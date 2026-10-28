@@ -19,12 +19,22 @@ namespace
         iResonance, iKeyTrack, iEnvDepth, iVelocityToFilter, iDriveBias, iDriveTrim,
         iFilterAttack, iFilterDecay, iFilterSustain, iFilterRelease,
         iAmpAttack, iAmpDecay, iAmpSustain, iAmpRelease, iVelocityRange,
-        iLfoWave, iLfoRate, iLfoSync, iLfoDivision, iLfoPitch1, iLfoPitch2, iLfoWidth1, iLfoWidth2, iLfoCutoff,
+        iLfoPitch1, iLfoPitch2, iLfoWidth1, iLfoWidth2, iLfoCutoff,
         iPolyModEnv, iPolyModOsc2, iPolyModToPitch1, iPolyModToWidth1, iPolyModToCutoff,
         iAnalog, iPhase,
         iVoiceMode, iGlide, iBendRange, iFineTune, iSeed, iTune, iPan, iLevel, iMute, iOutput,
         iSpaceType, iSpaceDecay, iSpacePreDelay, iSpaceSize, iSpaceDamping, iSpaceModulation, iSpaceWidth, iSpaceLowCut, iSpaceHighCut,
         iEchoType, iEchoSync, iEchoDivision, iEchoTime, iEchoFeedback, iEchoTone, iEchoAge, iEchoStereo,
+        // Version 2: ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1; FILTER DRIVE, KEY DNA.
+        iFilterDrive, iDriveMode, iDriveTone, iDriveBody,
+        iMovement, iMovementMode, iDriftSpeed, iDriftPitch, iDriftTone, iTapeWow, iTapeFlutter, iTapeWear,
+        iChorusRate, iChorusWidth, iChorusStereo, iPulseRate, iPulseShape, iPulseStereo,
+        iShaperPattern, iShaperRate, iShaperTarget, iShaperSmooth, iShaperCustom,
+        iReimagined, iReimaginedMode, iKaleidoscopeFocus, iKaleidoscopeSpread, iTapeFrameAge, iTapeFrameStability, iTapeFrameLength,
+        iToyboxMotion, iToyboxDigital, iToyboxPlay, iMirageClock, iMirageFilter, iMirageTone,
+        iSourceMode, iGrainPosition, iGrainSize, iGrainDensity, iGrainTune, iGrainSpread,
+        iLfoShape, iLfoRate, iLfoSync, iLfoDivision, iLfoPhase, iLfoPolarity, iLfoMode, iLfoScope,
+        iKeyDna, iKeyDnaAmount, iKeyDnaIndividuality, iKeyDnaPosition, iKeyDnaSize, iKeyDnaDensity, iKeyDnaSpread, iKeyDnaTune,
         count
     };
 
@@ -38,12 +48,25 @@ namespace
             resonance, keyTrack, envDepth, velocityToFilter, driveBias, driveTrim,
             filterAttack, filterDecay, filterSustain, filterRelease,
             "attack", "decay", "sustainLevel", "release", "velocityRange",
-            lfoWave, lfoRate, lfoSync, lfoDivision, lfoPitch1, lfoPitch2, lfoWidth1, lfoWidth2, lfoCutoff,
+            lfoPitch1, lfoPitch2, lfoWidth1, lfoWidth2, lfoCutoff,
             polyModEnv, polyModOsc2, polyModToPitch1, polyModToWidth1, polyModToCutoff,
             analogAmount, phaseMode,
             "voiceMode", "glide", "bendRange", "fineTune", "seed", "layerA.tune", "layerA.pan", "layerA.level", "layerA.mute", "gain",
             "space.type", "space.decay", "space.preDelay", "space.size", "space.damping", "space.modulation", "space.width", "space.lowCut", "space.highCut",
             "echo.type", "echo.sync", "echo.division", "echo.time", "echo.feedback", "echo.tone", "echo.age", "echo.stereo",
+            filterDrive, "drive.mode", "drive.tone", "drive.body",
+            "motion", "movement.mode", "movement.drift.speed", "movement.drift.pitch", "movement.drift.tone",
+            "movement.tape.wow", "movement.tape.flutter", "movement.tape.wear",
+            "movement.chorus.rate", "movement.chorus.width", "movement.chorus.stereo",
+            "movement.pulse.rate", "movement.pulse.shape", "movement.pulse.stereo",
+            "movement.shaper.pattern", "movement.shaper.rate", "movement.shaper.target", "movement.shaper.smooth", "movement.shaper.custom",
+            "reimagined", "layerA.reimagined.mode", "layerA.reimagined.kaleidoscope.focus", "layerA.reimagined.kaleidoscope.spread",
+            "layerA.reimagined.tapeFrame.age", "layerA.reimagined.tapeFrame.stability", "layerA.reimagined.tapeFrame.frame",
+            "layerA.reimagined.toybox.motion", "layerA.reimagined.toybox.digital", "layerA.reimagined.toybox.play",
+            "layerA.reimagined.mirage.clock", "layerA.reimagined.mirage.filter", "layerA.reimagined.mirage.tone",
+            "layerA.sourceMode", "layerA.granular.position", "layerA.granular.size", "layerA.granular.density", "layerA.granular.tune", "layerA.granular.spread",
+            "mod.lfo1.shape", "mod.lfo1.rate", "mod.lfo1.sync", "mod.lfo1.division", "mod.lfo1.phase", "mod.lfo1.polarity", "mod.lfo1.mode", "mod.lfo1.scope",
+            keyDna, keyDnaAmount, keyDnaIndividuality, keyDnaPosition, keyDnaSize, keyDnaDensity, keyDnaSpread, keyDnaTune,
         };
         jassert (list.size() == count);
         return list;
@@ -123,11 +146,12 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                              })));
     };
 
-    // The macros of its own: BLEND, TONE (the cutoff, shown in Hz), MOTION.
+    // The macros of its own: BLEND, TONE (the cutoff, shown in Hz); the LFO's amount (the
+    // first version's MOTION macro: its ID is kept, its knob is in the TONE popover now).
     percent (blend, "Blend", d.blend);
     layout.add (std::make_unique<Float> (id (tone), "Tone", juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), static_cast<float> (100.0 * d.tone),
                                          Attributes().withLabel ("%").withStringFromValueFunction ([] (float v, int) { return hertzText (math::toneToHz (0.01 * v)); })));
-    percent (motion, "Motion", d.movement);
+    percent (motion, "LFO Amount", d.lfoAmount);
 
     // Oscillators.
     choice (osc1Wave, "Osc 1 Wave", { "Saw", "Pulse", "Saw+Pulse" }, static_cast<int> (d.osc1Wave));
@@ -167,19 +191,21 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent (filterSustain, "Filter Sustain", d.filterSustain);
     time (filterRelease, "Filter Release", 0.005f, 45.0f, 0.6f, d.filterRelease);
 
-    // LFO.
-    choice (lfoWave, "LFO Wave", { "Sine", "Triangle", "Ramp", "Square", "S&H" }, static_cast<int> (d.lfoWave));
-    layout.add (std::make_unique<Float> (id (lfoRate), "LFO Rate", skewed (0.02f, 25.0f, 2.0f), static_cast<float> (d.lfoRateHz),
+    // The first version's LFO (unused since version 2: the LFO is ANDOR OSP's LFO 1, mod.lfo1.*,
+    // and sessions saved with these are migrated to it). Kept so their IDs never change.
+    choice (lfoWave, "LFO Wave (v1, unused)", { "Sine", "Triangle", "Ramp", "Square", "S&H" }, 1);
+    layout.add (std::make_unique<Float> (id (lfoRate), "LFO Rate (v1, unused)", skewed (0.02f, 25.0f, 2.0f), 4.0f,
                                          Attributes().withLabel ("Hz").withStringFromValueFunction ([] (float v, int) {
                                              return juce::String (v, v < 1.0f ? 2 : 1) + " Hz";
                                          })));
-    onOff (lfoSync, "LFO Sync", d.lfoSync);
+    onOff (lfoSync, "LFO Sync (v1, unused)", false);
     {
         juce::StringArray divisions;
         for (int i = 0; i < lfoDivisionCount; ++i)
             divisions.add (lfoDivisionName (i));
-        choice (lfoDivision, "LFO Division", divisions, d.lfoDivision);
+        choice (lfoDivision, "LFO Division (v1, unused)", divisions, 6);
     }
+    // The LFO's depths (the LFO itself is LFO 1 of the modulation panel).
     bipolar (lfoPitch1, "LFO to Osc 1 Pitch", 12.0f, d.lfoPitch1, "st", 2);
     bipolar (lfoPitch2, "LFO to Osc 2 Pitch", 12.0f, d.lfoPitch2, "st", 2);
     bipolar (lfoWidth1, "LFO to Osc 1 Width", 45.0f, 100.0 * d.lfoWidth1, "%", 0);
@@ -196,6 +222,24 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // ANALOG: the voices' tolerances and wander, and the oscillators' phase at a note.
     percent (analogAmount, "Analog", d.analogAmount);
     choice (phaseMode, "Osc Phase", { "Free", "Reset" }, static_cast<int> (d.phaseMode));
+
+    // Version 2. FILTER DRIVE: the ladder's input saturation (the DRIVE macro is ANDOR OSP's
+    // DRIVE now). KEY DNA: each key's own grains (GRANULAR), as ANDOR OSP's KeyDna.
+    auto v2 = [] (const juce::String& name) { return juce::ParameterID { name, 2 }; };
+    auto percent2 = [&] (const juce::String& name, const char* title, double value) {
+        layout.add (std::make_unique<Float> (v2 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+                                             Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    percent2 (filterDrive, "Filter Drive", d.filterDrive);
+    const osp::keydna::Settings dna;
+    layout.add (std::make_unique<juce::AudioParameterBool> (v2 (keyDna), "Key DNA", dna.enabled));
+    percent2 (keyDnaAmount, "Key DNA Amount", dna.amount);
+    percent2 (keyDnaIndividuality, "Key DNA Individuality", dna.individuality);
+    percent2 (keyDnaPosition, "Key DNA Position", keyDnaDefaultVariation);
+    percent2 (keyDnaSize, "Key DNA Size", keyDnaDefaultVariation);
+    percent2 (keyDnaDensity, "Key DNA Density", keyDnaDefaultVariation);
+    percent2 (keyDnaSpread, "Key DNA Spread", keyDnaDefaultVariation);
+    percent2 (keyDnaTune, "Key DNA Tune", 0.0);
 }
 
 //==============================================================================
@@ -226,7 +270,7 @@ Patch Reader::read() const noexcept
     auto index = [this] (int i, int n) { return std::clamp (juce::roundToInt (value (i)), 0, n - 1); };
     p.blend = 0.01 * v (iBlend);
     p.tone = 0.01 * v (iTone);
-    p.movement = 0.01 * v (iMotion);
+    p.lfoAmount = 0.01 * v (iMotion);
     p.drive = 0.01 * v (iDrive);
     p.space = 0.01 * v (iSpace);
     p.echo = 0.01 * v (iEcho);
@@ -265,10 +309,6 @@ Patch Reader::read() const noexcept
     p.ampSustain = 0.01 * v (iAmpSustain);
     p.ampRelease = 0.001 * v (iAmpRelease);
     p.velocityRangeDb = v (iVelocityRange);
-    p.lfoWave = static_cast<LfoWave> (index (iLfoWave, 5));
-    p.lfoRateHz = v (iLfoRate);
-    p.lfoSync = on (iLfoSync);
-    p.lfoDivision = index (iLfoDivision, lfoDivisionCount);
     p.lfoPitch1 = v (iLfoPitch1);
     p.lfoPitch2 = v (iLfoPitch2);
     p.lfoWidth1 = 0.01 * v (iLfoWidth1);
@@ -309,7 +349,72 @@ Patch Reader::read() const noexcept
     s.echoTone = 0.01 * v (iEchoTone);
     s.echoAge = 0.01 * v (iEchoAge);
     s.echoStereo = static_cast<osp::EchoStereo> (index (iEchoStereo, 3));
+
+    // Version 2: ANDOR OSP's settings, converted exactly as ANDOR OSP converts them.
+    p.filterDrive = 0.01 * v (iFilterDrive);
+    s.driveMode = static_cast<osp::DriveMode> (index (iDriveMode, 3));
+    s.driveTone = 0.01 * v (iDriveTone);
+    s.driveBody = 0.01 * v (iDriveBody);
+    p.motion = 0.01 * v (iMovement);
+    s.movementMode = static_cast<osp::MovementMode> (index (iMovementMode, 5));
+    s.driftSpeed = 0.01 * v (iDriftSpeed);
+    s.driftPitch = 0.01 * v (iDriftPitch);
+    s.driftTone = 0.01 * v (iDriftTone);
+    s.tapeWow = 0.01 * v (iTapeWow);
+    s.tapeFlutter = 0.01 * v (iTapeFlutter);
+    s.tapeWear = 0.01 * v (iTapeWear);
+    s.chorusRate = 0.01 * v (iChorusRate);
+    s.chorusWidth = 0.01 * v (iChorusWidth);
+    s.chorusStereo = 0.01 * v (iChorusStereo);
+    s.pulseRate = 0.01 * v (iPulseRate);
+    s.pulseShape = 0.01 * v (iPulseShape);
+    s.pulseStereo = 0.01 * v (iPulseStereo);
+    s.shaper.pattern = index (iShaperPattern, osp::RhythmicShaper::patternCount);
+    s.shaper.rate = static_cast<osp::ShaperRate> (index (iShaperRate, 6));
+    s.shaper.target = static_cast<osp::ShaperTarget> (index (iShaperTarget, 3));
+    s.shaper.smooth = 0.01 * v (iShaperSmooth);
+    s.shaper.custom = on (iShaperCustom);
+    p.reimagined = 0.01 * v (iReimagined);
+    auto& r = p.reimaginedSettings;
+    r.mode = osp::reimagined::modeFromIndex (index (iReimaginedMode, osp::reimaginedModeCount));
+    r.kaleidoscope = { 0.01 * v (iKaleidoscopeFocus), 0.01 * v (iKaleidoscopeSpread) };
+    r.tapeFrame = { 0.01 * v (iTapeFrameAge), 0.01 * v (iTapeFrameStability), static_cast<osp::TapeFrameLength> (index (iTapeFrameLength, 3)) };
+    r.toybox = { 0.01 * v (iToyboxMotion), 0.01 * v (iToyboxDigital), static_cast<osp::ToyboxPlay> (index (iToyboxPlay, 3)) };
+    r.mirage = { 0.01 * v (iMirageClock), 0.01 * v (iMirageFilter), static_cast<osp::MirageTone> (index (iMirageTone, 2)) };
+    p.granular = on (iSourceMode);
+    p.grains.position = 0.01 * v (iGrainPosition);
+    p.grains.sizeSeconds = 0.001 * v (iGrainSize);
+    p.grains.density = v (iGrainDensity);
+    p.grains.tuneSemitones = v (iGrainTune);
+    p.grains.spread = 0.01 * v (iGrainSpread);
+    auto& lfo = p.lfo;
+    lfo.shape = static_cast<osp::mod::LfoShape> (index (iLfoShape, osp::mod::lfoShapeCount));
+    lfo.rateHz = v (iLfoRate);
+    lfo.sync = on (iLfoSync);
+    lfo.division = index (iLfoDivision, osp::mod::syncDivisionCount);
+    lfo.phase = 0.01 * v (iLfoPhase);
+    lfo.bipolar = ! on (iLfoPolarity);
+    lfo.mode = static_cast<osp::mod::LfoMode> (index (iLfoMode, 3));
+    lfo.scope = on (iLfoScope) ? osp::mod::Scope::poly : osp::mod::Scope::global;
     return p;
+}
+
+osp::keydna::Settings Reader::keyDna (std::uint32_t seed) const noexcept
+{
+    osp::keydna::Settings k;
+    if (values.size() != static_cast<std::size_t> (count))
+        return k;
+    k.enabled = value (iKeyDna) >= 0.5f;
+    k.amount = 0.01 * value (iKeyDnaAmount);
+    k.individuality = 0.01 * value (iKeyDnaIndividuality);
+    k.seed = seed;
+    using osp::keydna::Param;
+    k[Param::position].variation = 0.01 * value (iKeyDnaPosition);
+    k[Param::size].variation = 0.01 * value (iKeyDnaSize);
+    k[Param::density].variation = 0.01 * value (iKeyDnaDensity);
+    k[Param::spread].variation = 0.01 * value (iKeyDnaSpread);
+    k[Param::tune].variation = 0.01 * value (iKeyDnaTune);
+    return k;
 }
 
 std::map<juce::String, float> valuesOf (const Patch& p)
@@ -318,7 +423,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     auto put = [&m] (int index, double value) { m[ids()[index]] = static_cast<float> (value); };
     put (iBlend, 100.0 * p.blend);
     put (iTone, 100.0 * p.tone);
-    put (iMotion, 100.0 * p.movement);
+    put (iMotion, 100.0 * p.lfoAmount);
     put (iDrive, 100.0 * p.drive);
     put (iSpace, 100.0 * p.space);
     put (iEcho, 100.0 * p.echo);
@@ -360,10 +465,6 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iAmpSustain, 100.0 * p.ampSustain);
     put (iAmpRelease, 1000.0 * p.ampRelease);
     put (iVelocityRange, p.velocityRangeDb);
-    put (iLfoWave, static_cast<int> (p.lfoWave));
-    put (iLfoRate, p.lfoRateHz);
-    put (iLfoSync, p.lfoSync ? 1.0 : 0.0);
-    put (iLfoDivision, p.lfoDivision);
     put (iLfoPitch1, p.lfoPitch1);
     put (iLfoPitch2, p.lfoPitch2);
     put (iLfoWidth1, 100.0 * p.lfoWidth1);
@@ -404,6 +505,57 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iEchoTone, 100.0 * s.echoTone);
     put (iEchoAge, 100.0 * s.echoAge);
     put (iEchoStereo, static_cast<int> (s.echoStereo));
+    put (iFilterDrive, 100.0 * p.filterDrive);
+    put (iDriveMode, static_cast<int> (s.driveMode));
+    put (iDriveTone, 100.0 * s.driveTone);
+    put (iDriveBody, 100.0 * s.driveBody);
+    put (iMovement, 100.0 * p.motion);
+    put (iMovementMode, static_cast<int> (s.movementMode));
+    put (iDriftSpeed, 100.0 * s.driftSpeed);
+    put (iDriftPitch, 100.0 * s.driftPitch);
+    put (iDriftTone, 100.0 * s.driftTone);
+    put (iTapeWow, 100.0 * s.tapeWow);
+    put (iTapeFlutter, 100.0 * s.tapeFlutter);
+    put (iTapeWear, 100.0 * s.tapeWear);
+    put (iChorusRate, 100.0 * s.chorusRate);
+    put (iChorusWidth, 100.0 * s.chorusWidth);
+    put (iChorusStereo, 100.0 * s.chorusStereo);
+    put (iPulseRate, 100.0 * s.pulseRate);
+    put (iPulseShape, 100.0 * s.pulseShape);
+    put (iPulseStereo, 100.0 * s.pulseStereo);
+    put (iShaperPattern, s.shaper.pattern);
+    put (iShaperRate, static_cast<int> (s.shaper.rate));
+    put (iShaperTarget, static_cast<int> (s.shaper.target));
+    put (iShaperSmooth, 100.0 * s.shaper.smooth);
+    put (iShaperCustom, s.shaper.custom ? 1.0 : 0.0);
+    const auto& r = p.reimaginedSettings;
+    put (iReimagined, 100.0 * p.reimagined);
+    put (iReimaginedMode, static_cast<int> (r.mode));
+    put (iKaleidoscopeFocus, 100.0 * r.kaleidoscope.focus);
+    put (iKaleidoscopeSpread, 100.0 * r.kaleidoscope.spread);
+    put (iTapeFrameAge, 100.0 * r.tapeFrame.age);
+    put (iTapeFrameStability, 100.0 * r.tapeFrame.stability);
+    put (iTapeFrameLength, static_cast<int> (r.tapeFrame.frame));
+    put (iToyboxMotion, 100.0 * r.toybox.motion);
+    put (iToyboxDigital, 100.0 * r.toybox.digital);
+    put (iToyboxPlay, static_cast<int> (r.toybox.play));
+    put (iMirageClock, 100.0 * r.mirage.clock);
+    put (iMirageFilter, 100.0 * r.mirage.filter);
+    put (iMirageTone, static_cast<int> (r.mirage.tone));
+    put (iSourceMode, p.granular ? 1.0 : 0.0);
+    put (iGrainPosition, 100.0 * p.grains.position);
+    put (iGrainSize, 1000.0 * p.grains.sizeSeconds);
+    put (iGrainDensity, p.grains.density);
+    put (iGrainTune, p.grains.tuneSemitones);
+    put (iGrainSpread, 100.0 * p.grains.spread);
+    put (iLfoShape, static_cast<int> (p.lfo.shape));
+    put (iLfoRate, p.lfo.rateHz);
+    put (iLfoSync, p.lfo.sync ? 1.0 : 0.0);
+    put (iLfoDivision, p.lfo.division);
+    put (iLfoPhase, 100.0 * p.lfo.phase);
+    put (iLfoPolarity, p.lfo.bipolar ? 0.0 : 1.0);
+    put (iLfoMode, static_cast<int> (p.lfo.mode));
+    put (iLfoScope, p.lfo.scope == osp::mod::Scope::poly ? 1.0 : 0.0);
     return m;
 }
 

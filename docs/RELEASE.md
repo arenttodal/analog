@@ -48,5 +48,6 @@ decision to sell are the owner's.
 
 ## Known release blockers
 
-- The host lists all 350 ANDOR parameters plus ANALOG's 48 (the shell's grouped layout is still to come).
-- No host or listening validation yet (Linux CI only, see docs/STATUS.md).
+- The host lists all 350 ANDOR parameters plus ANALOG's 57 (the shell's grouped layout is still to come;
+  four of ANALOG's own, the first version's LFO, are unused since version 2 and say so in their names).
+- No host or listening validation yet (Linux tests and the macOS CI build with auval, see docs/STATUS.md).

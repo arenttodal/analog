@@ -3,7 +3,9 @@
 #include "AnalogMath.h"
 #include "Oscillator.h"
 
+#include "engine/FastMath.h"
 #include "engine/InstrumentEngine.h"
+#include "engine/KaleidoscopeEngine.h"
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +38,18 @@ namespace
         const float angle = static_cast<float> (math::pi) * 0.25f * (std::clamp (pan, -1.0f, 1.0f) + 1.0f);
         left = 1.41421356f * std::cos (angle);
         right = 1.41421356f * std::sin (angle);
+    }
+
+    /** KALEIDOSCOPE's grains under the oscillators (ONE SHOT): close behind the sound, short,
+        scattered, so the remapped octaves and fifths shimmer around the note. */
+    osp::GranularParams cloudGrains() noexcept
+    {
+        osp::GranularParams g;
+        g.position = 0.15;
+        g.sizeSeconds = 0.12;
+        g.density = 16.0;
+        g.spread = 0.35;
+        return g;
     }
 
     float softGuard (float x) noexcept
@@ -87,13 +101,38 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         gTable[static_cast<std::size_t> (i)] = static_cast<float> (std::tan (math::pi * math::noteToHz (note) / internalRate));
     }
 
+    const int recordLength = static_cast<int> (std::ceil (recordingSeconds * internalRate));
     for (int s = 0; s < maxVoices; ++s)
     {
         auto& v = voices[static_cast<std::size_t> (s)];
         v.slot = s;
         v.amp.setSampleRate (internalRate);
         v.env.setSampleRate (internalRate);
+        v.recording.prepare (recordLength);
+        v.granulator.prepare (internalRate);
+        v.tapeFrame.prepare (internalRate);
+        v.toybox.prepare (internalRate);
+        v.mirage.prepare (internalRate);
     }
+    // The mode engines' "recording" on a live voice: only its length, rate and root are read.
+    auto standIn = [] (double rate, double seconds) {
+        osp::AudioData blank;
+        blank.sampleRate = rate;
+        blank.channels.assign (1, std::vector<float> (static_cast<std::size_t> (std::ceil (rate * seconds)), 0.0f));
+        return osp::PlaybackSource (blank, 60.0, 4);
+    };
+    tapeSource = standIn (1000.0, 12.0);
+    toyboxSource = standIn (1000.0, recordingSeconds);
+    mirageSource = standIn (internalRate, 0.001);
+    liveModel = osp::InstrumentModel();
+    liveModel.rootMidi = 60.0;
+    for (auto& m : resonanceModels)
+    {
+        m.rootMidi = 60.0;
+        m.resonanceHz.assign (static_cast<std::size_t> (osp::ReimaginedStage::resonators), 261.6);
+    }
+    kaleidoscopeStage.prepare (hostRate, 0x6b616c65ull);
+    lfoCurve = osp::mod::compileCurve (osp::mod::defaultLfoCurve());
 
     effects.prepare (hostRate, maxBlock, 1);
     dcCoef = static_cast<float> (1.0 - 2.0 * math::pi * 5.0 / hostRate);
@@ -116,8 +155,11 @@ void Synth::reset() noexcept
     smoothingPrimed = false;
     driftSeed = current.seed;
     rebuildDrift();
-    lfo.reset (current.seed);
+    lfo = {};
+    lfo.start (current.lfo, current.lfo.phase);
     lfoValue = 0.0f;
+    sharedDriftCents = 0.0;
+    stageCountdown = 0;
     for (auto& v : voices)
     {
         v.active = v.held = v.sustained = v.pending = v.hasPlayed = false;
@@ -130,6 +172,12 @@ void Synth::reset() noexcept
         v.line2.reset();
         v.osc2Out = 0.0f;
         v.outGain = 0.0f;
+        v.recording.restart();
+        v.granulator.stop();
+        v.modeEngine = nullptr;
+        v.modeFactor = 1.0;
+        v.grainMix = current.granular ? 1.0f : 0.0f;
+        v.driftNow = v.driftFrom = v.driftTo = {};
         // Free-running oscillators start where the slot's calibration puts them.
         osp::Prng start (osp::Prng::deriveSeed (current.seed, static_cast<std::uint64_t> (v.slot), 0x5048u));
         v.phase1 = start.nextDouble();
@@ -139,12 +187,15 @@ void Synth::reset() noexcept
     for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R })
         d->reset();
     osp::Macros macros;
-    macros.life = macros.motion = macros.reimagined = macros.drive = 0.0;
+    macros.life = macros.reimagined = 0.0;
+    macros.motion = current.motion;
+    macros.drive = current.drive;
     macros.space = current.space;
     macros.echo = current.echo;
     effects.setShaping (current.effects);
     effects.setMacros (macros);
     effects.reset();
+    kaleidoscopeStage.reset();
     dcL = dcR = 0.0f;
     dcStateL = dcStateR = 0.0f;
     sounding.store (0, std::memory_order_relaxed);
@@ -170,11 +221,29 @@ void Synth::setPatch (const Patch& patch) noexcept
         rebuildDrift();
     }
     osp::Macros macros;
-    macros.life = macros.motion = macros.reimagined = macros.drive = 0.0;
+    macros.life = macros.reimagined = 0.0;   // (KALEIDOSCOPE's stage is the synth's own)
+    macros.motion = std::clamp (current.motion, 0.0, 1.0);
+    macros.drive = std::clamp (current.drive, 0.0, 1.0);
     macros.space = std::clamp (current.space, 0.0, 1.0);
     macros.echo = std::clamp (current.echo, 0.0, 1.0);
     effects.setShaping (current.effects);
     effects.setMacros (macros);
+    const auto& rs = current.reimaginedSettings;
+    kaleidoscopeStage.setAmount (rs.mode == osp::ReimaginedMode::kaleidoscope ? current.reimagined : 0.0);
+    kaleidoscopeStage.setShape (rs.kaleidoscope.focus, rs.kaleidoscope.spread);
+}
+
+void Synth::setLfoCurve (const osp::mod::Curve& curve) noexcept
+{
+    lfoCurve = osp::mod::compileCurve (curve);
+}
+
+void Synth::setKeyDna (const osp::keydna::Settings& settings) noexcept
+{
+    if (settings == keyDna)
+        return;
+    keyDna = settings;
+    keyDnaTable.compute (keyDna);
 }
 
 void Synth::setTransport (const osp::HostTiming& t) noexcept
@@ -291,13 +360,37 @@ Synth::Voice* Synth::allocate() noexcept
     return best;
 }
 
+bool Synth::anyKeyHeld (const Voice* except) const noexcept
+{
+    for (const auto& v : voices)
+        if (&v != except && (v.held || v.sustained || v.pending))
+            return true;
+    return false;
+}
+
 void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool retrigger) noexcept
 {
     const bool wasActive = v.active;
+    // The first note of a phrase (nothing else held): the LFO restarts (RETRIGGER, ONE SHOT)
+    // and KALEIDOSCOPE's resonators tune to this note's harmonics.
+    if (retrigger && ! anyKeyHeld (&v))
+    {
+        if (current.lfo.mode != osp::mod::LfoMode::free)
+            lfo.start (current.lfo, current.lfo.phase);
+        resonanceModel ^= 1;
+        auto& model = resonanceModels[static_cast<std::size_t> (resonanceModel)];
+        const double f0 = math::noteToHz (note + current.tuneSemitones);
+        for (std::size_t k = 0; k < model.resonanceHz.size(); ++k)
+            model.resonanceHz[k] = std::min (f0 * static_cast<double> (k + 1), 0.45 * hostRate);
+        kaleidoscopeStage.setModel (&model);
+    }
+    if (retrigger)
+        effects.noteStarted();
     v.channel = channel;
     v.note = note;
     v.velocity = std::clamp (velocity, 0.0f, 1.0f);
     v.order = ++noteCounter;
+    v.seed = osp::Prng::deriveSeed (current.seed, v.order, static_cast<std::uint64_t> (note));
     v.held = true;
     v.sustained = false;
     v.pending = false;
@@ -309,7 +402,8 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         if (! (current.glideSeconds > 0.0 && v.hasPlayed))
             v.pitch = note;
         v.unisonOffset = 0.0;
-        equalPower (static_cast<float> (current.panPercent / 100.0) + static_cast<float> (current.stereoSpread) * slotPan[static_cast<std::size_t> (v.slot)], v.panL, v.panR);
+        v.pan = static_cast<float> (current.panPercent / 100.0) + static_cast<float> (current.stereoSpread) * slotPan[static_cast<std::size_t> (v.slot)];
+        equalPower (v.pan, v.panL, v.panR);
     }
     if (! wasActive)
     {
@@ -318,8 +412,36 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.line2.reset();
         v.osc2Out = 0.0f;
         v.outGain = 0.0f;
+        // A new sound: its own recording from silence, its grains, its drift, its mode.
+        v.noise.reseed (osp::Prng::deriveSeed (v.seed, 0x4e4fu, 0));
+        v.doublingPhase = 0.0;
+        v.doublingDelay = v.doublingTarget = 0.018 * internalRate;
+        v.recording.restart();
+        v.grainMix = current.granular ? 1.0f : 0.0f;
+        v.granulator.start (current.granular ? current.grains : cloudGrains(), v.seed);
+        v.driftRng.reseed (osp::Prng::deriveSeed (v.seed, 0x6472696674ull, 0));
+        v.driftNow = v.driftFrom = v.driftTo = {};
+        v.driftCountdown = 0;
+        v.driftSegment = 1;
+        updateDrift (v);
+        // It begins part-way through a wander, not at its centre (as ANDOR OSP's voices).
+        v.driftFrom = v.driftNow = v.driftTo;
+        v.driftCountdown = 0;
+        v.notePitch = note;
+        startModeEngine (v);
     }
-    updateVoiceControl (v, lfoValue, static_cast<float> (std::clamp (current.movement + wheel * (1.0 - current.movement), 0.0, 1.0)));
+    // LFO 1 with POLY voices: each note its own - from PHASE (RETRIGGER, ONE SHOT) or where
+    // the free-running LFO is (FREE), as ANDOR OSP's voice LFOs.
+    if (current.lfo.scope == osp::mod::Scope::poly && (retrigger || ! wasActive))
+    {
+        if (current.lfo.mode == osp::mod::LfoMode::free)
+            v.lfo = lfo;
+        else
+            v.lfo.start (current.lfo, current.lfo.phase);
+        v.lfo.evaluate (current.lfo, lfoCurve, v.seed);
+    }
+    updateVoiceControl (v, current.lfo.scope == osp::mod::Scope::poly ? static_cast<float> (v.lfo.value) : lfoValue,
+                        static_cast<float> (std::clamp (current.lfoAmount + wheel * (1.0 - current.lfoAmount), 0.0, 1.0)));
     v.outGain = wasActive ? v.outGain : v.outGainTarget;
     if (current.phaseMode == PhaseMode::reset)
     {
@@ -329,7 +451,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
             v.phase2 = 0.0;
         }
     }
-    else if (! wasActive && v.hasPlayed)
+    else if (! wasActive && v.hasPlayed && v.stoppedAt != stillRunning)
     {
         // Free-running: the oscillators kept turning while the voice was silent.
         const double elapsed = static_cast<double> (clock - v.stoppedAt) * oversampling;
@@ -500,7 +622,8 @@ void Synth::monoGoTo (int note, bool retrigger, float velocity, int channel) noe
         auto& v = voices[static_cast<std::size_t> (i)];
         const double spreadPosition = count > 1 ? 2.0 * i / (count - 1) - 1.0 : 0.0;
         v.unisonOffset = current.unison ? 0.25 * current.unisonDetune * spreadPosition : 0.0;
-        equalPower (static_cast<float> (current.panPercent / 100.0 + current.stereoSpread * spreadPosition * (current.unison ? 1.0 : 0.0)), v.panL, v.panR);
+        v.pan = static_cast<float> (current.panPercent / 100.0 + current.stereoSpread * spreadPosition * (current.unison ? 1.0 : 0.0));
+        equalPower (v.pan, v.panL, v.panR);
         if (! v.active || ! glide)
             v.pitch = glide ? lastMonoPitch : note;
         if (v.active && ! retrigger)
@@ -653,7 +776,12 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     // Pitch: the note (gliding), TUNE and FINE, the wheel, unison, the slot's tolerance and
     // its wander (ANALOG: +-10 cents fixed and +-3 cents moving at 100 %).
     const double performed = p.tuneSemitones + p.fineTuneCents / 100.0 + bend * p.bendRangeSemitones;
-    const double common = v.pitch + v.unisonOffset + performed;
+    // MOVEMENT DRIFT (the voice's own wander and the shared one); REIMAGINED's read speed
+    // (wow, self-modulation) moves the oscillators themselves while they are the source.
+    const double drifted = (v.driftNow[0] + sharedDriftCents) / 100.0
+                           + (v.modeEngine != nullptr ? 12.0 * std::log2 (std::max (1.0e-3, v.modeFactor)) * (1.0 - v.grainMix) : 0.0);
+    const double common = v.pitch + v.unisonOffset + performed + drifted;
+    v.notePitch = common;
     const double note1 = common + 12.0 * p.osc1Octave + p.osc1Coarse + a * (0.10 * d.pitch1 + 0.03 * d.wander) + lfoD * p.lfoPitch1;
     const double base2 = p.osc2KeyTrack ? common : 60.0 + v.unisonOffset + performed;
     const double note2 = base2 + 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0 + a * (0.10 * d.pitch2 - 0.03 * d.wander)
@@ -673,10 +801,11 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     // Filter: TONE, keyboard tracking around C4, the slot's tolerance (+-1 semitone at 100 %)
     // and wander, the LFO; the envelope (scaled by velocity) is added per sample.
     v.cutoffNote = toneNote + static_cast<float> (p.keyTrack * (v.pitch - 60.0)) + a * (1.0f * d.cutoff + 0.2f * d.wander)
-                   + lfoD * static_cast<float> (p.lfoCutoff);
+                   + lfoD * static_cast<float> (p.lfoCutoff) + static_cast<float> (12.0 * v.driftNow[1]);
     const double velocityScale = 1.0 - p.velocityToFilter + p.velocityToFilter * v.velocity;
     v.envDepth = static_cast<float> (p.envDepthSemitones * velocityScale);
     v.k = std::clamp (4.15f * resonanceSmoothed * (1.0f + 0.06f * a * d.resonance), 0.0f, 4.2f);
+    equalPower (v.pan + static_cast<float> (v.driftNow[3]), v.panL, v.panR);   // its place, as DRIFT moves it
     v.makeUp = (1.0f + 0.35f * v.k) / std::sqrt (driveGain) * math::dbToGain (p.driveTrimDb);
 
     // Envelopes: the slot's tolerance on the times (+-20 % at 100 %).
@@ -689,7 +818,118 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     const float velocityGain = math::dbToGain (-p.velocityRangeDb * soft * soft);
     // LEVEL at its bottom (ANDOR OSP's -48 dB) is silence.
     const float level = p.levelDb <= -47.99 ? 0.0f : math::dbToGain (p.levelDb);
-    v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain;
+    v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+
+    // The source: ONE SHOT <-> GRANULAR glides (about 8 ms); the grains' settings, moved by
+    // the REIMAGINED mode's travel and the key's KEY DNA; KALEIDOSCOPE's per-voice parts.
+    v.grainMix += 0.05f * ((p.granular ? 1.0f : 0.0f) - v.grainMix);
+    const auto& rs = p.reimaginedSettings;
+    const double r = rs.mode == osp::ReimaginedMode::kaleidoscope ? std::clamp (p.reimagined, 0.0, 1.0) : 0.0;
+    osp::NoteShape shape;
+    osp::kaleidoscope::shapeNote (shape, r, p.motion, rs.kaleidoscope);
+    v.saturationDrive = 1.0f + 4.0f * std::clamp (shape.saturation, 0.0f, 1.0f);
+    v.doubling = shape.doubling;
+    v.doublingPhase += 0.13 * static_cast<double> (controlPeriod) / hostRate;
+    v.doublingPhase -= std::floor (v.doublingPhase);
+    v.doublingTarget = (0.018 + 0.006 * std::sin (2.0 * math::pi * v.doublingPhase)) * internalRate;
+    v.cloud = (1.0f - v.grainMix) * shape.granular;
+    v.granulator.setRemap (shape.granular);
+    v.grainStep = v.modeEngine != nullptr ? v.modeFactor : 1.0;
+    if (p.granular)
+    {
+        auto g = p.grains;
+        if (v.modeEngine != nullptr)
+            g.position = std::clamp (g.position + v.modeEngine->grainPositionOffset(), 0.0, 1.0);
+        if (keyDnaTable.active())
+            osp::keydna::apply (keyDnaTable.at (v.note), g);
+        v.granulator.setParams (g);
+    }
+    else
+        v.granulator.setParams (cloudGrains());
+}
+
+void Synth::updateDrift (Voice& v) noexcept
+{
+    // ANDOR OSP's per-voice DRIFT (InstrumentEngine's shape, InstrumentVoice's wander), with
+    // KALEIDOSCOPE's own instability: depths in cents, octaves of tone, dB and place.
+    const auto& sh = current.effects;
+    const bool driftMode = sh.movementMode == osp::MovementMode::drift;
+    const double m = driftMode ? std::pow (std::clamp (current.motion, 0.0, 1.0), 0.75) : 0.0;
+    const auto& rs = current.reimaginedSettings;
+    const double r = rs.mode == osp::ReimaginedMode::kaleidoscope ? std::clamp (current.reimagined, 0.0, 1.0) : 0.0;
+    const double rr = 0.5 * r * r;
+    const std::array<double, 4> depth {
+        (m * osp::shaping::driftPitchCents (sh.driftPitch) + 12.0 * rr) * (1.0 + 2.0 * std::max (0.0, r - 0.6)),
+        m * osp::shaping::driftToneOctaves (sh.driftTone) + 0.6 * rr,
+        1.5 * m + 1.0 * rr,
+        0.3 * m + 0.2 * rr * static_cast<double> (osp::kaleidoscope::width (rs.kaleidoscope.spread)),
+    };
+    if (depth[0] <= 0.0 && depth[1] <= 0.0 && depth[2] <= 0.0 && depth[3] <= 0.0)
+    {
+        v.driftNow = v.driftFrom = v.driftTo = {};
+        v.driftCountdown = 0;
+        return;
+    }
+    if (--v.driftCountdown <= 0)
+    {
+        // A new glide from wherever the drift is now to fresh random values.
+        v.driftFrom = v.driftNow;
+        for (std::size_t i = 0; i < depth.size(); ++i)
+        {
+            const double magnitude = v.driftRng.uniform (0.35, 1.0);
+            v.driftTo[i] = depth[i] * (v.driftRng.nextDouble() < 0.5 ? -magnitude : magnitude);
+        }
+        const double rateHz = driftMode ? osp::shaping::driftSpeedHz (sh.driftSpeed) : 0.15;
+        const double seconds = v.driftRng.uniform (0.6, 1.4) / std::max (0.01, rateHz);
+        v.driftCountdown = v.driftSegment = std::max (1, static_cast<int> (seconds * hostRate / controlPeriod));
+    }
+    const double f = 1.0 - static_cast<double> (v.driftCountdown) / static_cast<double> (v.driftSegment);
+    const double glide = f * f * (3.0 - 2.0 * f);
+    for (std::size_t i = 0; i < depth.size(); ++i)
+        v.driftNow[i] = v.driftFrom[i] + (v.driftTo[i] - v.driftFrom[i]) * glide;
+}
+
+osp::ReimaginedControl Synth::modeControl (const Voice& v) const noexcept
+{
+    osp::ReimaginedControl c;
+    c.amount = std::clamp (current.reimagined, 0.0, 1.0);
+    c.settings = &current.reimaginedSettings;
+    c.step = std::exp2 ((v.notePitch - 60.0) / 12.0);   // the "recording" is rooted at C4
+    return c;
+}
+
+void Synth::startModeEngine (Voice& v) noexcept
+{
+    // As on an ANDOR OSP layer: a note uses the mode its layer named when it started, and a
+    // note started at 0 % plays without one. KALEIDOSCOPE is the voice's own path; MOSAIC
+    // rebuilds a recording from its harmonic analysis, which a live sound does not have.
+    v.modeEngine = nullptr;
+    v.modeFactor = 1.0;
+    v.modeCountdown = 0;
+    if (! (current.reimagined > 0.0))
+        return;
+    osp::ReimaginedVoiceEngine* engine = nullptr;
+    const osp::PlaybackSource* source = nullptr;
+    switch (current.reimaginedSettings.mode)
+    {
+        case osp::ReimaginedMode::tapeFrame: engine = &v.tapeFrame; source = &tapeSource; break;
+        case osp::ReimaginedMode::toybox:    engine = &v.toybox; source = &toyboxSource; break;
+        case osp::ReimaginedMode::mirage:    engine = &v.mirage; source = &mirageSource; break;
+        case osp::ReimaginedMode::kaleidoscope:
+        case osp::ReimaginedMode::mosaic:    return;
+    }
+    osp::ReimaginedNote n;
+    n.model = &liveModel;
+    n.source = source;
+    n.outputRate = internalRate;
+    n.rootStep = 1.0;
+    n.loop = true;          // a held note sustains
+    n.granular = true;      // it transforms the live sound (as an ANDOR OSP granular layer's grains)
+    n.velocity = v.velocity;
+    n.note = v.note;
+    n.seed = v.seed;
+    if (engine->start (n, modeControl (v)))
+        v.modeEngine = engine;
 }
 
 void Synth::controlUpdate() noexcept
@@ -702,7 +942,7 @@ void Synth::controlUpdate() noexcept
     const float c = smoothingPrimed ? math::smoothingCoefficient (0.015, hostRate / controlPeriod) : 1.0f;
     toneNote += c * (wantedTone - toneNote);
     resonanceSmoothed += c * (static_cast<float> (p.resonance) - resonanceSmoothed);
-    driveSmoothed += c * (static_cast<float> (p.drive) - driveSmoothed);
+    driveSmoothed += c * (static_cast<float> (p.filterDrive) - driveSmoothed);
     blendSmoothed += c * (static_cast<float> (p.blend) - blendSmoothed);
     smoothingPrimed = true;
     // DRIVE: up to +24 dB into the saturator (about half of it taken back after the filter,
@@ -711,18 +951,20 @@ void Synth::controlUpdate() noexcept
     driveBias = 0.6f * static_cast<float> (std::clamp (p.driveBias, 0.0, 1.0));
     driveBiasOffset = math::tanhFast (driveBias);
 
-    // The LFO: locked to the host's beat while it plays (SYNC), else free.
-    if (p.lfoSync && timing.valid && timing.playing)
-    {
-        const double ppq = ppqAtBlock + static_cast<double> (blockOffset) / hostRate * timing.bpm / 60.0;
-        lfoValue = lfo.lockTo (p.lfoWave, ppq, lfoDivisionQuarters (p.lfoDivision));
-    }
+    // The LFO (ANDOR OSP's LFO 1): on the host's beat while it plays (SYNC), else free.
+    if (p.lfo.sync && timing.valid && timing.playing)
+        lfo.follow (p.lfo, ppqAtBlock + static_cast<double> (blockOffset) / hostRate * timing.bpm / 60.0);
     else
-    {
-        const double rate = p.lfoSync ? std::max (timing.bpm, 1.0) / 60.0 / lfoDivisionQuarters (p.lfoDivision) : p.lfoRateHz;
-        lfoValue = lfo.advance (p.lfoWave, rate, seconds);
-    }
-    const auto depth = static_cast<float> (std::clamp (p.movement + wheel * (1.0 - p.movement), 0.0, 1.0));
+        lfo.advance (p.lfo, seconds, timing.valid ? timing.bpm : 120.0);
+    lfo.evaluate (p.lfo, lfoCurve, p.seed);
+    lfoValue = static_cast<float> (lfo.value);
+
+    // MOVEMENT DRIFT's shared part: the whole instrument wanders a little together.
+    sharedDriftCents = 0.0;
+    if (p.effects.movementMode == osp::MovementMode::drift && p.motion > 0.0)
+        sharedDriftCents = 0.3 * p.motion * osp::shaping::driftPitchCents (p.effects.driftPitch)
+                           * osp::shaping::sharedWander (p.seed, static_cast<double> (clock) / hostRate, osp::shaping::driftSpeedHz (p.effects.driftSpeed));
+    const auto depth = static_cast<float> (std::clamp (p.lfoAmount + wheel * (1.0 - p.lfoAmount), 0.0, 1.0));
 
     // Glide: the time to cover ~95 % of the interval.
     const double glideCoef = p.glideSeconds > 0.0 ? 1.0 - std::exp (-seconds * 3.0 / p.glideSeconds) : 1.0;
@@ -733,19 +975,29 @@ void Synth::controlUpdate() noexcept
         if (! v.active && ! v.pending)
             continue;
         v.pitch += (v.pitchTarget - v.pitch) * glideCoef;
-        updateVoiceControl (v, lfoValue, depth);
+        updateDrift (v);
+        float lfoNow = lfoValue;
+        if (p.lfo.scope == osp::mod::Scope::poly)
+        {
+            if (p.lfo.sync && timing.valid && timing.playing)
+                v.lfo.follow (p.lfo, ppqAtBlock + static_cast<double> (blockOffset) / hostRate * timing.bpm / 60.0);
+            else
+                v.lfo.advance (p.lfo, seconds, timing.valid ? timing.bpm : 120.0);
+            v.lfo.evaluate (p.lfo, lfoCurve, v.seed);   // (RANDOM: each note its own values)
+            lfoNow = static_cast<float> (v.lfo.value);
+        }
+        updateVoiceControl (v, lfoNow, depth);
     }
 }
 
 //==============================================================================
 // Audio
 
-float Synth::renderVoiceSample (Voice& v) noexcept
+float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
 {
     const auto& p = current;
     const auto w1 = osc::wavesOf (p.osc1Wave);
     const auto w2 = osc::wavesOf (p.osc2Wave);
-    const float envValue = v.env.next();
 
     // OSC 2 first: it is Poly Mod's source and hard sync's master.
     double wrap2 = -1.0;
@@ -754,6 +1006,7 @@ float Synth::renderVoiceSample (Voice& v) noexcept
 
     // Poly Mod: the filter envelope and OSC 2, at audio rate (amounts squared: fine near 0).
     const float pm = envValue * static_cast<float> (p.polyModEnv * p.polyModEnv) + v.osc2Out * static_cast<float> (p.polyModOsc2 * p.polyModOsc2);
+    polyMod = pm;
     double dt1 = v.dt1;
     float width1 = v.width1;
     if (p.polyModToPitch1)
@@ -777,19 +1030,124 @@ float Synth::renderVoiceSample (Voice& v) noexcept
     float mix = o1 * v.gain1 + v.osc2Out * v.gain2;
     if (v.gainNoise > 0.0f)
         mix += v.gainNoise * static_cast<float> (v.noise.bipolar());
+    float x = mix * filterInputGain;
 
-    // The ladder: cutoff from the control-rate base, the envelope and Poly Mod.
-    float cutoff = v.cutoffNote + envValue * v.envDepth;
-    if (p.polyModToCutoff)
-        cutoff += pm * polyModCutoffSemitones;
-    const float g = cutoffG (cutoff);
+    // The voice's own recording, and what GRANULAR and KALEIDOSCOPE take from it.
+    v.recording.write (x);
+    if (v.grainMix > 1.0e-4f || v.cloud > 1.0e-4f)
+    {
+        const float grains = v.granulator.render (v.recording, v.grainStep);
+        x = x * (1.0f - v.grainMix) * (1.0f - 0.5f * v.cloud) + grains * (v.grainMix + v.cloud);
+    }
+    if (v.doubling > 0.0f)
+    {
+        // KALEIDOSCOPE's doubling: a second head 12-24 ms behind, slowly moving (its delay
+        // glides sample by sample towards the control rate's value).
+        v.doublingDelay += 0.03 * (v.doublingTarget - v.doublingDelay);
+        const double delay = v.doublingDelay;
+        if (static_cast<double> (v.recording.history()) > delay + 4.0)
+        {
+            const double at = static_cast<double> (v.recording.now()) - delay;
+            const auto i = static_cast<std::int64_t> (std::floor (at));
+            const float* t = v.recording.taps (i - 1);
+            const auto wts = osp::hermiteWeights (static_cast<float> (at - static_cast<double> (i)));
+            const float doubled = (wts * osp::simd::Float4::load (t)).sum();
+            x = (x + v.doubling * doubled) / (1.0f + 0.5f * v.doubling);
+        }
+    }
+    if (v.saturationDrive > 1.0f)
+        x = osp::fastTanh (v.saturationDrive * x) / v.saturationDrive;   // KALEIDOSCOPE's harmonic saturation
+    return x;
+}
 
-    const float y = v.filter.process (mix * filterInputGain * driveGain, g, v.k, driveBias, driveBiasOffset);
-    v.outGain += 0.004f * (v.outGainTarget - v.outGain);
-    float out = y * v.makeUp * v.amp.next() * v.outGain;
-    if (v.fade > 0)
-        out *= static_cast<float> (v.fade) / static_cast<float> (std::max (1, static_cast<int> (stealFadeSeconds * internalRate)));
-    return out;
+void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcept
+{
+    const auto& p = current;
+    const int fadeLength = std::max (1, static_cast<int> (stealFadeSeconds * internalRate));
+    for (int done = 0; done < count && v.active;)
+    {
+        // The mode engine (TAPE FRAME, TOYBOX, MIRAGE) works in intervals of up to 32 samples,
+        // its controls updated every 32 (as in an ANDOR OSP voice).
+        int n = std::min (count - done, modeInterval);
+        if (v.modeEngine != nullptr)
+        {
+            if (v.modeCountdown <= 0)
+            {
+                v.modeEngine->control (modeControl (v));
+                v.modeFactor = v.modeEngine->stepFactor();
+                v.modeCountdown = modeInterval;
+            }
+            n = std::min (n, v.modeCountdown);
+        }
+        // The source runs ahead of the filter by up to one interval, but never past the
+        // voice's end or the end of a stolen note's fade: nothing is computed for a note
+        // that is over (so a render never depends on where blocks or intervals fall).
+        if (v.fade > 0)
+            n = std::min (n, v.fade);
+        bool ends = false;
+        for (int k = 0; k < n; ++k)
+        {
+            const auto ks = static_cast<std::size_t> (k);
+            const float env = v.env.next();
+            scratchEnv[ks] = env;
+            scratchSource[ks] = sourceSample (v, env, scratchPolyMod[ks]);
+            scratchAmp[ks] = v.amp.next();
+            if (! v.amp.isActive() && ! v.pending)
+            {
+                n = k + 1;
+                ends = true;
+                break;
+            }
+        }
+        if (v.modeEngine != nullptr)
+        {
+            v.modeEngine->render (scratchSource.data(), scratchSource.data(), scratchL.data(), scratchR.data(), n);
+            for (int k = 0; k < n; ++k)
+                scratchSource[static_cast<std::size_t> (k)] = 0.5f * (scratchL[static_cast<std::size_t> (k)] + scratchR[static_cast<std::size_t> (k)]);
+            v.modeCountdown -= n;
+        }
+
+        int used = n;
+        for (int k = 0; k < n; ++k)
+        {
+            // The ladder: cutoff from the control-rate base, the envelope and Poly Mod.
+            const auto ks = static_cast<std::size_t> (k);
+            float cutoff = v.cutoffNote + scratchEnv[ks] * v.envDepth;
+            if (p.polyModToCutoff)
+                cutoff += scratchPolyMod[ks] * polyModCutoffSemitones;
+            const float y = v.filter.process (scratchSource[ks] * driveGain, cutoffG (cutoff), v.k, driveBias, driveBiasOffset);
+            v.outGain += 0.004f * (v.outGainTarget - v.outGain);
+            float out = y * v.makeUp * scratchAmp[ks] * v.outGain;
+            if (v.fade > 0)
+                out *= static_cast<float> (v.fade) / static_cast<float> (fadeLength);
+            const int at = done + k;
+            left[at] += out * v.panL;
+            right[at] += out * v.panR;
+            if (v.fade > 0 && --v.fade == 0)
+            {
+                // The stolen note has faded: the waiting one starts with the next sample. (Its
+                // oscillators never stopped: their phases are already where they should be.)
+                v.amp.kill();
+                v.env.kill();
+                v.active = false;
+                v.stoppedAt = stillRunning;
+                startVoice (v, v.pendingChannel, v.pendingNote, v.pendingVelocity, v.pendingRetrigger);
+                used = k + 1;
+                break;
+            }
+            if (ends && k == n - 1)
+            {
+                v.active = false;
+                v.held = v.sustained = false;
+                // (`clock` is this control period's first host sample.)
+                v.stoppedAt = clock + static_cast<std::uint64_t> (at / oversampling);
+                if (v.modeEngine != nullptr)
+                    v.modeEngine->release();
+                return;
+            }
+        }
+        done += used;
+    }
 }
 
 void Synth::render (float* left, float* right, int numSamples) noexcept
@@ -822,33 +1180,8 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         const int chunk = std::min (controlCountdown, numSamples - pos);
         const int from = pos * oversampling, count = chunk * oversampling;
         for (auto& v : voices)
-        {
-            if (! v.active)
-                continue;
-            float* l = mixL.data() + from;
-            float* r = mixR.data() + from;
-            for (int i = 0; i < count; ++i)
-            {
-                const float s = renderVoiceSample (v);
-                l[i] += s * v.panL;
-                r[i] += s * v.panR;
-                if (v.fade > 0 && --v.fade == 0)
-                {
-                    // The stolen note has faded: the waiting one starts here.
-                    v.amp.kill();
-                    v.env.kill();
-                    v.active = false;
-                    startVoice (v, v.pendingChannel, v.pendingNote, v.pendingVelocity, v.pendingRetrigger);
-                }
-                if (! v.amp.isActive() && ! v.pending)
-                {
-                    v.active = false;
-                    v.held = v.sustained = false;
-                    v.stoppedAt = clock + static_cast<std::uint64_t> ((from + i) / oversampling);
-                    break;
-                }
-            }
-        }
+            if (v.active)
+                renderVoice (v, mixL.data() + from, mixR.data() + from, count);
         controlCountdown -= chunk;
         pos += chunk;
         blockOffset += chunk;
@@ -880,7 +1213,18 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         }
     }
 
-    // SPACE and ECHO (OSP's own), then a DC blocker and the output guard.
+    // KALEIDOSCOPE's resonators and formants on the mix (ANDOR OSP's stage), then ANDOR OSP's
+    // DRIVE, MOVEMENT, ECHO and SPACE, then a DC blocker and the output guard.
+    if (kaleidoscopeStage.active())
+        for (int i = 0; i < numSamples; ++i)
+        {
+            if (--stageCountdown <= 0)
+            {
+                kaleidoscopeStage.update();
+                stageCountdown = osp::ReimaginedStage::controlInterval;
+            }
+            kaleidoscopeStage.process (left[i], right[i]);
+        }
     effects.process (left, right, numSamples);
     const float out = math::dbToGain (current.outputDb);
     for (int i = 0; i < numSamples; ++i)
@@ -900,6 +1244,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     for (const auto& v : voices)
         count += v.active ? 1 : 0;
     sounding.store (count, std::memory_order_relaxed);
+    effects.setVoicesActive (count > 0);
 }
 
 Synth::VoiceView Synth::voiceView (int slot) const noexcept

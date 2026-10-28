@@ -20,17 +20,27 @@ repository, HANDOFF rule 12).
 ## 2. Signal flow (per voice, at 4x the host rate)
 
 ```
-OSC 2 (saw / tri / pulse, KEYBOARD, LO FREQ) ──┬─────────────► mixer ─► DRIVE ─► 4-pole ladder ─► VCA ─► pan ─┐
-          │ wrap (hard sync)                   └─► Poly Mod ─┐   ▲                  ▲  cutoff       ▲          │
-          ▼                                   filter env ──► │  noise           filter env, keys,  amp env      │
-OSC 1 (saw / pulse) ◄── pitch, width ◄───────────────────────┘                  LFO, Poly Mod, ANALOG          │
-                                                                                                               ▼
-       sum of voices (4x) ─► half-band 4x→2x (23 taps) ─► half-band 2x→1x (79 taps) ─► SPACE / ECHO (ANDOR OSP's) ─► DC block ─► output guard
+OSC 2 (saw / tri / pulse, KEYBOARD, LO FREQ) ──┬────► mixer ─► the voice's recording ─► ONE SHOT / GRANULAR ─► REIMAGINED ─► FILTER DRIVE ─► 4-pole ladder ─► VCA ─► pan ─┐
+          │ wrap (hard sync)                   └─► Poly Mod ─┐  ▲          (1.5 s)        (grains: POS, SIZE,    (KALEIDOSCOPE,                     ▲  cutoff       ▲          │
+          ▼                                   filter env ──► │ noise                       DENS, TUNE, SPREAD,   TAPE FRAME, TOYBOX,              filter env, keys,  amp env      │
+OSC 1 (saw / pulse) ◄── pitch, width ◄───────────────────────┘                             KEY DNA)              MIRAGE)                          LFO, Poly Mod, ANALOG, DRIFT  │
+                                                                                                                                                                         ▼
+  sum of voices (4x) ─► half-band 4x→2x ─► half-band 2x→1x ─► KALEIDOSCOPE's stage ─► DRIVE ─► MOVEMENT (TAPE, CHORUS, PULSE, SHAPER) ─► ECHO / SPACE ─► DC block ─► output guard
 ```
 
-One LFO for the instrument (as on the original), modulating both oscillators' pitch and pulse
-width and the cutoff; MOTION (and the mod wheel, which adds the rest of the way to full) sets how
-much of the per-destination depths is applied.
+One LFO for the instrument (as on the original; ANDOR OSP's LFO 1, optionally one per note),
+modulating both oscillators' pitch and pulse width and the cutoff; its amount (and the mod wheel,
+which adds the rest of the way to full) sets how much of the per-destination depths is applied.
+
+Since version 2 the voice records its own sound between the mixer and the filter, so ANDOR OSP's
+granulator and REIMAGINED modes work on it live (the filter, the envelopes, Poly Mod and the LFO
+still act on the result). GRANULAR's POS is how far back in the recording the grains are taken;
+a grain never reads ahead of what has been played (at a note's start it reads just behind the
+sound). TAPE FRAME, TOYBOX and MIRAGE are ANDOR OSP's own engines, unchanged, in their granular
+form (they transform the stream and steer the grains); KALEIDOSCOPE is its per-voice parts plus
+ANDOR OSP's resonator and formant stage on the mix, tuned to the harmonics of each phrase's first
+note. MOVEMENT's DRIFT is ANDOR OSP's per-voice wander; its other modes, DRIVE, ECHO and SPACE are
+ANDOR OSP's PostProcessor.
 
 ## 3. Oscillators (`dsp/Oscillator.h`, `dsp/PolyBlep.h`)
 
@@ -148,7 +158,7 @@ changes. No tables from any other product.
 
 ## 10. Plugin integration (`product/`)
 
-- **Parameters**: 48 of its own (`analog.*`, appended after the ANDOR schema, pinned by
+- **Parameters**: 57 of its own (four unused since version 2) (`analog.*`, appended after the ANDOR schema, pinned by
   `product/golden/parameter-schema.txt`), and ANDOR OSP's own where the meaning is identical (see
   PARAMETER_REGISTRY.md). **Departures** from the implementation specification's inventory: the
   waveform switches are choices (SAW / PULSE / BOTH; any combination of OSC 2's three) rather than
@@ -160,20 +170,22 @@ changes. No tables from any other product.
   leaves it bit-identical (`analog: every control the interface enables ...`).
 - **The card**: layer A's hero card shows "OSCILLATORS" and two periods of the oscillators' mix
   (`Engine::sourcePicture`), never a drop zone; files are refused (and said so). TUNE, PAN, LEVEL and
-  MUTE act on the generator; START, REIMAGINED, LINK, REVERSE, LOOP, FOLLOW, ONE SHOT/GRANULAR, the
-  EQ, SOLO, the modulation panel's LFO/ENV/VEL/NOTE pages and routes, the arpeggiator, MPE, pitch
-  character and DYNAMICS are shown disabled (ANDOR OSP's disabled look), not relabelled.
-- **Macros** (data order; ECHO's knob before SPACE's on screen): BLEND (oscillators, noise, voices,
-  unison), DRIVE (bias, trim), TONE (resonance, envelope amount, tracking, velocity; filter envelope),
-  MOTION (LFO wave/rate/sync/division, its five depths; Poly Mod; ANALOG and phase), SPACE (room,
-  decay, size, damping, width, pre-delay, modulation, low/high cut), ECHO (machine, stereo, sync,
-  division/time, feedback, tone, age). Popovers are compact cards built only from the shared parts.
-- **Presets**: 24 factory sounds (`dsp/FactoryPatches.cpp`, synthesized only) are written to
+  MUTE act on the generator, and since version 2 ONE SHOT / GRANULAR with the grain controls,
+  REIMAGINED (its name opens ANDOR OSP's popover) and the modulation panel's LFO 1 page; START,
+  LINK, REVERSE, LOOP, FOLLOW, the EQ, SOLO, the other modulation pages and the routes, the
+  arpeggiator, MPE, pitch character and DYNAMICS are shown disabled (ANDOR OSP's disabled look),
+  not relabelled.
+- **Macros** (data order; ECHO's knob before SPACE's on screen): BLEND (oscillators with their LFO
+  depths, Poly Mod, noise, voices, unison, KEY DNA), DRIVE (ANDOR OSP's), TONE (resonance, envelope
+  amount, tracking, velocity; filter envelope; FILTER DRIVE with bias and trim; the LFO's amount and
+  cutoff depth; ANALOG and phase), MOVEMENT, SPACE, ECHO (ANDOR OSP's). BLEND and TONE are compact
+  cards built only from the shared parts; the others are ANDOR OSP's own popovers.
+- **Presets**: 34 factory sounds (`dsp/FactoryPatches.cpp`, synthesized only) are written to
   `Documents/ANDOR Analog/Presets/Factory/<Category>/` by the plugin (never over the musician's own).
 
 ## 11. Not in this version (by design)
 
-Rev 2/Rev 3 circuit models, a second LFO, the function generator, the 40-destination matrix,
-double cross-mod, chorus and the other effects, microtuning, MPE, multitimbrality, the
+Rev 2/Rev 3 circuit models, a second LFO, the function generator, the 40-destination matrix
+(ANDOR OSP's routes), double cross-mod, LIFE and CHARACTER, MOSAIC (it needs a recording), microtuning, MPE, multitimbrality, the
 arpeggiator (disabled; it would need note generation in the engine), aftertouch, velocity curves.
 The shell still lists all 350 ANDOR parameters to hosts (HANDOFF "Known limitations": a release blocker).

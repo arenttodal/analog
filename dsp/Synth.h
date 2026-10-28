@@ -3,13 +3,21 @@
 #include "Envelope.h"
 #include "HalfBand.h"
 #include "LadderFilter.h"
-#include "Lfo.h"
+#include "LiveGranulator.h"
 #include "Patch.h"
 #include "PolyBlep.h"
 
 #include "core/Prng.h"
 #include "engine/HostTiming.h"
+#include "engine/KeyDna.h"
+#include "engine/MirageEngine.h"
+#include "engine/Modulation.h"
 #include "engine/PostProcessor.h"
+#include "engine/ReimaginedStage.h"
+#include "engine/TapeFrameEngine.h"
+#include "engine/ToyboxEngine.h"
+#include "model/InstrumentModel.h"
+#include "model/PlaybackSource.h"
 
 #include <array>
 #include <atomic>
@@ -27,12 +35,20 @@ namespace andor::analog
     OSC 1 (saw, pulse; hard-synced to OSC 2 on request), white noise, a mixer, a four-pole
     resonant ladder low-pass with saturation, a filter envelope and an amplitude envelope.
     Poly Mod sends the filter envelope and OSC 2 to OSC 1's pitch and pulse width and to the
-    cutoff, at audio rate. One LFO for the instrument; every voice slot has its own fixed
-    component tolerances and a slow wander (ANALOG), all drawn from the variation seed.
+    cutoff, at audio rate. One LFO for the instrument (ANDOR OSP's LFO 1); every voice slot
+    has its own fixed component tolerances and a slow wander (ANALOG), all drawn from the
+    variation seed.
+
+    Between the mixer and the filter, each voice records its own sound (LiveRecording):
+    GRANULAR plays grains taken live from it (ANDOR OSP's granulator and KEY DNA), and
+    ANDOR OSP's REIMAGINED modes work on that live sound - KALEIDOSCOPE (saturation, a
+    doubling head, remapped grains; its resonators and formants on the mix), TAPE FRAME,
+    TOYBOX and MIRAGE (their own engines, unchanged, as on a granular layer). MOVEMENT's
+    DRIFT wanders each voice's pitch, tone, level and place as in ANDOR OSP.
 
     Voices run at an oversampled rate (4x by default) and are decimated by two half-band
-    stages after they are summed; OSP's SPACE and ECHO (osp::PostProcessor) follow at the
-    host rate, then a soft output guard.
+    stages after they are summed; KALEIDOSCOPE's stage and ANDOR OSP's DRIVE, MOVEMENT, ECHO
+    and SPACE (osp::PostProcessor) follow at the host rate, then a soft output guard.
 
     Threads: prepare() allocates (message thread). Everything else is real-time safe and
     deterministic: the same seed, patch, events and block boundaries give the same output.
@@ -55,6 +71,13 @@ public:
     const Patch& patch() const noexcept { return current; }
     /** The host's transport (start of a block): the LFO's SYNC and ECHO's tempo. */
     void setTransport (const osp::HostTiming& timing) noexcept;
+    /** LFO 1's CUSTOM shape (its drawn curve). Real-time safe. */
+    void setLfoCurve (const osp::mod::Curve& curve) noexcept;
+    /** GRANULAR's KEY DNA (each key's own granular identity); recomputed only when it
+        changes. Real-time safe. */
+    void setKeyDna (const osp::keydna::Settings& settings) noexcept;
+    /** MOVEMENT SHAPER's playhead (0..1), for its picture. */
+    float shaperPhase() const noexcept { return effects.shaperPhase(); }
 
     // Events, applied at the current position (between render calls).
     void noteOn (int channel, int note, float velocity) noexcept;
@@ -88,6 +111,11 @@ public:
 
     /** The variation each voice slot carries at ANALOG 100 % (cents of OSC 1 pitch). */
     double slotPitchOffsetCents (int slot) const noexcept;
+    /** A voice's grains now (tests). */
+    int grainCount (int slot) const noexcept { return voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))].granulator.grainCount(); }
+    /** How long each voice's recording is (seconds), and the longest a mode engine runs per call. */
+    static constexpr double recordingSeconds = 1.5;
+    static constexpr int modeInterval = 32;
 
 private:
     struct Drift
@@ -101,6 +129,8 @@ private:
         std::uint64_t wanderCount = 0;   ///< targets drawn so far (seeds the next)
     };
 
+    static constexpr std::uint64_t stillRunning = ~std::uint64_t { 0 };
+
     struct Voice
     {
         int slot = 0;
@@ -109,11 +139,13 @@ private:
         bool sustained = false;   ///< released while the pedal holds it
         int channel = 0, note = -1;
         std::uint64_t order = 0;  ///< note-on sequence (oldest first)
+        std::uint64_t seed = 1;   ///< the note's own seed (grains, REIMAGINED, DRIFT)
         float velocity = 1.0f;
         double pitch = 60.0, pitchTarget = 60.0;   ///< MIDI notes (glide moves pitch)
         bool hasPlayed = false;
-        std::uint64_t stoppedAt = 0;               ///< sample clock when it fell silent
+        std::uint64_t stoppedAt = 0;               ///< sample clock when it fell silent (stillRunning: taken, never silent)
         double unisonOffset = 0.0;                 ///< semitones
+        float pan = 0.0f;                          ///< its place, -1..1 (before DRIFT)
         float panL = 1.0f, panR = 1.0f;
 
         double phase1 = 0.0, phase2 = 0.0;
@@ -131,6 +163,30 @@ private:
         float gain1 = 1.0f, gain2 = 1.0f, gainNoise = 0.0f, outGain = 0.0f, outGainTarget = 0.0f;
         float makeUp = 1.0f;   ///< resonance and DRIVE make-up gain after the filter
 
+        // The live sound: its recording, the grains read from it, KALEIDOSCOPE's parts.
+        LiveRecording recording;
+        LiveGranulator granulator;
+        bool grainsPlay = false;      ///< GRANULAR: the grains are the voice's source
+        float cloud = 0.0f;           ///< KALEIDOSCOPE's remapped grains under the oscillators (ONE SHOT)
+        double grainStep = 1.0;       ///< the grains' read speed (REIMAGINED's wow)
+        float grainMix = 0.0f;        ///< ONE SHOT -> GRANULAR, glided (a switch never clicks)
+        float saturationDrive = 1.0f, doubling = 0.0f;
+        double notePitch = 60.0;      ///< the pitch it plays now (MIDI note), for the mode engines
+        double doublingPhase = 0.0, doublingDelay = 0.0, doublingTarget = 0.0;   ///< (delays in samples)
+        // TAPE FRAME, TOYBOX, MIRAGE: the one this note started with (or none).
+        osp::TapeFrameEngine tapeFrame;
+        osp::ToyboxEngine toybox;
+        osp::MirageEngine mirage;
+        osp::ReimaginedVoiceEngine* modeEngine = nullptr;
+        int modeCountdown = 0;
+        double modeFactor = 1.0;      ///< the mode's read-speed factor (wow, self-modulation)
+        osp::mod::LfoState lfo;       ///< LFO 1 with POLY voices: this note's own
+        // MOVEMENT DRIFT (and KALEIDOSCOPE's own instability): slow random glides of pitch
+        // (cents), tone (octaves), level (dB) and place, as ANDOR OSP's voices wander.
+        std::array<double, 4> driftFrom {}, driftTo {}, driftNow {};
+        int driftCountdown = 0, driftSegment = 1;
+        osp::Prng driftRng { 1 };
+
         // A voice taken for a new note fades out first (3 ms), then starts the new one.
         int fade = 0;
         bool pending = false;
@@ -144,7 +200,15 @@ private:
     Voice* allocate() noexcept;
     void controlUpdate() noexcept;
     void updateVoiceControl (Voice& v, float lfoValue, float depth) noexcept;
-    float renderVoiceSample (Voice& v) noexcept;
+    void updateDrift (Voice& v) noexcept;
+    void startModeEngine (Voice& v) noexcept;
+    osp::ReimaginedControl modeControl (const Voice& v) const noexcept;
+    /** Renders `count` oversampled samples of a voice, adding them (panned) to left/right. */
+    void renderVoice (Voice& v, float* left, float* right, int count) noexcept;
+    /** One sample of a voice's source: oscillators, noise, the recording and the grains;
+        `polyMod` is Poly Mod's value at this sample (for the cutoff). */
+    float sourceSample (Voice& v, float envValue, float& polyMod) noexcept;
+    bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
     void monoNoteOff (int channel, int note) noexcept;
@@ -183,8 +247,9 @@ private:
     float bend = 0.0f, wheel = 0.0f;
     bool pedal = false;
 
-    // LFO and transport.
-    Lfo lfo;
+    // LFO (ANDOR OSP's LFO 1) and transport.
+    osp::mod::LfoState lfo;
+    osp::mod::CurveTable lfoCurve {};
     float lfoValue = 0.0f;
     osp::HostTiming timing;
     double ppqAtBlock = 0.0;
@@ -206,6 +271,26 @@ private:
     // Oversampled mix and decimation.
     std::vector<float> mixL, mixR, halfL, halfR;
     HalfBandDecimator stage1L, stage1R, stage2L, stage2R;
+
+    // GRANULAR's KEY DNA, REIMAGINED's live parts.
+    osp::keydna::Settings keyDna;
+    osp::keydna::Table keyDnaTable;
+    /** What the mode engines take for "the recording" on a live voice (they read only its
+        length, rate and root there): TOYBOX the voice's own recording's length; TAPE FRAME a
+        twelve-second tape (its FRAMEs, 3.6 to 11.4 s, are longer than what a voice keeps: its
+        travel is scaled into the recording); MIRAGE the voice rate (its clock). Rooted at C4,
+        with the matching model. */
+    osp::PlaybackSource tapeSource, toyboxSource, mirageSource;
+    osp::InstrumentModel liveModel;
+    // KALEIDOSCOPE on the mix: ANDOR OSP's stage, its resonators tuned to the harmonics of
+    // the first note of each phrase (two models, so a retune is a new model to it).
+    osp::ReimaginedStage kaleidoscopeStage;
+    std::array<osp::InstrumentModel, 2> resonanceModels;
+    int resonanceModel = 0, stageCountdown = 0;
+    // One interval of a voice: its source, the mode engine's output, the envelopes and Poly Mod.
+    std::array<float, modeInterval> scratchSource {}, scratchL {}, scratchR {}, scratchEnv {}, scratchPolyMod {};
+    std::array<float, modeInterval> scratchAmp {};
+    double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
     osp::PostProcessor effects;
     float dcL = 0.0f, dcR = 0.0f, dcStateL = 0.0f, dcStateR = 0.0f, dcCoef = 0.0f;

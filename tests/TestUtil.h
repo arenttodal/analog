@@ -123,6 +123,7 @@ namespace testutil
         p.envDepthSemitones = 0.0;
         p.space = 0.0;
         p.echo = 0.0;
+        p.motion = 0.0;
         p.ampAttack = 0.001;
         p.ampSustain = 1.0;
         p.ampRelease = 0.02;

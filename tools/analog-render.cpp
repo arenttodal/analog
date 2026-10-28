@@ -180,6 +180,9 @@ int main (int argc, char** argv)
         Synth synth;
         synth.prepare (o.rate, 512, o.oversampling);
         synth.setPatch (patch);
+        auto dna = keyDnaOf (*f);
+        dna.seed = patch.seed;
+        synth.setKeyDna (dna);
         synth.reset();
         std::vector<float> left, right;
         const auto& notes = o.notes.empty() ? f->demoNotes : o.notes;

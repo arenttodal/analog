@@ -31,6 +31,10 @@ public:
     void setSource (int, const osp::plugin::LoadedInstrument*) noexcept override {}
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept override;
     int activeNotes() const noexcept override { return synth.activeVoices(); }
+    void setShaperPattern (const osp::ShaperPattern& pattern) noexcept override { shaperPattern = pattern; }
+    float shaperPhase() const noexcept override { return synth.shaperPhase(); }
+    void setModulationCurve (int index, const osp::mod::Curve& curve) noexcept override;
+    juce::String reimaginedModeUnavailable (int layer, int mode) const override;
     bool sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const override;
 
     /** One period of the oscillators' mix for a patch (the card's picture). */
@@ -40,6 +44,7 @@ private:
     int oversamplingFactor;
     Synth synth;
     params::Reader reader;
+    osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
     std::vector<float> scratch;
     float lastScreenPitch = 0.0f, lastScreenMod = 0.0f;
     bool prepared = false;
