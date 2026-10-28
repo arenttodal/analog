@@ -2,6 +2,8 @@
 
 #include "Patch.h"
 
+#include "engine/KeyDna.h"
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
@@ -16,7 +18,8 @@
         rename, re-range or reorder one once released (sessions and automation keep them).
       - ANDOR OSP's own where the meaning is exactly the same (the amplitude envelope, the
         master volume, bend range, glide, mono, fine tune, variation seed, velocity range,
-        DRIVE, SPACE and ECHO with their settings, layer A's TUNE / PAN / LEVEL / MUTE): the
+        DRIVE, MOVEMENT, SPACE and ECHO with their settings, REIMAGINED and its modes, layer A's
+        source mode and GRANULAR settings, LFO 1, layer A's TUNE / PAN / LEVEL / MUTE): the
         shared interface's controls for them then work as they do in ANDOR OSP.
 
     docs/PARAMETER_REGISTRY.md lists every one with its range, default and use.
@@ -72,6 +75,18 @@ namespace andor::analog::params
     inline const juce::String polyModToCutoff = "analog.polyMod.toCutoff";
     inline const juce::String analogAmount = "analog.analog";
     inline const juce::String phaseMode = "analog.phase";
+    // Version 2.
+    inline const juce::String filterDrive = "analog.filterDrive";
+    inline const juce::String keyDna = "analog.keyDna";
+    inline const juce::String keyDnaAmount = "analog.keyDna.amount";
+    inline const juce::String keyDnaIndividuality = "analog.keyDna.individuality";
+    inline const juce::String keyDnaPosition = "analog.keyDna.position";
+    inline const juce::String keyDnaSize = "analog.keyDna.size";
+    inline const juce::String keyDnaDensity = "analog.keyDna.density";
+    inline const juce::String keyDnaSpread = "analog.keyDna.spread";
+    inline const juce::String keyDnaTune = "analog.keyDna.tune";
+    /** How far each key's own grains differ, by default, once KEY DNA is on. */
+    constexpr double keyDnaDefaultVariation = 0.35;
 
     /** Every parameter the engine reads (its own and ANDOR OSP's), for Engine::boundParameters. */
     const juce::StringArray& engineParameterIds();
@@ -86,6 +101,8 @@ namespace andor::analog::params
         void attach (juce::AudioProcessorValueTreeState& state);
         /** The patch the parameters describe now (real-time safe). */
         Patch read() const noexcept;
+        /** GRANULAR's KEY DNA as the parameters describe it (real-time safe; flat curves). */
+        osp::keydna::Settings keyDna (std::uint32_t seed) const noexcept;
 
     private:
         float value (int index) const noexcept;

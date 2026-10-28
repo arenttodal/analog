@@ -62,3 +62,42 @@ TEST_CASE ("realtime: rendering, events and patch changes never allocate", "[rea
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: GRANULAR, the REIMAGINED modes, MOVEMENT, DRIVE and KEY DNA never allocate", "[realtime][live]")
+{
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    auto p = factoryPatches()[0].patch;
+    p.granular = true;
+    p.motion = 0.6;
+    p.drive = 0.5;
+    p.reimagined = 0.7;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    osp::keydna::Settings dna;
+    dna.enabled = true;
+    for (auto& param : dna.params)
+        param.variation = 0.6;
+
+    counting = true;
+    for (int block = 0; block < 300; ++block)
+    {
+        p.reimaginedSettings.mode = osp::reimagined::modeFromIndex (block / 12 % osp::reimaginedModeCount);
+        p.effects.movementMode = static_cast<osp::MovementMode> (block / 30 % 5);
+        p.granular = block % 90 < 70;
+        p.lfo.shape = static_cast<osp::mod::LfoShape> (block / 7 % osp::mod::lfoShapeCount);
+        dna.amount = block % 40 < 20 ? 1.0 : 0.5;
+        synth.setKeyDna (dna);
+        synth.setLfoCurve (block % 2 == 0 ? osp::mod::straightCurve() : osp::mod::defaultLfoCurve());
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 30) % 48), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

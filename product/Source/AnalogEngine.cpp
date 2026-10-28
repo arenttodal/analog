@@ -17,7 +17,10 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
 {
     reader.attach (parameters);
     synth.prepare (sampleRate, std::max (1, maximumBlockSize), oversamplingFactor);
-    synth.setPatch (reader.read());
+    auto patch = reader.read();
+    patch.effects.shaper.customSteps = shaperPattern;
+    synth.setPatch (patch);
+    synth.setKeyDna (reader.keyDna (patch.seed));
     synth.reset();
     scratch.assign (static_cast<std::size_t> (std::max (1, maximumBlockSize)), 0.0f);
     prepared = true;
@@ -28,7 +31,10 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     const int total = buffer.getNumSamples();
     if (! prepared || total <= 0 || buffer.getNumChannels() == 0)
         return;
-    synth.setPatch (reader.read());
+    auto patch = reader.read();
+    patch.effects.shaper.customSteps = shaperPattern;   // MOVEMENT SHAPER's CUSTOM (the shell's)
+    synth.setPatch (patch);
+    synth.setKeyDna (reader.keyDna (patch.seed));       // recomputed only when it changes
     osp::HostTiming timing;
     timing.valid = performance.hasPosition;
     timing.playing = performance.playing;
@@ -74,6 +80,19 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     if (buffer.getNumChannels() == 1)
         for (int i = 0; i < total; ++i)
             left[i] = 0.5f * (left[i] + scratch[static_cast<std::size_t> (i)]);
+}
+
+void AnalogEngine::setModulationCurve (int index, const osp::mod::Curve& curve) noexcept
+{
+    if (index == 0)
+        synth.setLfoCurve (curve);   // LFO 1's CUSTOM shape (the synth's one LFO)
+}
+
+juce::String AnalogEngine::reimaginedModeUnavailable (int, int mode) const
+{
+    // MOSAIC rebuilds a recording from its harmonic analysis, made when it is loaded; the
+    // oscillators' live sound has none, so the mode leaves it as it is.
+    return mode == static_cast<int> (osp::ReimaginedMode::mosaic) ? juce::String ("NEEDS A RECORDING: PLAYS UNCHANGED") : juce::String();
 }
 
 bool AnalogEngine::sourcePicture (int, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const

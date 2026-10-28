@@ -54,6 +54,12 @@ and Hollow Organ (trimmed by their LEVEL).
 
 (About 1 % of one core per voice at 4x on this VM; Apple Silicon is typically 2–3x faster.)
 
+Version 2 (16 held voices, 4x, best of several runs; the VM's timings vary by about ±5 %):
+plain sounds (Warm Poly, Chorus Ensemble) 21–23 %; Toybox Chime 28 %, Mirage Bass 33 %,
+Kaleidoscope Pad 38 %, Tape Frame Keys 42 %; GRANULAR clouds 40–50 % (Grain Cloud: 22 grains a
+second of 280 ms each, about six overlapping per voice). The grains run at the voice rate (4x),
+so they read the oscillators' oversampled sound without aliasing.
+
 ### Realtime and determinism
 
 No heap allocation while rendering, through notes, controllers, pedal, voice stealing and patch
@@ -69,7 +75,14 @@ None of the following has been carried out; they are the release gate (spec §8,
 - [ ] The same chord at ANALOG 0 %, 50 %, 100 % (`--analog`), and two seeds (`--seed`).
 - [ ] Every factory sound, dry (SPACE and ECHO at 0) and as shipped: useful without effects, attractive with them.
 - [ ] Voice stealing on fast playing at VOICES 4 (no clicks), sustain pedal over chords, mono legato and glide.
-- [ ] DRIVE 0–100 % with BIAS: warm, never harsh at ordinary levels.
+- [ ] FILTER DRIVE 0–100 % with BIAS: warm, never harsh at ordinary levels; ANDOR OSP's DRIVE (TUBE, TAPE, CRUNCH) on chords and leads.
+- [ ] GRANULAR: switch ONE SHOT ↔ GRANULAR while holding a chord (no click); POS 0 → 100 % on a moving sound
+      (LFO on pitch): the grains reach back in time; TUNE ±12; KEY DNA on/off across the keyboard.
+- [ ] REIMAGINED, each mode in ONE SHOT and GRANULAR at 30 / 60 / 90 %: KALEIDOSCOPE's resonance follows the
+      phrase's first note; TAPE FRAME's wow and wear; TOYBOX's turning memory; MIRAGE's clock and filter.
+- [ ] MOVEMENT: DRIFT at 100 % on a chord (voices wander apart, not out of tune); TAPE, CHORUS, PULSE; SHAPER with
+      the host playing and stopped, and with a custom pattern.
+- [ ] The ten new factory sounds by ear (levels set by measurement only).
 - [ ] Hosts: Logic (AU), Ableton Live (AU/VST3), REAPER (VST3): automation, preset recall, project reopen, offline bounce = realtime.
 
 `./build/analog-render --all renders/` writes every factory sound's demo phrase.

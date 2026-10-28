@@ -154,7 +154,7 @@ TEST_CASE ("filter: DRIVE adds harmonics; BIAS adds even ones; TRIM sets the lev
     const double f0 = 220.0;
     auto clean = makeSynth (p);
     const auto a = render (*clean, 1.0, { on (0, 57) });
-    p.drive = 1.0;
+    p.filterDrive = 1.0;
     auto driven = makeSynth (p);
     const auto b = render (*driven, 1.0, { on (0, 57) });
     CHECK (harmonic (b, f0, 3) / harmonic (b, f0, 1) > 1.5 * harmonic (a, f0, 3) / harmonic (a, f0, 1));

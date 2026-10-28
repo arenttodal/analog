@@ -43,6 +43,16 @@ namespace
         p.effects.echoType = type;
     }
 
+    /** Every factory sound starts from INIT with the first version's LFO (TRIANGLE at 4 Hz:
+        what the mod wheel brings in), so each sounds as it did. */
+    Patch base()
+    {
+        Patch p;
+        p.lfo.shape = osp::mod::LfoShape::triangle;
+        p.lfo.rateHz = 4.0;
+        return p;
+    }
+
     const std::vector<int> chord { 48, 55, 60, 64, 67 };
     const std::vector<int> lowLine { 36, 36, 43, 39, 41, 36, 46, 43 };
     const std::vector<int> leadLine { 60, 63, 67, 70, 72, 70, 67, 65 };
@@ -51,16 +61,16 @@ namespace
     std::vector<FactoryPatch> build()
     {
         std::vector<FactoryPatch> list;
-        auto add = [&list] (const char* name, const char* category, Patch p, std::vector<int> notes, bool line = false) {
-            list.push_back ({ name, category, p, std::move (notes), line });
+        auto add = [&list] (const char* name, const char* category, Patch p, std::vector<int> notes, bool line = false, double keyDna = 0.0) {
+            list.push_back ({ name, category, p, std::move (notes), line, keyDna });
         };
 
         {
-            Patch p;   // INIT: two saws a few cents apart, the filter half open.
+            Patch p = base();   // INIT: two saws a few cents apart, the filter half open.
             add ("Init", "Basic", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2FineCents = 6.0;
             p.tone = hz (1400.0);
             p.resonance = 0.18;
@@ -73,7 +83,7 @@ namespace
             add ("Warm Poly", "Pad", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2FineCents = 5.0;
             p.tone = hz (520.0);
             p.resonance = 0.12;
@@ -86,7 +96,7 @@ namespace
             add ("Soft Brass", "Brass", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc1Width = 0.36;
             p.osc2FineCents = 9.0;
@@ -95,8 +105,8 @@ namespace
             p.envDepthSemitones = 6.0;
             filterEnv (p, 0.6, 1.5, 0.6, 1.5);
             ampEnv (p, 0.85, 1.0, 1.0, 1.9);
-            p.movement = 0.35;
-            p.lfoRateHz = 0.35;
+            p.lfoAmount = 0.35;
+            p.lfo.rateHz = 0.35;
             p.lfoPitch1 = 0.0;
             p.lfoPitch2 = 0.0;
             p.lfoWidth1 = 0.2;
@@ -107,7 +117,7 @@ namespace
             add ("String Pad", "Pad", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc1Width = 0.3;
             p.osc2Level = 0.0;
@@ -123,7 +133,7 @@ namespace
             add ("Pulse Arp", "Sequence", p, arpLine, true);
         }
         {
-            Patch p;
+            Patch p = base();
             p.voiceMode = VoiceMode::mono;
             p.osc1Octave = -1;
             p.osc2Wave = Osc2Wave::pulse;
@@ -142,7 +152,7 @@ namespace
             add ("Rounded Bass", "Bass", p, lowLine, true);
         }
         {
-            Patch p;
+            Patch p = base();
             p.voiceMode = VoiceMode::mono;
             p.osc2FineCents = 8.0;
             p.tone = hz (1800.0);
@@ -151,18 +161,18 @@ namespace
             filterEnv (p, 0.004, 0.5, 0.55, 0.25);
             ampEnv (p, 0.004, 0.3, 0.9, 0.22);
             p.glideSeconds = 0.08;
-            p.drive = 0.3;
+            p.filterDrive = 0.3;
             p.lfoPitch1 = 0.35;
             p.lfoPitch2 = 0.35;
             p.lfoWidth1 = 0.0;
             p.lfoWidth2 = 0.0;
-            p.lfoRateHz = 5.2;
+            p.lfo.rateHz = 5.2;
             delay (p, 0.22, 5, 0.35);
             room (p, 0.14, SpaceType::plate, 1.6);
             add ("Mono Lead", "Lead", p, leadLine, true);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc1Width = 0.14;
             p.osc1Level = 0.35;
@@ -180,7 +190,7 @@ namespace
             add ("Soft Keys", "Keys", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.sync = true;
             p.osc1Coarse = 7.0;
             p.osc2Level = 0.25;
@@ -192,12 +202,12 @@ namespace
             p.envDepthSemitones = 10.0;
             filterEnv (p, 0.001, 0.45, 0.3, 0.3);
             ampEnv (p, 0.002, 0.6, 0.8, 0.25);
-            p.drive = 0.2;
+            p.filterDrive = 0.2;
             delay (p, 0.18, 3, 0.3);
             add ("Sync Bite", "Lead", p, leadLine, true);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Level = 0.0;
             p.osc2Wave = Osc2Wave::triangle;
             p.osc2Level = 0.35;
@@ -212,7 +222,7 @@ namespace
             add ("Noise Swell", "Texture", p, { 60, 67 });
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2FineCents = 15.0;
             p.osc1Wave = Osc1Wave::sawPulse;
             p.osc1Width = 0.42;
@@ -222,8 +232,8 @@ namespace
             filterEnv (p, 1.2, 2.0, 0.6, 2.0);
             ampEnv (p, 1.1, 1.0, 1.0, 2.4);
             p.analogAmount = 1.0;
-            p.movement = 0.25;
-            p.lfoRateHz = 0.18;
+            p.lfoAmount = 0.25;
+            p.lfo.rateHz = 0.18;
             p.lfoPitch1 = 0.12;
             p.lfoPitch2 = -0.12;
             p.lfoCutoff = 7.0;
@@ -233,7 +243,7 @@ namespace
             add ("Detuned Haze", "Pad", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2Wave = Osc2Wave::triangle;
             p.osc2Coarse = 7.0;
             p.osc2FineCents = 0.0;
@@ -251,7 +261,7 @@ namespace
             add ("Metal Bells", "Keys", p, { 72, 76, 79, 84 });
         }
         {
-            Patch p;
+            Patch p = base();
             p.unison = true;
             p.polyphony = 8;
             p.unisonDetune = 0.45;
@@ -268,7 +278,7 @@ namespace
             add ("Unison Lead", "Lead", p, leadLine, true);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2FineCents = 4.0;
             p.tone = hz (380.0);
             p.resonance = 0.16;
@@ -276,12 +286,12 @@ namespace
             filterEnv (p, 0.002, 0.24, 0.2, 0.16);
             ampEnv (p, 0.002, 0.3, 0.55, 0.16);
             p.velocityToFilter = 0.6;
-            p.drive = 0.15;
+            p.filterDrive = 0.15;
             room (p, 0.14, SpaceType::room, 1.0);
             add ("Brass Stab", "Brass", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc1Width = 0.2;
             p.osc2Level = 0.0;
@@ -295,7 +305,7 @@ namespace
             add ("Wah Clav", "Keys", p, { 52, 55, 59, 64 });
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc1Octave = -1;
             p.osc1Width = 0.5;
@@ -311,17 +321,17 @@ namespace
             add ("Sub Pluck", "Bass", p, lowLine, true);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2FineCents = 10.0;
             p.tone = hz (420.0);
             p.resonance = 0.42;
             p.envDepthSemitones = 8.0;
             filterEnv (p, 1.0, 2.0, 0.5, 2.0);
             ampEnv (p, 0.7, 1.0, 1.0, 2.2);
-            p.lfoSync = true;
-            p.lfoDivision = 3;   // a bar
-            p.lfoWave = LfoWave::sine;
-            p.movement = 0.55;
+            p.lfo.sync = true;
+            p.lfo.division = 5;   // a bar
+            p.lfo.shape = osp::mod::LfoShape::sine;
+            p.lfoAmount = 0.55;
             p.lfoPitch1 = 0.0;
             p.lfoPitch2 = 0.0;
             p.lfoWidth1 = 0.0;
@@ -331,7 +341,7 @@ namespace
             add ("Sweep Pad", "Pad", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc1Width = 0.25;
             p.osc1Octave = 1;
@@ -348,7 +358,7 @@ namespace
             add ("Glass Keys", "Keys", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc2Wave = Osc2Wave::pulse;
             p.osc2Octave = 1;
@@ -357,8 +367,8 @@ namespace
             p.tone = hz (4200.0);
             p.envDepthSemitones = 0.0;
             ampEnv (p, 0.004, 0.2, 1.0, 0.06);
-            p.movement = 0.2;
-            p.lfoRateHz = 6.0;
+            p.lfoAmount = 0.2;
+            p.lfo.rateHz = 6.0;
             p.lfoPitch1 = 0.12;
             p.lfoPitch2 = 0.12;
             p.lfoWidth1 = 0.0;
@@ -368,7 +378,7 @@ namespace
             add ("Hollow Organ", "Keys", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.voiceMode = VoiceMode::mono;
             p.osc1Wave = Osc1Wave::sawPulse;
             p.osc1Width = 0.4;
@@ -379,14 +389,14 @@ namespace
             filterEnv (p, 0.002, 0.35, 0.4, 0.3);
             ampEnv (p, 0.003, 0.3, 0.85, 0.3);
             p.glideSeconds = 0.06;
-            p.drive = 0.45;
+            p.filterDrive = 0.45;
             p.driveBias = 0.4;
             delay (p, 0.42, 6, 0.55);
             room (p, 0.18, SpaceType::plate, 2.0);
             add ("Tape Echo Lead", "Lead", p, leadLine, true);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2Wave = Osc2Wave::triangle;
             p.osc2LowFrequency = true;
             p.osc2KeyTrack = false;
@@ -407,7 +417,7 @@ namespace
             add ("Low Drone", "Texture", p, { 36, 43 });
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Wave = Osc1Wave::pulse;
             p.osc1Width = 0.5;
             p.osc2Wave = Osc2Wave::sawPulse;
@@ -424,7 +434,7 @@ namespace
             add ("Hollow Square", "Keys", p, chord);
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc1Octave = -1;
             p.osc2Octave = -1;
             p.osc2FineCents = 12.0;
@@ -433,9 +443,9 @@ namespace
             p.envDepthSemitones = 26.0;
             filterEnv (p, 0.35, 1.4, 0.3, 1.2);
             ampEnv (p, 0.25, 1.0, 0.9, 1.4);
-            p.movement = 0.3;
-            p.lfoWave = LfoWave::sampleHold;
-            p.lfoRateHz = 7.0;
+            p.lfoAmount = 0.3;
+            p.lfo.shape = osp::mod::LfoShape::smoothRandom;   // (the first version stepped it)
+            p.lfo.rateHz = 7.0;
             p.lfoPitch1 = 0.0;
             p.lfoPitch2 = 0.0;
             p.lfoWidth1 = 0.0;
@@ -446,7 +456,7 @@ namespace
             add ("Random Steps", "Sequence", p, { 48, 55, 60 });
         }
         {
-            Patch p;
+            Patch p = base();
             p.osc2Wave = Osc2Wave::sawTriangle;
             p.osc2FineCents = 6.0;
             p.osc1Width = 0.5;
@@ -462,8 +472,200 @@ namespace
             delay (p, 0.12, 9, 0.3);
             add ("Velvet Strings", "Pad", p, chord);
         }
+
+        // Version 2: ANDOR OSP's engines on the oscillators' live sound.
+        {
+            Patch p = base();   // GRANULAR: a cloud from each voice's own last second, KEY DNA, KALEIDOSCOPE.
+            p.osc2Wave = Osc2Wave::sawTriangle;
+            p.osc2FineCents = 9.0;
+            p.tone = hz (2200.0);
+            p.resonance = 0.12;
+            p.envDepthSemitones = 8.0;
+            filterEnv (p, 0.8, 2.0, 0.6, 2.0);
+            ampEnv (p, 0.6, 1.5, 0.9, 2.2);
+            p.granular = true;
+            p.grains = { 0.45, 0.28, 22.0, 0.0, 0.6 };
+            p.reimagined = 0.45;
+            p.lfoAmount = 0.35;
+            p.lfo.rateHz = 0.3;
+            p.lfoPitch1 = 0.25;
+            p.lfoPitch2 = -0.25;
+            p.levelDb = -2.0;
+            room (p, 0.45, SpaceType::hall, 4.5);
+            add ("Grain Cloud", "Texture", p, chord, false, 0.5);
+        }
+        {
+            Patch p = base();   // KALEIDOSCOPE on strings: refracted, resonating, drifting.
+            p.osc2FineCents = 8.0;
+            p.tone = hz (1400.0);
+            p.resonance = 0.15;
+            p.envDepthSemitones = 14.0;
+            filterEnv (p, 0.4, 1.2, 0.5, 1.4);
+            ampEnv (p, 0.35, 1.0, 0.9, 1.6);
+            p.reimagined = 0.65;
+            p.reimaginedSettings.kaleidoscope = { 0.6, 0.7 };
+            p.motion = 0.35;
+            p.stereoSpread = 0.6;
+            p.levelDb = 2.0;
+            room (p, 0.35, SpaceType::hall, 3.5);
+            add ("Kaleidoscope Pad", "Pad", p, chord);
+        }
+        {
+            Patch p = base();   // TAPE FRAME: keys played back from a worn tape loop, MOVEMENT TAPE.
+            p.osc1Wave = Osc1Wave::pulse;
+            p.osc1Width = 0.35;
+            p.osc2Wave = Osc2Wave::triangle;
+            p.tone = hz (1800.0);
+            p.envDepthSemitones = 20.0;
+            filterEnv (p, 0.004, 0.8, 0.3, 0.6);
+            ampEnv (p, 0.004, 1.6, 0.5, 0.8);
+            p.granular = true;
+            p.grains = { 0.2, 0.18, 18.0, 0.0, 0.15 };
+            p.reimagined = 0.6;
+            p.reimaginedSettings.mode = osp::ReimaginedMode::tapeFrame;
+            p.reimaginedSettings.tapeFrame = { 0.5, 0.4, osp::TapeFrameLength::classic };
+            p.motion = 0.3;
+            p.effects.movementMode = osp::MovementMode::tape;
+            p.levelDb = 3.0;
+            room (p, 0.25, SpaceType::plate, 2.0);
+            add ("Tape Frame Keys", "Keys", p, chord);
+        }
+        {
+            Patch p = base();   // TOYBOX: a small digital keyboard turning its memory over.
+            p.osc1Wave = Osc1Wave::pulse;
+            p.osc1Width = 0.2;
+            p.osc2Wave = Osc2Wave::pulse;
+            p.osc2Octave = 1;
+            p.osc2Width = 0.3;
+            p.blend = 0.4;
+            p.tone = hz (5000.0);
+            p.envDepthSemitones = 12.0;
+            filterEnv (p, 0.002, 0.5, 0.2, 0.4);
+            ampEnv (p, 0.002, 1.2, 0.0, 1.0);
+            p.reimagined = 0.7;
+            p.reimaginedSettings.mode = osp::ReimaginedMode::toybox;
+            p.reimaginedSettings.toybox = { 0.4, 0.6, osp::ToyboxPlay::turn };
+            p.levelDb = -2.0;
+            delay (p, 0.25, 5, 0.4, EchoType::bbd);
+            room (p, 0.2, SpaceType::room, 1.2);
+            add ("Toybox Chime", "Keys", p, { 72, 76, 79, 84 });
+        }
+        {
+            Patch p = base();   // MIRAGE: an early sampler's heavy voice, then TUBE DRIVE.
+            p.voiceMode = VoiceMode::mono;
+            p.osc2Octave = -1;
+            p.osc2FineCents = 4.0;
+            p.tone = hz (900.0);
+            p.resonance = 0.25;
+            p.envDepthSemitones = 30.0;
+            filterEnv (p, 0.002, 0.35, 0.2, 0.25);
+            ampEnv (p, 0.002, 0.9, 0.7, 0.2);
+            p.reimagined = 0.65;
+            p.reimaginedSettings.mode = osp::ReimaginedMode::mirage;
+            p.reimaginedSettings.mirage = { 0.55, 0.6, osp::MirageTone::dark };
+            p.drive = 0.35;
+            p.space = 0.0;
+            p.levelDb = 5.0;
+            add ("Mirage Bass", "Bass", p, lowLine, true);
+        }
+        {
+            Patch p = base();   // MOVEMENT CHORUS: a wide string ensemble.
+            p.osc1Wave = Osc1Wave::saw;
+            p.osc2Wave = Osc2Wave::saw;
+            p.osc2FineCents = 5.0;
+            p.tone = hz (2600.0);
+            p.envDepthSemitones = 6.0;
+            filterEnv (p, 0.3, 1.0, 0.7, 1.2);
+            ampEnv (p, 0.3, 1.0, 0.9, 1.3);
+            p.motion = 0.6;
+            p.effects.movementMode = osp::MovementMode::chorus;
+            p.effects.chorusWidth = 0.7;
+            p.effects.chorusStereo = 0.8;
+            p.levelDb = 0.0;
+            room (p, 0.3, SpaceType::hall, 3.0);
+            add ("Chorus Ensemble", "Pad", p, chord);
+        }
+        {
+            Patch p = base();   // MOVEMENT PULSE: an organ through a rotating tremolo.
+            p.osc1Wave = Osc1Wave::pulse;
+            p.osc1Width = 0.5;
+            p.osc2Wave = Osc2Wave::pulse;
+            p.osc2Octave = 1;
+            p.osc2FineCents = 0.0;
+            p.tone = hz (3200.0);
+            p.envDepthSemitones = 0.0;
+            ampEnv (p, 0.01, 0.2, 1.0, 0.12);
+            p.motion = 0.5;
+            p.effects.movementMode = osp::MovementMode::pulse;
+            p.effects.pulseRate = 0.6;
+            p.effects.pulseShape = 0.4;
+            p.levelDb = -5.0;
+            room (p, 0.2, SpaceType::room, 1.4);
+            add ("Pulse Organ", "Keys", p, chord);
+        }
+        {
+            Patch p = base();   // MOVEMENT SHAPER: a pad cut into a sixteenth-note rhythm.
+            p.osc2FineCents = 10.0;
+            p.tone = hz (1600.0);
+            p.resonance = 0.3;
+            p.envDepthSemitones = 10.0;
+            ampEnv (p, 0.05, 1.0, 0.9, 0.6);
+            p.motion = 0.85;
+            p.effects.movementMode = osp::MovementMode::shaper;
+            p.effects.shaper.pattern = 5;
+            p.effects.shaper.target = osp::ShaperTarget::both;
+            p.levelDb = 0.0;
+            delay (p, 0.2, 5, 0.35);
+            room (p, 0.25, SpaceType::plate, 2.2);
+            add ("Shaper Gate", "Sequence", p, chord);
+        }
+        {
+            Patch p = base();   // DRIVE CRUNCH: a synced lead pushed hard.
+            p.voiceMode = VoiceMode::mono;
+            p.glideSeconds = 0.04;
+            p.osc1Coarse = 7.0;
+            p.sync = true;
+            p.tone = hz (2400.0);
+            p.resonance = 0.2;
+            p.envDepthSemitones = 16.0;
+            filterEnv (p, 0.002, 0.4, 0.5, 0.3);
+            ampEnv (p, 0.002, 0.5, 0.85, 0.25);
+            p.drive = 0.55;
+            p.effects.driveMode = osp::DriveMode::crunch;
+            p.effects.driveTone = 0.6;
+            p.levelDb = 2.0;
+            delay (p, 0.2, 5, 0.35);
+            add ("Crunch Lead", "Lead", p, leadLine, true);
+        }
+        {
+            Patch p = base();   // GRANULAR an octave up, each key its own: frozen glass.
+            p.osc1Wave = Osc1Wave::pulse;
+            p.osc1Width = 0.3;
+            p.osc2Wave = Osc2Wave::triangle;
+            p.tone = hz (4000.0);
+            p.envDepthSemitones = 0.0;
+            ampEnv (p, 0.9, 1.5, 0.9, 3.0);
+            p.granular = true;
+            p.grains = { 0.85, 0.4, 12.0, 12.0, 0.3 };
+            p.reimagined = 0.3;
+            p.levelDb = -4.0;
+            room (p, 0.55, SpaceType::hall, 6.0);
+            delay (p, 0.2, 7, 0.5);
+            add ("Frozen Glass", "Texture", p, { 60, 67, 72 }, false, 0.6);
+        }
         return list;
     }
+}
+
+osp::keydna::Settings keyDnaOf (const FactoryPatch& f)
+{
+    osp::keydna::Settings k;
+    k.enabled = f.keyDna > 0.0;
+    k.seed = f.patch.seed;
+    using osp::keydna::Param;
+    for (const auto param : { Param::position, Param::size, Param::density, Param::spread })
+        k[param].variation = f.keyDna > 0.0 ? f.keyDna : 0.35;
+    return k;
 }
 
 const std::vector<FactoryPatch>& factoryPatches()

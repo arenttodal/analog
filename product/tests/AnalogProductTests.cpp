@@ -5,8 +5,10 @@
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "Binding.h"
 #include "CeramicSkin.h"
 #include "FactoryPatches.h"
+#include "MacroPopups.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
@@ -162,6 +164,12 @@ TEST_CASE ("analog: the factory presets are installed, listed and load exactly",
         params::Reader reader;
         reader.attach (p.parameters);
         checkSameValues (params::valuesOf (factory.patch), params::valuesOf (reader.read()), p);
+        // KEY DNA (not part of the patch): on, with the sound's variation, where it has one.
+        const auto dna = reader.keyDna (factory.patch.seed);
+        const auto wanted = keyDnaOf (factory);
+        CHECK (dna.enabled == wanted.enabled);
+        if (wanted.enabled)
+            CHECK (dna[osp::keydna::Param::size].variation == Approx (wanted[osp::keydna::Param::size].variation).margin (1.0e-3));
     }
     // A second instance does not write them again (same version), and a musician's preset
     // beside them is kept.
@@ -253,29 +261,89 @@ TEST_CASE ("analog: the card shows the oscillators, and its picture follows them
 TEST_CASE ("analog: every control the interface enables moves the sound; every one it disables does not", "[analog][bindings]")
 {
     // The context: everything that can be heard is in play (both oscillators with every
-    // wave, Poly Mod on all three destinations, the LFO brought in, DRIVE, SPACE, ECHO).
+    // wave, Poly Mod on all three destinations, the LFO brought in, FILTER DRIVE, DRIVE,
+    // MOVEMENT, SPACE, ECHO).
     Patch context;
     context.osc1Wave = Osc1Wave::sawPulse;
     context.osc2Wave = Osc2Wave::all;
     context.polyModEnv = 0.3;
     context.polyModOsc2 = 0.25;
     context.polyModToPitch1 = context.polyModToWidth1 = context.polyModToCutoff = true;
-    context.movement = 0.6;
+    context.lfoAmount = 0.6;
     context.lfoCutoff = 6.0;
+    context.lfo.rateHz = 4.0;
+    context.filterDrive = 0.3;
     context.drive = 0.3;
+    context.motion = 0.6;
     context.space = 0.3;
     context.echo = 0.3;
     context.effects.echoTimeMs = 90.0;
     context.effects.echoDivision = 0;
+    context.effects.shaper.pattern = 0;   // (SHAPER CUSTOM starts as pattern THREE: another one, so it is heard)
     context.ampRelease = 0.08;
     context.ampSustain = 0.6;   // (at 100 % the decay has nowhere to go)
     // A few controls act only in a mode: they are tried in it.
+    auto movementMode = [] (osp::MovementMode m) { return [m] (Patch& c) { c.effects.movementMode = m; }; };
+    auto reimaginedMode = [] (osp::ReimaginedMode m) {
+        return [m] (Patch& c) {
+            c.reimagined = 0.8;
+            c.reimaginedSettings.mode = m;
+        };
+    };
+    auto granular = [] (Patch& c) { c.granular = true; };
     std::map<juce::String, std::function<void (Patch&)>> modes {
         { params::unisonDetune, [] (Patch& c) { c.unison = true; } },
         { "glide", [] (Patch& c) { c.voiceMode = VoiceMode::mono; } },
-        { params::lfoDivision, [] (Patch& c) { c.lfoSync = true; } },
+        { "mod.lfo1.division", [] (Patch& c) { c.lfo.sync = true; } },
+        { "mod.lfo1.phase", [] (Patch& c) { c.lfo.mode = osp::mod::LfoMode::retrigger; } },
+        { "mod.lfo1.scope", [] (Patch& c) { c.lfo.shape = osp::mod::LfoShape::smoothRandom; } },   // (each note its own values)
         { "echo.time", [] (Patch& c) { c.effects.echoSync = false; } },
+        { "layerA.reimagined.mode", reimaginedMode (osp::ReimaginedMode::kaleidoscope) },
+        { "layerA.reimagined.kaleidoscope.focus", reimaginedMode (osp::ReimaginedMode::kaleidoscope) },
+        { "layerA.reimagined.kaleidoscope.spread", reimaginedMode (osp::ReimaginedMode::kaleidoscope) },
+        { "layerA.reimagined.tapeFrame.age", reimaginedMode (osp::ReimaginedMode::tapeFrame) },
+        { "layerA.reimagined.tapeFrame.stability", reimaginedMode (osp::ReimaginedMode::tapeFrame) },
+        { "layerA.reimagined.tapeFrame.frame", [] (Patch& c) {
+              c.granular = true;   // FRAME is the tape's length: heard as the grains follow it
+              c.reimagined = 0.8;
+              c.reimaginedSettings.mode = osp::ReimaginedMode::tapeFrame;
+          } },
+        { "layerA.reimagined.toybox.motion", reimaginedMode (osp::ReimaginedMode::toybox) },
+        { "layerA.reimagined.toybox.digital", reimaginedMode (osp::ReimaginedMode::toybox) },
+        { "layerA.reimagined.toybox.play", [] (Patch& c) {
+              c.granular = true;   // PLAY is how its heads move: heard as the grains follow them
+              c.reimagined = 0.8;
+              c.reimaginedSettings.mode = osp::ReimaginedMode::toybox;
+          } },
+        { "layerA.reimagined.mirage.clock", reimaginedMode (osp::ReimaginedMode::mirage) },
+        { "layerA.reimagined.mirage.filter", reimaginedMode (osp::ReimaginedMode::mirage) },
+        { "layerA.reimagined.mirage.tone", reimaginedMode (osp::ReimaginedMode::mirage) },
+        { "layerA.granular.position", granular },
+        { "layerA.granular.size", granular },
+        { "layerA.granular.density", granular },
+        { "layerA.granular.tune", granular },
+        { "layerA.granular.spread", granular },
+        { "movement.tape.wow", movementMode (osp::MovementMode::tape) },
+        { "movement.tape.flutter", movementMode (osp::MovementMode::tape) },
+        { "movement.tape.wear", movementMode (osp::MovementMode::tape) },
+        { "movement.chorus.rate", movementMode (osp::MovementMode::chorus) },
+        { "movement.chorus.width", movementMode (osp::MovementMode::chorus) },
+        { "movement.chorus.stereo", movementMode (osp::MovementMode::chorus) },
+        { "movement.pulse.rate", movementMode (osp::MovementMode::pulse) },
+        { "movement.pulse.shape", movementMode (osp::MovementMode::pulse) },
+        { "movement.pulse.stereo", movementMode (osp::MovementMode::pulse) },
+        { "movement.shaper.pattern", movementMode (osp::MovementMode::shaper) },
+        { "movement.shaper.rate", movementMode (osp::MovementMode::shaper) },
+        { "movement.shaper.target", movementMode (osp::MovementMode::shaper) },
+        { "movement.shaper.smooth", movementMode (osp::MovementMode::shaper) },
+        { "movement.shaper.custom", movementMode (osp::MovementMode::shaper) },
     };
+    // KEY DNA is GRANULAR's, and its settings act while it is on.
+    for (const auto& id : { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
+                            params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune })
+        modes[id] = granular;
+    const juce::StringArray keyDnaOn { params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
+                                       params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune };
 
     const auto bound = params::engineParameterIds();
     ShellProcessor p;
@@ -291,6 +359,8 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             mode->second (patch);
         p.resetSettings();
         apply (p, patch);
+        if (keyDnaOn.contains (id))
+            setValue (p, params::keyDna, 1.0f);
         const auto reference = renderShell (p, 0.6);
 
         // Another value: the far side of the range from where it is.
@@ -314,7 +384,126 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         }
     }
     CHECK (checkedBound == bound.size() - 2);   // (the two wheels are not parameters)
-    CHECK (checkedUnbound > 300);
+    CHECK (checkedUnbound > 250);
+}
+
+TEST_CASE ("analog: a version-1 session or preset is migrated and sounds as it did", "[analog][state]")
+{
+    // Version 1: DRIVE was the filter's input drive, the LFO its own parameters, and ANDOR OSP's
+    // MOVEMENT, REIMAGINED and GRANULAR were stored at their defaults, unheard.
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        setValue (old, "drive", 40.0f);
+        setValue (old, params::lfoWave, 4.0f);       // S&H
+        setValue (old, params::lfoRate, 7.0f);
+        setValue (old, params::lfoSync, 1.0f);
+        setValue (old, params::lfoDivision, 3.0f);   // 1 bar
+        setValue (old, params::motion, 30.0f);       // the LFO's amount
+        setValue (old, "motion", 12.0f);
+        setValue (old, "layerA.sourceMode", 1.0f);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->removeAttribute ("productVersion");   // as version 1 wrote it
+    juce::MemoryBlock v1;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v1);
+
+    ShellProcessor p;
+    p.setStateInformation (v1.getData(), static_cast<int> (v1.getSize()));
+    auto value = [&p] (const juce::String& id) { return p.parameters.getRawParameterValue (id)->load(); };
+    CHECK (value (params::filterDrive) == Approx (40.0f));
+    CHECK (value ("drive") == 0.0f);
+    CHECK (value ("mod.lfo1.shape") == 5.0f);     // RANDOM
+    CHECK (value ("mod.lfo1.rate") == Approx (7.0f).epsilon (0.01));
+    CHECK (value ("mod.lfo1.sync") == 1.0f);
+    CHECK (value ("mod.lfo1.division") == 5.0f);  // 1 bar
+    CHECK (value (params::motion) == Approx (30.0f));
+    CHECK (value ("motion") == 0.0f);
+    CHECK (value ("layerA.sourceMode") == 0.0f);
+
+    // Today's state is read as it is (no migration).
+    juce::MemoryBlock now;
+    p.getStateInformation (now);
+    ShellProcessor q;
+    setValue (q, "motion", 50.0f);
+    q.setStateInformation (now.getData(), static_cast<int> (now.getSize()));
+    CHECK (q.parameters.getRawParameterValue ("motion")->load() == 0.0f);
+    setValue (q, "motion", 50.0f);
+    juce::MemoryBlock withMovement;
+    q.getStateInformation (withMovement);
+    ShellProcessor r;
+    r.setStateInformation (withMovement.getData(), static_cast<int> (withMovement.getSize()));
+    CHECK (r.parameters.getRawParameterValue ("motion")->load() == Approx (50.0f));
+}
+
+TEST_CASE ("analog: SHAPER's custom pattern is played, saved with the session and recalled", "[analog][state][movement]")
+{
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    setValue (p, "motion", 100.0f);
+    setValue (p, "movement.mode", 4.0f);   // SHAPER
+    setValue (p, "movement.shaper.custom", 1.0f);
+    const auto library = renderShell (p, 0.8);
+    osp::ShaperPattern pattern {};
+    for (std::size_t i = 0; i < pattern.size(); ++i)
+        pattern[i] = { i % 2 == 0 ? 1.0f : 0.0f, i % 2 == 0 ? 1.0f : 0.0f, osp::StepShape::hold };
+    p.setShaperCustomPattern (pattern, false);
+    const auto custom = renderShell (p, 0.8);
+    CHECK (differenceRms (library, custom) > 1.0e-5);
+
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.shaperCustomPattern() == pattern);
+}
+
+TEST_CASE ("analog: DRIVE, MOVEMENT, SPACE and ECHO open ANDOR OSP's popovers; REIMAGINED opens from the card", "[analog][editor]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    // ANDOR OSP's own panels (same sizes as in ANDOR OSP, from the same code).
+    for (const auto& [macro, popup] : { std::pair { 1, osp::plugin::MacroPopup::drive }, std::pair { 3, osp::plugin::MacroPopup::movement },
+                                        std::pair { 4, osp::plugin::MacroPopup::space }, std::pair { 5, osp::plugin::MacroPopup::echo } })
+    {
+        INFO ("macro " << macro);
+        ui.openPopup (macro);
+        REQUIRE (ui.openPopupPanel() != nullptr);
+        CHECK (ui.openPopupPanel()->cardSize() == osp::plugin::createMacroPopup (popup, p)->cardSize());
+        ui.closePopup();
+    }
+    // REIMAGINED: the card's name opens ANDOR OSP's popover (the engine reads the amount).
+    auto& card = ui.engineCard (0);
+    REQUIRE (card.onReimagined != nullptr);
+    card.onReimagined (0);
+    CHECK (ui.openPopupIndex() == andor::shell::ShellEditor::reimaginedPopup);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    ui.closePopup();
+    // MOSAIC says why it leaves the sound as it is; every other mode plays.
+    CHECK (p.reimaginedModeUnavailable (0, static_cast<int> (osp::ReimaginedMode::mosaic)).isNotEmpty());
+    for (const auto mode : { osp::ReimaginedMode::kaleidoscope, osp::ReimaginedMode::tapeFrame, osp::ReimaginedMode::toybox, osp::ReimaginedMode::mirage })
+        CHECK (p.reimaginedModeUnavailable (0, static_cast<int> (mode)).isEmpty());
+    // The modulation panel's LFO 1 is the synth's LFO: its controls are enabled.
+    ui.modulationPanel().showTab (2);
+    int lfoControls = 0, enabled = 0;
+    std::function<void (juce::Component&)> visit = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (const auto tags = osp::plugin::binding::tagsOf (*child); tags.joinIntoString (" ").contains ("mod.lfo1."))
+            {
+                ++lfoControls;
+                enabled += child->isEnabled() ? 1 : 0;
+            }
+            visit (*child);
+        }
+    };
+    ui.refreshNow();
+    visit (ui.modulationPanel());
+    CHECK (lfoControls > 0);
+    CHECK (enabled > 0);
 }
 
 TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_SCREENSHOT_DIR)", "[.][screenshots]")
@@ -339,7 +528,7 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     editor->setSize (1448, 1086);
     shoot ("analog-init");
     shoot ("analog-init@2x", 2.0f);
-    const char* names[] = { "blend", "drive", "tone", "motion", "space", "echo" };
+    const char* names[] = { "blend", "drive", "tone", "movement", "space", "echo" };
     for (int m = 0; m < 6; ++m)
     {
         ui.openPopup (m);
@@ -350,6 +539,24 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     ui.openPopup (andor::shell::ShellEditor::advancedPopup);
     shoot ("analog-advanced");
     ui.closePopup();
+    // REIMAGINED (KALEIDOSCOPE, then MOSAIC, which a synth cannot play) and GRANULAR on the card.
+    setValue (p, "reimagined", 60.0f);
+    ui.openPopup (andor::shell::ShellEditor::reimaginedPopup);
+    shoot ("analog-reimagined-kaleidoscope");
+    ui.closePopup();
+    setValue (p, "layerA.reimagined.mode", 3.0f);
+    ui.openPopup (andor::shell::ShellEditor::reimaginedPopup);
+    shoot ("analog-reimagined-mosaic");
+    ui.closePopup();
+    setValue (p, "layerA.reimagined.mode", 0.0f);
+    setValue (p, "reimagined", 0.0f);
+    setValue (p, "layerA.sourceMode", 1.0f);
+    ui.engineCard (0).showGranularControls (true, true);
+    shoot ("analog-granular");
+    setValue (p, "layerA.sourceMode", 0.0f);
+    ui.modulationPanel().showTab (2);
+    shoot ("analog-lfo1");
+    ui.modulationPanel().showTab (0);
     // A sound with character on the card: Sync Bite's picture, keys held.
     apply (p, factoryPatches()[8].patch);
     p.keyboardState.noteOn (1, 60, 0.8f);

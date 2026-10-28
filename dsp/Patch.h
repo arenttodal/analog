@@ -1,5 +1,8 @@
 #pragma once
 
+#include "engine/GranularSource.h"
+#include "engine/Modulation.h"
+#include "engine/ReimaginedModes.h"
 #include "engine/Shaping.h"
 
 #include <cstdint>
@@ -10,21 +13,22 @@ namespace andor::analog
 enum class Osc1Wave { saw, pulse, sawPulse };
 /** OSC 2's waveforms, any combination of SAW, TRI and PULSE (index order is the parameter's). */
 enum class Osc2Wave { saw, triangle, pulse, sawTriangle, sawPulse, trianglePulse, all };
-enum class LfoWave { sine, triangle, ramp, square, sampleHold };
 enum class PhaseMode { free, reset };
 enum class VoiceMode { poly, mono };
 
-/** LFO sync divisions, slowest first (lengths in quarter notes). */
+/** The first version's own LFO divisions (analog.lfo.division, slowest first), kept to read
+    sessions saved by it; today the LFO is ANDOR OSP's LFO 1 (osp::mod::syncName). */
 constexpr int lfoDivisionCount = 13;
-inline double lfoDivisionQuarters (int index) noexcept
-{
-    constexpr double q[lfoDivisionCount] = { 32.0, 16.0, 8.0, 4.0, 2.0, 4.0 / 3.0, 1.0, 2.0 / 3.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
-    return q[index < 0 ? 0 : (index >= lfoDivisionCount ? lfoDivisionCount - 1 : index)];
-}
 inline const char* lfoDivisionName (int index) noexcept
 {
     constexpr const char* n[lfoDivisionCount] = { "8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
     return n[index < 0 ? 0 : (index >= lfoDivisionCount ? lfoDivisionCount - 1 : index)];
+}
+/** A first-version division as ANDOR OSP's (1/2T, which it lacks, becomes the nearest: 1/4D). */
+inline int syncDivisionOfLegacy (int index) noexcept
+{
+    constexpr int m[lfoDivisionCount] = { 8, 7, 6, 5, 4, 14, 3, 11, 2, 10, 1, 9, 0 };
+    return m[index < 0 ? 0 : (index >= lfoDivisionCount ? lfoDivisionCount - 1 : index)];
 }
 
 /** The polyphony choices (analog.polyphony). */
@@ -74,7 +78,7 @@ struct Patch
     double keyTrack = 0.5;       ///< 0..1 (1: one octave per octave, pivot C4)
     double envDepthSemitones = 24.0;   ///< -60..60
     double velocityToFilter = 0.0;     ///< 0..1: how much velocity scales the envelope amount
-    double drive = 0.0;          ///< DRIVE 0..1: pre-filter saturation
+    double filterDrive = 0.0;    ///< FILTER DRIVE 0..1: the ladder's input saturation
     double driveBias = 0.0;      ///< 0..1: asymmetry (even harmonics)
     double driveTrimDb = 0.0;    ///< -12..+6 dB after the filter
 
@@ -83,12 +87,10 @@ struct Patch
     double ampAttack = 0.002, ampDecay = 0.6, ampSustain = 1.0, ampRelease = 0.7;
     double velocityRangeDb = 30.0;   ///< 0..48: how much softer the softest note is
 
-    // LFO (global, as on the original instrument).
-    LfoWave lfoWave = LfoWave::triangle;
-    double lfoRateHz = 4.0;
-    bool lfoSync = false;
-    int lfoDivision = 6;
-    double movement = 0.0;          ///< MOTION 0..1: how much of the depths below is applied (the mod wheel adds the rest)
+    // LFO (global, as on the original instrument): ANDOR OSP's LFO 1 (shape, rate or sync,
+    // phase, polarity, free / retrigger / one shot; CUSTOM is its drawn curve, Synth::setLfoCurve).
+    osp::mod::LfoSettings lfo;
+    double lfoAmount = 0.0;         ///< 0..1: how much of the depths below is applied (the mod wheel adds the rest)
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45
@@ -119,7 +121,21 @@ struct Patch
     double outputDb = 0.0;        ///< the master volume
     std::uint32_t seed = 1;
 
-    // Effects (OSP's SPACE and ECHO, with OSP's own settings).
+    // The source: the oscillators as they are (ONE SHOT) or grains taken live from each
+    // voice's own recent sound (GRANULAR: POS how far back, SIZE, DENS, TUNE, SPREAD).
+    bool granular = false;
+    osp::GranularParams grains;
+
+    // REIMAGINED: ANDOR OSP's modes on the live sound (KALEIDOSCOPE, TAPE FRAME, TOYBOX,
+    // MIRAGE; MOSAIC needs a recording's harmonic analysis and leaves the sound unchanged).
+    double reimagined = 0.0;      ///< 0..1
+    osp::ReimaginedSettings reimaginedSettings;
+
+    // ANDOR OSP's macros and effects on the mix, with its own settings (`effects`):
+    // DRIVE (tube, tape, crunch), MOVEMENT (DRIFT in the voices; TAPE, CHORUS, PULSE, SHAPER
+    // on the mix), SPACE and ECHO.
+    double drive = 0.0;           ///< 0..1 (0: out of the signal path)
+    double motion = 0.12;         ///< MOVEMENT 0..1 (ANDOR OSP's default: a little DRIFT)
     double space = 0.10;          ///< wet 0..1
     double echo = 0.0;            ///< wet 0..1
     osp::Shaping effects;

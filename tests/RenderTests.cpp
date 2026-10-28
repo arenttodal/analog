@@ -107,16 +107,16 @@ TEST_CASE ("render: every modulation route moves the sound when on, and nothing 
         { "poly mod osc 2 -> pitch 1", [] (Patch& p) { p.polyModOsc2 = 0.5; p.polyModToPitch1 = true; } },
         { "poly mod osc 2 -> width 1", [] (Patch& p) { p.polyModOsc2 = 0.5; p.polyModToWidth1 = true; } },
         { "poly mod osc 2 -> cutoff", [] (Patch& p) { p.polyModOsc2 = 0.5; p.polyModToCutoff = true; } },
-        { "lfo -> pitch 1", [] (Patch& p) { p.movement = 1.0; p.lfoPitch1 = 2.0; p.lfoPitch2 = 0.0; p.lfoWidth1 = p.lfoWidth2 = 0.0; } },
-        { "lfo -> pitch 2", [] (Patch& p) { p.movement = 1.0; p.lfoPitch2 = 2.0; p.lfoPitch1 = 0.0; p.lfoWidth1 = p.lfoWidth2 = 0.0; } },
-        { "lfo -> width 1", [] (Patch& p) { p.movement = 1.0; p.lfoWidth1 = 0.3; p.lfoPitch1 = p.lfoPitch2 = 0.0; p.lfoWidth2 = 0.0; } },
-        { "lfo -> width 2", [] (Patch& p) { p.movement = 1.0; p.osc2Wave = Osc2Wave::pulse; p.lfoWidth2 = 0.3; p.lfoPitch1 = p.lfoPitch2 = 0.0; p.lfoWidth1 = 0.0; } },
-        { "lfo -> cutoff", [] (Patch& p) { p.movement = 1.0; p.lfoCutoff = 24.0; p.lfoPitch1 = p.lfoPitch2 = 0.0; p.lfoWidth1 = p.lfoWidth2 = 0.0; } },
+        { "lfo -> pitch 1", [] (Patch& p) { p.lfoAmount = 1.0; p.lfoPitch1 = 2.0; p.lfoPitch2 = 0.0; p.lfoWidth1 = p.lfoWidth2 = 0.0; } },
+        { "lfo -> pitch 2", [] (Patch& p) { p.lfoAmount = 1.0; p.lfoPitch2 = 2.0; p.lfoPitch1 = 0.0; p.lfoWidth1 = p.lfoWidth2 = 0.0; } },
+        { "lfo -> width 1", [] (Patch& p) { p.lfoAmount = 1.0; p.lfoWidth1 = 0.3; p.lfoPitch1 = p.lfoPitch2 = 0.0; p.lfoWidth2 = 0.0; } },
+        { "lfo -> width 2", [] (Patch& p) { p.lfoAmount = 1.0; p.osc2Wave = Osc2Wave::pulse; p.lfoWidth2 = 0.3; p.lfoPitch1 = p.lfoPitch2 = 0.0; p.lfoWidth1 = 0.0; } },
+        { "lfo -> cutoff", [] (Patch& p) { p.lfoAmount = 1.0; p.lfoCutoff = 24.0; p.lfoPitch1 = p.lfoPitch2 = 0.0; p.lfoWidth1 = p.lfoWidth2 = 0.0; } },
         { "filter envelope", [] (Patch& p) { p.envDepthSemitones = 30.0; } },
         { "sync", [] (Patch& p) { p.sync = true; p.osc1Coarse = 5.0; } },
         { "noise", [] (Patch& p) { p.noiseLevel = 0.5; } },
         { "blend", [] (Patch& p) { p.blend = 0.9; } },
-        { "drive", [] (Patch& p) { p.drive = 0.8; } },
+        { "filter drive", [] (Patch& p) { p.filterDrive = 0.8; } },
         { "analog", [] (Patch& p) { p.analogAmount = 1.0; } },
         { "space", [] (Patch& p) { p.space = 0.6; } },
         { "echo", [] (Patch& p) { p.echo = 0.6; p.effects.echoSync = false; p.effects.echoTimeMs = 120.0; } },
@@ -140,14 +140,14 @@ TEST_CASE ("render: every modulation route moves the sound when on, and nothing 
     auto depths = base;
     depths.lfoPitch1 = 5.0;
     depths.lfoCutoff = 20.0;
-    depths.movement = 0.0;
+    depths.lfoAmount = 0.0;
     CHECK (identical (play (depths), reference));
 }
 
 TEST_CASE ("render: the mod wheel brings in the LFO's depths", "[render][modulation]")
 {
     auto p = measurementPatch();
-    p.movement = 0.0;
+    p.lfoAmount = 0.0;
     p.lfoPitch1 = 1.0;
     auto quiet = makeSynth (p);
     const auto still = render (*quiet, 1.0, { on (0, 69) });
