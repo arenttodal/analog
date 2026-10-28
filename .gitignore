@@ -1,0 +1,5 @@
+build/
+build-*/
+renders/
+*.wav
+.DS_Store

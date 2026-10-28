@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "ANDOR Analog",
+  "slug": "analog",
+  "pluginCode": "Aanl",
+  "bundleId": "com.osp.andoranalog",
+  "version": "0.1.0",
+  "target": "ANDOR_Analog",
+  "identity": "/ANALOG",
+  "tagline": "A living analog instrument",
+  "presetExtension": ".andoranalog",
+  "stateType": "ANDOR_ANALOG",
+  "shellTemplateVersion": 1,
+  "created": "2026-10-28"
+}

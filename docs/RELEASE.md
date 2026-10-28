@@ -1,0 +1,49 @@
+# ANDOR ANALOG — release checklist
+
+Nothing below has been signed, notarized, purchased or published. Credentials, licences and the
+decision to sell are the owner's.
+
+## Build
+
+- macOS: `cmake -B build-plugin -G Ninja -DOSP_BUILD_PLUGIN=ON "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"`,
+  target `ANDOR_Analog_All` (AU, VST3, Standalone). Deployment target 11.0 (ANDOR OSP's).
+- Windows (later): VST3 and Standalone only (no AU on Windows).
+- Release builds with symbols archived; identifiers (`Aanl`, `com.osp.andoranalog`, parameter IDs,
+  `ANDOR_ANALOG`, `.andoranalog`) never change.
+
+## Validate
+
+- [ ] `ctest --test-dir build-plugin --output-on-failure` (ANDOR OSP's suite, the visual regressions, `andor_analog_tests`, `analog_dsp_tests`).
+- [ ] `pluginval --strictness-level 10` on the VST3 and the AU.
+- [ ] `auval -v aumu Aanl Ospx`.
+- [ ] Logic Pro (AU), Ableton Live (AU and VST3), REAPER or Cubase (VST3): scan, play, automate,
+      save/reopen, offline bounce, sample-rate and buffer changes, MIDI panic, window sizes 869–1810 px.
+- [ ] The listening checklist (docs/AUDIBLE_QA.md).
+
+## Package (macOS)
+
+- Install locations: `/Library/Audio/Plug-Ins/Components/ANDOR Analog.component`,
+  `/Library/Audio/Plug-Ins/VST3/ANDOR Analog.vst3`, `/Applications/ANDOR Analog.app`.
+- Factory presets are written by the plugin itself on first run
+  (`~/Documents/ANDOR Analog/Presets/Factory`); the installer need not copy files.
+- Sign app and plug-ins with a Developer ID Application certificate (hardened runtime, secure
+  timestamp); the PKG with a Developer ID Installer certificate; submit the DMG/PKG to Apple's notary
+  service; staple; verify with `codesign --verify --deep --strict`, `spctl -a -vv`, `stapler validate`,
+  then install on a clean Mac. Keys live in CI secrets, never in a repository.
+- ANDOR OSP's `plugin-pipeline/` is the build-and-download kit to reuse.
+
+## Licensing (decide before selling)
+
+- [ ] **JUCE**: ANDOR OSP pins JUCE 8.0.9. Check the licence that applies to that version, and buy
+      the commercial entitlement (or comply with the AGPL) before distributing closed-source binaries.
+- [ ] **Artwork**: only `shared/andor-ui/Resources` from ANDOR OSP's repository (see its
+      `assets/manifest.json`); this repository holds none. The owner authorizes its use in this product.
+- [ ] **Fonts**: Inter and Outfit travel with their OFL licence files.
+- [ ] **Branding**: "Prophet-inspired" is internal sound direction only; no product text, preset name
+      or marketing may suggest Sequential or Arturia endorsement or copied sound, code or design.
+- [ ] Factory presets are synthesized only (no samples, no outside files) — true today.
+
+## Known release blockers
+
+- The host lists all 350 ANDOR parameters plus ANALOG's 48 (the shell's grouped layout is still to come).
+- No host or listening validation yet (Linux CI only, see docs/STATUS.md).

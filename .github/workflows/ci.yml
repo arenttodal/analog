@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  engine:
+    # The engine alone (pure C++): fast, on every push.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libsqlite3-dev
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --target analog_dsp_tests analog-render
+      - name: Test
+        run: ./build/analog_dsp_tests
+      - name: Benchmark
+        run: ./build/analog-render --benchmark --voices 16 --seconds 5
+
+  plugin-macos:
+    # The plugin as it ships (universal), its tests, ANDOR OSP's suite, and auval.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Dependencies
+        run: brew install ninja
+      - name: Configure
+        run: cmake -B build-plugin -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSP_BUILD_PLUGIN=ON "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+      - name: Build
+        run: cmake --build build-plugin
+      - name: Test (engine, product, ANDOR OSP, visual regressions)
+        run: ctest --test-dir build-plugin --output-on-failure
+      - name: Validate ANDOR Analog AU
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release/AU/ANDOR Analog.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -v aumu Aanl Ospx
+      - name: Upload the visual regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression
+          path: build-plugin/andor-visual-regression/
+          if-no-files-found: ignore

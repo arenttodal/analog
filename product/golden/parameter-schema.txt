@@ -1,0 +1,48 @@
+analog.blend v1 float "Blend" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.tone v1 float "Tone" label="%" range=0.0000..100.0000/0.0100 skew=1.00000 default=62.0000 steps=2147483647 texts=20 Hz|600 Hz|18.0 kHz
+analog.motion v1 float "Motion" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc1.wave v1 choice "Osc 1 Wave" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Saw|Pulse|Saw+Pulse [Saw|Pulse|Saw+Pulse]
+analog.osc1.octave v1 int "Osc 1 Octave" label="oct" range=-2.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=-2 oct|0 oct|+2 oct
+analog.osc1.coarse v1 int "Osc 1 Coarse" label="st" range=-12.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=25 texts=-12 st|0 st|+12 st
+analog.osc1.width v1 float "Osc 1 Pulse Width" label="%" range=2.0000..98.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=2 %|50 %|98 %
+analog.osc1.level v1 float "Osc 1 Level" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc2.wave v1 choice "Osc 2 Wave" label="" range=0.0000..6.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=Saw|Saw+Tri|All [Saw|Triangle|Pulse|Saw+Tri|Saw+Pulse|Tri+Pulse|All]
+analog.osc2.octave v1 int "Osc 2 Octave" label="oct" range=-2.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=-2 oct|0 oct|+2 oct
+analog.osc2.coarse v1 int "Osc 2 Coarse" label="st" range=-12.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=25 texts=-12 st|0 st|+12 st
+analog.osc2.fine v1 float "Osc 2 Fine" label="ct" range=-100.0000..100.0000/0.0100 skew=1.00000 default=7.0000 steps=2147483647 texts=-100 ct|0 ct|+100 ct
+analog.osc2.width v1 float "Osc 2 Pulse Width" label="%" range=2.0000..98.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=2 %|50 %|98 %
+analog.osc2.level v1 float "Osc 2 Level" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=80.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc2.keyTrack v1 bool "Osc 2 Keyboard" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.osc2.lowFreq v1 bool "Osc 2 Low Freq" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.noise v1 float "Noise" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.sync v1 bool "Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.polyphony v1 choice "Voices" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=3.0000 steps=5 texts=1|4|16 [1|2|4|8|16]
+analog.unison v1 bool "Unison" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.unison.detune v1 float "Unison Detune" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.spread v1 float "Stereo Spread" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=40.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.resonance v1 float "Resonance" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.keyTrack v1 float "Filter Keyboard" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.envDepth v1 float "Filter Env Amount" label="st" range=-60.0000..60.0000/0.0100 skew=1.00000 default=24.0000 steps=2147483647 texts=-60.0 st|0.0 st|+60.0 st
+analog.velocityToFilter v1 float "Velocity to Filter" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.drive.bias v1 float "Drive Bias" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.drive.trim v1 float "Drive Trim" label="dB" range=-12.0000..6.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=-12.0 dB|-3.0 dB|+6.0 dB
+analog.filterEnv.attack v1 float "Filter Attack" label="s" range=0.0010..30.0000/0.0000 skew=0.14466 default=0.0080 steps=2147483647 texts=1 ms|250 ms|30.0 s
+analog.filterEnv.decay v1 float "Filter Decay" label="s" range=0.0050..40.0000/0.0000 skew=0.16472 default=0.5000 steps=2147483647 texts=5 ms|600 ms|40.0 s
+analog.filterEnv.sustain v1 float "Filter Sustain" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.filterEnv.release v1 float "Filter Release" label="s" range=0.0050..45.0000/0.0000 skew=0.16024 default=0.3500 steps=2147483647 texts=5 ms|600 ms|45.0 s
+analog.lfo.wave v1 choice "LFO Wave" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=5 texts=Sine|Ramp|S&H [Sine|Triangle|Ramp|Square|S&H]
+analog.lfo.rate v1 float "LFO Rate" label="Hz" range=0.0200..25.0000/0.0000 skew=0.27343 default=4.0000 steps=2147483647 texts=0.02 Hz|2.0 Hz|25.0 Hz
+analog.lfo.sync v1 bool "LFO Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.lfo.division v1 choice "LFO Division" label="" range=0.0000..12.0000/1.0000 skew=1.00000 default=6.0000 steps=13 texts=8 bars|1/4|1/32 [8 bars|4 bars|2 bars|1 bar|1/2|1/2T|1/4|1/4T|1/8|1/8T|1/16|1/16T|1/32]
+analog.lfo.pitch1 v1 float "LFO to Osc 1 Pitch" label="st" range=-12.0000..12.0000/0.0100 skew=1.00000 default=0.4000 steps=2147483647 texts=-12.00 st|0.00 st|+12.00 st
+analog.lfo.pitch2 v1 float "LFO to Osc 2 Pitch" label="st" range=-12.0000..12.0000/0.0100 skew=1.00000 default=0.4000 steps=2147483647 texts=-12.00 st|0.00 st|+12.00 st
+analog.lfo.width1 v1 float "LFO to Osc 1 Width" label="%" range=-45.0000..45.0000/0.0100 skew=1.00000 default=15.0000 steps=2147483647 texts=-45 %|0 %|+45 %
+analog.lfo.width2 v1 float "LFO to Osc 2 Width" label="%" range=-45.0000..45.0000/0.0100 skew=1.00000 default=15.0000 steps=2147483647 texts=-45 %|0 %|+45 %
+analog.lfo.cutoff v1 float "LFO to Cutoff" label="st" range=-48.0000..48.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-48.0 st|0.0 st|+48.0 st
+analog.polyMod.env v1 float "Poly Mod Filter Env" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.polyMod.osc2 v1 float "Poly Mod Osc 2" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.polyMod.toPitch1 v1 bool "Poly Mod to Osc 1 Pitch" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.polyMod.toWidth1 v1 bool "Poly Mod to Osc 1 Width" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.polyMod.toCutoff v1 bool "Poly Mod to Cutoff" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.analog v1 float "Analog" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.phase v1 choice "Osc Phase" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Free|Free|Reset [Free|Reset]
