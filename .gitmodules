@@ -1,0 +1,4 @@
+[submodule "external/osp"]
+	path = external/osp
+	url = https://github.com/arenttodal/OSP
+	branch = claude/andor-analog-shell
