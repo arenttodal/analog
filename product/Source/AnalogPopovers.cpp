@@ -18,6 +18,24 @@ namespace
         rows), each row with a quiet caption as Advanced has. Only shared parts: MiniKnob,
         SegmentedControl, ValueSelector and the look-and-feel's toggle.
     */
+    /** ANALOG's own parameters print their values themselves; ANDOR OSP's (SPACE, ECHO) are
+        printed by their unit, with the popovers' own formats (as ANDOR OSP's popovers do). */
+    MiniKnob::Formatter formatterFor (juce::RangedAudioParameter& p)
+    {
+        if (p.getParameterID().startsWith ("analog."))
+            return [&p] (double v) { return p.getText (p.convertTo0to1 (static_cast<float> (v)), 0); };
+        const auto label = p.getLabel();
+        if (label == "%")
+            return [] (double v) { return format::percent (v) + " %"; };
+        if (label == "ms")
+            return [] (double v) { return format::milliseconds (v); };
+        if (label == "Hz")
+            return [] (double v) { return format::hertz (v); };
+        if (label == "s")
+            return [] (double v) { return juce::String (v, v < 10.0 ? 1 : 0) + " s"; };
+        return [&p] (double v) { return p.getText (p.convertTo0to1 (static_cast<float> (v)), 0); };
+    }
+
     class AnalogPanel final : public MiniPanel
     {
     public:
@@ -34,9 +52,7 @@ namespace
         {
             auto* parameter = host.apvts().getParameter (id);
             jassert (parameter != nullptr);
-            auto k = std::make_unique<MiniKnob> (host.apvts(), id, caption, [parameter] (double v) {
-                return parameter->getText (parameter->convertTo0to1 (static_cast<float> (v)), 0);
-            });
+            auto k = std::make_unique<MiniKnob> (host.apvts(), id, caption, formatterFor (*parameter));
             k->setArcColour (accent);
             add (std::move (k), weight, knobHeight);
         }

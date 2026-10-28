@@ -20,11 +20,12 @@ No Mac, host, pluginval, auval, signing or listening session has happened yet._
 | Plugin: product identity, registry, parameters (ANDOR schema unchanged + 48 own, golden) | ✅ done and tested | `andor_analog_tests` (shell suite + product tests) |
 | Every enabled control audible, every disabled one inert (all ~400 host parameters) | ✅ done and tested | `analog: every control the interface enables ...` |
 | Generator card (OSCILLATORS + waveform picture), no drop zone, files refused | ✅ done and tested | shell test `a generator engine has one card ...`; screenshots |
-| Six macro popovers from shared parts | ⚠️ built, reviewed only as screenshots | needs a designer's review against ANDOR's guide |
+| Six macro popovers from shared parts | ⚠️ built, reviewed only as screenshots | `[screenshots]` test; needs a designer's review against ANDOR's guide |
 | 24 factory presets, installed to Documents/…/Factory | ✅ done and tested | `analog: the factory presets are installed, listed and load exactly` |
 | Session recall | ✅ done and tested | `analog: a session recalls the sound exactly` |
-| Visual regression (parity with ANDOR OSP, 18 states, 0 px outside masks) | see the latest run in the commit message | `andor_analog_tests_visual` |
-| ANDOR OSP unchanged (design capture, schema golden, suite) | see the latest run in the commit message | OSP branch `claude/andor-analog-shell` |
+| Visual regression (parity with ANDOR OSP, 18 states, 0 px outside masks) | ✅ done and tested | `andor_analog_tests_visual`: 0 px in all 18 states, tolerance 0 |
+| ANDOR OSP unchanged (design capture, schema golden, suite) | ✅ done and tested | design capture byte-identical except the MOVEMENT popover, which also differs run to run on the unchanged build; ctest 12/12 green (OSP's unit, integration, regression, plugin) |
+| Linux VST3 and Standalone build | ✅ built | `ANDOR_Analog_All` |
 | macOS build, AU, auval, pluginval, DAWs | ❌ not done | CI workflow `plugin-macos` written, not yet run |
 | Listening tests and preset voicing by ear | ❌ not done | docs/AUDIBLE_QA.md checklist |
 | Arpeggiator | ❌ not implemented (shown disabled) | |
