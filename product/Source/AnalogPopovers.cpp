@@ -54,7 +54,7 @@ namespace
             auto s = std::make_unique<ValueSelector> (*host.apvts().getParameter (id), caption);
             s->setAccent (accent);
             s->setTooltip (tooltip);
-            add (std::move (s), weight, segmentHeight);
+            add (std::move (s), weight, selectorHeight);
         }
 
         void toggle (const juce::String& id, const char* text, float weight, const char* tooltip)
@@ -143,7 +143,8 @@ namespace
         }
 
         static constexpr int headerTop = 32, bottom = 10, captionHeight = 14, rowGap = 6;
-        static constexpr int knobHeight = 58, segmentHeight = 22, toggleHeight = 24;
+        // A captioned selector is 34 high, as in ANDOR OSP's popovers (caption over the value key).
+        static constexpr int knobHeight = 58, segmentHeight = 22, selectorHeight = 34, toggleHeight = 24;
 
         InstrumentHost& host;
         int panelWidth;
