@@ -53,7 +53,9 @@ namespace
     juce::String percentText (float v, int) { return juce::String (juce::roundToInt (v)) + " %"; }
     juce::String signedText (float v, const char* unit, int decimals)
     {
-        const auto rounded = juce::String (std::abs (v), decimals);
+        // (juce::String (x, 0) means full precision, not no decimals: whole numbers are rounded
+        // here, so a midpoint that floating point leaves at -2e-6 prints "0", not "2.2e-06".)
+        const auto rounded = decimals == 0 ? juce::String (juce::roundToInt (std::abs (v))) : juce::String (std::abs (v), decimals);
         const bool zero = std::abs (rounded.getDoubleValue()) < 1.0e-12;
         return (zero ? juce::String() : (v > 0.0f ? "+" : "-")) + rounded + " " + unit;
     }

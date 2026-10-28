@@ -32,7 +32,7 @@ namespace
         if (label == "Hz")
             return [] (double v) { return format::hertz (v); };
         if (label == "s")
-            return [] (double v) { return juce::String (v, v < 10.0 ? 1 : 0) + " s"; };
+            return [] (double v) { return (v < 10.0 ? juce::String (v, 1) : juce::String (juce::roundToInt (v))) + " s"; };
         return [&p] (double v) { return p.getText (p.convertTo0to1 (static_cast<float> (v)), 0); };
     }
 

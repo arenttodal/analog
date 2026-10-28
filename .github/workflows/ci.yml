@@ -36,16 +36,23 @@ jobs:
       - name: Configure
         run: cmake -B build-plugin -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSP_BUILD_PLUGIN=ON "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
       - name: Build
+        id: build
         run: cmake --build build-plugin
       - name: Test (engine, product, ANDOR OSP, visual regressions)
         run: ctest --test-dir build-plugin --output-on-failure
+      # The AU check and the test build follow every successful build, also when a test fails
+      # (the job stays red then): a known intermittent macOS pixel difference in ANDOR Example's
+      # regression (ANDOR OSP's andor-design-system/reports/validation.md) must not withhold
+      # ANDOR Analog's download.
       - name: Validate ANDOR Analog AU
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           cp -R "build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release/AU/ANDOR Analog.component" ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
           auval -v aumu Aanl Ospx
       - name: Package macOS test build
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           out="ANDOR-Analog-macOS-test"
           mkdir -p "$out"
@@ -57,6 +64,7 @@ jobs:
           lipo -info "$out/ANDOR Analog.component/Contents/MacOS/ANDOR Analog"
           ditto -c -k --keepParent "$out" ANDOR-Analog-macOS-test.zip
       - name: Upload the macOS test build
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ANDOR-Analog-macOS-test

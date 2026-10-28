@@ -114,6 +114,27 @@ TEST_CASE ("analog: the parameters' defaults are the INIT patch", "[analog][para
     checkSameValues (params::valuesOf (Patch()), params::valuesOf (reader.read()), p);
 }
 
+TEST_CASE ("analog: value texts read as numbers, also where floating point leaves a midpoint near zero", "[analog][parameters]")
+{
+    // Apple Silicon computes the midpoint of -100..100 as -2.2e-6; it must read "0 ct", not
+    // "2.23517e-06 ct" (the schema golden's 0.5 probe, and what a knob shows).
+    ShellProcessor p;
+    for (const auto& id : { params::osc2Fine, params::lfoWidth1, params::lfoWidth2, params::envDepth, params::lfoCutoff })
+    {
+        INFO (id);
+        auto* param = p.parameters.getParameter (id);
+        REQUIRE (param != nullptr);
+        for (const float nearZero : { -2.23517e-6f, 0.0f, 1.0e-6f })
+        {
+            const auto text = param->getText (param->convertTo0to1 (nearZero), 0);
+            CHECK_FALSE (text.containsChar ('e'));
+            CHECK (text.startsWithChar ('0'));
+        }
+        CHECK (param->getText (1.0f, 0).startsWithChar ('+'));
+        CHECK (param->getText (0.0f, 0).startsWithChar ('-'));
+    }
+}
+
 TEST_CASE ("analog: every factory sound survives the trip through the parameters", "[analog][parameters]")
 {
     ShellProcessor p;
