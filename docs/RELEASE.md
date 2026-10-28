@@ -31,6 +31,9 @@ decision to sell are the owner's.
   service; staple; verify with `codesign --verify --deep --strict`, `spctl -a -vv`, `stapler validate`,
   then install on a clean Mac. Keys live in CI secrets, never in a repository.
 - ANDOR OSP's `plugin-pipeline/` is the build-and-download kit to reuse.
+- Until then, the unsigned **test build**: CI (`plugin-macos`) uploads `ANDOR-Analog-macOS-test.zip`
+  with the AU, VST3, standalone app, `packaging/macos-test/install.command` (per-user install, no
+  admin rights, removes the download quarantine, makes AU hosts rescan) and its README.
 
 ## Licensing (decide before selling)
 

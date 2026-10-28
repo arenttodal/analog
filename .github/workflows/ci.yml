@@ -45,6 +45,22 @@ jobs:
           cp -R "build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release/AU/ANDOR Analog.component" ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
           auval -v aumu Aanl Ospx
+      - name: Package macOS test build
+        run: |
+          out="ANDOR-Analog-macOS-test"
+          mkdir -p "$out"
+          art="build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release"
+          cp -R "$art/AU/ANDOR Analog.component" "$art/VST3/ANDOR Analog.vst3" "$out/"
+          if [ -d "$art/Standalone/ANDOR Analog.app" ]; then cp -R "$art/Standalone/ANDOR Analog.app" "$out/"; fi
+          cp packaging/macos-test/install.command packaging/macos-test/README.txt "$out/"
+          chmod +x "$out/install.command"
+          lipo -info "$out/ANDOR Analog.component/Contents/MacOS/ANDOR Analog"
+          ditto -c -k --keepParent "$out" ANDOR-Analog-macOS-test.zip
+      - name: Upload the macOS test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANDOR-Analog-macOS-test
+          path: ANDOR-Analog-macOS-test.zip
       - name: Upload the visual regression report
         if: always()
         uses: actions/upload-artifact@v4
