@@ -4,7 +4,8 @@ _29 October 2026, version 2 with the arpeggiator, the whole modulation panel and
 the card. Built and tested on Linux x86-64 (GCC 13, Xvfb); the macOS build, its tests and auval
 pass in CI (`plugin-macos`), the Windows build and its tests too (`plugin-windows`, 64-bit MSVC).
 No DAW session, pluginval, signing or formal listening test yet; the owner has played version 1
-and version 2 (the macOS test builds). Next: V3_ORGANIC_MORPH_SPEC.md (queued, not started)._
+and version 2 (the macOS test builds). Queued, not started: V3_ORGANIC_MORPH_SPEC.md, then
+JUNO_ENGINE_SPEC.md (they share the oscillator-model parameters)._
 
 | Area | State | Evidence |
 |---|---|---|
@@ -15,6 +16,7 @@ and version 2 (the macOS test builds). Next: V3_ORGANIC_MORPH_SPEC.md (queued, n
 | Two ADSRs (amplitude: ANDOR OSP's AMP parameters; filter: its own) | ✅ done and tested | [envelope] |
 | LFO: ANDOR OSP's LFO 1 (7 shapes incl. RANDOM and a drawn CUSTOM, rate or sync, phase, polarity, free / retrigger / one shot, global or POLY), its amount and the mod wheel | ✅ done and tested | [modulation], [live][lfo]; the modulation panel's LFO 1 page; sync not yet tested against a running host transport |
 | Modulation: ANDOR OSP's panel (LFO 1 and 2, ENV 1 and 2, VEL, NOTE, wheel, CC 1-4 with Learn, pressure; 16 routes, depth routes, curves, APPLY TO AMP) to every continuous control: 72 of ANDOR ANALOG's own (per note or the instrument's) and the 16 of ANDOR OSP's it plays; drag a source onto any knob | ✅ done and tested | `analog: every modulation destination it offers moves the sound`; [modulation] in analog_dsp_tests (per note VEL, controllers, reset, APPLY TO AMP); no allocation ([realtime][modulation]); CPU unchanged within noise (24.7-25.8 % of a VM core, 16 voices) |
+| AMP envelope picture follows its knobs and automation (it redrew only when its dots were dragged) | ✅ fixed | the shell's editor repaints it when attack, decay, sustain or release move, as ANDOR OSP's does |
 | Arpeggiator: ANDOR OSP's (18 patterns, 10 rates, gate, octaves, swing, velocity, host sync, hold with the pedal, its display), in front of the synth; the ARP destinations | ✅ done and tested | `shell: an engine that binds arp.* is played by ANDOR OSP's arpeggiator`; the bindings test (every ARP control heard) |
 | GRANULAR on the card: POS, the SPREAD pane and every playing grain (where it reads, its window, its row), as ANDOR OSP shows them over a recording | ✅ done and tested / ⚠️ seen only in screenshots | `analog: GRANULAR's grains are shown on the card ...`; `shell: a generator engine's grains reach the card` |
 | GRANULAR on the oscillators: each voice records its own sound (1.5 s) and plays ANDOR OSP's grains from it (POS how far back, SIZE, DENS, TUNE, SPREAD), with KEY DNA | ✅ done and tested | [live][granular]: speaks at once, sustains, every setting heard, TUNE +12 is an octave, extremes finite, KEY DNA neutral when off |
