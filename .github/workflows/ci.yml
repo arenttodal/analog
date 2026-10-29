@@ -50,7 +50,12 @@ jobs:
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           cp -R "build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release/AU/ANDOR Analog.component" ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
-          auval -v aumu Aanl Ospx
+          # (Its full listing is thousands of lines: kept as a file, its verdict printed, so the
+          # tests' output above stays within reach of log viewers that show only the end.)
+          status=0
+          auval -v aumu Aanl Ospx > auval.log 2>&1 || status=$?
+          tail -40 auval.log
+          exit $status
       - name: Package macOS test build
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
