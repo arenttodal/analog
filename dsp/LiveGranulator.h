@@ -3,6 +3,7 @@
 #include "core/Prng.h"
 #include "engine/GranularSource.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -73,6 +74,12 @@ private:
 class LiveGranulator
 {
 public:
+    /** A playing grain as the card draws it: `position` how far back it reads on POS's scale
+        (0 just played .. 1 POS at 100 %), `level` its window now, `lane` its row (0..1). */
+    struct GrainDot
+    {
+        float position = 0.0f, level = 0.0f, lane = 0.5f;
+    };
     static constexpr int maxGrains = osp::GranularSource::maxGrains;
     /** POS 1 reaches this share of the recording back (the rest is room for SPREAD and the grain). */
     static constexpr double reach = 0.7;
@@ -83,6 +90,8 @@ public:
     void setRemap (double amount) noexcept { remapAmount = amount; }
     void stop() noexcept;
     int grainCount() const noexcept { return activeGrains; }
+    /** Writes up to `max` playing grains (reading `recording`); returns how many. */
+    int collect (const LiveRecording& recording, GrainDot* out, int max) const noexcept;
 
     /** One sample from `recording` (which already holds everything up to now). `step`:
         how fast grains read relative to the recording (1: its own pitch; REIMAGINED's wow). */
@@ -94,9 +103,16 @@ private:
         double position = 0.0, ratio = 1.0;   // tape time; read speed
         double c = 1.0, s = 0.0, cd = 1.0, sd = 0.0;   // Hann window by rotation
         int remaining = 0;
+        float lane = 0.5f;   // its row on the card (drawn only)
         bool active = false;
     };
     void spawn (const LiveRecording& recording, double step) noexcept;
+    /** How far back POS 1 reaches now (samples): the scale grains are placed on. */
+    static double reachSamples (const LiveRecording& recording) noexcept
+    {
+        const double capacity = static_cast<double> (recording.size()) - 8.0;
+        return (std::min (recording.history(), capacity) - 4.0) * reach;   // as spawn() places them
+    }
 
     osp::GranularParams settings;
     double rate = 48000.0, remapAmount = 0.0;
@@ -104,6 +120,7 @@ private:
     std::array<Grain, maxGrains> grains {};
     std::array<int, maxGrains> playing {};   ///< the active grains' slots, in the order they started
     int activeGrains = 0, countdown = 0;
+    std::uint32_t spawned = 0;   ///< grains started this note (their lanes)
     bool spawning = false;
     float norm = 1.0f;
 };

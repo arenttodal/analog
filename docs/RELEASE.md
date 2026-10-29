@@ -7,7 +7,9 @@ decision to sell are the owner's.
 
 - macOS: `cmake -B build-plugin -G Ninja -DOSP_BUILD_PLUGIN=ON "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"`,
   target `ANDOR_Analog_All` (AU, VST3, Standalone). Deployment target 11.0 (ANDOR OSP's).
-- Windows (later): VST3 and Standalone only (no AU on Windows).
+- Windows: Visual Studio 2022, 64-bit, `cmake -B build-plugin -G "Visual Studio 17 2022" -A x64
+  -DOSP_BUILD_PLUGIN=ON` with SQLite from vcpkg (`-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`);
+  VST3 and Standalone only (no AU on Windows).
 - Release builds with symbols archived; identifiers (`Aanl`, `com.osp.andoranalog`, parameter IDs,
   `ANDOR_ANALOG`, `.andoranalog`) never change.
 
@@ -34,6 +36,15 @@ decision to sell are the owner's.
 - Until then, the unsigned **test build**: CI (`plugin-macos`) uploads `ANDOR-Analog-macOS-test.zip`
   with the AU, VST3, standalone app, `packaging/macos-test/install.command` (per-user install, no
   admin rights, removes the download quarantine, makes AU hosts rescan) and its README.
+
+## Package (Windows)
+
+- Install locations: `C:\Program Files\Common Files\VST3\ANDOR Analog.vst3`,
+  `C:\Program Files\ANDOR Analog\ANDOR Analog.exe` (and a Start menu entry).
+- Sign the plug-in, the app and the installer (Authenticode, an EV or OV code-signing
+  certificate) so SmartScreen does not warn.
+- Until then, the unsigned **test build**: CI (`plugin-windows`) uploads `ANDOR-Analog-Windows-test.zip`
+  with the VST3, the standalone app, `Install.bat` (asks for administrator rights) and its README.
 
 ## Licensing (decide before selling)
 

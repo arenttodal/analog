@@ -94,6 +94,14 @@ namespace andor::analog::params
     /** Appends the product's own parameters (ProductInfo::addParameters). */
     void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
 
+    /**
+        The controls a modulation route can move (ProductInfo::modulationDestinations, in this
+        order: mod::productDest (k) is the k-th; append only, sessions store the order).
+        Voice-owned ones are moved per note (Reader::moveControl), global ones for the whole
+        instrument (Reader::read with the moved values).
+    */
+    const std::vector<osp::mod::ProductDest>& modulationDestinations();
+
     /** The engine's view: raw parameter values (cached in prepare(), read on the audio thread). */
     class Reader
     {
@@ -104,9 +112,29 @@ namespace andor::analog::params
         /** GRANULAR's KEY DNA as the parameters describe it (real-time safe; flat curves). */
         osp::keydna::Settings keyDna (std::uint32_t seed) const noexcept;
 
+        // Modulation (real-time safe).
+        static constexpr int maxValues = 192;
+        using Values = std::array<float, maxValues>;
+        /** Every raw value now, in the reader's order. */
+        void snapshot (Values& raw) const noexcept;
+        /** The patch `raw` describes. */
+        Patch read (const Values& raw) const noexcept;
+        /** Moves product destination k's raw value by `offset` (a share of its knob's travel,
+            clamped at its ends); false: not one of the reader's. */
+        bool move (Values& raw, int k, double offset) const noexcept;
+        /** The same for one of the reader's parameters by ID (ANDOR OSP's macros). */
+        void moveById (Values& raw, const char* id, double offset) const noexcept;
+        /** Sets in `patch` what product destination k (a voice's control) sets, from `base` (raw
+            values) moved by `offset`. */
+        void moveControl (Patch& patch, const Values& base, int k, double offset) const noexcept;
+
     private:
         float value (int index) const noexcept;
+        Patch readWith (const float* raw) const noexcept;
+        void moveIndex (Values& raw, int index, double offset) const noexcept;
         std::vector<std::atomic<float>*> values;
+        std::vector<juce::NormalisableRange<float>> ranges;
+        std::vector<int> destinationIndex;   ///< product destination k -> the reader's index
     };
 
     /** A patch as parameter values (unnormalised), by ID: the factory presets. */

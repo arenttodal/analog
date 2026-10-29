@@ -1,9 +1,10 @@
 # ANDOR ANALOG — status
 
-_28 October 2026, version 2 (ANDOR OSP's engines on the synth). Built and tested on Linux
-x86-64 (GCC 13, Xvfb); the macOS build, its tests and auval pass in CI (`plugin-macos`). No DAW
-session, pluginval, signing or formal listening test yet; the owner has played version 1 (the
-macOS test build)._
+_29 October 2026, version 2 with the arpeggiator, the whole modulation panel and the grains on
+the card. Built and tested on Linux x86-64 (GCC 13, Xvfb); the macOS build, its tests and auval
+pass in CI (`plugin-macos`), the Windows build and its tests too (`plugin-windows`, 64-bit MSVC).
+No DAW session, pluginval, signing or formal listening test yet; the owner has played version 1
+and version 2 (the macOS test builds). Next: V3_ORGANIC_MORPH_SPEC.md (queued, not started)._
 
 | Area | State | Evidence |
 |---|---|---|
@@ -13,6 +14,9 @@ macOS test build)._
 | Four-pole ZDF ladder with saturation, resonance to self-oscillation, FILTER DRIVE / BIAS / TRIM | ✅ done and tested | [filter] |
 | Two ADSRs (amplitude: ANDOR OSP's AMP parameters; filter: its own) | ✅ done and tested | [envelope] |
 | LFO: ANDOR OSP's LFO 1 (7 shapes incl. RANDOM and a drawn CUSTOM, rate or sync, phase, polarity, free / retrigger / one shot, global or POLY), its amount and the mod wheel | ✅ done and tested | [modulation], [live][lfo]; the modulation panel's LFO 1 page; sync not yet tested against a running host transport |
+| Modulation: ANDOR OSP's panel (LFO 1 and 2, ENV 1 and 2, VEL, NOTE, wheel, CC 1-4 with Learn, pressure; 16 routes, depth routes, curves, APPLY TO AMP) to every continuous control: 72 of ANDOR ANALOG's own (per note or the instrument's) and the 16 of ANDOR OSP's it plays; drag a source onto any knob | ✅ done and tested | `analog: every modulation destination it offers moves the sound`; [modulation] in analog_dsp_tests (per note VEL, controllers, reset, APPLY TO AMP); no allocation ([realtime][modulation]); CPU unchanged within noise (24.7-25.8 % of a VM core, 16 voices) |
+| Arpeggiator: ANDOR OSP's (18 patterns, 10 rates, gate, octaves, swing, velocity, host sync, hold with the pedal, its display), in front of the synth; the ARP destinations | ✅ done and tested | `shell: an engine that binds arp.* is played by ANDOR OSP's arpeggiator`; the bindings test (every ARP control heard) |
+| GRANULAR on the card: POS, the SPREAD pane and every playing grain (where it reads, its window, its row), as ANDOR OSP shows them over a recording | ✅ done and tested / ⚠️ seen only in screenshots | `analog: GRANULAR's grains are shown on the card ...`; `shell: a generator engine's grains reach the card` |
 | GRANULAR on the oscillators: each voice records its own sound (1.5 s) and plays ANDOR OSP's grains from it (POS how far back, SIZE, DENS, TUNE, SPREAD), with KEY DNA | ✅ done and tested | [live][granular]: speaks at once, sustains, every setting heard, TUNE +12 is an octave, extremes finite, KEY DNA neutral when off |
 | REIMAGINED on the live sound: KALEIDOSCOPE (saturation, doubling, remapped grains; ANDOR OSP's resonator and formant stage on the mix, tuned to each phrase's first note), TAPE FRAME, TOYBOX, MIRAGE (ANDOR OSP's own engines, unchanged); MOSAIC needs a recording's analysis and leaves the sound as it is (its popover says so) | ✅ done and tested | [live][reimagined] in ONE SHOT and GRANULAR; each mode's settings heard; 0 % is the plain sound |
 | MOVEMENT: DRIFT in each voice (ANDOR OSP's wander of pitch, tone, level, place) and TAPE, CHORUS, PULSE, SHAPER (with its custom pattern) on the mix | ✅ done and tested | [live][movement]; `analog: SHAPER's custom pattern is played, saved …` |
@@ -35,9 +39,9 @@ macOS test build)._
 | ANDOR OSP unchanged (design capture, schema golden, suite) | ✅ done and tested | design capture byte-identical except the MOVEMENT popover's moving strip, which also differs run to run on the unchanged build; OSP's ctest green |
 | Linux VST3 and Standalone build | ✅ built | `ANDOR_Analog_All` |
 | macOS build, AU, auval | ✅ done (CI) | `plugin-macos`: build, ctest, `auval -v aumu Aanl Ospx`, the test-build zip |
+| Windows build (VST3, standalone; 64-bit) | ✅ done (CI) | `plugin-windows`: Visual Studio 2022, the engine's and the product's tests, the test-build zip with Install.bat |
 | pluginval, DAWs | ❌ not done | docs/RELEASE.md |
 | Listening tests and preset voicing by ear | ❌ not done | docs/AUDIBLE_QA.md checklist |
-| Arpeggiator | ❌ not implemented (shown disabled) | |
 | Host parameter list trimmed to the used ones | ❌ not implemented (shell-wide limitation) | release blocker |
 | Signing, notarization, installer, JUCE licence | ❌ not done | docs/RELEASE.md |
 
@@ -59,6 +63,6 @@ macOS test build)._
 1. Final product name and tagline ("ANDOR Analog", "/ANALOG", "A living analog instrument").
 2. The generator card as built (one hero card with the oscillators' waveform) — or a designed
    ANDOR extension with oscillator controls on the card.
-3. Whether the arpeggiator ships (it needs note generation in the engine).
+3. The arpeggiator ships as ANDOR OSP's (played by the shell): by ear.
 4. Voicing: filter and drift constants, factory sounds (the ten new ones included) — by ear.
 5. JUCE commercial licence, signing credentials, the artwork's use in this product.

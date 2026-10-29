@@ -170,11 +170,24 @@ changes. No tables from any other product.
   leaves it bit-identical (`analog: every control the interface enables ...`).
 - **The card**: layer A's hero card shows "OSCILLATORS" and two periods of the oscillators' mix
   (`Engine::sourcePicture`), never a drop zone; files are refused (and said so). TUNE, PAN, LEVEL and
-  MUTE act on the generator, and since version 2 ONE SHOT / GRANULAR with the grain controls,
-  REIMAGINED (its name opens ANDOR OSP's popover) and the modulation panel's LFO 1 page; START,
-  LINK, REVERSE, LOOP, FOLLOW, the EQ, SOLO, the other modulation pages and the routes, the
-  arpeggiator, MPE, pitch character and DYNAMICS are shown disabled (ANDOR OSP's disabled look),
-  not relabelled.
+  MUTE act on the generator, and since version 2 ONE SHOT / GRANULAR with the grain controls
+  (the card draws POS, SPREAD and every playing grain, `Engine::grainSnapshot`: a grain's place
+  is how far back it reads, on POS's scale), REIMAGINED (its name opens ANDOR OSP's popover) and
+  the modulation panel; START, LINK, REVERSE, LOOP, FOLLOW, the EQ, SOLO, MPE, pitch character
+  and DYNAMICS are shown disabled (ANDOR OSP's disabled look), not relabelled.
+- **Modulation** (version 3 of the engine work, same state version): ANDOR OSP's whole
+  modulation panel - LFO 1 (the synth's LFO: its classic depths and the routes hear the same
+  one) and LFO 2, ENV 1 and 2, VEL, NOTE, the mod wheel, CC 1-4 and pressure - through its 16
+  routes to every continuous control the synth reads (PARAMETER_REGISTRY.md C). The synth runs
+  ANDOR OSP's `mod::Runtime` and a `mod::VoiceState` per voice at the control rate (8 samples);
+  a voice whose controls are routed plays from its own copy of the patch, the routed controls
+  moved (`ControlModulator`: the product converts a knob's moved value exactly as its parameter
+  does); the instrument's controls are moved once per block from the shared sources. Smoothed
+  controls (BLEND, TONE, RESONANCE, FILTER DRIVE) keep their smoothing and add the note's move.
+  Drag a source onto a knob (the macros and the popovers' knobs too) to assign it.
+- **Arpeggiator**: ANDOR OSP's, played by the shell in front of the synth (every pattern, rate,
+  gate, octaves, swing, velocity; host sync; its display); the ARP destinations come from the
+  synth's shared sources.
 - **Macros** (data order; ECHO's knob before SPACE's on screen): BLEND (oscillators with their LFO
   depths, Poly Mod, noise, voices, unison, KEY DNA), DRIVE (ANDOR OSP's), TONE (resonance, envelope
   amount, tracking, velocity; filter envelope; FILTER DRIVE with bias and trim; the LFO's amount and
@@ -185,7 +198,8 @@ changes. No tables from any other product.
 
 ## 11. Not in this version (by design)
 
-Rev 2/Rev 3 circuit models, a second LFO, the function generator, the 40-destination matrix
-(ANDOR OSP's routes), double cross-mod, LIFE and CHARACTER, MOSAIC (it needs a recording), microtuning, MPE, multitimbrality, the
-arpeggiator (disabled; it would need note generation in the engine), aftertouch, velocity curves.
+Rev 2/Rev 3 circuit models, the function generator, double cross-mod, LIFE and CHARACTER, MOSAIC
+(it needs a recording), microtuning, MPE, multitimbrality. (APPLY TO AMP shapes the velocity the
+loudness follows by VEL's curve, in front of VELOCITY RANGE.) The next version's plan:
+V3_ORGANIC_MORPH_SPEC.md.
 The shell still lists all 350 ANDOR parameters to hosts (HANDOFF "Known limitations": a release blocker).

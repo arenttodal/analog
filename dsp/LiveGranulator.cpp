@@ -24,6 +24,7 @@ void LiveGranulator::start (const osp::GranularParams& params, std::uint64_t see
     for (auto& g : grains)
         g.active = false;
     activeGrains = 0;
+    spawned = 0;
     countdown = 0;   // the first grain starts with the note
     spawning = true;
     setParams (params);
@@ -100,8 +101,29 @@ void LiveGranulator::spawn (const LiveRecording& recording, double step) noexcep
     slot->cd = std::cos (w);
     slot->sd = std::sin (w);
     slot->remaining = n;
+    // Rows by the golden ratio: evenly spread, no random draw (the sound's stream is untouched).
+    const double row = 0.5 + 0.6180339887498949 * static_cast<double> (spawned++);
+    slot->lane = static_cast<float> (row - std::floor (row));
     slot->active = true;
     playing[static_cast<std::size_t> (activeGrains++)] = static_cast<int> (slot - grains.data());
+}
+
+int LiveGranulator::collect (const LiveRecording& recording, GrainDot* out, int max) const noexcept
+{
+    const double scale = reachSamples (recording);
+    if (activeGrains == 0 || scale < 1.0)
+        return 0;
+    const auto now = static_cast<double> (recording.now());
+    int n = 0;
+    for (int k = 0; k < activeGrains && n < max; ++k)
+    {
+        const auto& g = grains[static_cast<std::size_t> (playing[static_cast<std::size_t> (k)])];
+        out[n].position = static_cast<float> (std::clamp ((now - g.position) / scale, 0.0, 1.0));
+        out[n].level = static_cast<float> (0.5 - 0.5 * g.c);
+        out[n].lane = g.lane;
+        ++n;
+    }
+    return n;
 }
 
 float LiveGranulator::render (const LiveRecording& recording, double step) noexcept

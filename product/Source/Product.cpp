@@ -126,6 +126,9 @@ const ProductInfo& productInfo()
         p.macroPopover = [] (int macro, osp::plugin::InstrumentHost& host) { return andor::analog::createMacroPopover (macro, host); };
         p.addParameters = [] (juce::AudioProcessorValueTreeState::ParameterLayout& layout) { andor::analog::params::addTo (layout); };
         p.installFactoryPresets = installFactoryPresets;
+        // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
+        // envelope, the generator's level, pan, tune, REIMAGINED and grains) and these.
+        p.modulationDestinations = andor::analog::params::modulationDestinations();
         p.stateVersion = 2;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)

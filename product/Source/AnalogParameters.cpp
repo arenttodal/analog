@@ -108,6 +108,10 @@ const juce::StringArray& engineParameterIds()
         // The wheels are read from MIDI and from the on-screen wheels.
         l.add ("midi.pitchWheel");
         l.add ("midi.modWheel");
+        // ANDOR OSP's arpeggiator: the shell plays it in front of the synth.
+        l.add ("arp.*");
+        // ANDOR OSP's modulation: LFO 2, ENV 1 and 2, VEL and NOTE, the 16 routes.
+        l.add ("mod.*");
         return l;
     }();
     return list;
@@ -243,15 +247,175 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
 }
 
 //==============================================================================
+namespace
+{
+    /** A voice's control moved by modulation: what its value sets in the patch (as read()). */
+    void assign (Patch& p, int i, double v) noexcept
+    {
+        switch (i)
+        {
+            case iBlend: p.blend = 0.01 * v; break;
+            case iTone: p.tone = 0.01 * v; break;
+            case iMotion: p.lfoAmount = 0.01 * v; break;
+            case iOsc1Coarse: p.osc1Coarse = std::round (v); break;
+            case iOsc1Width: p.osc1Width = 0.01 * v; break;
+            case iOsc1Level: p.osc1Level = 0.01 * v; break;
+            case iOsc2Coarse: p.osc2Coarse = std::round (v); break;
+            case iOsc2Fine: p.osc2FineCents = v; break;
+            case iOsc2Width: p.osc2Width = 0.01 * v; break;
+            case iOsc2Level: p.osc2Level = 0.01 * v; break;
+            case iNoise: p.noiseLevel = 0.01 * v; break;
+            case iResonance: p.resonance = 0.01 * v; break;
+            case iKeyTrack: p.keyTrack = 0.01 * v; break;
+            case iEnvDepth: p.envDepthSemitones = v; break;
+            case iVelocityToFilter: p.velocityToFilter = 0.01 * v; break;
+            case iDriveTrim: p.driveTrimDb = v; break;
+            case iFilterAttack: p.filterAttack = v; break;
+            case iFilterDecay: p.filterDecay = v; break;
+            case iFilterSustain: p.filterSustain = 0.01 * v; break;
+            case iFilterRelease: p.filterRelease = v; break;
+            case iVelocityRange: p.velocityRangeDb = v; break;
+            case iLfoPitch1: p.lfoPitch1 = v; break;
+            case iLfoPitch2: p.lfoPitch2 = v; break;
+            case iLfoWidth1: p.lfoWidth1 = 0.01 * v; break;
+            case iLfoWidth2: p.lfoWidth2 = 0.01 * v; break;
+            case iLfoCutoff: p.lfoCutoff = v; break;
+            case iPolyModEnv: p.polyModEnv = 0.01 * v; break;
+            case iPolyModOsc2: p.polyModOsc2 = 0.01 * v; break;
+            case iAnalog: p.analogAmount = 0.01 * v; break;
+            case iFilterDrive: p.filterDrive = 0.01 * v; break;
+            case iGrainTune: p.grains.tuneSemitones = v; break;
+            default: break;
+        }
+    }
+
+    struct Destination
+    {
+        int index;
+        const char* name;
+        osp::mod::Owner owner;
+    };
+
+    /** ANDOR ANALOG's own modulation destinations (append only: sessions store the order).
+        Every continuous control the engine reads that has no ANDOR OSP destination; voice-
+        owned ones are what each note plays with (a POLY source moves each note its own way),
+        global ones are the instrument's (its effects, its performance settings). */
+    const std::vector<Destination>& destinations()
+    {
+        using O = osp::mod::Owner;
+        static const std::vector<Destination> list {
+            { iBlend, "BLEND", O::voice }, { iTone, "TONE", O::voice }, { iResonance, "RESONANCE", O::voice },
+            { iEnvDepth, "FILTER ENV AMOUNT", O::voice }, { iKeyTrack, "KEY TRACK", O::voice }, { iVelocityToFilter, "VEL TO FILTER", O::voice },
+            { iFilterDrive, "FILTER DRIVE", O::voice }, { iDriveTrim, "FILTER TRIM", O::voice },
+            { iFilterAttack, "FILTER ATTACK", O::voice }, { iFilterDecay, "FILTER DECAY", O::voice },
+            { iFilterSustain, "FILTER SUSTAIN", O::voice }, { iFilterRelease, "FILTER RELEASE", O::voice },
+            { iOsc1Coarse, "OSC 1 SEMI", O::voice }, { iOsc1Width, "OSC 1 WIDTH", O::voice }, { iOsc1Level, "OSC 1 LEVEL", O::voice },
+            { iOsc2Coarse, "OSC 2 SEMI", O::voice }, { iOsc2Fine, "OSC 2 FINE", O::voice }, { iOsc2Width, "OSC 2 WIDTH", O::voice },
+            { iOsc2Level, "OSC 2 LEVEL", O::voice }, { iNoise, "NOISE", O::voice },
+            { iPolyModEnv, "POLY MOD ENV", O::voice }, { iPolyModOsc2, "POLY MOD OSC 2", O::voice },
+            { iMotion, "LFO AMOUNT", O::voice }, { iLfoPitch1, "LFO OSC 1 PITCH", O::voice }, { iLfoPitch2, "LFO OSC 2 PITCH", O::voice },
+            { iLfoWidth1, "LFO OSC 1 PW", O::voice }, { iLfoWidth2, "LFO OSC 2 PW", O::voice }, { iLfoCutoff, "LFO CUTOFF", O::voice },
+            { iAnalog, "ANALOG", O::voice }, { iVelocityRange, "VELOCITY RANGE", O::voice }, { iGrainTune, "GRAIN TUNE", O::voice },
+            { iDriveBias, "FILTER BIAS", O::global }, { iUnisonDetune, "UNISON DETUNE", O::global }, { iSpread, "STEREO SPREAD", O::global },
+            { iGlide, "GLIDE", O::global }, { iFineTune, "FINE TUNE", O::global }, { iOutput, "VOLUME", O::global },
+            { iDriveTone, "DRIVE TONE", O::global }, { iDriveBody, "DRIVE BODY", O::global },
+            { iDriftSpeed, "DRIFT SPEED", O::global }, { iDriftPitch, "DRIFT PITCH", O::global }, { iDriftTone, "DRIFT TONE", O::global },
+            { iTapeWow, "TAPE WOW", O::global }, { iTapeFlutter, "TAPE FLUTTER", O::global }, { iTapeWear, "TAPE WEAR", O::global },
+            { iChorusRate, "CHORUS RATE", O::global }, { iChorusWidth, "CHORUS WIDTH", O::global }, { iChorusStereo, "CHORUS STEREO", O::global },
+            { iPulseRate, "PULSE RATE", O::global }, { iPulseShape, "PULSE SHAPE", O::global }, { iPulseStereo, "PULSE STEREO", O::global },
+            { iShaperSmooth, "SHAPER SMOOTH", O::global },
+            { iSpaceDecay, "SPACE DECAY", O::global }, { iSpacePreDelay, "SPACE PRE-DELAY", O::global }, { iSpaceSize, "SPACE SIZE", O::global },
+            { iSpaceDamping, "SPACE DAMPING", O::global }, { iSpaceModulation, "SPACE MODULATION", O::global }, { iSpaceWidth, "SPACE WIDTH", O::global },
+            { iSpaceLowCut, "SPACE LOW CUT", O::global }, { iSpaceHighCut, "SPACE HIGH CUT", O::global },
+            { iEchoTime, "ECHO TIME", O::global }, { iEchoFeedback, "ECHO FEEDBACK", O::global }, { iEchoTone, "ECHO TONE", O::global },
+            { iEchoAge, "ECHO AGE", O::global },
+            { iKaleidoscopeFocus, "KALEIDOSCOPE FOCUS", O::global }, { iKaleidoscopeSpread, "KALEIDOSCOPE SPREAD", O::global },
+            { iTapeFrameAge, "TAPE FRAME AGE", O::global }, { iTapeFrameStability, "TAPE FRAME STABILITY", O::global },
+            { iToyboxMotion, "TOYBOX MOTION", O::global }, { iToyboxDigital, "TOYBOX DIGITAL", O::global },
+            { iMirageClock, "MIRAGE CLOCK", O::global }, { iMirageFilter, "MIRAGE FILTER", O::global },
+        };
+        return list;
+    }
+}
+
+const std::vector<osp::mod::ProductDest>& modulationDestinations()
+{
+    static const std::vector<osp::mod::ProductDest> list = [] {
+        std::vector<osp::mod::ProductDest> l;
+        for (const auto& d : destinations())
+            l.push_back ({ ids()[d.index].toStdString(), d.name, d.owner, osp::mod::Update::continuous });
+        jassert (static_cast<int> (l.size()) <= osp::mod::maxProductDests);
+        return l;
+    }();
+    return list;
+}
+
 void Reader::attach (juce::AudioProcessorValueTreeState& state)
 {
+    static_assert (count <= maxValues);
     values.clear();
+    ranges.clear();
     for (const auto& name : ids())
     {
         auto* v = state.getRawParameterValue (name);
         jassert (v != nullptr);
         values.push_back (v);
+        auto* parameter = state.getParameter (name);
+        ranges.push_back (parameter != nullptr ? parameter->getNormalisableRange() : juce::NormalisableRange<float>());
     }
+    destinationIndex.clear();
+    for (const auto& d : destinations())
+        destinationIndex.push_back (d.index);
+}
+
+void Reader::snapshot (Values& raw) const noexcept
+{
+    for (int i = 0; i < count && i < static_cast<int> (values.size()); ++i)
+        raw[static_cast<std::size_t> (i)] = value (i);
+}
+
+Patch Reader::read (const Values& raw) const noexcept
+{
+    return readWith (raw.data());
+}
+
+bool Reader::move (Values& raw, int k, double offset) const noexcept
+{
+    if (k < 0 || k >= static_cast<int> (destinationIndex.size()) || ranges.size() != static_cast<std::size_t> (count))
+        return false;
+    moveIndex (raw, destinationIndex[static_cast<std::size_t> (k)], offset);
+    return true;
+}
+
+void Reader::moveIndex (Values& raw, int index, double offset) const noexcept
+{
+    const auto i = static_cast<std::size_t> (index);
+    const auto& range = ranges[i];
+    const double at = std::clamp (static_cast<double> (range.convertTo0to1 (std::clamp (raw[i], range.start, range.end))) + offset, 0.0, 1.0);
+    raw[i] = range.convertFrom0to1 (static_cast<float> (at));
+}
+
+void Reader::moveById (Values& raw, const char* id, double offset) const noexcept
+{
+    // (Four IDs, compared on the audio thread without allocating.)
+    for (int i = 0; i < count && ranges.size() == static_cast<std::size_t> (count); ++i)
+        if (ids()[i] == id)
+        {
+            moveIndex (raw, i, offset);
+            return;
+        }
+}
+
+void Reader::moveControl (Patch& patch, const Values& base, int k, double offset) const noexcept
+{
+    if (k < 0 || k >= static_cast<int> (destinationIndex.size()))
+        return;
+    auto raw = base[static_cast<std::size_t> (destinationIndex[static_cast<std::size_t> (k)])];
+    Values one;   // (only the moved value is read back)
+    const auto i = static_cast<std::size_t> (destinationIndex[static_cast<std::size_t> (k)]);
+    one[i] = raw;
+    if (move (one, k, offset))
+        assign (patch, static_cast<int> (i), static_cast<double> (one[i]));
 }
 
 float Reader::value (int index) const noexcept
@@ -262,12 +426,18 @@ float Reader::value (int index) const noexcept
 
 Patch Reader::read() const noexcept
 {
+    return readWith (nullptr);
+}
+
+Patch Reader::readWith (const float* raw) const noexcept
+{
     Patch p;
     if (values.size() != static_cast<std::size_t> (count))
         return p;
-    auto v = [this] (int i) { return static_cast<double> (value (i)); };
-    auto on = [this] (int i) { return value (i) >= 0.5f; };
-    auto index = [this] (int i, int n) { return std::clamp (juce::roundToInt (value (i)), 0, n - 1); };
+    auto at = [this, raw] (int i) { return raw != nullptr ? raw[i] : value (i); };
+    auto v = [&at] (int i) { return static_cast<double> (at (i)); };
+    auto on = [&at] (int i) { return at (i) >= 0.5f; };
+    auto index = [&at] (int i, int n) { return std::clamp (juce::roundToInt (at (i)), 0, n - 1); };
     p.blend = 0.01 * v (iBlend);
     p.tone = 0.01 * v (iTone);
     p.lfoAmount = 0.01 * v (iMotion);
