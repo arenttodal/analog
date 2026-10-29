@@ -8,7 +8,7 @@ ANDOR Analog test build for macOS (universal: Apple Silicon and Intel)
    - Ableton Live / Reaper: rescan plug-ins, then use the VST3 or AU "ANDOR Analog"
    - Or open ~/Applications/ANDOR Analog.app (standalone, choose your audio device in Options)
 
-The 24 factory sounds appear in the preset list (Presets/Factory) after the first launch.
+The 34 factory sounds appear in the preset list (Presets/Factory) after the first launch.
 
 This build is not signed or notarised (that needs a Developer ID). install.command
 removes the download quarantine so macOS lets it load.
