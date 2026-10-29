@@ -153,7 +153,7 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // The macros of its own: BLEND, TONE (the cutoff, shown in Hz); the LFO's amount (the
     // first version's MOTION macro: its ID is kept, its knob is in the TONE popover now).
     percent (blend, "Blend", d.blend);
-    layout.add (std::make_unique<Float> (id (tone), "Tone", juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), static_cast<float> (100.0 * d.tone),
+    layout.add (std::make_unique<Float> (id (tone), "Filter", juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), static_cast<float> (100.0 * d.tone),
                                          Attributes().withLabel ("%").withStringFromValueFunction ([] (float v, int) { return hertzText (math::toneToHz (0.01 * v)); })));
     percent (motion, "LFO Amount", d.lfoAmount);
 
@@ -304,7 +304,7 @@ namespace
     {
         using O = osp::mod::Owner;
         static const std::vector<Destination> list {
-            { iBlend, "BLEND", O::voice }, { iTone, "TONE", O::voice }, { iResonance, "RESONANCE", O::voice },
+            { iBlend, "BLEND", O::voice }, { iTone, "FILTER", O::voice }, { iResonance, "RESONANCE", O::voice },
             { iEnvDepth, "FILTER ENV AMOUNT", O::voice }, { iKeyTrack, "KEY TRACK", O::voice }, { iVelocityToFilter, "VEL TO FILTER", O::voice },
             { iFilterDrive, "FILTER DRIVE", O::voice }, { iDriveTrim, "FILTER TRIM", O::voice },
             { iFilterAttack, "FILTER ATTACK", O::voice }, { iFilterDecay, "FILTER DECAY", O::voice },

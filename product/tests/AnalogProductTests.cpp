@@ -540,7 +540,7 @@ TEST_CASE ("analog: a modulated sound recalls exactly, and the routes' destinati
         setValue (p, "mod.lfo2.rate", 3.0f);
         before = renderShell (p, 0.5);
         p.getStateInformation (session);
-        CHECK (osp::plugin::InstrumentHost::modDestinationNames()[tone] == "TONE");
+        CHECK (osp::plugin::InstrumentHost::modDestinationNames()[tone] == "FILTER");
     }
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
@@ -596,6 +596,79 @@ TEST_CASE ("analog: a version-1 session or preset is migrated and sounds as it d
     ShellProcessor r;
     r.setStateInformation (withMovement.getData(), static_cast<int> (withMovement.getSize()));
     CHECK (r.parameters.getRawParameterValue ("motion")->load() == Approx (50.0f));
+}
+
+TEST_CASE ("analog: a version-2 session's BLEND moves into the oscillators' levels and sounds as it did", "[analog][state]")
+{
+    // Version 2 mixed the oscillators with BLEND; version 3 with their LEVELs (BLEND at 50 %).
+    juce::MemoryBlock session;
+    juce::AudioBuffer<float> before;
+    {
+        ShellProcessor old;
+        apply (old, factoryPatches()[1].patch);
+        setValue (old, params::blend, 75.0f);
+        setValue (old, params::osc1Level, 90.0f);
+        setValue (old, params::osc2Level, 80.0f);
+        setValue (old, "space", 0.0f);
+        before = renderShell (old, 0.5, phrase, false);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 2);   // as version 2 wrote it
+    juce::MemoryBlock v2;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v2);
+
+    ShellProcessor p;
+    p.setStateInformation (v2.getData(), static_cast<int> (v2.getSize()));
+    auto value = [&p] (const juce::String& id) { return p.parameters.getRawParameterValue (id)->load(); };
+    CHECK (value (params::blend) == Approx (50.0f));
+    double l1 = 0.9, l2 = 0.8;
+    foldBlend (0.75, l1, l2);
+    CHECK (value (params::osc1Level) == Approx (100.0 * l1).margin (0.1));
+    CHECK (value (params::osc2Level) == Approx (100.0 * l2).margin (0.1));
+    CHECK (value (params::osc2Level) == Approx (80.0f));   // (at 75 % OSC 2 was at its full level)
+    // The same sound (the levels' steps of 0.1 % aside).
+    const auto after = renderShell (p, 0.5, phrase, false);
+    double sum = 0.0, diff = 0.0;
+    for (int i = 0; i < before.getNumSamples(); ++i)
+    {
+        sum += static_cast<double> (before.getSample (0, i)) * before.getSample (0, i);
+        const double d = before.getSample (0, i) - after.getSample (0, i);
+        diff += d * d;
+    }
+    CHECK (std::sqrt (diff / std::max (sum, 1.0e-12)) < 0.01);   // within 1 % (-40 dB)
+}
+
+TEST_CASE ("analog: the card's first knob is DETUNE, and its name opens the oscillators", "[analog][editor]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.refreshNow();
+    auto& card = ui.engineCard (0);
+    // Its dial is OSC 2's fine tuning (a modulation drop target), shown enabled.
+    juce::Slider* detune = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && s->getProperties()["paramId"].toString() == params::osc2Fine)
+                detune = s;
+            find (*child);
+        }
+    };
+    find (card);
+    REQUIRE (detune != nullptr);
+    CHECK (detune->isEnabled());
+    setValue (p, params::osc2Fine, -12.0f);
+    CHECK (detune->getValue() == Approx (-12.0));
+    // Its name opens the oscillators' popover; the first macro has none and is disabled.
+    ui.openPopup (andor::shell::ShellEditor::startControlPopup);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    CHECK (ui.openPopupPanel()->getTitle().isEmpty() == false);
+    ui.closePopup();
+    ui.openPopup (0);
+    CHECK (ui.openPopupPanel() == nullptr);
 }
 
 TEST_CASE ("analog: SHAPER's custom pattern is played, saved with the session and recalled", "[analog][state][movement]")
@@ -688,14 +761,17 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     editor->setSize (1448, 1086);
     shoot ("analog-init");
     shoot ("analog-init@2x", 2.0f);
-    const char* names[] = { "blend", "drive", "tone", "movement", "space", "echo" };
-    for (int m = 0; m < 6; ++m)
+    const char* names[] = { "unassigned", "drive", "filter", "movement", "space", "echo" };
+    for (int m = 1; m < 6; ++m)
     {
         ui.openPopup (m);
         REQUIRE (ui.openPopupPanel() != nullptr);
         shoot (juce::String ("analog-popover-") + names[m]);
         ui.closePopup();
     }
+    ui.openPopup (andor::shell::ShellEditor::startControlPopup);
+    shoot ("analog-popover-oscillators");
+    ui.closePopup();
     ui.openPopup (andor::shell::ShellEditor::advancedPopup);
     shoot ("analog-advanced");
     ui.closePopup();

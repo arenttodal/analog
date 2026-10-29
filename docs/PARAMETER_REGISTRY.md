@@ -24,8 +24,8 @@ Defaults are the INIT patch (`dsp/Patch.h`); values are in the units shown.
 
 | ID | Name | Kind | Range | Default |
 |---|---|---|---|---|
-| `analog.blend` | Blend | float | 0 % … 100 % | 50 % |
-| `analog.tone` | Tone | float | 20 Hz … 18.0 kHz | 62 % |
+| `analog.blend` | Blend (since state version 3 not on screen: the oscillators are mixed by their LEVELs; older settings are folded into the levels, it rests at 50 %, still automatable) | float | 0 % … 100 % | 50 % |
+| `analog.tone` | Filter (named "Tone" until state version 3; the FILTER macro) | float | 20 Hz … 18.0 kHz | 62 % |
 | `analog.motion` | LFO Amount (v1: "Motion", the macro) | float | 0 % … 100 % | 0 % |
 | `analog.osc1.wave` | Osc 1 Wave | choice | Saw, Pulse, Saw+Pulse | 0 |
 | `analog.osc1.octave` | Osc 1 Octave | int | -2 oct … +2 oct | 0 oct |
@@ -123,7 +123,7 @@ travel: depth 100 % takes it from where it is to either end.
   ATTACK / DECAY (taken as a note starts), SUSTAIN, RELEASE (taken as it is released), ENV 1/2's
   times, another route's depth, the ARP destinations. The others (LIFE, CHARACTER, START, EQ,
   DAMPEN, B and C) have no control here and are never offered on a knob.
-- **ANDOR ANALOG's own, per note** (a POLY source moves each note its own way): BLEND, TONE,
+- **ANDOR ANALOG's own, per note** (a POLY source moves each note its own way): BLEND (off screen), FILTER,
   RESONANCE, FILTER ENV AMOUNT, KEY TRACK, VEL TO FILTER, FILTER DRIVE, FILTER TRIM, FILTER
   ATTACK / DECAY / SUSTAIN / RELEASE, OSC 1 SEMI / WIDTH / LEVEL, OSC 2 SEMI / FINE / WIDTH /
   LEVEL, NOISE, POLY MOD ENV, POLY MOD OSC 2, LFO AMOUNT, LFO OSC 1 / OSC 2 PITCH, LFO OSC 1 /

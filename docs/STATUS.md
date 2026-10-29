@@ -34,7 +34,8 @@ JUNO_ENGINE_SPEC.md (they share the oscillator-model parameters)._
 | Sessions and presets of version 1 migrated (state version 2) | ✅ done and tested | `analog: a version-1 session or preset is migrated and sounds as it did` |
 | Every enabled control audible, every disabled one inert (all ~400 host parameters) | ✅ done and tested | `analog: every control the interface enables ...` |
 | Generator card (OSCILLATORS + waveform picture, ONE SHOT / GRANULAR and the grain controls), no drop zone, files refused | ✅ done and tested | shell test `a generator engine has one card ...`; screenshots |
-| Macro popovers: DRIVE, MOVEMENT, SPACE, ECHO and REIMAGINED are ANDOR OSP's own (shared from its repository; OSP stays pixel-identical); BLEND and TONE are the instrument's | ✅ done and tested / ⚠️ BLEND and TONE reviewed only as screenshots | `analog: DRIVE, MOVEMENT, SPACE and ECHO open ANDOR OSP's popovers …`; `[screenshots]` |
+| Macro popovers: DRIVE, MOVEMENT, SPACE, ECHO and REIMAGINED are ANDOR OSP's own (shared from its repository; OSP stays pixel-identical); FILTER (was TONE) and OSCILLATORS (opened by the card's DETUNE name) are the instrument's; the first macro is not assigned yet (disabled) | ✅ done and tested / ⚠️ FILTER and OSCILLATORS reviewed only as screenshots | `analog: DRIVE, MOVEMENT, SPACE and ECHO open ANDOR OSP's popovers …`; `analog: the card's first knob is DETUNE ...`; `[screenshots]` |
+| State version 3: BLEND left the screen (the oscillators are mixed by their LEVELs); version-2 sessions and presets fold it into the levels; factory presets likewise (factory set 3) | ✅ done and tested | `analog: a version-2 session's BLEND moves into the oscillators' levels and sounds as it did` |
 | 34 factory presets (10 new for the new engines), installed to Documents/…/Factory | ✅ done and tested | `analog: the factory presets are installed, listed and load exactly`; headroom test |
 | Session recall | ✅ done and tested | `analog: a session recalls the sound exactly` |
 | Visual regression (parity with ANDOR OSP, 18 states, 0 px outside masks) | ✅ done and tested | `andor_analog_tests_visual` |
@@ -58,7 +59,7 @@ JUNO_ENGINE_SPEC.md (they share the oscillator-model parameters)._
 - TAPE FRAME's FRAME lengths (3.6–11.4 s of tape) are longer than a voice's recording (1.5 s):
   the tape runs for the whole FRAME, its travel scaled into the recording.
 - KEY DNA has no curves here yet (ANDOR OSP has no editor for them either): AMOUNT,
-  INDIVIDUALITY and each parameter's variation (BLEND popover).
+  INDIVIDUALITY and each parameter's variation (OSCILLATORS popover).
 
 ## Open decisions for the owner
 

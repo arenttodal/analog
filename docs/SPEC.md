@@ -80,7 +80,9 @@ ANDOR OSP's PostProcessor.
 ## 4. Mixer and DRIVE
 
 `mix = OSC1 · L1 · g1(BLEND) + OSC2 · L2 · g2(BLEND) + noise · N`, where BLEND crossfades with equal
-power and leaves both oscillators at their own levels at 50 % (`g = min(1, √2·cos/sin θ)`).
+power and leaves both oscillators at their own levels at 50 % (`g = min(1, √2·cos/sin θ)`). Since
+state version 3 the oscillators are mixed by their LEVELs: BLEND is not on screen and rests at 50 %;
+an older session's or preset's BLEND is folded into the two levels (`foldBlend`: the same sound).
 The mix enters the filter at −7 dBFS per oscillator (×0.45); DRIVE adds up to +24 dB before the
 saturator and takes about half back after it; BIAS offsets the saturator (asymmetric: even
 harmonics; its DC is removed); TRIM sets the level after the filter (−12..+6 dB).
@@ -188,11 +190,14 @@ changes. No tables from any other product.
 - **Arpeggiator**: ANDOR OSP's, played by the shell in front of the synth (every pattern, rate,
   gate, octaves, swing, velocity; host sync; its display); the ARP destinations come from the
   synth's shared sources.
-- **Macros** (data order; ECHO's knob before SPACE's on screen): BLEND (oscillators with their LFO
-  depths, Poly Mod, noise, voices, unison, KEY DNA), DRIVE (ANDOR OSP's), TONE (resonance, envelope
-  amount, tracking, velocity; filter envelope; FILTER DRIVE with bias and trim; the LFO's amount and
-  cutoff depth; ANALOG and phase), MOVEMENT, SPACE, ECHO (ANDOR OSP's). BLEND and TONE are compact
-  cards built only from the shared parts; the others are ANDOR OSP's own popovers.
+- **Macros** (data order; ECHO's knob before SPACE's on screen): the first is not assigned yet (shown
+  disabled, "—"), DRIVE (ANDOR OSP's), FILTER (the cutoff; its popover: resonance, envelope amount,
+  tracking, velocity; filter envelope; FILTER DRIVE with bias and trim; the LFO's amount and cutoff
+  depth; ANALOG and phase), MOVEMENT, SPACE, ECHO (ANDOR OSP's). FILTER is a compact card built only
+  from the shared parts; the others are ANDOR OSP's own popovers.
+- **The card's first knob** (START's place, `ProductInfo::generatorStartControl`): DETUNE, OSC 2's
+  fine tuning against OSC 1. Its name opens OSCILLATORS (both oscillators' waves, tuning, levels -
+  the mix - and LFO depths, sync, Poly Mod, noise, voices, unison, KEY DNA).
 - **Presets**: 34 factory sounds (`dsp/FactoryPatches.cpp`, synthesized only) are written to
   `Documents/ANDOR Analog/Presets/Factory/<Category>/` by the plugin (never over the musician's own).
 

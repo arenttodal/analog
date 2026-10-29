@@ -62,6 +62,9 @@ namespace
     {
         std::vector<FactoryPatch> list;
         auto add = [&list] (const char* name, const char* category, Patch p, std::vector<int> notes, bool line = false, double keyDna = 0.0) {
+            // (Version 3: the oscillators' mix is in their levels; BLEND rests at its centre.)
+            foldBlend (p.blend, p.osc1Level, p.osc2Level);
+            p.blend = 0.5;
             list.push_back ({ name, category, p, std::move (notes), line, keyDna });
         };
 
