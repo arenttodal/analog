@@ -153,9 +153,10 @@ const ProductInfo& productInfo()
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
         // envelope, the generator's level, pan, tune, REIMAGINED and grains) and these.
         p.modulationDestinations = andor::analog::params::modulationDestinations();
-        // The card's first knob is DETUNE (OSC 2 against OSC 1); its name opens the oscillators.
-        p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE",
-                                    [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorPopover (host); } };
+        // The card's first knob is DETUNE (OSC 2 against OSC 1), a plain control; the card's
+        // heading, OSCILLATORS beside M and S, opens the oscillators' settings.
+        p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE", nullptr };
+        p.generatorHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorPopover (host); };
         p.stateVersion = 4;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)

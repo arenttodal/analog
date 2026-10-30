@@ -694,14 +694,80 @@ TEST_CASE ("analog: a version-3 session opens with every version-4 setting neutr
             REQUIRE (before.getSample (c, i) == after.getSample (c, i));
 }
 
-TEST_CASE ("analog: the card's first knob is DETUNE, and its name opens the oscillators", "[analog][editor]")
+TEST_CASE ("analog: OSCILLATORS beside M and S opens the oscillators' settings; DETUNE is a plain control", "[analog][editor]")
 {
     ShellProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     ui.refreshNow();
     auto& card = ui.engineCard (0);
-    // Its dial is OSC 2's fine tuning (a modulation drop target), shown enabled.
+    auto event = [] (juce::Component& c, juce::Point<float> at) {
+        auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, {}, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, at, now, 1, false);
+    };
+    auto press = [&] (juce::Component& c, juce::Point<float> at) {   // as a real click: the watch, then the component
+        ui.pressAnywhere (&c);
+        c.mouseDown (event (c, at));
+        c.mouseUp (event (c, at));
+    };
+
+    // The heading's door covers the word's glyphs, right of M and S, inside the text area.
+    REQUIRE (card.hasHeadingDoor());
+    const auto heading = card.headingBounds();
+    REQUIRE (! heading.isEmpty());
+    auto* door = card.getComponentAt (heading.getCentre());
+    REQUIRE (door != nullptr);
+    CHECK (card.isHeading (door));
+    juce::Component* mute = nullptr;
+    juce::Component* solo = nullptr;
+    for (auto* child : card.getChildren())
+        if (auto* b = dynamic_cast<osp::plugin::LayerStateButton*> (child))
+            (mute == nullptr ? mute : solo) = b;
+    REQUIRE (mute != nullptr);
+    REQUIRE (solo != nullptr);
+    CHECK (heading.getX() >= mute->getRight());
+    CHECK (! heading.intersects (mute->getBounds()));
+    CHECK (! heading.intersects (solo->getBounds()));
+    CHECK (heading.getWidth() < card.getWidth() / 3);   // the word, not the header
+
+    // A click opens the oscillators' popover below the word; a second click closes it.
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    CHECK (ui.openPopupPanel()->getTitle().isNotEmpty());
+    // (Through its own coordinates: the popover is scaled, and its bounds include its shadow.)
+    auto* shown = ui.openPopupPanel();
+    const auto panel = ui.getLocalArea (shown, shown->getLocalBounds().reduced (osp::plugin::MiniPanel::shadowMargin));
+    CHECK (panel.getY() >= ui.getLocalArea (&card, heading).getBottom());
+    CHECK (ui.getLocalBounds().contains (panel));
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    CHECK (ui.openPopupIndex() == -1);
+    // A click elsewhere closes it; so does Escape.
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    ui.pressAnywhere (&card.display());
+    CHECK (ui.openPopupIndex() == -1);
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    ui.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+    CHECK (ui.openPopupIndex() == -1);
+    // The keyboard: Return and Space on the focused word open and close it.
+    CHECK (door->getWantsKeyboardFocus());
+    door->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    door->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey));
+    CHECK (ui.openPopupIndex() == -1);
+    CHECK (door->getTitle().isNotEmpty());   // (its accessibility handler is a button; it exists once on screen)
+
+    // M and S still mute and solo the layer (the door does not cover them).
+    const float muteBefore = p.parameters.getRawParameterValue ("layerA.mute")->load();
+    press (*mute, mute->getLocalBounds().getCentre().toFloat());
+    CHECK (p.parameters.getRawParameterValue ("layerA.mute")->load() != muteBefore);
+    CHECK (ui.openPopupIndex() == -1);
+
+    // DETUNE: OSC 2's fine tuning, enabled, a modulation target; clicking or dragging it moves
+    // the tuning and never opens a popover.
     juce::Slider* detune = nullptr;
     std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
         for (auto* child : c.getChildren())
@@ -716,11 +782,17 @@ TEST_CASE ("analog: the card's first knob is DETUNE, and its name opens the osci
     CHECK (detune->isEnabled());
     setValue (p, params::osc2Fine, -12.0f);
     CHECK (detune->getValue() == Approx (-12.0));
-    // Its name opens the oscillators' popover; the first macro has none and is disabled.
+    auto* knob = detune->getParentComponent();
+    REQUIRE (knob != nullptr);
+    const auto caption = card.startLabelBounds();
+    press (*knob, knob->getLocalPoint (&card, caption.getCentre()).toFloat());   // its name
+    CHECK (ui.openPopupIndex() == -1);
+    detune->setValue (25.0, juce::sendNotificationSync);   // a drag's result
+    CHECK (p.parameters.getRawParameterValue (params::osc2Fine)->load() == Approx (25.0f).margin (0.01f));
+    CHECK (ui.openPopupIndex() == -1);
+    // The start-control popover route is gone (DETUNE has no door); the first macro has none.
     ui.openPopup (andor::shell::ShellEditor::startControlPopup);
-    REQUIRE (ui.openPopupPanel() != nullptr);
-    CHECK (ui.openPopupPanel()->getTitle().isEmpty() == false);
-    ui.closePopup();
+    CHECK (ui.openPopupPanel() == nullptr);
     ui.openPopup (0);
     CHECK (ui.openPopupPanel() == nullptr);
 }
