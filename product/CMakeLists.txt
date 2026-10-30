@@ -16,6 +16,7 @@ andor_add_instrument(ANDOR_Analog
         Source/AnalogEngine.cpp
         Source/AnalogParameters.cpp
         Source/AnalogPopovers.cpp
+        Source/AnalogOscillatorWorkbench.cpp
     # A synthesizer, not a sampler: hosts file it with the instruments that synthesize.
     VST3_CATEGORIES Instrument Synth)
 target_link_libraries(ANDOR_Analog PUBLIC analog_dsp)

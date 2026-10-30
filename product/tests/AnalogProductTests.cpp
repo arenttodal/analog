@@ -840,23 +840,131 @@ TEST_CASE ("analog: a version-4 session rests at the A/B mix's centre, where ORG
     CHECK (q.parameterValue ("ab.blend") == Approx (0.0f));
 }
 
-TEST_CASE ("analog: OSCILLATORS beside M and S opens the oscillators' settings; DETUNE is a plain control", "[analog][editor]")
+namespace
 {
-    ShellProcessor p;
-    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
-    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
-    ui.refreshNow();
-    auto& card = ui.engineCard (0);
-    auto event = [] (juce::Component& c, juce::Point<float> at) {
+    /** A fresh editor at the reference size with the workbench's view preference reset (it is
+        kept in the product's documents folder, across launches). */
+    struct WorkbenchFixture
+    {
+        explicit WorkbenchFixture (int width = 1448)
+        {
+            p.setWellViewState ({});
+            editor.reset (p.createEditorIfNeeded());
+            ui = &dynamic_cast<andor::shell::ShellEditor&> (*editor);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+            ui->refreshNow();
+        }
+        ~WorkbenchFixture()
+        {
+            editor.reset();
+            p.setWellViewState ({});
+        }
+        osp::plugin::EngineCard& card() { return ui->engineCard (0); }
+        osp::plugin::CardWellEditor* bench() { return card().wellEditorComponent(); }
+        /** The view preference, as the musician would set it (the shell keeps it). */
+        void view (bool detailed, int section = 0, bool pinned = false)
+        {
+            osp::plugin::CardWellEditor::ViewState v;
+            v.detailed = detailed;
+            v.section = section;
+            v.pinned = pinned;
+            p.setWellViewState (v);
+            if (bench() != nullptr)
+                bench()->setViewState (v);
+            ui->refreshNow();
+        }
+        /** The workbench's control bound to `id` (null: none), and whether it is on screen. */
+        juce::Component* control (const juce::String& id)
+        {
+            juce::Component* found = nullptr;
+            std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+                for (auto* child : c.getChildren())
+                {
+                    if (found == nullptr && osp::plugin::binding::tagsOf (*child).contains (id))
+                        found = child;
+                    find (*child);
+                }
+            };
+            if (bench() != nullptr)
+                find (*bench());
+            return found;
+        }
+        bool shown (const juce::String& id)
+        {
+            auto* c = control (id);
+            for (; c != nullptr && c != bench(); c = c->getParentComponent())
+                if (! c->isVisible())
+                    return false;
+            return c != nullptr && bench()->isVisible();
+        }
+        /** The view's leaf controls on screen: inside the well, none overlapping another. */
+        void checkLayout()
+        {
+            REQUIRE (bench() != nullptr);
+            const auto well = bench()->getLocalBounds();
+            std::vector<juce::Rectangle<int>> boxes;
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+                for (auto* child : c.getChildren())
+                {
+                    if (! child->isVisible())
+                        continue;
+                    const bool leaf = dynamic_cast<juce::Button*> (child) != nullptr || dynamic_cast<osp::plugin::MiniKnob*> (child) != nullptr
+                                      || dynamic_cast<osp::plugin::SegmentedControl*> (child) != nullptr
+                                      || dynamic_cast<osp::plugin::ValueSelector*> (child) != nullptr || child->getComponentID().isNotEmpty();
+                    if (leaf)
+                    {
+                        const auto box = bench()->getLocalArea (child, child->getLocalBounds());
+                        INFO (child->getTitle() << " " << child->getComponentID() << " at " << box.toString() << " in " << well.toString());
+                        CHECK (well.contains (box));
+                        CHECK (box.getHeight() >= 24);   // (a reachable target)
+                        for (const auto& other : boxes)
+                            CHECK_FALSE (box.intersects (other));
+                        boxes.push_back (box);
+                    }
+                    else
+                        walk (*child);
+                }
+            };
+            walk (*bench());
+            CHECK (boxes.size() >= 6);
+        }
+        std::map<juce::String, float> values()
+        {
+            std::map<juce::String, float> v;
+            for (auto* parameter : p.getParameters())
+                if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+                    v[withId->paramID] = parameter->getValue();
+            return v;
+        }
+
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+        andor::shell::ShellEditor* ui = nullptr;
+    };
+
+    juce::MouseEvent mouseEventFor (juce::Component& c, juce::Point<float> at)
+    {
         auto source = juce::Desktop::getInstance().getMainMouseSource();
         const auto now = juce::Time::getCurrentTime();
         return juce::MouseEvent (source, at, {}, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, at, now, 1, false);
-    };
+    }
+}
+
+TEST_CASE ("analog: OSCILLATORS beside M and S opens the workbench in the waveform's well; DETUNE is a plain control", "[analog][editor][workbench]")
+{
+    WorkbenchFixture f;
+    auto& ui = *f.ui;
+    auto& card = f.card();
     auto press = [&] (juce::Component& c, juce::Point<float> at) {   // as a real click: the watch, then the component
         ui.pressAnywhere (&c);
-        c.mouseDown (event (c, at));
-        c.mouseUp (event (c, at));
+        c.mouseDown (mouseEventFor (c, at));
+        c.mouseUp (mouseEventFor (c, at));
     };
+
+    // At first the waveform; no workbench made yet (nothing at start-up unless pinned).
+    CHECK (card.display().isVisible());
+    CHECK_FALSE (ui.isWellEditorShown());
+    CHECK (f.bench() == nullptr);
 
     // The heading's door covers the word's glyphs, right of M and S, inside the text area.
     REQUIRE (card.hasHeadingDoor());
@@ -877,74 +985,307 @@ TEST_CASE ("analog: OSCILLATORS beside M and S opens the oscillators' settings; 
     CHECK (! heading.intersects (solo->getBounds()));
     CHECK (heading.getWidth() < card.getWidth() / 3);   // the word, not the header
 
-    // A click opens the oscillators' popover below the word; a second click closes it.
+    // A click shows the workbench exactly in the well (the card does not move or resize, no
+    // popover opens); a second click brings the waveform back.
+    const auto cardBounds = card.getBounds();
+    const auto well = card.display().getBounds();
+    const auto before = f.values();
     press (*door, door->getLocalBounds().getCentre().toFloat());
-    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
-    REQUIRE (ui.openPopupPanel() != nullptr);
-    CHECK (ui.openPopupPanel()->getTitle().isNotEmpty());
-    // (Through its own coordinates: the popover is scaled, and its bounds include its shadow.)
-    auto* shown = ui.openPopupPanel();
-    const auto panel = ui.getLocalArea (shown, shown->getLocalBounds().reduced (osp::plugin::MiniPanel::shadowMargin));
-    CHECK (panel.getY() >= ui.getLocalArea (&card, heading).getBottom());
-    CHECK (ui.getLocalBounds().contains (panel));
-    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.isWellEditorShown());
+    REQUIRE (f.bench() != nullptr);
+    CHECK (f.bench()->getBounds() == well);
+    CHECK_FALSE (card.display().isVisible());   // (it does not draw beneath)
+    CHECK (card.getBounds() == cardBounds);
     CHECK (ui.openPopupIndex() == -1);
-    // A click elsewhere closes it; so does Escape.
+    CHECK (ui.openPopupPanel() == nullptr);
+    CHECK (card.getComponentAt (well.getCentre()) != &card.display());
+    // A click inside it (or on the card's knobs) does not close it.
+    ui.pressAnywhere (f.bench());
+    CHECK (ui.isWellEditorShown());
     press (*door, door->getLocalBounds().getCentre().toFloat());
-    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
-    ui.pressAnywhere (&card.display());
-    CHECK (ui.openPopupIndex() == -1);
+    CHECK_FALSE (ui.isWellEditorShown());
+    CHECK (card.display().isVisible());
+    CHECK (f.bench() != nullptr);   // (kept, hidden: it never intercepts a click)
+    CHECK_FALSE (f.bench()->isVisible());
+    CHECK (card.getComponentAt (well.getCentre()) == &card.display());
+    // WAVE in its toolbar does the same as the heading; so does Escape.
     press (*door, door->getLocalBounds().getCentre().toFloat());
-    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    REQUIRE (ui.isWellEditorShown());
+    auto* wave = dynamic_cast<juce::Button*> (f.bench()->findChildWithID ("wave"));
+    REQUIRE (wave != nullptr);
+    wave->onClick();
+    CHECK_FALSE (ui.isWellEditorShown());
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.isWellEditorShown());
     ui.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
-    CHECK (ui.openPopupIndex() == -1);
-    // The keyboard: Return and Space on the focused word open and close it.
+    CHECK_FALSE (ui.isWellEditorShown());
+    // The keyboard: Return and Space on the focused word.
     CHECK (door->getWantsKeyboardFocus());
     door->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
-    CHECK (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    CHECK (ui.isWellEditorShown());
     door->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey));
-    CHECK (ui.openPopupIndex() == -1);
+    CHECK_FALSE (ui.isWellEditorShown());
     CHECK (door->getTitle().isNotEmpty());   // (its accessibility handler is a button; it exists once on screen)
+    // Opening and closing it changed no parameter.
+    CHECK (f.values() == before);
 
-    // M and S still mute and solo the layer (the door does not cover them).
-    const float muteBefore = p.parameters.getRawParameterValue ("layerA.mute")->load();
+    // M and S still mute and solo the layer, the workbench open or not.
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    const float muteBefore = f.p.parameters.getRawParameterValue ("layerA.mute")->load();
     press (*mute, mute->getLocalBounds().getCentre().toFloat());
-    CHECK (p.parameters.getRawParameterValue ("layerA.mute")->load() != muteBefore);
-    CHECK (ui.openPopupIndex() == -1);
+    CHECK (f.p.parameters.getRawParameterValue ("layerA.mute")->load() != muteBefore);
+    CHECK (ui.isWellEditorShown());
+    press (*mute, mute->getLocalBounds().getCentre().toFloat());
 
     // DETUNE: OSC 2's fine tuning, enabled, a modulation target; clicking or dragging it moves
-    // the tuning and never opens a popover.
+    // the tuning and never opens anything.
     juce::Slider* detune = nullptr;
     std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
         for (auto* child : c.getChildren())
         {
-            if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && s->getProperties()["paramId"].toString() == params::osc2Fine)
+            if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && s->getProperties()["paramId"].toString() == params::osc2Fine
+                                                               && c.getParentComponent() == &card)
                 detune = s;
-            find (*child);
+            if (child != f.bench())
+                find (*child);
         }
     };
     find (card);
     REQUIRE (detune != nullptr);
     CHECK (detune->isEnabled());
-    setValue (p, params::osc2Fine, -12.0f);
+    setValue (f.p, params::osc2Fine, -12.0f);
     CHECK (detune->getValue() == Approx (-12.0));
     auto* knob = detune->getParentComponent();
     REQUIRE (knob != nullptr);
+    press (*door, door->getLocalBounds().getCentre().toFloat());   // (the waveform again)
     const auto caption = card.startLabelBounds();
     press (*knob, knob->getLocalPoint (&card, caption.getCentre()).toFloat());   // its name
     CHECK (ui.openPopupIndex() == -1);
+    CHECK_FALSE (ui.isWellEditorShown());
     detune->setValue (25.0, juce::sendNotificationSync);   // a drag's result
-    CHECK (p.parameters.getRawParameterValue (params::osc2Fine)->load() == Approx (25.0f).margin (0.01f));
+    CHECK (f.p.parameters.getRawParameterValue (params::osc2Fine)->load() == Approx (25.0f).margin (0.01f));
     CHECK (ui.openPopupIndex() == -1);
-    // The start-control popover route is gone (DETUNE has no door); the first macro is MORPH's.
+    // No popover route for the oscillators any more (the old one is gone); the start
+    // control has none; the first macro is MORPH's.
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
+    CHECK (ui.openPopupPanel() == nullptr);
     ui.openPopup (andor::shell::ShellEditor::startControlPopup);
     CHECK (ui.openPopupPanel() == nullptr);
     ui.openPopup (0);
     REQUIRE (ui.openPopupPanel() != nullptr);
     CHECK (ui.openPopupPanel()->getTitle() == "MORPH");
+    ui.closePopup();
 }
 
-TEST_CASE ("analog: the OSCILLATORS and FILTER popovers show each model's own controls, and fit the instrument", "[analog][editor]")
+TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Detailed, in the well at every size", "[analog][editor][workbench]")
+{
+    WorkbenchFixture f;
+    f.ui->showWellEditor (true);
+    REQUIRE (f.ui->isWellEditorShown());
+
+    // QUICK (the default): both oscillators, each its model, ON, its waves, its main controls.
+    CHECK_FALSE (f.bench()->viewState().detailed);
+    for (const auto& id : { params::osc1Model, params::osc2Model, params::osc1Enabled, params::osc2Enabled, params::osc1Wave, params::osc2Wave,
+                            params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::osc2Octave, params::osc2Level })
+    {
+        INFO (id);
+        CHECK (f.shown (id));
+    }
+    CHECK_FALSE (f.shown (params::osc1DcoSub));
+    CHECK_FALSE (f.shown (params::osc1WideShape));
+    CHECK (f.control (params::lfoPitch1) == nullptr);   // (Detailed's: not made in Quick)
+    f.checkLayout();
+    // DCO on OSC 1, WIDE on OSC 2: the view follows (also a change from elsewhere: automation,
+    // a preset). A model's settings are kept while another is shown.
+    setValue (f.p, params::osc1Width, 30.0f);
+    setValue (f.p, params::osc1Model, 1.0f);
+    setValue (f.p, params::osc2Model, 2.0f);
+    f.ui->refreshNow();
+    CHECK_FALSE (f.shown (params::osc1Wave));
+    CHECK (f.shown (params::osc1DcoSaw));
+    CHECK (f.shown (params::osc1DcoPulse));
+    CHECK (f.shown (params::osc1DcoSub));
+    CHECK (f.shown (params::osc1Width));
+    CHECK (f.shown (params::osc2WideWave));
+    CHECK (f.shown (params::osc2WideShape));
+    CHECK (f.shown (params::osc2WideSpread));
+    CHECK_FALSE (f.shown (params::osc2Wave));
+    f.checkLayout();
+    setValue (f.p, params::osc1Model, 0.0f);
+    CHECK (f.p.parameterValue (params::osc1Width) == Approx (30.0f).margin (0.1f));
+    // A control in the workbench moves its parameter (and so the sound): its attachment.
+    auto* level = dynamic_cast<osp::plugin::MiniKnob*> (f.control (params::osc2Level));
+    REQUIRE (level != nullptr);
+    level->slider.setValue (55.0, juce::sendNotificationSync);
+    CHECK (f.p.parameterValue (params::osc2Level) == Approx (55.0f).margin (0.2f));
+    // SPREAD acts on SUPER SAW only: faded otherwise, lit with it.
+    CHECK (f.control (params::osc2WideSpread)->getAlpha() < 0.5f);
+    setValue (f.p, params::osc2WideWave, 4.0f);
+    f.ui->refreshNow();
+    CHECK (f.control (params::osc2WideSpread)->getAlpha() == Approx (1.0f));
+
+    // QUICK <-> DETAILED changes the view only, never a value.
+    const auto before = f.values();
+    // DETAILED: one section at a time; together they hold every oscillator setting the old
+    // popover had (and that the engine plays).
+    const std::vector<std::vector<juce::String>> sections {
+        { params::osc1Model, params::osc1Enabled, params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::lfoPitch1, params::lfoWidth1 },
+        { params::osc2Model, params::osc2Enabled, params::osc2Octave, params::osc2Coarse, params::osc2Fine, params::osc2Width, params::osc2Level, params::lfoPitch2,
+          params::lfoWidth2, params::osc2WideWave, params::osc2WideShape, params::osc2WideSpread },
+        { params::sync, params::osc2KeyTrack, params::osc2LowFreq, params::ringMix, params::polyModEnv, params::polyModOsc2, params::polyModToPitch1,
+          params::polyModToWidth1, params::polyModToCutoff },
+        { params::noise, params::noiseColor, params::polyphony, params::unison, params::unisonDetune, params::spread },
+        { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize, params::keyDnaDensity,
+          params::keyDnaSpread, params::keyDnaTune },
+    };
+    for (int section = 0; section < 5; ++section)
+    {
+        f.view (true, section);
+        for (const auto& id : sections[static_cast<std::size_t> (section)])
+        {
+            INFO ("section " << section << ": " << id);
+            CHECK (f.shown (id));
+        }
+        f.checkLayout();
+    }
+    // OSC 1 as a DCO in Detailed: its PWM source and depth as well.
+    setValue (f.p, params::osc1Model, 1.0f);
+    f.view (true, 0);
+    CHECK (f.shown (params::osc1DcoPwmSource));
+    CHECK (f.shown (params::osc1DcoPwmDepth));
+    CHECK (f.shown (params::osc1DcoSub));
+    f.checkLayout();
+    setValue (f.p, params::osc1Model, 0.0f);
+    f.view (false);
+    CHECK (f.values() == before);
+    // The section chosen is kept while Quick is shown, and comes back with Detailed (the
+    // toolbar's own QUICK | DETAILED; the shell keeps the choice).
+    f.view (true, 3);
+    auto* detail = f.bench()->findChildWithID ("detail");
+    REQUIRE (detail != nullptr);
+    detail->mouseDown (mouseEventFor (*detail, { 5.0f, 5.0f }));   // QUICK
+    CHECK_FALSE (f.bench()->viewState().detailed);
+    CHECK_FALSE (f.p.wellViewState().detailed);
+    CHECK (f.p.wellViewState().section == 3);
+    CHECK (f.control (params::noise) == nullptr);   // (MORE's controls are gone with it)
+    detail->mouseDown (mouseEventFor (*detail, { static_cast<float> (detail->getWidth()) - 5.0f, 5.0f }));   // DETAILED
+    CHECK (f.bench()->viewState().detailed);
+    CHECK (f.bench()->viewState().section == 3);
+    CHECK (f.shown (params::noise));
+    f.view (false);
+    CHECK (f.values() == before);
+
+    // Smaller windows scale the whole instrument: the well's own layout is the same. Two
+    // cards (ORGANIC loaded) make the well narrower: Quick and every section still fit.
+    {
+        Scratch scratch;
+        loadOrganic (f.p, writeRecording (scratch.dir, "workbench stand-in.wav", 57, 1.0));
+        f.ui->refreshNow();
+        REQUIRE (f.ui->visibleCardCount() == 2);
+        REQUIRE (f.ui->isWellEditorShown());
+        CHECK (f.bench()->getBounds() == f.card().display().getBounds());
+        CHECK (f.bench()->getWidth() < 800);
+        f.view (false);
+        f.checkLayout();
+        for (int section = 0; section < 5; ++section)
+        {
+            INFO ("narrow, section " << section);
+            f.view (true, section);
+            f.checkLayout();
+        }
+        // ORGANIC's card has no oscillator editor; its heading opens nothing.
+        CHECK_FALSE (f.ui->engineCard (1).hasHeadingDoor());
+        CHECK (f.ui->engineCard (1).wellEditorComponent() == nullptr);
+        f.view (false);
+    }
+}
+
+TEST_CASE ("analog: the EQ takes the well and gives it back to a pinned workbench; the pin outlives the window", "[analog][editor][workbench]")
+{
+    WorkbenchFixture f;
+    auto& card = f.card();
+    auto& ui = *f.ui;
+    const auto before = f.values();
+
+    // Unpinned: the EQ replaces it; closing the EQ shows the waveform.
+    ui.showWellEditor (true);
+    REQUIRE (card.onEqToggle != nullptr);
+    card.onEqToggle (0, true);
+    CHECK (card.isEqOpen());
+    CHECK_FALSE (ui.isWellEditorShown());
+    CHECK_FALSE (f.bench()->isVisible());
+    card.onEqToggle (0, false);
+    CHECK_FALSE (card.isEqOpen());
+    CHECK_FALSE (ui.isWellEditorShown());
+    CHECK (card.display().isVisible());
+    // From the waveform: EQ open and closed, the waveform again.
+    card.onEqToggle (0, true);
+    card.onEqToggle (0, false);
+    CHECK_FALSE (ui.isWellEditorShown());
+
+    // PIN (its key): the EQ still takes the well, and gives it back when it closes.
+    ui.showWellEditor (true);
+    auto* pin = dynamic_cast<juce::Button*> (f.bench()->findChildWithID ("pin"));
+    REQUIRE (pin != nullptr);
+    CHECK (pin->getTitle().isNotEmpty());
+    pin->setToggleState (true, juce::dontSendNotification);
+    pin->onClick();
+    CHECK (f.p.wellViewState().pinned);
+    card.onEqToggle (0, true);
+    CHECK (card.isEqOpen());
+    CHECK_FALSE (ui.isWellEditorShown());
+    card.onEqToggle (0, false);
+    CHECK (ui.isWellEditorShown());
+    CHECK_FALSE (card.isEqOpen());
+    // The heading while the EQ is open: the workbench takes the well back, the EQ closes.
+    card.onEqToggle (0, true);
+    ui.toggleWellEditor();
+    CHECK (ui.isWellEditorShown());
+    CHECK_FALSE (card.isEqOpen());
+    // None of it is sound: no parameter moved.
+    CHECK (f.values() == before);
+
+    // A preset (or a factory sound) leaves it where it is, showing the new values.
+    apply (f.p, factoryPatches()[8].patch);
+    ui.refreshNow();
+    CHECK (ui.isWellEditorShown());
+    // Detailed and its section are kept with the pin.
+    f.view (true, 2, true);
+    // The window closes and opens again (or the plugin): pinned, it opens with the workbench,
+    // in Detailed, at the same section.
+    f.editor.reset();
+    f.editor.reset (f.p.createEditorIfNeeded());
+    f.ui = &dynamic_cast<andor::shell::ShellEditor&> (*f.editor);
+    f.ui->refreshNow();
+    CHECK (f.ui->isWellEditorShown());
+    REQUIRE (f.bench() != nullptr);
+    CHECK (f.bench()->viewState().detailed);
+    CHECK (f.bench()->viewState().section == 2);
+    {
+        // Another instance of the plugin (a new processor) reads the same preference.
+        ShellProcessor other;
+        CHECK (other.wellViewState().pinned);
+        CHECK (other.wellViewState().section == 2);
+    }
+    // The heading hides it and unpins (the musician's own choice outranks the pin).
+    f.ui->toggleWellEditor();
+    CHECK_FALSE (f.ui->isWellEditorShown());
+    CHECK_FALSE (f.p.wellViewState().pinned);
+    f.editor.reset();
+    f.editor.reset (f.p.createEditorIfNeeded());
+    f.ui = &dynamic_cast<andor::shell::ShellEditor&> (*f.editor);
+    f.ui->refreshNow();
+    CHECK_FALSE (f.ui->isWellEditorShown());
+    // Closing the window with it open is safe (no callback outlives it).
+    f.ui->showWellEditor (true);
+    f.editor.reset();
+    // The view is not in the session (nor in a preset: presets are written from parameters).
+    juce::MemoryBlock state;
+    f.p.getStateInformation (state);
+    CHECK_FALSE (state.toString().contains ("pinned"));
+}
+
+TEST_CASE ("analog: the FILTER popover shows each model's own controls, and fits the instrument", "[analog][editor]")
 {
     ShellProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
@@ -984,23 +1325,6 @@ TEST_CASE ("analog: the OSCILLATORS and FILTER popovers show each model's own co
         INFO ("popover " << area.toString() << " in " << ui.getLocalBounds().toString());
         CHECK (ui.getLocalBounds().contains (area));
     };
-    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
-    fits();
-    CHECK (shown (params::osc1Wave));
-    CHECK_FALSE (shown (params::osc1DcoSub));
-    CHECK_FALSE (shown (params::osc1WideShape));
-    // DCO on OSC 1, WIDE on OSC 2: the card follows while open (the editor's refresh).
-    setValue (p, params::osc1Model, 1.0f);
-    setValue (p, params::osc2Model, 2.0f);
-    ui.refreshNow();
-    CHECK_FALSE (shown (params::osc1Wave));
-    CHECK (shown (params::osc1DcoSub));
-    CHECK (shown (params::osc1DcoPwmSource));
-    CHECK (shown (params::osc2WideShape));
-    CHECK (shown (params::osc2WideWave));
-    CHECK_FALSE (shown (params::osc2Wave));
-    fits();
-    ui.closePopup();
     // FILTER: the OTA's settings only with the OTA; the Juno variant where it acts.
     ui.openPopup (2);
     fits();
@@ -1230,6 +1554,7 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     const auto before = osp::plugin::skin::look();
     osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
     ShellProcessor p;
+    p.setWellViewState ({});
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     auto shoot = [&] (const juce::String& name, float scale = 1.0f) {
@@ -1251,16 +1576,49 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
         shoot (juce::String ("analog-popover-") + names[m]);
         ui.closePopup();
     }
-    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
-    shoot ("analog-popover-oscillators");
-    ui.closePopup();
-    // Each model's own settings, and the OTA's.
+    // The OSCILLATOR WORKBENCH in the card's well: QUICK, each DETAILED section, each model.
+    auto view = [&] (bool detailed, int section) {
+        osp::plugin::CardWellEditor::ViewState v;
+        v.detailed = detailed;
+        v.section = section;
+        p.setWellViewState (v);
+        if (auto* bench = ui.engineCard (0).wellEditorComponent())
+            bench->setViewState (v);
+    };
+    view (false, 0);
+    ui.showWellEditor (true);
+    shoot ("analog-workbench-quick");
+    shoot ("analog-workbench-quick@2x", 2.0f);
+    const char* sections[] = { "osc1", "osc2", "pair", "more", "keydna" };
+    for (int section = 0; section < 5; ++section)
+    {
+        view (true, section);
+        shoot (juce::String ("analog-workbench-detailed-") + sections[section]);
+    }
     setValue (p, params::osc1Model, 1.0f);
+    setValue (p, params::osc1DcoPulse, 1.0f);
+    setValue (p, params::osc1DcoSub, 60.0f);
     setValue (p, params::osc2Model, 2.0f);
     setValue (p, params::osc2WideWave, 4.0f);
-    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
-    shoot ("analog-popover-oscillators-dco-wide");
-    ui.closePopup();
+    setValue (p, params::osc2WideSpread, 45.0f);
+    view (false, 0);
+    shoot ("analog-workbench-quick-dco-wide");
+    view (true, 0);
+    shoot ("analog-workbench-detailed-osc1-dco");
+    view (true, 1);
+    shoot ("analog-workbench-detailed-osc2-wide");
+    view (false, 0);
+    // The EQ takes the well; the heading shows which view is open.
+    ui.engineCard (0).onEqToggle (0, true);
+    shoot ("analog-workbench-eq-priority");
+    ui.engineCard (0).onEqToggle (0, false);
+    ui.showWellEditor (false);
+    setValue (p, params::osc1Model, 0.0f);
+    setValue (p, params::osc1DcoPulse, 0.0f);
+    setValue (p, params::osc1DcoSub, 0.0f);
+    setValue (p, params::osc2Model, 0.0f);
+    setValue (p, params::osc2WideWave, 0.0f);
+    setValue (p, params::osc2WideSpread, 0.0f);
     setValue (p, params::filterModel, 1.0f);
     setValue (p, params::otaHpf, 3.0f);
     ui.openPopup (2);
@@ -1270,10 +1628,6 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     setValue (p, params::osc2Model, 0.0f);
     setValue (p, params::filterModel, 0.0f);
     setValue (p, params::otaHpf, 0.0f);
-    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
-    ui.engineCard (0).setHeadingOpen (true);
-    shoot ("analog-heading-open");
-    ui.closePopup();
     ui.openPopup (andor::shell::ShellEditor::advancedPopup);
     shoot ("analog-advanced");
     ui.closePopup();
@@ -1325,5 +1679,25 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     shoot ("analog-sync-bite-keys");
     editor->setSize (869, juce::roundToInt (869.0f * 1086.0f / 1448.0f));
     shoot ("analog-window-869");
+    apply (p, Patch());
+    ui.showWellEditor (true);
+    shoot ("analog-workbench-window-869");
+    editor->setSize (1810, juce::roundToInt (1810.0f * 1086.0f / 1448.0f));
+    shoot ("analog-workbench-window-1810");
+    editor->setSize (1448, 1086);
+    {
+        // Two cards (ORGANIC loaded): the narrower well, QUICK and a DETAILED section.
+        Scratch scratch;
+        loadOrganic (p, writeRecording (scratch.dir, "workbench stand-in A3.wav", 57, 1.0));
+        view (false, 0);
+        shoot ("analog-workbench-two-cards-quick");
+        view (true, 1);
+        shoot ("analog-workbench-two-cards-detailed-osc2");
+        view (true, 2);
+        shoot ("analog-workbench-two-cards-detailed-pair");
+        view (false, 0);
+    }
+    ui.showWellEditor (false);
+    p.setWellViewState ({});
     osp::plugin::skin::setLook (before);
 }

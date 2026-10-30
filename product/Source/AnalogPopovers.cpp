@@ -242,80 +242,6 @@ namespace
         std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;
     };
 
-    std::unique_ptr<MiniPanel> blendPopover (InstrumentHost& h)
-    {
-        using namespace params;
-        auto p = std::make_unique<AnalogPanel> (h, "OSCILLATORS", 640, 0);
-        auto* panel = p.get();
-        // Each slot: its model (CLASSIC, DCO, WIDE) and ON, the model's own settings (only its
-        // own are shown), then what every model shares (tuning, width, level, LFO depths).
-        for (int slot = 1; slot <= 2; ++slot)
-        {
-            const bool first = slot == 1;
-            const auto modelId = first ? osc1Model : osc2Model;
-            p->row (first ? "OSCILLATOR 1" : "OSCILLATOR 2");
-            p->segments (modelId, { "CLASSIC", "DCO", "WIDE" }, 3.0f,
-                         "The oscillator's model: CLASSIC (the original), DCO (stable, after the Juno), WIDE (after the Jupiter-8, with SUPER SAW)");
-            p->toggle (first ? osc1Enabled : osc2Enabled, "ON", 0.8f, "The oscillator sounds (off: silent; as a sync or Poly Mod source it keeps running)");
-            p->row ({});
-            p->showWhen ([panel, modelId] { return panel->choiceIndex (modelId) == 0; });
-            if (first)
-                p->segments (osc1Wave, { "SAW", "PULSE", "BOTH" }, 2.4f, "Oscillator 1's waveform: saw, pulse, or both");
-            else
-                p->selector (osc2Wave, "WAVE", 1.4f, "Oscillator 2's waveforms: saw, triangle and pulse, alone or together");
-            p->row ({});
-            p->showWhen ([panel, modelId] { return panel->choiceIndex (modelId) == 1; });
-            p->toggle (first ? osc1DcoSaw : osc2DcoSaw, "SAW", 0.9f, "The DCO's sawtooth");
-            p->toggle (first ? osc1DcoPulse : osc2DcoPulse, "PULSE", 0.9f, "The DCO's pulse (its width: WIDTH, swept by PWM)");
-            p->knob (first ? osc1DcoSub : osc2DcoSub, "SUB");
-            p->segments (first ? osc1DcoPwmSource : osc2DcoPwmSource, { "MAN", "LFO", "ENV" }, 2.0f,
-                         "What sweeps the pulse width: the WIDTH knob alone, LFO 1, or the filter envelope");
-            p->knob (first ? osc1DcoPwmDepth : osc2DcoPwmDepth, "PWM");
-            p->row ({});
-            p->showWhen ([panel, modelId] { return panel->choiceIndex (modelId) == 2; });
-            p->selector (first ? osc1WideWave : osc2WideWave, "WAVE", 1.6f, "WIDE's wave: saw, pulse, triangle, square, or SUPER SAW (seven detuned saws, a modern addition)");
-            p->knob (first ? osc1WideShape : osc2WideShape, "SHAPE");
-            p->knob (first ? osc1WideSpread : osc2WideSpread, "SPREAD");
-            p->row ({});
-            p->knob (first ? osc1Octave : osc2Octave, "OCT");
-            p->knob (first ? osc1Coarse : osc2Coarse, "SEMI");
-            if (! first)
-                p->knob (osc2Fine, "DETUNE");   // (the card's DETUNE)
-            p->knob (first ? osc1Width : osc2Width, "WIDTH");
-            p->knob (first ? osc1Level : osc2Level, "LEVEL");
-            p->knob (first ? lfoPitch1 : lfoPitch2, "LFO PITCH");
-            p->knob (first ? lfoWidth1 : lfoWidth2, "LFO PW");
-        }
-        p->row ("THE PAIR");
-        p->toggle (sync, "SYNC", 1.0f, "Hard sync: oscillator 2 restarts oscillator 1 every cycle (tune oscillator 1 up for the classic sweep)");
-        p->toggle (osc2KeyTrack, "KEYBOARD", 1.2f, "Oscillator 2 follows the keyboard (off: a fixed pitch, for drones and Poly Mod)");
-        p->toggle (osc2LowFreq, "LO FREQ", 1.1f, "Oscillator 2 seven octaves down: a slow modulator for Poly Mod");
-        p->knob (ringMix, "RING");
-        p->row ("POLY MOD");
-        p->knob (polyModEnv, "FILT ENV");
-        p->knob (polyModOsc2, "OSC 2");
-        p->toggle (polyModToPitch1, "PITCH 1", 1.1f, "Poly Mod moves oscillator 1's pitch (FM with oscillator 2, sweeps with the envelope)");
-        p->toggle (polyModToWidth1, "WIDTH 1", 1.1f, "Poly Mod moves oscillator 1's pulse width");
-        p->toggle (polyModToCutoff, "FILTER", 1.1f, "Poly Mod moves the filter's cutoff");
-        p->row ("NOISE & VOICES");
-        p->knob (noise, "NOISE");
-        p->segments (noiseColor, { "WHITE", "JUNO" }, 1.6f, "The noise's colour: white, or the Juno's darker hiss");
-        p->segments (polyphony, { "1", "2", "4", "8", "16" }, 2.6f, "How many voices play (with UNISON: how many stack on one note)");
-        p->toggle (unison, "UNISON", 1.1f, "Every voice on one note, detuned: a thick mono sound");
-        p->knob (unisonDetune, "UNI DETUNE");
-        p->knob (spread, "SPREAD");
-        p->row ("KEY DNA  (GRANULAR: each key its own grains)");
-        p->toggle (keyDna, "ON", 0.8f, "KEY DNA: every key plays its own grains (where, how long, how dense, how wide), the same each time");
-        p->knob (keyDnaAmount, "AMOUNT");
-        p->knob (keyDnaIndividuality, "INDIVIDUAL");
-        p->knob (keyDnaPosition, "POS");
-        p->knob (keyDnaSize, "SIZE");
-        p->knob (keyDnaDensity, "DENS");
-        p->knob (keyDnaSpread, "SPREAD");
-        p->knob (keyDnaTune, "TUNE");
-        return p;
-    }
-
     std::unique_ptr<MiniPanel> tonePopover (InstrumentHost& h)
     {
         using namespace params;
@@ -394,11 +320,6 @@ namespace
         p->knob (organicRoot, "ROOT");
         return p;
     }
-}
-
-std::unique_ptr<MiniPanel> createOscillatorPopover (InstrumentHost& host)
-{
-    return blendPopover (host);
 }
 
 std::unique_ptr<MiniPanel> createMacroPopover (int macro, InstrumentHost& host)

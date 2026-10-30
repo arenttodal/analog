@@ -4,6 +4,7 @@
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "AnalogOscillatorWorkbench.h"
 #include "AnalogPopovers.h"
 #include "FactoryPatches.h"
 #include "ShellProduct.h"
@@ -162,9 +163,11 @@ const ProductInfo& productInfo()
         // envelope, the generator's level, pan, tune, REIMAGINED and grains) and these.
         p.modulationDestinations = andor::analog::params::modulationDestinations();
         // The card's first knob is DETUNE (OSC 2 against OSC 1), a plain control; the card's
-        // heading, OSCILLATORS beside M and S, opens the oscillators' settings.
+        // heading, OSCILLATORS beside M and S, opens the OSCILLATOR WORKBENCH in the
+        // waveform's dark well (the shell's in-card editor; its view is an interface
+        // preference, never a parameter).
         p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE", nullptr };
-        p.generatorHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorPopover (host); };
+        p.generatorWellEditor = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorWorkbench (host); };
         // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
         // sample store, card and recall).
         p.hybridSampleName = "ORGANIC";
