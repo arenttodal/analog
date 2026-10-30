@@ -171,12 +171,16 @@ namespace
                 }
                 if (i == index)
                 {
+                    // The chosen view: lit as the segmented controls' chosen key (the accent's
+                    // dark tone, its keyline, its text).
                     const auto key = cell.reduced (1.5f);
-                    g.setColour (accent().withAlpha (0.16f));
+                    const auto lit = design::colour::accent;
+                    const auto deep = lit.interpolatedWith (juce::Colour (0xff1e2222), 0.62f);
+                    g.setGradientFill (juce::ColourGradient (deep.brighter (0.25f), 0.0f, key.getY(), deep.darker (0.15f), 0.0f, key.getBottom(), false));
                     g.fillRoundedRectangle (key, radius - 1.0f);
-                    g.setColour (accent().withAlpha (0.85f));
+                    g.setColour (lit.withAlpha (0.9f));
                     g.drawRoundedRectangle (key.reduced (0.5f), radius - 1.0f, 1.0f);
-                    g.setColour (accent().interpolatedWith (juce::Colour (0xfff2eee6), 0.35f));
+                    g.setColour (lit.interpolatedWith (juce::Colour (0xfffff0e4), 0.3f));
                 }
                 else
                     g.setColour (cream.withAlpha (i == hover ? 0.92f : 0.66f));
@@ -303,6 +307,7 @@ namespace
             auto k = std::make_unique<MiniKnob> (host.apvts(), id, caption, [p] (double v) { return p->getText (p->convertTo0to1 (static_cast<float> (v)), 0); });
             k->setOnDark (true);
             k->slider.getProperties().set ("arc", static_cast<juce::int64> (accent().getARGB()));
+            k->slider.getProperties().set ("graphite", true);   // (the knob's graphite cap: it sits on the well)
             if (tooltip != nullptr)
                 k->slider.setTooltip (tooltip);
             return add (std::move (k));
@@ -311,7 +316,7 @@ namespace
         {
             auto s = std::make_unique<SegmentedControl> (*host.apvts().getParameter (id), std::move (items));
             s->setOnDark (true);
-            s->setAccent (accent());
+            s->setAccent (design::colour::accent);   // (the chosen segment: the instrument's accent key)
             s->setTooltip (tooltip);
             s->setTitle (host.apvts().getParameter (id)->getName (64));
             binding::tag (*s, id);

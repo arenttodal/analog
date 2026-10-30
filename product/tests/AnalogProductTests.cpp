@@ -9,6 +9,7 @@
 #include "CeramicSkin.h"
 #include "FactoryPatches.h"
 #include "MacroPopups.h"
+#include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
@@ -1283,6 +1284,83 @@ TEST_CASE ("analog: the EQ takes the well and gives it back to a pinned workbenc
     juce::MemoryBlock state;
     f.p.getStateInformation (state);
     CHECK_FALSE (state.toString().contains ("pinned"));
+}
+
+TEST_CASE ("analog: its walnut finish is its own: copper, its own pieces, ANDOR OSP's within a scope; every window the same", "[analog][editor][materials]")
+{
+    namespace design = osp::plugin::design;
+    namespace skin = osp::plugin::skin;
+    const auto before = skin::look();
+    skin::setLook (skin::Look::ceramic);
+    ShellProcessor p;   // (the product's materials: set by every instance alike)
+    const auto osp = design::Materials::osp();
+    // The tokens every drawing reads are the product's: aged copper, not ANDOR OSP's coral.
+    CHECK (design::colour::accent != osp.accent);
+    CHECK (design::colour::accent == juce::Colour (0xffc8703f));
+    CHECK (osp::plugin::palette::layer (0) == juce::Colour (0xffd78b50));
+    CHECK (design::colour::identity (0).badgeTop != osp.identityA.badgeTop);
+    CHECK (osp::plugin::palette::layer (1) == juce::Colour (0xff8f9bb4));   // (B and C keep their identities)
+    CHECK (design::colour::cardTop == osp.cardTop);                         // (the family's ceramic)
+    {
+        // Its own pieces (the walnut housing, the copper badge) replace the shared ones by
+        // name; every other piece is ANDOR OSP's.
+        skin::Pieces::Holder holder;
+        auto& pieces = holder.pieces();
+        REQUIRE (pieces.isValid());
+        REQUIRE (pieces.overlayPack() != nullptr);
+        const auto* housing = pieces.find ("housing");
+        const auto* badge = pieces.find ("badge-A");
+        REQUIRE (housing != nullptr);
+        REQUIRE (badge != nullptr);
+        CHECK (pieces.overlayPack()->find ("housing") == housing);
+        CHECK (badge->face == juce::Colour (0xffc86a3c));
+        CHECK (pieces.overlayPack()->find ("card-1379") == nullptr);
+        CHECK (pieces.find ("card-1379") != nullptr);
+        // The walnut: a dark, warm wood where ANDOR OSP's teak is light (the cheek's middle).
+        const auto image = pieces.decode (*housing, housing->levels.front());
+        REQUIRE (image.isValid());
+        const auto wood = image.getPixelAt (28, image.getHeight() / 2);
+        CHECK (wood.getBrightness() < 0.5f);
+        CHECK (wood.getRed() > wood.getBlue());
+        const auto ceramic = image.getPixelAt (image.getWidth() / 2, image.getHeight() / 2);
+        CHECK (ceramic.getBrightness() > 0.8f);   // (the ceramic is the family's)
+        {
+            // Within a scope, ANDOR OSP's materials exactly (the visual regression's parity
+            // render): its coral and its own pieces; the product's come back after it.
+            const design::ScopedMaterials ospMaterials (osp);
+            CHECK (design::colour::accent == osp.accent);
+            CHECK (osp::plugin::palette::layer (0) == osp.layerA);
+            CHECK (pieces.overlayPack() == nullptr);
+            REQUIRE (pieces.find ("badge-A") != nullptr);
+            CHECK (pieces.find ("badge-A")->face == juce::Colour (0xffd87c60));
+            ShellProcessor another;   // (a new instance inside the scope does not override it)
+            CHECK (design::colour::accent == osp.accent);
+        }
+        CHECK (design::colour::accent == juce::Colour (0xffc8703f));
+        CHECK (pieces.overlayPack() != nullptr);
+    }
+    // Two windows (of two instances) draw the same: no instance changes another's look.
+    {
+        ShellProcessor q;
+        p.setWellViewState ({});
+        std::unique_ptr<juce::AudioProcessorEditor> a (p.createEditorIfNeeded()), b (q.createEditorIfNeeded());
+        a->setSize (1448, 1086);
+        b->setSize (1448, 1086);
+        dynamic_cast<andor::shell::ShellEditor&> (*a).refreshNow();
+        dynamic_cast<andor::shell::ShellEditor&> (*b).refreshNow();
+        const auto ia = a->createComponentSnapshot (a->getLocalBounds(), true, 1.0f);
+        const auto ib = b->createComponentSnapshot (b->getLocalBounds(), true, 1.0f);
+        int differing = 0;
+        for (int y = 0; y < ia.getHeight(); y += 2)
+            for (int x = 0; x < ia.getWidth(); x += 2)
+                differing += ia.getPixelAt (x, y) == ib.getPixelAt (x, y) ? 0 : 1;
+        CHECK (differing == 0);
+    }
+    // The finish is interface only: it is in no parameter and not in the session.
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    CHECK_FALSE (state.toString().containsIgnoreCase ("walnut"));
+    skin::setLook (before);
 }
 
 TEST_CASE ("analog: the FILTER popover shows each model's own controls, and fits the instrument", "[analog][editor]")
