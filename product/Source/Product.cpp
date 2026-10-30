@@ -3,6 +3,7 @@
 // shared/andor-shell/template.
 
 #include "AnalogEngine.h"
+#include "AnalogMaterialsData.h"
 #include "AnalogParameters.h"
 #include "AnalogOscillatorWorkbench.h"
 #include "AnalogPopovers.h"
@@ -72,6 +73,26 @@ namespace
     void migrateFromVersion4 (osp::plugin::InstrumentHost& host)
     {
         host.setParameterValue ("ab.blend", 0.5f);
+    }
+
+    /** ANDOR ANALOG's materials: aged copper for ANDOR OSP's coral, layer A's amber trace,
+        the walnut housing and copper badge (tools/make_walnut_skin.py). The ceramic is the
+        family's. */
+    osp::plugin::design::Materials walnutMaterials()
+    {
+        auto m = osp::plugin::design::Materials::osp();
+        m.accent = juce::Colour (0xffc8703f);
+        m.accentTop = juce::Colour (0xffd57e48);
+        m.accentBottom = juce::Colour (0xffa9542b);
+        m.accentSoft = juce::Colour (0xfff1cbb2);
+        m.paletteAccent = juce::Colour (0xffcc7a48);
+        m.layerA = juce::Colour (0xffd78b50);
+        m.identityA = { juce::Colour (0xffd9824c), juce::Colour (0xff9c4a22), juce::Colour (0xfff0a060), juce::Colour (0xffc8703f), juce::Colour (0xffd57e48),
+                        juce::Colour (0xffe4b07a) };
+        m.graphiteOnWell = true;
+        m.pack = AnalogMaterialsData::walnutskin_zip;
+        m.packSize = static_cast<size_t> (AnalogMaterialsData::walnutskin_zipSize);
+        return m;
     }
 
     juce::String safeFileName (const std::string& name)
@@ -173,6 +194,9 @@ const ProductInfo& productInfo()
         p.hybridSampleName = "ORGANIC";
         // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
         p.generatorModeName = "Standard";
+        // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
+        // finish, interface only.
+        p.materials = walnutMaterials();
         p.stateVersion = 5;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
