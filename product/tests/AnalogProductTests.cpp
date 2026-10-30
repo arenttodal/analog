@@ -501,6 +501,10 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
     const auto vel = static_cast<float> (osp::mod::sourceIndex (osp::mod::Source::vel) + 1);
     for (const auto& [dest, id] : dests)
     {
+        // (A destination whose control the engine does not play yet stays disabled; the
+        // bindings test proves it inert.)
+        if (! params::engineParameterIds().contains (id))
+            continue;
         INFO (id << " (" << osp::mod::destInfo (dest).name << ")");
         auto patch = context;
         if (const auto mode = modes.find (id); mode != modes.end())
@@ -638,6 +642,56 @@ TEST_CASE ("analog: a version-2 session's BLEND moves into the oscillators' leve
         diff += d * d;
     }
     CHECK (std::sqrt (diff / std::max (sum, 1.0e-12)) < 0.01);   // within 1 % (-40 dB)
+}
+
+TEST_CASE ("analog: a version-3 session opens with every version-4 setting neutral and sounds as it did", "[analog][state]")
+{
+    // A version-3 session has none of version 4's parameters (models, OTA, chorus, ORGANIC,
+    // MORPH): loading it into an instrument that was playing other settings sets each to its
+    // default, so the session plays CLASSIC + CLASSIC through the LADDER, chorus off.
+    juce::MemoryBlock session;
+    juce::AudioBuffer<float> before;
+    {
+        ShellProcessor old;
+        apply (old, factoryPatches()[2].patch);
+        setValue (old, "space", 0.0f);
+        before = renderShell (old, 0.5, phrase, false);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 3);   // as version 3 wrote it: without version 4's parameters
+    int removed = 0;
+    for (auto* tree : xml->getChildIterator())
+        for (int i = tree->getNumChildElements(); --i >= 0;)
+            if (params::version4Ids().contains (tree->getChildElement (i)->getStringAttribute ("id")))
+            {
+                tree->removeChildElement (tree->getChildElement (i), true);
+                ++removed;
+            }
+    CHECK (removed == params::version4Ids().size());
+    juce::MemoryBlock v3;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v3);
+
+    ShellProcessor p;
+    // What was playing before: every version-4 setting away from its default.
+    for (const auto& id : params::version4Ids())
+    {
+        auto* parameter = p.parameters.getParameter (id);
+        REQUIRE (parameter != nullptr);
+        parameter->setValueNotifyingHost (parameter->getDefaultValue() > 0.5f ? 0.0f : 1.0f);
+    }
+    p.setStateInformation (v3.getData(), static_cast<int> (v3.getSize()));
+    for (const auto& id : params::version4Ids())
+    {
+        INFO (id);
+        auto* parameter = p.parameters.getParameter (id);
+        CHECK (parameter->getValue() == Approx (parameter->getDefaultValue()).margin (1.0e-6));
+    }
+    const auto after = renderShell (p, 0.5, phrase, false);
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < before.getNumSamples(); ++i)
+            REQUIRE (before.getSample (c, i) == after.getSample (c, i));
 }
 
 TEST_CASE ("analog: the card's first knob is DETUNE, and its name opens the oscillators", "[analog][editor]")

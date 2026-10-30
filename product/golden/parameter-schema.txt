@@ -55,3 +55,54 @@ analog.keyDna.size v2 float "Key DNA Size" label="%" range=0.0000..100.0000/0.10
 analog.keyDna.density v2 float "Key DNA Density" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.keyDna.spread v2 float "Key DNA Spread" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.keyDna.tune v2 float "Key DNA Tune" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc1.model v4 choice "Osc 1 Model" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Classic|DCO|Wide [Classic|DCO|Wide]
+analog.osc2.model v4 choice "Osc 2 Model" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Classic|DCO|Wide [Classic|DCO|Wide]
+analog.osc1.dco.saw v4 bool "Osc 1 DCO Saw" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.osc1.dco.pulse v4 bool "Osc 1 DCO Pulse" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.osc1.dco.subLevel v4 float "Osc 1 DCO Sub" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc1.dco.pwmSource v4 choice "Osc 1 DCO PWM Source" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Manual|LFO|Env [Manual|LFO|Env]
+analog.osc1.dco.pwmDepth v4 float "Osc 1 DCO PWM Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc2.dco.saw v4 bool "Osc 2 DCO Saw" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.osc2.dco.pulse v4 bool "Osc 2 DCO Pulse" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.osc2.dco.subLevel v4 float "Osc 2 DCO Sub" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc2.dco.pwmSource v4 choice "Osc 2 DCO PWM Source" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Manual|LFO|Env [Manual|LFO|Env]
+analog.osc2.dco.pwmDepth v4 float "Osc 2 DCO PWM Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc1.wide.wave v4 choice "Osc 1 Wide Wave" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Saw|Triangle|Super Saw [Saw|Pulse|Triangle|Square|Super Saw]
+analog.osc2.wide.wave v4 choice "Osc 2 Wide Wave" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Saw|Triangle|Super Saw [Saw|Pulse|Triangle|Square|Super Saw]
+analog.osc1.wide.shape v4 float "Osc 1 Wide Shape" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc2.wide.shape v4 float "Osc 2 Wide Shape" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc1.wide.spread v4 float "Osc 1 Super Saw Spread" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc2.wide.spread v4 float "Osc 2 Super Saw Spread" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc.pair.ringMix v4 float "Ring Mod" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.noise.color v4 choice "Noise Color" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=White|White|Juno [White|Juno]
+analog.filter.model v4 choice "Filter Model" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Ladder|Ladder|OTA [Ladder|OTA]
+analog.filter.ota.character v4 choice "OTA Character" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Juno|Juno|Jupiter [Juno|Jupiter]
+analog.filter.ota.slope v4 choice "OTA Slope" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=24 dB|24 dB|12 dB [24 dB|12 dB]
+analog.filter.ota.hpf v4 choice "High-Pass" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Off|1|3 [Off|0|1|2|3]
+analog.filter.juno.variant v4 choice "Juno Variant" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=6|60|106 [6|60|106]
+analog.juno.lfoDelay v4 float "LFO Delay" label="s" range=0.0000..5.0000/0.0000 skew=0.32692 default=0.0000 steps=2147483647 texts=0 ms|600 ms|5.00 s
+analog.juno.lfoRise v4 float "LFO Rise" label="s" range=0.0000..5.0000/0.0000 skew=0.32692 default=0.0000 steps=2147483647 texts=0 ms|600 ms|5.00 s
+analog.juno.vcaMode v4 choice "VCA Mode" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Env|Env|Gate [Env|Gate]
+analog.juno.envLink v4 bool "Env Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.juno.chorusMode v4 choice "Chorus" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=Off|II|I+II [Off|I|II|I+II]
+analog.juno.chorusNoise v4 bool "Chorus Noise" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.osc1.enabled v4 bool "Osc 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.osc2.enabled v4 bool "Osc 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.organic.enabled v4 bool "Organic On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.organic.level v4 float "Organic Level" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.organic.pan v4 float "Organic Pan" label="%" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 %|0 %|+100 %
+analog.organic.root v4 int "Organic Root" label="" range=-1.0000..127.0000/1.0000 skew=1.00000 default=-1.0000 steps=129 texts=Auto|D#4|G9
+analog.organic.start v4 float "Organic Start" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.organic.loop v4 bool "Organic Loop" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.organic.follow v4 bool "Organic Follow Env" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.organic.reverse v4 bool "Organic Reverse" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.morph.enabled v4 bool "Morph On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.morph.position v4 float "Morph" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.method v4 choice "Morph Method" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Imprint|Fuse|Weave [Imprint|Fuse|Weave]
+analog.morph.carrier v4 choice "Morph Carrier" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Osc 1|Osc 2|Both [Osc 1|Osc 2|Both]
+analog.morph.texture v4 float "Morph Texture" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.attack v4 float "Morph Attack" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.formants v4 float "Morph Formants" label="st" range=-12.0000..12.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-12.0 st|0.0 st|+12.0 st
+analog.morph.detail v4 float "Morph Detail" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.levelMatch v4 bool "Morph Level Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.morph.output v4 choice "Morph Output" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Morph Only|Morph Only|Layered [Morph Only|Layered]

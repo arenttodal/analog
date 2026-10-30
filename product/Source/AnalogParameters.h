@@ -85,6 +85,62 @@ namespace andor::analog::params
     inline const juce::String keyDnaDensity = "analog.keyDna.density";
     inline const juce::String keyDnaSpread = "analog.keyDna.spread";
     inline const juce::String keyDnaTune = "analog.keyDna.tune";
+    // State version 4 (one append-only set: oscillator models, OTA filter family, chorus,
+    // ORGANIC, MORPH). docs/PARAMETER_REGISTRY.md section E.
+    inline const juce::String osc1Model = "analog.osc1.model";
+    inline const juce::String osc2Model = "analog.osc2.model";
+    inline const juce::String osc1DcoSaw = "analog.osc1.dco.saw";
+    inline const juce::String osc1DcoPulse = "analog.osc1.dco.pulse";
+    inline const juce::String osc1DcoSub = "analog.osc1.dco.subLevel";
+    inline const juce::String osc1DcoPwmSource = "analog.osc1.dco.pwmSource";
+    inline const juce::String osc1DcoPwmDepth = "analog.osc1.dco.pwmDepth";
+    inline const juce::String osc2DcoSaw = "analog.osc2.dco.saw";
+    inline const juce::String osc2DcoPulse = "analog.osc2.dco.pulse";
+    inline const juce::String osc2DcoSub = "analog.osc2.dco.subLevel";
+    inline const juce::String osc2DcoPwmSource = "analog.osc2.dco.pwmSource";
+    inline const juce::String osc2DcoPwmDepth = "analog.osc2.dco.pwmDepth";
+    inline const juce::String osc1WideWave = "analog.osc1.wide.wave";
+    inline const juce::String osc2WideWave = "analog.osc2.wide.wave";
+    inline const juce::String osc1WideShape = "analog.osc1.wide.shape";
+    inline const juce::String osc2WideShape = "analog.osc2.wide.shape";
+    inline const juce::String osc1WideSpread = "analog.osc1.wide.spread";
+    inline const juce::String osc2WideSpread = "analog.osc2.wide.spread";
+    inline const juce::String ringMix = "analog.osc.pair.ringMix";
+    inline const juce::String noiseColor = "analog.noise.color";
+    inline const juce::String filterModel = "analog.filter.model";
+    inline const juce::String otaCharacter = "analog.filter.ota.character";
+    inline const juce::String otaSlope = "analog.filter.ota.slope";
+    inline const juce::String otaHpf = "analog.filter.ota.hpf";
+    inline const juce::String junoVariant = "analog.filter.juno.variant";
+    inline const juce::String lfoDelay = "analog.juno.lfoDelay";
+    inline const juce::String lfoRise = "analog.juno.lfoRise";
+    inline const juce::String vcaMode = "analog.juno.vcaMode";
+    inline const juce::String envLink = "analog.juno.envLink";
+    inline const juce::String chorusMode = "analog.juno.chorusMode";
+    inline const juce::String chorusNoise = "analog.juno.chorusNoise";
+    inline const juce::String osc1Enabled = "analog.osc1.enabled";
+    inline const juce::String osc2Enabled = "analog.osc2.enabled";
+    inline const juce::String organicEnabled = "analog.organic.enabled";
+    inline const juce::String organicLevel = "analog.organic.level";
+    inline const juce::String organicPan = "analog.organic.pan";
+    inline const juce::String organicRoot = "analog.organic.root";
+    inline const juce::String organicStart = "analog.organic.start";
+    inline const juce::String organicLoop = "analog.organic.loop";
+    inline const juce::String organicFollow = "analog.organic.follow";
+    inline const juce::String organicReverse = "analog.organic.reverse";
+    inline const juce::String morphEnabled = "analog.morph.enabled";
+    inline const juce::String morphPosition = "analog.morph.position";
+    inline const juce::String morphMethod = "analog.morph.method";
+    inline const juce::String morphCarrier = "analog.morph.carrier";
+    inline const juce::String morphTexture = "analog.morph.texture";
+    inline const juce::String morphAttack = "analog.morph.attack";
+    inline const juce::String morphFormants = "analog.morph.formants";
+    inline const juce::String morphDetail = "analog.morph.detail";
+    inline const juce::String morphLevelMatch = "analog.morph.levelMatch";
+    inline const juce::String morphOutput = "analog.morph.output";
+    /** Every parameter state version 4 added (the V3 -> V4 migration sets them to their defaults). */
+    const juce::StringArray& version4Ids();
+
     /** How far each key's own grains differ, by default, once KEY DNA is on. */
     constexpr double keyDnaDefaultVariation = 0.35;
 
@@ -113,7 +169,7 @@ namespace andor::analog::params
         osp::keydna::Settings keyDna (std::uint32_t seed) const noexcept;
 
         // Modulation (real-time safe).
-        static constexpr int maxValues = 192;
+        static constexpr int maxValues = 256;
         using Values = std::array<float, maxValues>;
         /** Every raw value now, in the reader's order. */
         void snapshot (Values& raw) const noexcept;

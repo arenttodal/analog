@@ -54,6 +54,17 @@ namespace
         host.setParameterValue (p::blend, 50.0f);
     }
 
+    /** Version 4 (the oscillator models, the OTA filter family, the chorus, ORGANIC and MORPH,
+        all in one step): an older session or preset has none of their parameters, so each is
+        set to its default (CLASSIC + CLASSIC, LADDER, chorus off, ORGANIC off, MORPH off):
+        exactly the sound it had. Nothing it stored is changed. */
+    void migrateFromVersion3 (osp::plugin::InstrumentHost& host)
+    {
+        for (const auto& id : andor::analog::params::version4Ids())
+            if (auto* parameter = host.apvts().getParameter (id))
+                host.setParameterValue (id, parameter->convertFrom0to1 (parameter->getDefaultValue()));
+    }
+
     juce::String safeFileName (const std::string& name)
     {
         return juce::File::createLegalFileName (juce::String (name));
@@ -145,12 +156,14 @@ const ProductInfo& productInfo()
         // The card's first knob is DETUNE (OSC 2 against OSC 1); its name opens the oscillators.
         p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE",
                                     [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorPopover (host); } };
-        p.stateVersion = 3;
+        p.stateVersion = 4;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
             if (from < 3)
                 migrateFromVersion2 (host);
+            if (from < 4)
+                migrateFromVersion3 (host);
         };
         return p;
     }();

@@ -35,6 +35,18 @@ namespace
         iSourceMode, iGrainPosition, iGrainSize, iGrainDensity, iGrainTune, iGrainSpread,
         iLfoShape, iLfoRate, iLfoSync, iLfoDivision, iLfoPhase, iLfoPolarity, iLfoMode, iLfoScope,
         iKeyDna, iKeyDnaAmount, iKeyDnaIndividuality, iKeyDnaPosition, iKeyDnaSize, iKeyDnaDensity, iKeyDnaSpread, iKeyDnaTune,
+        // State version 4.
+        iOsc1Model, iOsc2Model,
+        iOsc1DcoSaw, iOsc1DcoPulse, iOsc1DcoSub, iOsc1DcoPwmSource, iOsc1DcoPwmDepth,
+        iOsc2DcoSaw, iOsc2DcoPulse, iOsc2DcoSub, iOsc2DcoPwmSource, iOsc2DcoPwmDepth,
+        iOsc1WideWave, iOsc2WideWave, iOsc1WideShape, iOsc2WideShape, iOsc1WideSpread, iOsc2WideSpread,
+        iRingMix, iNoiseColor,
+        iFilterModel, iOtaCharacter, iOtaSlope, iOtaHpf, iJunoVariant,
+        iLfoDelay, iLfoRise, iVcaMode, iEnvLink, iChorusMode, iChorusNoise,
+        iOsc1Enabled, iOsc2Enabled,
+        iOrganicEnabled, iOrganicLevel, iOrganicPan, iOrganicRoot, iOrganicStart, iOrganicLoop, iOrganicFollow, iOrganicReverse,
+        iMorphEnabled, iMorphPosition, iMorphMethod, iMorphCarrier, iMorphTexture, iMorphAttack, iMorphFormants, iMorphDetail,
+        iMorphLevelMatch, iMorphOutput,
         count
     };
 
@@ -67,6 +79,17 @@ namespace
             "layerA.sourceMode", "layerA.granular.position", "layerA.granular.size", "layerA.granular.density", "layerA.granular.tune", "layerA.granular.spread",
             "mod.lfo1.shape", "mod.lfo1.rate", "mod.lfo1.sync", "mod.lfo1.division", "mod.lfo1.phase", "mod.lfo1.polarity", "mod.lfo1.mode", "mod.lfo1.scope",
             keyDna, keyDnaAmount, keyDnaIndividuality, keyDnaPosition, keyDnaSize, keyDnaDensity, keyDnaSpread, keyDnaTune,
+            osc1Model, osc2Model,
+            osc1DcoSaw, osc1DcoPulse, osc1DcoSub, osc1DcoPwmSource, osc1DcoPwmDepth,
+            osc2DcoSaw, osc2DcoPulse, osc2DcoSub, osc2DcoPwmSource, osc2DcoPwmDepth,
+            osc1WideWave, osc2WideWave, osc1WideShape, osc2WideShape, osc1WideSpread, osc2WideSpread,
+            ringMix, noiseColor,
+            filterModel, otaCharacter, otaSlope, otaHpf, junoVariant,
+            lfoDelay, lfoRise, vcaMode, envLink, chorusMode, chorusNoise,
+            osc1Enabled, osc2Enabled,
+            organicEnabled, organicLevel, organicPan, organicRoot, organicStart, organicLoop, organicFollow, organicReverse,
+            morphEnabled, morphPosition, morphMethod, morphCarrier, morphTexture, morphAttack, morphFormants, morphDetail,
+            morphLevelMatch, morphOutput,
         };
         jassert (list.size() == count);
         return list;
@@ -101,10 +124,32 @@ namespace
     }
 }
 
+const juce::StringArray& version4Ids()
+{
+    static const juce::StringArray list = [] {
+        juce::StringArray l;
+        for (int i = iOsc1Model; i < count; ++i)
+            l.add (ids()[i]);
+        return l;
+    }();
+    return list;
+}
+
 const juce::StringArray& engineParameterIds()
 {
     static const juce::StringArray list = [] {
-        auto l = ids();
+        // State version 4's parameters exist from the start (one schema), but a control is
+        // only offered once the engine plays it: the rest stay disabled on screen.
+        static const juce::StringArray notPlayedYet = [] {
+            juce::StringArray n;
+            for (int i = iOsc1Model; i < count; ++i)
+                n.add (ids()[i]);
+            return n;
+        }();
+        juce::StringArray l;
+        for (const auto& id : ids())
+            if (! notPlayedYet.contains (id))
+                l.add (id);
         // The wheels are read from MIDI and from the on-screen wheels.
         l.add ("midi.pitchWheel");
         l.add ("midi.modWheel");
@@ -244,6 +289,91 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent2 (keyDnaDensity, "Key DNA Density", keyDnaDefaultVariation);
     percent2 (keyDnaSpread, "Key DNA Spread", keyDnaDefaultVariation);
     percent2 (keyDnaTune, "Key DNA Tune", 0.0);
+
+    // State version 4: the oscillator models (CLASSIC, the original, by default), the OTA
+    // filter family, the chorus, ORGANIC and MORPH. Every default leaves the sound as
+    // version 3 played it.
+    auto v4 = [] (const juce::String& name) { return juce::ParameterID { name, 4 }; };
+    auto percent4 = [&] (const juce::String& name, const char* title, double value) {
+        layout.add (std::make_unique<Float> (v4 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+                                             Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    auto onOff4 = [&] (const juce::String& name, const char* title, bool value) {
+        layout.add (std::make_unique<juce::AudioParameterBool> (v4 (name), title, value));
+    };
+    auto choice4 = [&] (const juce::String& name, const char* title, juce::StringArray items, int value) {
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v4 (name), title, items, value));
+    };
+    auto time4 = [&] (const juce::String& name, const char* title, float hi, double value) {
+        layout.add (std::make_unique<Float> (v4 (name), title, skewed (0.0f, hi, 0.6f), static_cast<float> (value),
+                                             Attributes().withLabel ("s").withStringFromValueFunction (secondsText)));
+    };
+    auto bipolar4 = [&] (const juce::String& name, const char* title, float range, double value, const char* unit, int decimals) {
+        layout.add (std::make_unique<Float> (v4 (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
+                                             Attributes().withLabel (unit).withStringFromValueFunction ([unit, decimals] (float v, int) {
+                                                 return signedText (v, unit, decimals);
+                                             })));
+    };
+    const juce::StringArray models { "Classic", "DCO", "Wide" };
+    const juce::StringArray pwmSources { "Manual", "LFO", "Env" };
+    const juce::StringArray wideWaves { "Saw", "Pulse", "Triangle", "Square", "Super Saw" };
+    choice4 (osc1Model, "Osc 1 Model", models, static_cast<int> (d.osc1Model));
+    choice4 (osc2Model, "Osc 2 Model", models, static_cast<int> (d.osc2Model));
+    for (const auto* dco : { &d.dco1, &d.dco2 })
+    {
+        const bool first = dco == &d.dco1;
+        onOff4 (first ? osc1DcoSaw : osc2DcoSaw, first ? "Osc 1 DCO Saw" : "Osc 2 DCO Saw", dco->saw);
+        onOff4 (first ? osc1DcoPulse : osc2DcoPulse, first ? "Osc 1 DCO Pulse" : "Osc 2 DCO Pulse", dco->pulse);
+        percent4 (first ? osc1DcoSub : osc2DcoSub, first ? "Osc 1 DCO Sub" : "Osc 2 DCO Sub", dco->subLevel);
+        choice4 (first ? osc1DcoPwmSource : osc2DcoPwmSource, first ? "Osc 1 DCO PWM Source" : "Osc 2 DCO PWM Source", pwmSources, static_cast<int> (dco->pwmSource));
+        percent4 (first ? osc1DcoPwmDepth : osc2DcoPwmDepth, first ? "Osc 1 DCO PWM Depth" : "Osc 2 DCO PWM Depth", dco->pwmDepth);
+    }
+    choice4 (osc1WideWave, "Osc 1 Wide Wave", wideWaves, static_cast<int> (d.wide1.wave));
+    choice4 (osc2WideWave, "Osc 2 Wide Wave", wideWaves, static_cast<int> (d.wide2.wave));
+    percent4 (osc1WideShape, "Osc 1 Wide Shape", d.wide1.shape);
+    percent4 (osc2WideShape, "Osc 2 Wide Shape", d.wide2.shape);
+    percent4 (osc1WideSpread, "Osc 1 Super Saw Spread", d.wide1.spread);
+    percent4 (osc2WideSpread, "Osc 2 Super Saw Spread", d.wide2.spread);
+    percent4 (ringMix, "Ring Mod", d.ringMix);
+    choice4 (noiseColor, "Noise Color", { "White", "Juno" }, static_cast<int> (d.noiseColor));
+    choice4 (filterModel, "Filter Model", { "Ladder", "OTA" }, static_cast<int> (d.filterModel));
+    choice4 (otaCharacter, "OTA Character", { "Juno", "Jupiter" }, static_cast<int> (d.otaVoicing));
+    choice4 (otaSlope, "OTA Slope", { "24 dB", "12 dB" }, d.otaTwoPole ? 1 : 0);
+    choice4 (otaHpf, "High-Pass", { "Off", "0", "1", "2", "3" }, d.highPass + 1);
+    choice4 (junoVariant, "Juno Variant", { "6", "60", "106" }, static_cast<int> (d.junoVariant));
+    time4 (lfoDelay, "LFO Delay", 5.0f, d.lfoDelaySeconds);
+    time4 (lfoRise, "LFO Rise", 5.0f, d.lfoRiseSeconds);
+    choice4 (vcaMode, "VCA Mode", { "Env", "Gate" }, d.vcaGate ? 1 : 0);
+    onOff4 (envLink, "Env Link", d.envLink);
+    choice4 (chorusMode, "Chorus", { "Off", "I", "II", "I+II" }, d.chorusMode);
+    onOff4 (chorusNoise, "Chorus Noise", d.chorusNoise);
+    onOff4 (osc1Enabled, "Osc 1 On", d.osc1Enabled);
+    onOff4 (osc2Enabled, "Osc 2 On", d.osc2Enabled);
+    const auto& o = d.organic;
+    onOff4 (organicEnabled, "Organic On", o.enabled);
+    percent4 (organicLevel, "Organic Level", o.level);
+    bipolar4 (organicPan, "Organic Pan", 100.0f, 100.0 * o.pan, "%", 0);
+    layout.add (std::make_unique<juce::AudioParameterInt> (v4 (organicRoot), "Organic Root", -1, 127, o.rootOverride,
+                                                           juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) {
+                                                               if (v < 0)
+                                                                   return juce::String ("Auto");
+                                                               return juce::MidiMessage::getMidiNoteName (v, true, true, 4);
+                                                           })));
+    percent4 (organicStart, "Organic Start", o.start);
+    onOff4 (organicLoop, "Organic Loop", o.loop);
+    onOff4 (organicFollow, "Organic Follow Env", o.follow);
+    onOff4 (organicReverse, "Organic Reverse", o.reverse);
+    const auto& m = d.morph;
+    onOff4 (morphEnabled, "Morph On", m.enabled);
+    percent4 (morphPosition, "Morph", m.position);
+    choice4 (morphMethod, "Morph Method", { "Imprint", "Fuse", "Weave" }, static_cast<int> (m.method));
+    choice4 (morphCarrier, "Morph Carrier", { "Osc 1", "Osc 2", "Both" }, static_cast<int> (m.carrier));
+    percent4 (morphTexture, "Morph Texture", m.texture);
+    percent4 (morphAttack, "Morph Attack", m.attack);
+    bipolar4 (morphFormants, "Morph Formants", 12.0f, m.formants, "st", 1);
+    percent4 (morphDetail, "Morph Detail", m.detail);
+    onOff4 (morphLevelMatch, "Morph Level Match", m.levelMatch);
+    choice4 (morphOutput, "Morph Output", { "Morph Only", "Layered" }, static_cast<int> (m.output));
 }
 
 //==============================================================================
@@ -285,6 +415,22 @@ namespace
             case iAnalog: p.analogAmount = 0.01 * v; break;
             case iFilterDrive: p.filterDrive = 0.01 * v; break;
             case iGrainTune: p.grains.tuneSemitones = v; break;
+            case iOsc1DcoSub: p.dco1.subLevel = 0.01 * v; break;
+            case iOsc2DcoSub: p.dco2.subLevel = 0.01 * v; break;
+            case iOsc1DcoPwmDepth: p.dco1.pwmDepth = 0.01 * v; break;
+            case iOsc2DcoPwmDepth: p.dco2.pwmDepth = 0.01 * v; break;
+            case iOsc1WideShape: p.wide1.shape = 0.01 * v; break;
+            case iOsc2WideShape: p.wide2.shape = 0.01 * v; break;
+            case iOsc1WideSpread: p.wide1.spread = 0.01 * v; break;
+            case iOsc2WideSpread: p.wide2.spread = 0.01 * v; break;
+            case iRingMix: p.ringMix = 0.01 * v; break;
+            case iOrganicLevel: p.organic.level = 0.01 * v; break;
+            case iOrganicPan: p.organic.pan = 0.01 * v; break;
+            case iMorphPosition: p.morph.position = 0.01 * v; break;
+            case iMorphTexture: p.morph.texture = 0.01 * v; break;
+            case iMorphAttack: p.morph.attack = 0.01 * v; break;
+            case iMorphFormants: p.morph.formants = v; break;
+            case iMorphDetail: p.morph.detail = 0.01 * v; break;
             default: break;
         }
     }
@@ -333,6 +479,14 @@ namespace
             { iTapeFrameAge, "TAPE FRAME AGE", O::global }, { iTapeFrameStability, "TAPE FRAME STABILITY", O::global },
             { iToyboxMotion, "TOYBOX MOTION", O::global }, { iToyboxDigital, "TOYBOX DIGITAL", O::global },
             { iMirageClock, "MIRAGE CLOCK", O::global }, { iMirageFilter, "MIRAGE FILTER", O::global },
+            // State version 4 (appended).
+            { iOsc1DcoSub, "OSC 1 SUB", O::voice }, { iOsc2DcoSub, "OSC 2 SUB", O::voice },
+            { iOsc1DcoPwmDepth, "OSC 1 PWM DEPTH", O::voice }, { iOsc2DcoPwmDepth, "OSC 2 PWM DEPTH", O::voice },
+            { iOsc1WideShape, "OSC 1 SHAPE", O::voice }, { iOsc2WideShape, "OSC 2 SHAPE", O::voice },
+            { iOsc1WideSpread, "OSC 1 SPREAD", O::voice }, { iOsc2WideSpread, "OSC 2 SPREAD", O::voice },
+            { iRingMix, "RING MOD", O::voice }, { iOrganicLevel, "ORGANIC LEVEL", O::voice }, { iOrganicPan, "ORGANIC PAN", O::voice },
+            { iMorphPosition, "MORPH", O::voice }, { iMorphTexture, "MORPH TEXTURE", O::voice }, { iMorphAttack, "MORPH ATTACK", O::voice },
+            { iMorphFormants, "MORPH FORMANTS", O::voice }, { iMorphDetail, "MORPH DETAIL", O::voice },
         };
         return list;
     }
@@ -566,6 +720,56 @@ Patch Reader::readWith (const float* raw) const noexcept
     lfo.bipolar = ! on (iLfoPolarity);
     lfo.mode = static_cast<osp::mod::LfoMode> (index (iLfoMode, 3));
     lfo.scope = on (iLfoScope) ? osp::mod::Scope::poly : osp::mod::Scope::global;
+
+    // State version 4.
+    p.osc1Model = static_cast<OscModel> (index (iOsc1Model, 3));
+    p.osc2Model = static_cast<OscModel> (index (iOsc2Model, 3));
+    auto dco = [&] (DcoSettings& c, int saw, int pulse, int sub, int source, int depth) {
+        c.saw = on (saw);
+        c.pulse = on (pulse);
+        c.subLevel = 0.01 * v (sub);
+        c.pwmSource = static_cast<PwmSource> (index (source, 3));
+        c.pwmDepth = 0.01 * v (depth);
+    };
+    dco (p.dco1, iOsc1DcoSaw, iOsc1DcoPulse, iOsc1DcoSub, iOsc1DcoPwmSource, iOsc1DcoPwmDepth);
+    dco (p.dco2, iOsc2DcoSaw, iOsc2DcoPulse, iOsc2DcoSub, iOsc2DcoPwmSource, iOsc2DcoPwmDepth);
+    p.wide1 = { static_cast<WideWave> (index (iOsc1WideWave, 5)), 0.01 * v (iOsc1WideShape), 0.01 * v (iOsc1WideSpread) };
+    p.wide2 = { static_cast<WideWave> (index (iOsc2WideWave, 5)), 0.01 * v (iOsc2WideShape), 0.01 * v (iOsc2WideSpread) };
+    p.ringMix = 0.01 * v (iRingMix);
+    p.noiseColor = static_cast<NoiseColor> (index (iNoiseColor, 2));
+    p.filterModel = static_cast<FilterModel> (index (iFilterModel, 2));
+    p.otaVoicing = static_cast<OtaVoicing> (index (iOtaCharacter, 2));
+    p.otaTwoPole = index (iOtaSlope, 2) == 1;
+    p.highPass = index (iOtaHpf, 5) - 1;
+    p.junoVariant = static_cast<JunoVariant> (index (iJunoVariant, 3));
+    p.lfoDelaySeconds = v (iLfoDelay);
+    p.lfoRiseSeconds = v (iLfoRise);
+    p.vcaGate = index (iVcaMode, 2) == 1;
+    p.envLink = on (iEnvLink);
+    p.chorusMode = index (iChorusMode, 4);
+    p.chorusNoise = on (iChorusNoise);
+    p.osc1Enabled = on (iOsc1Enabled);
+    p.osc2Enabled = on (iOsc2Enabled);
+    auto& o = p.organic;
+    o.enabled = on (iOrganicEnabled);
+    o.level = 0.01 * v (iOrganicLevel);
+    o.pan = 0.01 * v (iOrganicPan);
+    o.rootOverride = std::clamp (juce::roundToInt (at (iOrganicRoot)), -1, 127);
+    o.start = 0.01 * v (iOrganicStart);
+    o.loop = on (iOrganicLoop);
+    o.follow = on (iOrganicFollow);
+    o.reverse = on (iOrganicReverse);
+    auto& m = p.morph;
+    m.enabled = on (iMorphEnabled);
+    m.position = 0.01 * v (iMorphPosition);
+    m.method = static_cast<MorphMethod> (index (iMorphMethod, 3));
+    m.carrier = static_cast<MorphCarrier> (index (iMorphCarrier, 3));
+    m.texture = 0.01 * v (iMorphTexture);
+    m.attack = 0.01 * v (iMorphAttack);
+    m.formants = v (iMorphFormants);
+    m.detail = 0.01 * v (iMorphDetail);
+    m.levelMatch = on (iMorphLevelMatch);
+    m.output = static_cast<MorphOutput> (index (iMorphOutput, 2));
     return p;
 }
 
@@ -726,6 +930,58 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iLfoPolarity, p.lfo.bipolar ? 0.0 : 1.0);
     put (iLfoMode, static_cast<int> (p.lfo.mode));
     put (iLfoScope, p.lfo.scope == osp::mod::Scope::poly ? 1.0 : 0.0);
+    put (iOsc1Model, static_cast<int> (p.osc1Model));
+    put (iOsc2Model, static_cast<int> (p.osc2Model));
+    auto dco = [&] (const DcoSettings& c, int saw, int pulse, int sub, int source, int depth) {
+        put (saw, c.saw ? 1.0 : 0.0);
+        put (pulse, c.pulse ? 1.0 : 0.0);
+        put (sub, 100.0 * c.subLevel);
+        put (source, static_cast<int> (c.pwmSource));
+        put (depth, 100.0 * c.pwmDepth);
+    };
+    dco (p.dco1, iOsc1DcoSaw, iOsc1DcoPulse, iOsc1DcoSub, iOsc1DcoPwmSource, iOsc1DcoPwmDepth);
+    dco (p.dco2, iOsc2DcoSaw, iOsc2DcoPulse, iOsc2DcoSub, iOsc2DcoPwmSource, iOsc2DcoPwmDepth);
+    put (iOsc1WideWave, static_cast<int> (p.wide1.wave));
+    put (iOsc2WideWave, static_cast<int> (p.wide2.wave));
+    put (iOsc1WideShape, 100.0 * p.wide1.shape);
+    put (iOsc2WideShape, 100.0 * p.wide2.shape);
+    put (iOsc1WideSpread, 100.0 * p.wide1.spread);
+    put (iOsc2WideSpread, 100.0 * p.wide2.spread);
+    put (iRingMix, 100.0 * p.ringMix);
+    put (iNoiseColor, static_cast<int> (p.noiseColor));
+    put (iFilterModel, static_cast<int> (p.filterModel));
+    put (iOtaCharacter, static_cast<int> (p.otaVoicing));
+    put (iOtaSlope, p.otaTwoPole ? 1.0 : 0.0);
+    put (iOtaHpf, p.highPass + 1);
+    put (iJunoVariant, static_cast<int> (p.junoVariant));
+    put (iLfoDelay, p.lfoDelaySeconds);
+    put (iLfoRise, p.lfoRiseSeconds);
+    put (iVcaMode, p.vcaGate ? 1.0 : 0.0);
+    put (iEnvLink, p.envLink ? 1.0 : 0.0);
+    put (iChorusMode, p.chorusMode);
+    put (iChorusNoise, p.chorusNoise ? 1.0 : 0.0);
+    put (iOsc1Enabled, p.osc1Enabled ? 1.0 : 0.0);
+    put (iOsc2Enabled, p.osc2Enabled ? 1.0 : 0.0);
+    const auto& o = p.organic;
+    put (iOrganicEnabled, o.enabled ? 1.0 : 0.0);
+    put (iOrganicLevel, 100.0 * o.level);
+    put (iOrganicPan, 100.0 * o.pan);
+    put (iOrganicRoot, o.rootOverride);
+    put (iOrganicStart, 100.0 * o.start);
+    put (iOrganicLoop, o.loop ? 1.0 : 0.0);
+    put (iOrganicFollow, o.follow ? 1.0 : 0.0);
+    put (iOrganicReverse, o.reverse ? 1.0 : 0.0);
+    const auto& mo = p.morph;
+    put (iMorphEnabled, mo.enabled ? 1.0 : 0.0);
+    put (iMorphPosition, 100.0 * mo.position);
+    put (iMorphMethod, static_cast<int> (mo.method));
+    put (iMorphCarrier, static_cast<int> (mo.carrier));
+    put (iMorphTexture, 100.0 * mo.texture);
+    put (iMorphAttack, 100.0 * mo.attack);
+    put (iMorphFormants, mo.formants);
+    put (iMorphDetail, 100.0 * mo.detail);
+    put (iMorphLevelMatch, mo.levelMatch ? 1.0 : 0.0);
+    put (iMorphOutput, static_cast<int> (mo.output));
     return m;
 }
 
