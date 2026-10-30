@@ -28,8 +28,167 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     prepared = true;
 }
 
+//==============================================================================
+// MORPH's analysis thread.
+
+class AnalogEngine::Analyser final : public juce::Thread
+{
+public:
+    explicit Analyser (AnalogEngine& e) : juce::Thread ("ANDOR Analog morph analysis"), engine (e) { startThread (juce::Thread::Priority::low); }
+    ~Analyser() override
+    {
+        cancelling = true;
+        signalThreadShouldExit();
+        notify();
+        stopThread (10000);
+    }
+
+    void request (std::shared_ptr<const osp::plugin::LoadedInstrument> source)
+    {
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            wanted = std::move (source);
+            hasRequest = true;
+            state = wanted != nullptr ? "Analysing ORGANIC's recording for MORPH" : "Load a recording onto ORGANIC to morph";
+        }
+        cancelling = true;   // (a newer recording: the one being analysed is not needed)
+        notify();
+    }
+
+    juce::String status() const
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        return state;
+    }
+
+    void run() override
+    {
+        while (! threadShouldExit())
+        {
+            std::shared_ptr<const osp::plugin::LoadedInstrument> source;
+            {
+                const std::lock_guard<std::mutex> lock (mutex);
+                if (hasRequest)
+                {
+                    source = wanted;
+                    hasRequest = false;
+                    cancelling = false;
+                }
+            }
+            if (source != nullptr && source->model != nullptr && source->model->isValid())
+                analyse (source);
+            else if (source == nullptr)
+                collect();
+            wait (250);
+            collect();
+        }
+    }
+
+private:
+    void analyse (const std::shared_ptr<const osp::plugin::LoadedInstrument>& source)
+    {
+        auto box = std::make_shared<ProfileBox>();
+        box->model = source->model.get();
+        box->source = source;
+        const auto key = source->contentHash;
+        std::shared_ptr<const ProfileBox> cached;
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            for (const auto& [k, p] : cache)
+                if (k == key && ! key.empty())
+                    cached = p;
+        }
+        if (cached != nullptr)
+            box->profile = cached->profile;
+        else
+        {
+            // The recording as ANDOR OSP prepared it, summed to mono (as the voices play it).
+            const auto& src = *source->model->original.source;
+            std::vector<float> mono (static_cast<std::size_t> (src.numFrames()), 0.0f);
+            for (int ch = 0; ch < src.numChannels(); ++ch)
+            {
+                const float* d = src.channelData (ch);   // (the first frame: the padding is before it)
+                for (std::size_t i = 0; i < mono.size(); ++i)
+                    mono[i] += d[i] / static_cast<float> (src.numChannels());
+            }
+            box->profile = morph::analyse (mono.data(), static_cast<std::int64_t> (mono.size()), src.sampleRate(), {}, &cancelling);
+            if (cancelling.load())
+                return;
+        }
+        std::shared_ptr<const ProfileBox> published = box;
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            if (! key.empty() && cached == nullptr)
+            {
+                cache.emplace_back (key, published);
+                if (cache.size() > 4)
+                    cache.erase (cache.begin());
+            }
+            boxes.push_back (published);
+            state = box->profile.kind == morph::MorphProfile::Kind::pitched
+                        ? juce::String()
+                        : "MORPH needs a pitched recording: " + juce::String (box->profile.status) + " (the sources play as they are)";
+        }
+        engine.pending.store (published.get(), std::memory_order_release);
+    }
+
+    /** Frees the profiles the audio thread no longer reads (never the newest, never the one in use). */
+    void collect()
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        const auto* used = engine.inUse.load (std::memory_order_acquire);
+        const auto* next = engine.pending.load (std::memory_order_acquire);
+        for (std::size_t i = 0; i + 1 < boxes.size();)
+        {
+            if (boxes[i].get() != used && boxes[i].get() != next)
+                boxes.erase (boxes.begin() + static_cast<long> (i));
+            else
+                ++i;
+        }
+    }
+
+    AnalogEngine& engine;
+    mutable std::mutex mutex;
+    std::shared_ptr<const osp::plugin::LoadedInstrument> wanted;
+    bool hasRequest = false;
+    std::atomic<bool> cancelling { false };
+    juce::String state = "Load a recording onto ORGANIC to morph";
+    std::vector<std::shared_ptr<const ProfileBox>> boxes;
+    std::vector<std::pair<std::string, std::shared_ptr<const ProfileBox>>> cache;
+};
+
+AnalogEngine::AnalogEngine (int oversampling) : oversamplingFactor (oversampling) {}
+
+AnalogEngine::~AnalogEngine()
+{
+    analyser.reset();   // (before the synth that may read a profile goes)
+}
+
+void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin::LoadedInstrument> source)
+{
+    if (layer != 1)
+        return;
+    if (analyser == nullptr)
+        analyser = std::make_unique<Analyser> (*this);
+    analyser->request (std::move (source));
+}
+
+juce::String AnalogEngine::status (const juce::String& topic) const
+{
+    if (topic != "morph")
+        return {};
+    return analyser != nullptr ? analyser->status() : juce::String ("Load a recording onto ORGANIC to morph");
+}
+
 void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept
 {
+    // MORPH: a profile finished on the analysis thread (it describes the model it names: the
+    // synth uses it only while that model plays).
+    if (const auto* box = pending.exchange (nullptr, std::memory_order_acq_rel))
+    {
+        synth.setMorphProfile (&box->profile, box->model);
+        inUse.store (box, std::memory_order_release);
+    }
     const int total = buffer.getNumSamples();
     if (! prepared || total <= 0 || buffer.getNumChannels() == 0)
         return;
@@ -198,33 +357,85 @@ bool AnalogEngine::sourcePicture (int, const juce::AudioProcessorValueTreeState&
 std::vector<float> AnalogEngine::pictureOf (const Patch& p, int points)
 {
     // One period of OSC 1 (or, synced, of OSC 2, the master): the two oscillators as the
-    // mixer blends them, without the filter. LOW FREQ OSC 2 is a modulator: not drawn.
-    const auto w1 = osc::wavesOf (p.osc1Wave);
-    const auto w2 = osc::wavesOf (p.osc2Wave);
+    // mixer blends them, each in its model, without the filter. LOW FREQ OSC 2 is a
+    // modulator: not drawn. A DCO's sub needs two periods to show its octave: then two are
+    // drawn.
+    auto plan = [&p] (int slot) {
+        osc::SlotPlan s;
+        s.model = slot == 1 ? p.osc1Model : p.osc2Model;
+        if (s.model == OscModel::classic)
+            s.waves = slot == 1 ? osc::wavesOf (p.osc1Wave) : osc::wavesOf (p.osc2Wave);
+        else if (s.model == OscModel::dco)
+        {
+            const auto& c = slot == 1 ? p.dco1 : p.dco2;
+            s.waves = osc::wavesOf (c);
+            s.subLevel = static_cast<float> (c.subLevel);
+        }
+        else
+        {
+            const auto& w = slot == 1 ? p.wide1 : p.wide2;
+            s.waves = osc::wavesOf (w.wave);
+            s.squareWidth = w.wave == WideWave::square;
+            s.superSaw = w.wave == WideWave::superSaw;
+        }
+        return s;
+    };
+    const auto plan1 = plan (1), plan2 = plan (2);
+    const double spread1 = p.wide1.spread, spread2 = p.wide2.spread;
+    // A slot's naive value at `phase` (cycle `n` of its own, for the sub's octave).
+    auto value = [] (const osc::SlotPlan& s, double phase, int n, float width, double spread) {
+        if (s.squareWidth)
+            width = 0.5f;
+        float v = osc::naive (s.waves, phase, width);
+        if (s.subLevel > 0.0f)
+            v += (n % 2 == 0 ? 1.0f : -1.0f) * s.subLevel;
+        if (s.superSaw && spread > 0.0)
+        {
+            // The side saws drawn where their detune has carried them a little way (a still
+            // picture of a moving sound), at the level the engine gives them.
+            const float side = osc::superSawSideLevel (spread);
+            float sum = v;
+            for (int i = 0; i < osc::superSawSides; ++i)
+            {
+                double q = phase + 0.11 * osc::superSawOffsets[static_cast<std::size_t> (i)] * (0.3 + spread);
+                q -= std::floor (q);
+                sum += side * static_cast<float> (2.0 * q - 1.0);
+            }
+            v = sum * osc::superSawNormal (side);
+        }
+        return v;
+    };
     const double pitch1 = 12.0 * p.osc1Octave + p.osc1Coarse;
     const double pitch2 = 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0;
     const double ratio21 = std::exp2 ((pitch2 - pitch1) / 12.0);
     const double theta = p.blend * 1.5707963267948966;
-    const auto g1 = static_cast<float> (p.osc1Level * std::min (1.0, 1.41421356 * std::cos (theta)));
-    const auto g2 = static_cast<float> (p.osc2LowFrequency ? 0.0 : p.osc2Level * std::min (1.0, 1.41421356 * std::sin (theta)));
+    const auto g1 = static_cast<float> (p.osc1Enabled ? p.osc1Level * std::min (1.0, 1.41421356 * std::cos (theta)) : 0.0);
+    const auto g2 = static_cast<float> (p.osc2LowFrequency || ! p.osc2Enabled ? 0.0 : p.osc2Level * std::min (1.0, 1.41421356 * std::sin (theta)));
+    const auto ring = static_cast<float> (std::clamp (p.ringMix, 0.0, 1.0));
+    const double periods = plan1.subLevel > 0.0f || plan2.subLevel > 0.0f ? 2.0 : 1.0;
     std::vector<float> cycle (static_cast<std::size_t> (std::max (2, points)));
     for (std::size_t i = 0; i < cycle.size(); ++i)
     {
-        const double t = static_cast<double> (i) / static_cast<double> (cycle.size());
-        double phase1, phase2;
+        const double t = periods * static_cast<double> (i) / static_cast<double> (cycle.size());
+        double cycles1, cycles2;
         if (p.sync && ! p.osc2LowFrequency)
         {
-            phase2 = t;
-            const double slave = t / ratio21;   // OSC 1's cycles within one of OSC 2's
-            phase1 = slave - std::floor (slave);
+            cycles2 = t;
+            const double inMaster = t - std::floor (t);
+            cycles1 = std::floor (t) * 1.0e3 + inMaster / ratio21;   // (restarted every master cycle)
         }
         else
         {
-            phase1 = t;
-            const double b = t * ratio21;
-            phase2 = b - std::floor (b);
+            cycles1 = t;
+            cycles2 = t * ratio21;
         }
-        cycle[i] = g1 * osc::naive (w1, phase1, static_cast<float> (p.osc1Width)) + g2 * osc::naive (w2, phase2, static_cast<float> (p.osc2Width));
+        const double phase1 = cycles1 - std::floor (cycles1), phase2 = cycles2 - std::floor (cycles2);
+        const float o1 = value (plan1, phase1, static_cast<int> (std::floor (cycles1)), static_cast<float> (p.osc1Width), spread1);
+        const float o2 = value (plan2, phase2, static_cast<int> (std::floor (cycles2)), static_cast<float> (p.osc2Width), spread2);
+        float mix = g1 * o1 + g2 * o2;
+        if (ring > 0.0f)
+            mix += ring * (1.7f * o1 * o2 * 0.5f * (g1 + g2) - mix);
+        cycle[i] = mix;
     }
     return cycle;
 }

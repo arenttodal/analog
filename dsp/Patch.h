@@ -16,6 +16,71 @@ enum class Osc1Wave { saw, pulse, sawPulse };
 /** OSC 2's waveforms, any combination of SAW, TRI and PULSE (index order is the parameter's). */
 enum class Osc2Wave { saw, triangle, pulse, sawTriangle, sawPulse, trianglePulse, all };
 enum class PhaseMode { free, reset };
+
+// State version 4 (one shared setup for the oscillator models, the OTA filter family, the
+// chorus, ORGANIC and MORPH). Index orders are the parameters' choice orders: frozen.
+
+/** Each oscillator slot's sound model: CLASSIC (the original oscillator, unchanged), DCO (a
+    pitch-stable compound oscillator after the Juno family), WIDE (a VCO after the Jupiter-8,
+    with an optional modern SUPER SAW). */
+enum class OscModel { classic, dco, wide };
+/** What sweeps a DCO's pulse width: the knob alone, LFO 1, or the filter envelope. */
+enum class PwmSource { manual, lfo, env };
+enum class WideWave { saw, pulse, triangle, square, superSaw };
+enum class FilterModel { ladder, ota };
+enum class OtaVoicing { juno, jupiter };
+enum class JunoVariant { juno6, juno60, juno106 };
+enum class NoiseColor { white, juno };
+enum class MorphMethod { imprint, fuse, weave };
+enum class MorphCarrier { osc1, osc2, both };
+enum class MorphOutput { morphOnly, layered };
+
+/** A DCO slot's settings (its pulse width is the slot's WIDTH, its tuning and level the slot's). */
+struct DcoSettings
+{
+    bool saw = true, pulse = false;
+    double subLevel = 0.0;        ///< 0..1: the square one octave down (true divide-by-two)
+    PwmSource pwmSource = PwmSource::manual;
+    double pwmDepth = 0.0;        ///< 0..1: how far LFO 1 or the envelope sweeps the width
+};
+
+/** A WIDE slot's settings (pulse width: the slot's WIDTH). */
+struct WideSettings
+{
+    WideWave wave = WideWave::saw;
+    double shape = 0.5;           ///< 0..1: the wave's edge (0 soft .. 0.5 calibrated .. 1 raw)
+    double spread = 0.0;          ///< 0..1: SUPER SAW's detune (0: one saw, centred)
+};
+
+/** The ORGANIC source: a recording played by each voice. The file is the shell's layer B and
+    these are its card's settings (ANDOR OSP's layerB.*, same meaning), plus the root override. */
+struct OrganicSettings
+{
+    bool heard = true;            ///< not muted (or silenced by the other card's solo)
+    double levelDb = 0.0;         ///< the card's LEVEL (-48 dB and below: silent)
+    double pan = 0.0;             ///< -1..1
+    double tuneSemitones = 0.0;
+    int rootOverride = -1;        ///< MIDI note; < 0: the analysis' root (AUTO)
+    double start = 0.0;           ///< 0..1 of the recording
+    bool loop = true;             ///< hold a sustaining recording through its loop region
+    bool follow = true;           ///< its level follows the AMP envelope (off: it plays out its natural length)
+    bool reverse = false;
+};
+
+/** MORPH: the recording turned into the chosen analog carrier. */
+struct MorphSettings
+{
+    bool enabled = false;
+    double position = 0.0;        ///< 0 the recording .. 1 the carrier
+    MorphMethod method = MorphMethod::imprint;
+    MorphCarrier carrier = MorphCarrier::both;
+    double texture = 0.5;         ///< 0..1: the recording's noise / bow residue
+    double attack = 0.5;          ///< 0..1: the recording's attack kept
+    double formants = 0.0;        ///< semitones -12..12: the acoustic envelope moved
+    double detail = 0.5;          ///< 0..1: how many partials / bands take part
+    bool levelMatch = true;
+    MorphOutput output = MorphOutput::morphOnly;
+};
 enum class VoiceMode { poly, mono };
 
 /** The first version's own LFO divisions (analog.lfo.division, slowest first), kept to read
@@ -78,6 +143,14 @@ struct Patch
 
     double noiseLevel = 0.0;
     bool sync = false;
+
+    // State version 4: each slot's model and its settings, the pair's ring modulation.
+    OscModel osc1Model = OscModel::classic, osc2Model = OscModel::classic;
+    DcoSettings dco1, dco2;
+    WideSettings wide1, wide2;
+    double ringMix = 0.0;         ///< 0..1: OSC 1 x OSC 2 mixed in (OSC 2 LEVEL scales it)
+    bool osc1Enabled = true, osc2Enabled = true;
+    NoiseColor noiseColor = NoiseColor::white;
     /** BLEND: 0 OSC 1 only .. 0.5 both at their levels .. 1 OSC 2 only (equal power). */
     double blend = 0.5;
 
@@ -95,11 +168,20 @@ struct Patch
     double filterDrive = 0.0;    ///< FILTER DRIVE 0..1: the ladder's input saturation
     double driveBias = 0.0;      ///< 0..1: asymmetry (even harmonics)
     double driveTrimDb = 0.0;    ///< -12..+6 dB after the filter
+    // State version 4: the filter model (LADDER: the original), the OTA family's voicing and
+    // slope, the high-pass before it (< 0 off; 0..3 the variant's positions).
+    FilterModel filterModel = FilterModel::ladder;
+    OtaVoicing otaVoicing = OtaVoicing::juno;
+    bool otaTwoPole = false;
+    int highPass = -1;
+    JunoVariant junoVariant = JunoVariant::juno60;
 
     // Envelopes (seconds; sustain 0..1).
     double filterAttack = 0.008, filterDecay = 0.5, filterSustain = 0.2, filterRelease = 0.35;
     double ampAttack = 0.002, ampDecay = 0.6, ampSustain = 1.0, ampRelease = 0.7;
     double velocityRangeDb = 30.0;   ///< 0..48: how much softer the softest note is
+    bool vcaGate = false;            ///< state version 4: the amplitude is a gate (the envelope only shapes the filter)
+    bool envLink = false;            ///< state version 4: the amplitude follows the filter envelope's ADSR
 
     // LFO (global, as on the original instrument): ANDOR OSP's LFO 1 (shape, rate or sync,
     // phase, polarity, free / retrigger / one shot; CUSTOM is its drawn curve, Synth::setLfoCurve).
@@ -110,6 +192,8 @@ struct Patch
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45
     double lfoWidth2 = 0.15;
     double lfoCutoff = 0.0;         ///< semitones, -48..48
+    double lfoDelaySeconds = 0.0;   ///< state version 4: each note's LFO depths wait this long ...
+    double lfoRiseSeconds = 0.0;    ///< ... then fade in over this long (the Juno's DELAY)
 
     // Poly Mod: sources (0..1) and destinations.
     double polyModEnv = 0.0;
@@ -153,6 +237,12 @@ struct Patch
     double space = 0.10;          ///< wet 0..1
     double echo = 0.0;            ///< wet 0..1
     osp::Shaping effects;
+
+    // State version 4: the chorus after the voices (0 OFF, 1 I, 2 II, 3 I+II), ORGANIC, MORPH.
+    int chorusMode = 0;
+    bool chorusNoise = false;
+    OrganicSettings organic;
+    MorphSettings morph;
 };
 
 } // namespace andor::analog

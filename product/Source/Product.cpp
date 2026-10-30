@@ -15,7 +15,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-3";
+    constexpr const char* factoryVersion = "analog-factory-4";
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -52,6 +52,17 @@ namespace
         host.setParameterValue (p::osc1Level, static_cast<float> (100.0 * level1));
         host.setParameterValue (p::osc2Level, static_cast<float> (100.0 * level2));
         host.setParameterValue (p::blend, 50.0f);
+    }
+
+    /** Version 4 (the oscillator models, the OTA filter family, the chorus, ORGANIC and MORPH,
+        all in one step): an older session or preset has none of their parameters, so each is
+        set to its default (CLASSIC + CLASSIC, LADDER, chorus off, ORGANIC off, MORPH off):
+        exactly the sound it had. Nothing it stored is changed. */
+    void migrateFromVersion3 (osp::plugin::InstrumentHost& host)
+    {
+        for (const auto& id : andor::analog::params::version4Ids())
+            if (auto* parameter = host.apvts().getParameter (id))
+                host.setParameterValue (id, parameter->convertFrom0to1 (parameter->getDefaultValue()));
     }
 
     juce::String safeFileName (const std::string& name)
@@ -130,7 +141,7 @@ const ProductInfo& productInfo()
         // ANDOR OSP). DRIVE, MOVEMENT, SPACE and ECHO are ANDOR OSP's own (parameters,
         // popovers and sound); FILTER is the instrument's. The first is not assigned yet: it
         // shows ANDOR OSP's LIFE knob, which the engine does not read, so it is disabled.
-        p.macros = { { { "life", juce::String::fromUTF8 ("\xe2\x80\x94"), "Not assigned yet" },
+        p.macros = { { { andor::analog::params::morphPosition, "MORPH", "Morph: ORGANIC's recording into the oscillators (IMPRINT, FUSE, WEAVE)" },
                        { "drive", "DRIVE", "Drive: saturation of the whole sound (tube, tape or crunch)" },
                        { andor::analog::params::tone, "FILTER", "Filter: the four-pole filter's cutoff (resonance, envelope, filter drive, LFO amount behind it)" },
                        { "motion", "MOVEMENT", "Movement: drift, tape, chorus, pulse or a rhythmic shaper" },
@@ -142,15 +153,21 @@ const ProductInfo& productInfo()
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
         // envelope, the generator's level, pan, tune, REIMAGINED and grains) and these.
         p.modulationDestinations = andor::analog::params::modulationDestinations();
-        // The card's first knob is DETUNE (OSC 2 against OSC 1); its name opens the oscillators.
-        p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE",
-                                    [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorPopover (host); } };
-        p.stateVersion = 3;
+        // The card's first knob is DETUNE (OSC 2 against OSC 1), a plain control; the card's
+        // heading, OSCILLATORS beside M and S, opens the oscillators' settings.
+        p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE", nullptr };
+        p.generatorHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorPopover (host); };
+        // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
+        // sample store, card and recall).
+        p.hybridSampleName = "ORGANIC";
+        p.stateVersion = 4;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
             if (from < 3)
                 migrateFromVersion2 (host);
+            if (from < 4)
+                migrateFromVersion3 (host);
         };
         return p;
     }();

@@ -39,6 +39,9 @@ add_subdirectory(${ANALOG_OSP_DIR} osp)
 add_library(analog_dsp STATIC
     dsp/FactoryPatches.cpp
     dsp/HalfBand.cpp
+    dsp/JunoChorus.cpp
+    dsp/morph/MorphAnalyzer.cpp
+    dsp/morph/MorphVoice.cpp
     dsp/LiveGranulator.cpp
     dsp/Synth.cpp)
 target_include_directories(analog_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/dsp)
@@ -60,9 +63,17 @@ if(OSP_BUILD_TESTS)
         tests/RealtimeTests.cpp
         tests/LiveTests.cpp
         tests/ModulationTests.cpp
+        tests/LegacyTests.cpp
+        tests/OtaFilterTests.cpp
+        tests/ChorusTests.cpp
+        tests/ModelTests.cpp
+        tests/OrganicTests.cpp
+        tests/MorphAnalysisTests.cpp
+        tests/MorphTests.cpp
         tools/Wav.cpp)
     target_include_directories(analog_dsp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/tools)
     target_link_libraries(analog_dsp_tests PRIVATE analog_dsp Catch2::Catch2WithMain)
+    target_compile_definitions(analog_dsp_tests PRIVATE ANALOG_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
     osp_set_warnings(analog_dsp_tests)
     add_test(NAME analog_dsp_tests COMMAND analog_dsp_tests)
 endif()

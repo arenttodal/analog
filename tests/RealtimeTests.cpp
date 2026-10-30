@@ -4,6 +4,7 @@
 #include "TestUtil.h"
 
 #include "FactoryPatches.h"
+#include "morph/MorphAnalyzer.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -142,6 +143,139 @@ TEST_CASE ("realtime: modulation (routes, a product control, controllers, reset)
         synth.render (left.data(), right.data(), 512);
     }
     synth.reset();
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: the oscillator models, RING, the OTA, the high-pass and the chorus never allocate", "[realtime][models]")
+{
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    Patch p;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 240; ++block)
+    {
+        p.osc1Model = static_cast<OscModel> (block / 8 % 3);
+        p.osc2Model = static_cast<OscModel> (block / 24 % 3);
+        p.wide1.wave = static_cast<WideWave> (block / 5 % 5);
+        p.wide1.spread = (block % 7) / 7.0;
+        p.dco2.subLevel = 0.5;
+        p.dco2.pwmSource = static_cast<PwmSource> (block % 3);
+        p.dco2.pwmDepth = 0.5;
+        p.ringMix = block % 40 < 20 ? 0.6 : 0.0;
+        p.noiseLevel = 0.2;
+        p.noiseColor = static_cast<NoiseColor> (block / 30 % 2);
+        p.filterModel = static_cast<FilterModel> (block / 16 % 2);
+        p.otaVoicing = static_cast<OtaVoicing> (block / 32 % 2);
+        p.otaTwoPole = block % 50 < 25;
+        p.highPass = block / 12 % 5 - 1;
+        p.chorusMode = block / 20 % 4;
+        p.chorusNoise = block % 2 == 0;
+        p.lfoDelaySeconds = 0.1;
+        p.lfoRiseSeconds = 0.2;
+        p.vcaGate = block % 60 < 10;
+        p.envLink = block % 60 > 50;
+        p.sync = block % 9 < 4;
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 40) % 48), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: ORGANIC (notes, loops, a recording replaced while it plays) never allocates", "[realtime][organic]")
+{
+    auto make = [] (double hz) {
+        osp::AudioData audio;
+        audio.sampleRate = 44100.0;
+        std::vector<float> x (44100);
+        for (std::size_t i = 0; i < x.size(); ++i)
+            x[i] = static_cast<float> (0.5 * std::sin (2.0 * 3.14159265358979 * hz * static_cast<double> (i) / 44100.0));
+        audio.channels = { x };
+        auto m = std::make_shared<osp::InstrumentModel>();
+        m->original.source = std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
+        m->original.continuation.canSustain = true;
+        m->original.continuation.jumps.push_back ({ 30000.0, 8000.0, 400.0, 1.0f, 1.0f });
+        m->original.continuation.backstop = 0;
+        return m;
+    };
+    const auto a = make (220.0), b = make (330.0);
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    Patch p;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 200; ++block)
+    {
+        if (block % 25 == 0)
+            synth.setOrganic (block % 50 == 0 ? a.get() : b.get());
+        p.organic.reverse = block % 60 > 40;
+        p.organic.follow = block % 70 < 50;
+        p.osc1Model = static_cast<OscModel> (block % 3);
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 40) % 48), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    synth.setOrganic (nullptr);
+    synth.render (left.data(), right.data(), 512);
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position moving) never allocates", "[realtime][morph]")
+{
+    osp::AudioData audio;
+    audio.sampleRate = 48000.0;
+    std::vector<float> x (96000);
+    for (std::size_t i = 0; i < x.size(); ++i)
+    {
+        const double t = static_cast<double> (i) / 48000.0;
+        x[i] = static_cast<float> (0.3 * std::sin (2.0 * 3.14159265358979 * 220.0 * t) + 0.15 * std::sin (2.0 * 3.14159265358979 * 660.0 * t));
+    }
+    audio.channels = { x };
+    auto model = std::make_shared<osp::InstrumentModel>();
+    model->original.source = std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
+    const auto profile = andor::analog::morph::analyse (x.data(), static_cast<std::int64_t> (x.size()), 48000.0);
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    Patch p;
+    p.morph.enabled = true;
+    synth.setPatch (p);
+    synth.reset();
+    synth.setOrganic (model.get());
+    synth.setMorphProfile (&profile, model.get());
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 180; ++block)
+    {
+        p.morph.method = static_cast<MorphMethod> (block / 20 % 3);
+        p.morph.carrier = static_cast<MorphCarrier> (block / 7 % 3);
+        p.morph.output = static_cast<MorphOutput> (block / 45 % 2);
+        p.morph.position = (block % 30) / 29.0;
+        p.morph.formants = (block % 11) - 5.0;
+        p.morph.detail = (block % 13) / 12.0;
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (40 + block % 36), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (40 + (block + 30) % 36), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
     counting = false;
     CHECK (allocations.load() == 0);
 }

@@ -27,6 +27,10 @@ struct FactoryPatch
 /** A factory sound's KEY DNA as the engine takes it (seeded from the patch's variation seed). */
 osp::keydna::Settings keyDnaOf (const FactoryPatch& patch);
 
+/** How many of the factory sounds existed before state version 4 (the first ones, unchanged:
+    tests/LegacyTests.cpp holds them to their stored renders). */
+constexpr int legacyFactoryCount = 34;
+
 /** Every factory sound (synthesized only: no samples, no outside files). */
 const std::vector<FactoryPatch>& factoryPatches();
 

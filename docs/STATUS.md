@@ -1,11 +1,11 @@
 # ANDOR ANALOG — status
 
-_29 October 2026, version 2 with the arpeggiator, the whole modulation panel and the grains on
-the card. Built and tested on Linux x86-64 (GCC 13, Xvfb); the macOS build, its tests and auval
-pass in CI (`plugin-macos`), the Windows build and its tests too (`plugin-windows`, 64-bit MSVC).
-No DAW session, pluginval, signing or formal listening test yet; the owner has played version 1
-and version 2 (the macOS test builds). Queued, not started: V3_ORGANIC_MORPH_SPEC.md, then
-JUNO_ENGINE_SPEC.md (they share the oscillator-model parameters)._
+_30 October 2026: state version 4, the unified expansion (docs/UNIFIED_ANALOG_EXPANSION_PLAN.md).
+Each slot can be CLASSIC, DCO or WIDE. There are now OTA filters, a high-pass, a chorus, Juno
+modulation, ORGANIC (one recording beside the oscillators) and MORPH (IMPRINT, FUSE, WEAVE).
+Built and tested on Linux x86-64 (GCC 13, Xvfb): every suite plus ASan/UBSan on the engine.
+macOS and Windows: CI. No DAW session, pluginval or formal listening test yet. A listening
+package was rendered (20 tracks)._
 
 | Area | State | Evidence |
 |---|---|---|
@@ -43,6 +43,20 @@ JUNO_ENGINE_SPEC.md (they share the oscillator-model parameters)._
 | Linux VST3 and Standalone build | ✅ built | `ANDOR_Analog_All` |
 | macOS build, AU, auval | ✅ done (CI) | `plugin-macos`: build, ctest, `auval -v aumu Aanl Ospx`, the test-build zip |
 | Windows build (VST3, standalone; 64-bit) | ✅ done (CI) | `plugin-windows`: Visual Studio 2022, the engine's and the product's tests, the test-build zip with Install.bat |
+| **State version 4** (one migration: models, OTA, chorus, ORGANIC, MORPH; 44 parameters appended; V1→V2→V3→V4) | ✅ done and tested | `analog: a version-3 session opens with every version-4 setting neutral and sounds as it did`; schema golden |
+| Legacy sounds unchanged (34 factory + 6 edge patches, 3 rates; exact hashes on Linux, contours everywhere) | ✅ done and tested | `[legacy]` (tests/golden/legacy-renders.txt) |
+| OSCILLATORS heading (beside M/S) opens the oscillators' settings; DETUNE only tunes | ✅ done and tested | `analog: OSCILLATORS beside M and S ...` (click, toggle, outside, Escape, Return/Space, M/S untouched); ANDOR OSP pixel-identical (design capture) |
+| DCO model: saw/pulse, divide-by-two sub, PWM (manual/LFO/env), pitch-stable (1/5 tolerance, 1/10 wander) | ✅ done and tested | `[models][dco]` |
+| WIDE model: saw/pulse/triangle/square, SHAPE (pitch-tracking edge), SUPER SAW (7 saws, exact single saw at spread 0) | ✅ done and tested | `[models][wide]`, `[supersaw]`; aliasing at C7 ≤ −67.8 dB |
+| All 9 model pairings with sync and Poly Mod; RING MOD; JUNO noise; slot on/off | ✅ done and tested | `[models][pairs]`, `[ring]`, `[noise]` |
+| OTA filter (Juno/Jupiter, 24/12 dB, 2 solves/sample), ladder↔OTA crossfade; high-pass (Juno 6/60/106, Jupiter) | ✅ done and tested / ⚠️ HPF frequencies approximations (Jupiter's unsourced) | `[ota]`, `[hpf]`, `[models][ota]` |
+| Juno-style BBD chorus (I, II, I+II, hiss), after the voices; OFF bit-exact | ✅ done and tested / ⚠️ rates from public write-ups | `[chorus]` |
+| LFO DELAY/RISE, VCA GATE, ENV LINK | ✅ done and tested | `[models][juno]` |
+| OSCILLATORS/FILTER/MORPH popovers: each model's own controls only; fit the window | ✅ done and tested / ⚠️ reviewed as screenshots | `analog: the OSCILLATORS and FILTER popovers ...` |
+| 10 version-4 factory sounds (44 in all), factory set 4 | ✅ done and tested / ⚠️ voiced without listening | headroom, distinctness, trip through parameters |
+| ORGANIC: one recording on the shell's layer B (OSP loader, store, card, recall/relocation), played per voice through the filter; LOOP (OSP continuation), REVERSE, FOLLOW, root override, swap without a click | ✅ done and tested | `[organic]`; `analog: ORGANIC takes a recording ...` |
+| MORPH: analysis on its own thread (cached), IMPRINT / FUSE / WEAVE, exact ends, click-free moves, MORPH ONLY / LAYERED, unavailable state; the first macro | ✅ done and tested / ⚠️ only on a synthesized stand-in, not real recordings | `[morph]`, `analog: MORPH is the first macro ...` |
+| CPU (16 voices, 48 kHz, 4x, one core) | ✅ measured | CLASSIC 24.8 %, DCO 28.1 %, SUPER SAW pair 34.1 %, OTA 36.3 %, ORGANIC + MORPH 44–47 % |
 | pluginval, DAWs | ❌ not done | docs/RELEASE.md |
 | Listening tests and preset voicing by ear | ❌ not done | docs/AUDIBLE_QA.md checklist |
 | Host parameter list trimmed to the used ones | ❌ not implemented (shell-wide limitation) | release blocker |
@@ -61,7 +75,24 @@ JUNO_ENGINE_SPEC.md (they share the oscillator-model parameters)._
 - KEY DNA has no curves here yet (ANDOR OSP has no editor for them either): AMOUNT,
   INDIVIDUALITY and each parameter's variation (OSCILLATORS popover).
 
+## Version 4 notes
+
+- ORGANIC is the shell's layer B. Its card is ANDOR OSP's own sample card, with LEVEL, TUNE,
+  START, LOOP, FOLLOW, REVERSE, M and S. PAN stays disabled: each voice is one mono signal
+  through its filter.
+- MORPH needs a pitched recording. Otherwise its popover says why and the sources play as they
+  are.
+- The oscillator pair is one card. There is no third "OSC 2" card: see the decisions below.
+
 ## Open decisions for the owner
+
+0. Version 4:
+   - three source cards (OSC 1, OSC 2, ORGANIC) instead of two (the pair, ORGANIC): that needs
+     a LEVEL/PAN/M/S for each oscillator in the shared shell;
+   - the HPF frequencies and the Juno-6 voicing, by ear or by measurement;
+   - MORPH by ear on real recordings (nyckelharpa, cello);
+   - whether a DCO with its sub (−67.8 dB aliasing at C7, against CLASSIC's −75.2) is
+     acceptable.
 
 1. Final product name and tagline ("ANDOR Analog", "/ANALOG", "A living analog instrument").
 2. The generator card as built (one hero card with the oscillators' waveform) — or a designed

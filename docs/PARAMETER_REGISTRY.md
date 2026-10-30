@@ -159,3 +159,68 @@ travel: depth 100 % takes it from where it is to either end.
 | `analog.polyphony`, `.glide`, `.velocityAmp`, `.mono`, `.masterGain` | `analog.polyphony`, `glide`, `velocityRange`, `voiceMode`, `gain` |
 | `analog.fx.space.*`, `analog.fx.echo.*` | ANDOR OSP's `space.*`, `echo.*` (a send at 0 is off and sleeps) |
 
+
+## E. State version 4 (oscillator models, OTA filter family, chorus, ORGANIC, MORPH)
+
+Appended after every earlier parameter in one step (JUCE version hint 4). A session or preset
+saved before version 4 loads with each of these at its default (`migrateFromVersion3`), which is
+the sound it had. Choice orders are frozen. A control is offered on screen only once the engine
+plays it.
+
+| ID | Type | Range / choices (index order) | Default | Use |
+|---|---|---|---|---|
+| `analog.osc1.model`, `analog.osc2.model` | choice | Classic, DCO, Wide | Classic | each slot's sound model |
+| `analog.osc{1,2}.dco.saw` | bool | | on | DCO saw |
+| `analog.osc{1,2}.dco.pulse` | bool | | off | DCO pulse (width: `analog.osc*.width`) |
+| `analog.osc{1,2}.dco.subLevel` | % | 0..100 | 0 | the square one octave down (divide-by-two) |
+| `analog.osc{1,2}.dco.pwmSource` | choice | Manual, LFO, Env | Manual | what sweeps the pulse width |
+| `analog.osc{1,2}.dco.pwmDepth` | % | 0..100 | 0 | how far LFO 1 / the filter envelope sweep it |
+| `analog.osc{1,2}.wide.wave` | choice | Saw, Pulse, Triangle, Square, Super Saw | Saw | WIDE's wave |
+| `analog.osc{1,2}.wide.shape` | % | 0..100 | 50 | the wave's edge: 0 soft, 50 calibrated, 100 raw |
+| `analog.osc{1,2}.wide.spread` | % | 0..100 | 0 | SUPER SAW's detune (0: one centred saw) |
+| `analog.osc.pair.ringMix` | % | 0..100 | 0 | OSC 1 × OSC 2 mixed in |
+| `analog.noise.color` | choice | White, Juno | White | the NOISE source's colour |
+| `analog.filter.model` | choice | Ladder, OTA | Ladder | the low-pass |
+| `analog.filter.ota.character` | choice | Juno, Jupiter | Juno | the OTA family's voicing (and which high-pass curve) |
+| `analog.filter.ota.slope` | choice | 24 dB, 12 dB | 24 dB | OTA slope |
+| `analog.filter.ota.hpf` | choice | Off, 0, 1, 2, 3 | Off | the high-pass before the low-pass (any filter model) |
+| `analog.filter.juno.variant` | choice | 6, 60, 106 | 60 | Juno calibration (high-pass positions, DCO, OTA) |
+| `analog.juno.lfoDelay`, `analog.juno.lfoRise` | s | 0..5 | 0 | each note's LFO depths wait, then fade in |
+| `analog.juno.vcaMode` | choice | Env, Gate | Env | the amplitude a gate (envelope on the filter only) |
+| `analog.juno.envLink` | bool | | off | the amplitude follows the filter envelope's ADSR |
+| `analog.juno.chorusMode` | choice | Off, I, II, I+II | Off | the chorus after the voices |
+| `analog.juno.chorusNoise` | bool | | off | its hiss |
+| `analog.osc1.enabled`, `analog.osc2.enabled` | bool | | on | a slot silenced (its card hides when both are off) |
+| `analog.organic.root` | int | −1..127 | −1 (Auto) | ORGANIC's root note (Auto: ANDOR OSP's analysis) |
+
+**ORGANIC is the shell's layer B** (`ProductInfo::hybridSampleName = "ORGANIC"`). Its card's
+own controls are ANDOR OSP's `layerB.*`, with their meaning there:
+
+| Parameter | Use |
+|---|---|
+| `layerB.level` | ORGANIC's level |
+| `layerB.tune` | its tuning against the note |
+| `layerB.start` | where each note starts in the recording |
+| `layerB.loop` | held notes cycle through ANDOR OSP's continuation loop |
+| `layerB.follow` | the note follows the key (off: the recording plays out first) |
+| `layerB.reverse` | backwards |
+| `layerB.mute`, `layerB.solo` / `layerA.solo` | each card's M and S (a solo silences the other card) |
+
+`layerB.pan` stays disabled: each voice is one mono signal through its filter, and the voice's place applies to ORGANIC too.
+
+The version-4 drafts `analog.organic.enabled/level/pan/start/loop/follow/reverse` were dropped
+before release: they would have duplicated these card controls.
+| `analog.morph.enabled` | bool | | off | MORPH replaces / joins the sources |
+| `analog.morph.position` | % | 0..100 | 0 | 0 the recording .. 100 the carrier |
+| `analog.morph.method` | choice | Imprint, Fuse, Weave | Imprint | the morph algorithm |
+| `analog.morph.carrier` | choice | Osc 1, Osc 2, Both | Both | the analog side (Both: the levelled pair) |
+| `analog.morph.texture` | % | 0..100 | 50 | the recording's noise / bow residue |
+| `analog.morph.attack` | % | 0..100 | 50 | how much of its attack is kept |
+| `analog.morph.formants` | st | −12..12 | 0 | the acoustic envelope moved |
+| `analog.morph.detail` | % | 0..100 | 50 | how many partials / bands take part |
+| `analog.morph.levelMatch` | bool | | on | the morph's loudness held between its ends |
+| `analog.morph.output` | choice | Morph Only, Layered | Morph Only | replace the sources, or join them |
+
+Modulation destinations appended (after §C's 72, same order rule): OSC 1/2 SUB, OSC 1/2 PWM
+DEPTH, OSC 1/2 SHAPE, OSC 1/2 SPREAD, RING MOD, MORPH, MORPH TEXTURE,
+MORPH ATTACK, MORPH FORMANTS, MORPH DETAIL (all per voice).

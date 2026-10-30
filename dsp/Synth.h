@@ -2,7 +2,13 @@
 
 #include "Envelope.h"
 #include "HalfBand.h"
+#include "HighPassFilter.h"
+#include "JunoChorus.h"
 #include "LadderFilter.h"
+#include "Oscillator.h"
+#include "OrganicVoice.h"
+#include "OtaFilter.h"
+#include "morph/MorphVoice.h"
 #include "LiveGranulator.h"
 #include "Patch.h"
 #include "PolyBlep.h"
@@ -123,6 +129,25 @@ public:
     /** A raw MIDI message (1-3 bytes); anything the synth does not play is ignored. */
     void handleMidi (const std::uint8_t* data, int size) noexcept;
 
+    /** ORGANIC's recording (ANDOR OSP's prepared model; null: none). Audio thread. The previous
+        one is read no more once this returns: the notes playing it fade it out from a short
+        copy. New notes play the new one. */
+    void setOrganic (const osp::InstrumentModel* model) noexcept;
+    const osp::InstrumentModel* organicModel() const noexcept { return organicSource; }
+    /** MORPH's analysis of ORGANIC's recording (built off the audio thread), for `model`: it
+        applies while that model is the one playing. Null: none (MORPH unavailable: the
+        sources play as they are). Audio thread; the profile must outlive its use here. */
+    void setMorphProfile (const morph::MorphProfile* profile, const osp::InstrumentModel* model) noexcept
+    {
+        morphProfile = profile;
+        morphModel = model;
+    }
+    /** MORPH can play now: a pitched profile for the recording that plays. */
+    bool morphAvailable() const noexcept
+    {
+        return morphProfile != nullptr && morphModel == organicSource && organicSource != nullptr && morphProfile->kind == morph::MorphProfile::Kind::pitched;
+    }
+
     /** Renders `numSamples` into left/right (overwritten); any length (in pieces of the prepared maximum). */
     void render (float* left, float* right, int numSamples) noexcept;
 
@@ -187,6 +212,34 @@ private:
         BlepLine line1, line2;
         float osc2Out = 0.0f;
         LadderFilter filter;
+        // State version 4: each slot's model state and plan (control rate), the pair's ring
+        // mix, NOISE's colour, the OTA low-pass and the high-pass before the filter.
+        osc::SlotExtra extra1, extra2;
+        osc::SlotPlan plan1, plan2;
+        bool classicPair = true;      ///< both slots CLASSIC, no ring, white noise: the original path
+        float ringNow = 0.0f;         ///< RING MOD, glided (a change never clicks)
+        float pwm1 = 0.0f, pwm2 = 0.0f;           ///< DCO PWM from LFO 1 (width offset, control rate)
+        float pwmEnv1 = 0.0f, pwmEnv2 = 0.0f;     ///< DCO PWM depth from the filter envelope (per sample)
+        float noiseColour = 0.0f;     ///< JUNO noise: its low-pass state
+        OtaFilter ota;
+        float otaMix = 0.0f, otaTarget = 0.0f;    ///< LADDER 0 .. OTA 1 (a model change crossfades)
+        float resonance01 = 0.0f;
+        float otaCutoffOffset = 0.0f; ///< semitones (the Juno-6's calibration)
+        VoiceHighPass highPass;
+        int highPassTail = 0;         ///< samples the high-pass keeps running after it was switched off
+        double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
+        // ORGANIC: the recording this note plays beside the oscillators (into the same mixer).
+        OrganicVoice organic;
+        double organicStep = 0.0;     ///< source frames per internal sample (control rate)
+        float organicGain = 0.0f;
+        bool organicOn = false;       ///< playing, or fading a replaced recording out
+        bool releaseWhenPlayedOut = false;   ///< FOLLOW off: the key was released; the recording plays out first
+        // MORPH: the recording turned into the carrier (when its profile is ready).
+        morph::MorphVoice morph;
+        morph::CarrierSpectrum carrierSpectrum {};
+        bool morphOn = false;
+        int morphCountdown = 0;       ///< MORPH's control runs every fourth control period
+        float lfoFade = 1.0f;
         Envelope amp, env;
         osp::Prng noise { 1 };
 
@@ -197,6 +250,7 @@ private:
         float k = 0.0f;
         float gain1 = 1.0f, gain2 = 1.0f, gainNoise = 0.0f, outGain = 0.0f, outGainTarget = 0.0f;
         float makeUp = 1.0f;   ///< resonance and DRIVE make-up gain after the filter
+        float otaMakeUp = 1.0f;   ///< the same after the OTA (DRIVE and TRIM only)
 
         // The live sound: its recording, the grains read from it, KALEIDOSCOPE's parts.
         LiveRecording recording;
@@ -256,6 +310,9 @@ private:
     /** One sample of a voice's source: oscillators, noise, the recording and the grains;
         `polyMod` is Poly Mod's value at this sample (for the cutoff). */
     float sourceSample (Voice& v, float envValue, float& polyMod) noexcept;
+    /** The mixer's output (at the filter's input level) through the voice's recording,
+        GRANULAR, KALEIDOSCOPE's doubling and saturation. */
+    float liveStages (Voice& v, float x) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
@@ -267,6 +324,10 @@ private:
     void updateWander (Drift& d) noexcept;
     float cutoffG (float note) const noexcept;
     void applyPolyphonyLimit() noexcept;
+    /** A slot's plan for the control period (its model's sums and extras). */
+    void planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept;
+    /** One sample of OSC 1 and OSC 2 and their mix for a voice playing any model pair. */
+    float modelPairSample (Voice& v, const Patch& p, float envValue, float& polyMod) noexcept;
 
     Patch current;
     double hostRate = 48000.0, internalRate = 192000.0;
@@ -351,6 +412,11 @@ private:
     std::array<float, modeInterval> scratchAmp {};
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
+    const osp::InstrumentModel* organicSource = nullptr;
+    const morph::MorphProfile* morphProfile = nullptr;
+    float lastNoise = 0.0f;   ///< this sample's noise in the voice's mix (MORPH takes the pair without it)
+    const osp::InstrumentModel* morphModel = nullptr;
+    JunoChorus chorus;            ///< state version 4: the chorus after the voices (off: bit-exact bypass)
     osp::PostProcessor effects;
     float dcL = 0.0f, dcR = 0.0f, dcStateL = 0.0f, dcStateR = 0.0f, dcCoef = 0.0f;
 

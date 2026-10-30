@@ -208,3 +208,27 @@ Rev 2/Rev 3 circuit models, the function generator, double cross-mod, LIFE and C
 loudness follows by VEL's curve, in front of VELOCITY RANGE.) The next version's plan:
 V3_ORGANIC_MORPH_SPEC.md.
 The shell still lists all 350 ANDOR parameters to hosts (HANDOFF "Known limitations": a release blocker).
+
+## State version 4: oscillator models, OTA, chorus, ORGANIC, MORPH
+
+The decisions and the parameter contract are in `UNIFIED_ANALOG_EXPANSION_PLAN.md` and `PARAMETER_REGISTRY.md` §E. In the code:
+
+- **Slots** (`dsp/Oscillator.h`):
+  - CLASSIC is the original `walk`/BLEP code.
+  - DCO and WIDE use `renderModel`, which shares the slot's BLEP line: the sub's flip-flop edges, SUPER SAW's six side saws.
+  - WIDE SHAPE is a one-pole filter at 4·64^shape harmonics of the slot's own pitch.
+  - Sync and Poly Mod belong to the pair (`Synth::modelPairSample`).
+  - RING MOD crossfades towards 1.7·o1·o2·(g1+g2)/2.
+- **Filters** (`dsp/OtaFilter.h`, `dsp/HighPassFilter.h`): a ~30 ms crossfade between LADDER and OTA. The high-pass sits before either filter; switched off, it glides to flat and then sleeps.
+- **Chorus** (`dsp/JunoChorus.*`): runs after decimation, before KALEIDOSCOPE and ANDOR OSP's effects. OFF does not touch the buffers.
+- **ORGANIC** (`dsp/OrganicVoice.h`):
+  - Each voice plays ANDOR OSP's prepared model with Hermite interpolation, in mono, into the voice mixer.
+  - LOOP takes a backward continuation jump; the crossfade law follows the measured correlation.
+  - A replaced recording fades out from a 6 ms copy.
+- **MORPH** (`dsp/morph/*`):
+  - The endpoint law is `out = a o + b M + c C` with b = √(4p(1−p)), a = (1−p)(1−b), c = p(1−b).
+  - IMPRINT: an 11-band constant-Q bank at the internal rate, gains = (E_acoustic/E_carrier)^s.
+  - FUSE: coherent additive partials (rotators) with log-interpolated, formant-corrected magnitudes.
+  - WEAVE: partial groups taken whole from either side in a seeded order.
+  - Partials and noise run at the host rate and are interpolated up (their images fall in the decimators' stopband).
+  - The profile is analysed on the engine's worker thread and handed over lock-free.

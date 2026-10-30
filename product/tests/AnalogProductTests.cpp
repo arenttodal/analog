@@ -13,11 +13,16 @@
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
+#include "audio/utility/TestSignals.h"
+#include "core/PitchMath.h"
+#include "io/AudioFileIO.h"
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <map>
 
 using andor::shell::ShellProcessor;
@@ -59,6 +64,14 @@ namespace
                 out.copyFrom (ch, pos, buffer, ch, 0, n);
         }
         return out;
+    }
+
+    double rmsOf (const juce::AudioBuffer<float>& a)
+    {
+        double sum = 0.0;
+        for (int i = 0; i < a.getNumSamples(); ++i)
+            sum += static_cast<double> (a.getSample (0, i)) * a.getSample (0, i);
+        return std::sqrt (sum / std::max (1, a.getNumSamples()));
     }
 
     double differenceRms (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
@@ -103,6 +116,49 @@ namespace
         Patch patch;
         std::map<juce::String, std::function<void (Patch&)>> modes;
     };
+
+    /** A recording for ORGANIC (ANDOR OSP's test vowel), written to `dir`. */
+    juce::File writeRecording (const juce::File& dir, const juce::String& name, int midi, double seconds)
+    {
+        const auto file = dir.getChildFile (name);
+        std::string error;
+        REQUIRE (osp::io::writeAudioFile (std::filesystem::path (file.getFullPathName().toStdString()),
+                                          osp::testsignals::vowel (osp::midiToHz (midi), seconds, 48000.0, 3), osp::io::SampleFormat::pcm24, error));
+        return file;
+    }
+
+    struct Scratch
+    {
+        juce::File dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("andor-analog-test-" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+        Scratch() { dir.createDirectory(); }
+        ~Scratch() { dir.deleteRecursively(); }
+    };
+
+    /** Waits until MORPH's analysis of the recording reached the audio thread (blocks are
+        rendered meanwhile: the hand-over happens in one). */
+    void waitForMorph (ShellProcessor& p)
+    {
+        juce::AudioBuffer<float> buffer (2, 256);
+        juce::MidiBuffer none;
+        p.prepareToPlay (48000.0, 256);
+        for (int i = 0; i < 600 && p.engineStatus ("morph").isNotEmpty(); ++i)
+        {
+            juce::Thread::sleep (50);
+            p.processBlock (buffer, none);
+        }
+        REQUIRE (p.engineStatus ("morph").isEmpty());
+        p.processBlock (buffer, none);   // (the profile taken by the audio thread)
+    }
+
+    /** Loads a recording into ORGANIC (layer B), waits for it and for MORPH's analysis. */
+    void loadOrganic (ShellProcessor& p, const juce::File& file)
+    {
+        REQUIRE (p.addLayers ({ file }) == 1);
+        REQUIRE (p.waitForLoads (60000));
+        p.pollLoads();
+        REQUIRE (p.loadState (1) == osp::plugin::InstrumentHost::LoadState::ready);
+        waitForMorph (p);
+    }
 
     SoundContext soundContext()
     {
@@ -181,6 +237,54 @@ namespace
             { "movement.shaper.smooth", movementMode (osp::MovementMode::shaper) },
             { "movement.shaper.custom", movementMode (osp::MovementMode::shaper) },
         };
+        // State version 4: each model's settings act in that model; PWM depth with a source
+        // (and the source with a depth); SUPER SAW's spread on SUPER SAW; the OTA's voicing and
+        // slope on the OTA; the Juno variant through the high-pass; the chorus' hiss with it on.
+        auto model = [] (int slot, OscModel m) { return [slot, m] (Patch& c) { (slot == 1 ? c.osc1Model : c.osc2Model) = m; }; };
+        for (int slot = 1; slot <= 2; ++slot)
+        {
+            const bool first = slot == 1;
+            for (const auto& id : { first ? params::osc1DcoSaw : params::osc2DcoSaw, first ? params::osc1DcoPulse : params::osc2DcoPulse,
+                                    first ? params::osc1DcoSub : params::osc2DcoSub })
+                modes[id] = model (slot, OscModel::dco);
+            modes[first ? params::osc1DcoPwmSource : params::osc2DcoPwmSource] = [slot] (Patch& c) {
+                (slot == 1 ? c.osc1Model : c.osc2Model) = OscModel::dco;
+                auto& d = slot == 1 ? c.dco1 : c.dco2;
+                d.pulse = true;
+                d.pwmDepth = 0.6;
+            };
+            modes[first ? params::osc1DcoPwmDepth : params::osc2DcoPwmDepth] = [slot] (Patch& c) {
+                (slot == 1 ? c.osc1Model : c.osc2Model) = OscModel::dco;
+                auto& d = slot == 1 ? c.dco1 : c.dco2;
+                d.pulse = true;
+                d.pwmSource = PwmSource::lfo;
+            };
+            modes[first ? params::osc1WideWave : params::osc2WideWave] = model (slot, OscModel::wide);
+            modes[first ? params::osc1WideShape : params::osc2WideShape] = model (slot, OscModel::wide);
+            modes[first ? params::osc1WideSpread : params::osc2WideSpread] = [slot] (Patch& c) {
+                (slot == 1 ? c.osc1Model : c.osc2Model) = OscModel::wide;
+                (slot == 1 ? c.wide1 : c.wide2).wave = WideWave::superSaw;
+            };
+        }
+        modes[params::noiseColor] = [] (Patch& c) { c.noiseLevel = 0.5; };
+        modes[params::otaCharacter] = [] (Patch& c) {
+            c.filterModel = FilterModel::ota;
+            c.resonance = 0.6;
+        };
+        modes[params::otaSlope] = [] (Patch& c) { c.filterModel = FilterModel::ota; };
+        modes[params::junoVariant] = [] (Patch& c) {
+            c.highPass = 2;
+            c.filterModel = FilterModel::ota;
+        };
+        modes[params::chorusNoise] = [] (Patch& c) { c.chorusMode = 1; };
+        // MORPH (a recording loaded and analysed by the test): on, half way.
+        for (const auto& id : { params::morphEnabled, params::morphMethod, params::morphCarrier, params::morphTexture, params::morphAttack,
+                                params::morphFormants, params::morphDetail, params::morphLevelMatch, params::morphOutput, params::morphPosition })
+            modes[id] = [id] (Patch& c) {
+                c.morph.enabled = true;
+                c.morph.position = id == params::morphTexture || id == params::morphAttack ? 0.3 : 0.5;
+            };
+
         // KEY DNA is GRANULAR's, and its settings act while it is on.
         for (const auto& id : { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
                                 params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune })
@@ -433,6 +537,15 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         return false;
     };
     ShellProcessor p;
+    // ORGANIC's card controls act on a recording: one is loaded (long enough to sustain, so
+    // ANDOR OSP's continuation marks loops for LOOP).
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 2.5));
+    // LOOP acts where the recording would end under a held note: START near its end.
+    setups["layerB.loop"] = [] (ShellProcessor& q) {
+        setValue (q, "layerB.start", 50.0f);
+        setValue (q, "layerB.tune", 12.0f);   // (twice as fast: the held notes reach the loop)
+    };
     int checkedBound = 0, checkedUnbound = 0;
     for (auto* base : p.getParameters())
     {
@@ -483,6 +596,8 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
     // ANDOR OSP's destinations it plays, by the control that shows each.
     using D = osp::mod::Dest;
     ShellProcessor p;   // (its parameters are made with the product's destinations registered)
+    Scratch scratch;   // (MORPH's destinations act on a recording)
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 2.5));
     std::vector<std::pair<osp::mod::Dest, juce::String>> dests;
     const auto& own = params::modulationDestinations();
     REQUIRE (osp::mod::productDestCount() == static_cast<int> (own.size()));
@@ -501,6 +616,10 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
     const auto vel = static_cast<float> (osp::mod::sourceIndex (osp::mod::Source::vel) + 1);
     for (const auto& [dest, id] : dests)
     {
+        // (A destination whose control the engine does not play yet stays disabled; the
+        // bindings test proves it inert.)
+        if (! params::engineParameterIds().contains (id))
+            continue;
         INFO (id << " (" << osp::mod::destInfo (dest).name << ")");
         auto patch = context;
         if (const auto mode = modes.find (id); mode != modes.end())
@@ -640,14 +759,130 @@ TEST_CASE ("analog: a version-2 session's BLEND moves into the oscillators' leve
     CHECK (std::sqrt (diff / std::max (sum, 1.0e-12)) < 0.01);   // within 1 % (-40 dB)
 }
 
-TEST_CASE ("analog: the card's first knob is DETUNE, and its name opens the oscillators", "[analog][editor]")
+TEST_CASE ("analog: a version-3 session opens with every version-4 setting neutral and sounds as it did", "[analog][state]")
+{
+    // A version-3 session has none of version 4's parameters (models, OTA, chorus, ORGANIC,
+    // MORPH): loading it into an instrument that was playing other settings sets each to its
+    // default, so the session plays CLASSIC + CLASSIC through the LADDER, chorus off.
+    juce::MemoryBlock session;
+    juce::AudioBuffer<float> before;
+    {
+        ShellProcessor old;
+        apply (old, factoryPatches()[2].patch);
+        setValue (old, "space", 0.0f);
+        before = renderShell (old, 0.5, phrase, false);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 3);   // as version 3 wrote it: without version 4's parameters
+    int removed = 0;
+    for (auto* tree : xml->getChildIterator())
+        for (int i = tree->getNumChildElements(); --i >= 0;)
+            if (params::version4Ids().contains (tree->getChildElement (i)->getStringAttribute ("id")))
+            {
+                tree->removeChildElement (tree->getChildElement (i), true);
+                ++removed;
+            }
+    CHECK (removed == params::version4Ids().size());
+    juce::MemoryBlock v3;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v3);
+
+    ShellProcessor p;
+    // What was playing before: every version-4 setting away from its default.
+    for (const auto& id : params::version4Ids())
+    {
+        auto* parameter = p.parameters.getParameter (id);
+        REQUIRE (parameter != nullptr);
+        parameter->setValueNotifyingHost (parameter->getDefaultValue() > 0.5f ? 0.0f : 1.0f);
+    }
+    p.setStateInformation (v3.getData(), static_cast<int> (v3.getSize()));
+    for (const auto& id : params::version4Ids())
+    {
+        INFO (id);
+        auto* parameter = p.parameters.getParameter (id);
+        CHECK (parameter->getValue() == Approx (parameter->getDefaultValue()).margin (1.0e-6));
+    }
+    const auto after = renderShell (p, 0.5, phrase, false);
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < before.getNumSamples(); ++i)
+            REQUIRE (before.getSample (c, i) == after.getSample (c, i));
+}
+
+TEST_CASE ("analog: OSCILLATORS beside M and S opens the oscillators' settings; DETUNE is a plain control", "[analog][editor]")
 {
     ShellProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     ui.refreshNow();
     auto& card = ui.engineCard (0);
-    // Its dial is OSC 2's fine tuning (a modulation drop target), shown enabled.
+    auto event = [] (juce::Component& c, juce::Point<float> at) {
+        auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, {}, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, at, now, 1, false);
+    };
+    auto press = [&] (juce::Component& c, juce::Point<float> at) {   // as a real click: the watch, then the component
+        ui.pressAnywhere (&c);
+        c.mouseDown (event (c, at));
+        c.mouseUp (event (c, at));
+    };
+
+    // The heading's door covers the word's glyphs, right of M and S, inside the text area.
+    REQUIRE (card.hasHeadingDoor());
+    const auto heading = card.headingBounds();
+    REQUIRE (! heading.isEmpty());
+    auto* door = card.getComponentAt (heading.getCentre());
+    REQUIRE (door != nullptr);
+    CHECK (card.isHeading (door));
+    juce::Component* mute = nullptr;
+    juce::Component* solo = nullptr;
+    for (auto* child : card.getChildren())
+        if (auto* b = dynamic_cast<osp::plugin::LayerStateButton*> (child))
+            (mute == nullptr ? mute : solo) = b;
+    REQUIRE (mute != nullptr);
+    REQUIRE (solo != nullptr);
+    CHECK (heading.getX() >= mute->getRight());
+    CHECK (! heading.intersects (mute->getBounds()));
+    CHECK (! heading.intersects (solo->getBounds()));
+    CHECK (heading.getWidth() < card.getWidth() / 3);   // the word, not the header
+
+    // A click opens the oscillators' popover below the word; a second click closes it.
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    CHECK (ui.openPopupPanel()->getTitle().isNotEmpty());
+    // (Through its own coordinates: the popover is scaled, and its bounds include its shadow.)
+    auto* shown = ui.openPopupPanel();
+    const auto panel = ui.getLocalArea (shown, shown->getLocalBounds().reduced (osp::plugin::MiniPanel::shadowMargin));
+    CHECK (panel.getY() >= ui.getLocalArea (&card, heading).getBottom());
+    CHECK (ui.getLocalBounds().contains (panel));
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    CHECK (ui.openPopupIndex() == -1);
+    // A click elsewhere closes it; so does Escape.
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    ui.pressAnywhere (&card.display());
+    CHECK (ui.openPopupIndex() == -1);
+    press (*door, door->getLocalBounds().getCentre().toFloat());
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    ui.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+    CHECK (ui.openPopupIndex() == -1);
+    // The keyboard: Return and Space on the focused word open and close it.
+    CHECK (door->getWantsKeyboardFocus());
+    door->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (ui.openPopupIndex() == andor::shell::ShellEditor::generatorHeaderPopup);
+    door->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey));
+    CHECK (ui.openPopupIndex() == -1);
+    CHECK (door->getTitle().isNotEmpty());   // (its accessibility handler is a button; it exists once on screen)
+
+    // M and S still mute and solo the layer (the door does not cover them).
+    const float muteBefore = p.parameters.getRawParameterValue ("layerA.mute")->load();
+    press (*mute, mute->getLocalBounds().getCentre().toFloat());
+    CHECK (p.parameters.getRawParameterValue ("layerA.mute")->load() != muteBefore);
+    CHECK (ui.openPopupIndex() == -1);
+
+    // DETUNE: OSC 2's fine tuning, enabled, a modulation target; clicking or dragging it moves
+    // the tuning and never opens a popover.
     juce::Slider* detune = nullptr;
     std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
         for (auto* child : c.getChildren())
@@ -662,13 +897,215 @@ TEST_CASE ("analog: the card's first knob is DETUNE, and its name opens the osci
     CHECK (detune->isEnabled());
     setValue (p, params::osc2Fine, -12.0f);
     CHECK (detune->getValue() == Approx (-12.0));
-    // Its name opens the oscillators' popover; the first macro has none and is disabled.
+    auto* knob = detune->getParentComponent();
+    REQUIRE (knob != nullptr);
+    const auto caption = card.startLabelBounds();
+    press (*knob, knob->getLocalPoint (&card, caption.getCentre()).toFloat());   // its name
+    CHECK (ui.openPopupIndex() == -1);
+    detune->setValue (25.0, juce::sendNotificationSync);   // a drag's result
+    CHECK (p.parameters.getRawParameterValue (params::osc2Fine)->load() == Approx (25.0f).margin (0.01f));
+    CHECK (ui.openPopupIndex() == -1);
+    // The start-control popover route is gone (DETUNE has no door); the first macro is MORPH's.
     ui.openPopup (andor::shell::ShellEditor::startControlPopup);
-    REQUIRE (ui.openPopupPanel() != nullptr);
-    CHECK (ui.openPopupPanel()->getTitle().isEmpty() == false);
-    ui.closePopup();
-    ui.openPopup (0);
     CHECK (ui.openPopupPanel() == nullptr);
+    ui.openPopup (0);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    CHECK (ui.openPopupPanel()->getTitle() == "MORPH");
+}
+
+TEST_CASE ("analog: the OSCILLATORS and FILTER popovers show each model's own controls, and fit the instrument", "[analog][editor]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    // A control of the open popover bound to `id`, and whether it shows.
+    auto shown = [&ui] (const juce::String& id) {
+        bool found = false, visible = false;
+        auto* panel = ui.openPopupPanel();
+        auto onScreen = [panel] (juce::Component* c) {   // (it and every parent up to the popover)
+            for (; c != nullptr && c != panel; c = c->getParentComponent())
+                if (! c->isVisible())
+                    return false;
+            return true;
+        };
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (osp::plugin::binding::tagsOf (*child).contains (id))
+                {
+                    found = true;
+                    visible = visible || onScreen (child);
+                }
+                find (*child);
+            }
+        };
+        if (auto* panel = ui.openPopupPanel())
+            find (*panel);
+        REQUIRE (found);
+        return visible;
+    };
+    auto fits = [&ui] {
+        auto* panel = ui.openPopupPanel();
+        REQUIRE (panel != nullptr);
+        const auto area = ui.getLocalArea (panel, panel->getLocalBounds().reduced (osp::plugin::MiniPanel::shadowMargin));
+        INFO ("popover " << area.toString() << " in " << ui.getLocalBounds().toString());
+        CHECK (ui.getLocalBounds().contains (area));
+    };
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
+    fits();
+    CHECK (shown (params::osc1Wave));
+    CHECK_FALSE (shown (params::osc1DcoSub));
+    CHECK_FALSE (shown (params::osc1WideShape));
+    // DCO on OSC 1, WIDE on OSC 2: the card follows while open (the editor's refresh).
+    setValue (p, params::osc1Model, 1.0f);
+    setValue (p, params::osc2Model, 2.0f);
+    ui.refreshNow();
+    CHECK_FALSE (shown (params::osc1Wave));
+    CHECK (shown (params::osc1DcoSub));
+    CHECK (shown (params::osc1DcoPwmSource));
+    CHECK (shown (params::osc2WideShape));
+    CHECK (shown (params::osc2WideWave));
+    CHECK_FALSE (shown (params::osc2Wave));
+    fits();
+    ui.closePopup();
+    // FILTER: the OTA's settings only with the OTA; the Juno variant where it acts.
+    ui.openPopup (2);
+    fits();
+    CHECK_FALSE (shown (params::otaCharacter));
+    CHECK_FALSE (shown (params::junoVariant));
+    setValue (p, params::filterModel, 1.0f);
+    ui.refreshNow();
+    CHECK (shown (params::otaCharacter));
+    CHECK (shown (params::otaSlope));
+    CHECK (shown (params::junoVariant));
+    setValue (p, params::otaCharacter, 1.0f);   // JUPITER: no Juno variant
+    ui.refreshNow();
+    CHECK_FALSE (shown (params::junoVariant));
+    CHECK (shown (params::chorusMode));
+    CHECK (shown (params::lfoDelay));
+    fits();
+}
+
+TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscillators, plays it, recalls it", "[analog][organic]")
+{
+    Scratch scratch;
+    const auto file = writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5);
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    CHECK (ui.visibleCardCount() == 1);   // the oscillators alone: the hero card
+    CHECK (ui.isInterestedInFileDrag ({ file.getFullPathName() }));
+    const auto synth = renderShell (p, 0.6);
+
+    loadOrganic (p, file);
+    CHECK (p.currentInstrument (1)->model->original.continuation.hasJumps());   // (it sustains: LOOP has a loop)
+    ui.refreshNow();
+    CHECK (ui.visibleCardCount() == 2);   // two equal cards
+    CHECK (ui.engineCard (0).hasHeadingDoor());
+    CHECK_FALSE (ui.engineCard (1).hasHeadingDoor());   // ORGANIC's name opens no oscillator settings
+    const auto layered = renderShell (p, 0.6);
+    CHECK (differenceRms (synth, layered) > 1.0e-4);
+    // ORGANIC alone: both oscillators off.
+    setValue (p, params::osc1Enabled, 0.0f);
+    setValue (p, params::osc2Enabled, 0.0f);
+    const auto alone = renderShell (p, 0.6);
+    CHECK (rmsOf (alone) > 1.0e-3);
+    // Its card's M silences it; S on the oscillators' card too; S on its own silences them.
+    setValue (p, "layerB.mute", 1.0f);
+    CHECK (rmsOf (renderShell (p, 0.6)) < 1.0e-6);
+    setValue (p, "layerB.mute", 0.0f);
+    setValue (p, "layerA.solo", 1.0f);
+    CHECK (rmsOf (renderShell (p, 0.6)) < 1.0e-6);
+    setValue (p, "layerA.solo", 0.0f);
+    setValue (p, params::osc1Enabled, 100.0f);
+    setValue (p, params::osc2Enabled, 100.0f);
+    setValue (p, "layerB.solo", 1.0f);
+    CHECK (differenceRms (renderShell (p, 0.6), alone) < 1.0e-6);
+    setValue (p, "layerB.solo", 0.0f);
+
+    // A session recalls the recording (by its content hash, from ANDOR OSP's sample store)
+    // and the sound, exactly; also when the original file has gone.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    for (const bool moved : { false, true })
+    {
+        INFO ((moved ? "the original file moved away" : "in place"));
+        if (moved)
+            REQUIRE (file.moveFileTo (scratch.dir.getChildFile ("elsewhere.wav")));
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (q.waitForLoads (60000));
+        q.pollLoads();
+        REQUIRE (q.loadState (1) == osp::plugin::InstrumentHost::LoadState::ready);
+        CHECK (differenceRms (renderShell (q, 0.6), layered) < 1.0e-6);
+    }
+    // Removed: the oscillators alone again, one card.
+    p.removeLayer (1);
+    p.pollLoads();
+    renderShell (p, 0.05);   // (the hand-over happens in a block)
+    ui.refreshNow();
+    CHECK (ui.visibleCardCount() == 1);
+    CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
+}
+
+TEST_CASE ("analog: MORPH is the first macro; it tells whether it can morph, and turns the recording into the oscillators", "[analog][organic][morph]")
+{
+    Scratch scratch;
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    // Nothing loaded: unavailable, said so; MORPH on changes nothing a musician hears as a morph
+    // (the oscillators play).
+    CHECK (p.engineStatus ("morph").isNotEmpty());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.openPopup (0);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    ui.closePopup();
+    const auto synth = renderShell (p, 0.8);
+    setValue (p, params::morphEnabled, 1.0f);
+    setValue (p, params::morphPosition, 50.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-6);
+
+    loadOrganic (p, writeRecording (scratch.dir, "stand-in A3.wav", 57, 2.5));
+    CHECK (p.engineStatus ("morph").isEmpty());   // ready
+    // The ends: 0 % the recording (the oscillators replaced by it), 100 % the oscillators.
+    setValue (p, params::morphPosition, 100.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-3 * std::max (1.0e-6, rmsOf (synth)) + 1.0e-6);
+    setValue (p, params::morphPosition, 0.0f);
+    const auto recordingEnd = renderShell (p, 0.8);
+    setValue (p, params::morphEnabled, 0.0f);
+    setValue (p, params::osc1Enabled, 0.0f);
+    setValue (p, params::osc2Enabled, 0.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), recordingEnd) < 1.0e-3 * rmsOf (recordingEnd) + 1.0e-6);
+    setValue (p, params::osc1Enabled, 100.0f);
+    setValue (p, params::osc2Enabled, 100.0f);
+    setValue (p, params::morphEnabled, 1.0f);
+    // The middle: each method its own sound.
+    std::vector<juce::AudioBuffer<float>> methods;
+    setValue (p, params::morphPosition, 50.0f);
+    for (int m = 0; m < 3; ++m)
+    {
+        setValue (p, params::morphMethod, static_cast<float> (m));
+        methods.push_back (renderShell (p, 0.8));
+        CHECK (rmsOf (methods.back()) > 1.0e-3);
+    }
+    CHECK (differenceRms (methods[0], methods[1]) > 1.0e-4);
+    CHECK (differenceRms (methods[1], methods[2]) > 1.0e-4);
+    // Recalled with the session, MORPH and all.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (q.waitForLoads (60000));
+    q.pollLoads();
+    waitForMorph (q);
+    CHECK (differenceRms (renderShell (q, 0.8), methods[2]) < 1.0e-6);
 }
 
 TEST_CASE ("analog: SHAPER's custom pattern is played, saved with the session and recalled", "[analog][state][movement]")
@@ -769,8 +1206,28 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
         shoot (juce::String ("analog-popover-") + names[m]);
         ui.closePopup();
     }
-    ui.openPopup (andor::shell::ShellEditor::startControlPopup);
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
     shoot ("analog-popover-oscillators");
+    ui.closePopup();
+    // Each model's own settings, and the OTA's.
+    setValue (p, params::osc1Model, 1.0f);
+    setValue (p, params::osc2Model, 2.0f);
+    setValue (p, params::osc2WideWave, 4.0f);
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
+    shoot ("analog-popover-oscillators-dco-wide");
+    ui.closePopup();
+    setValue (p, params::filterModel, 1.0f);
+    setValue (p, params::otaHpf, 3.0f);
+    ui.openPopup (2);
+    shoot ("analog-popover-filter-ota");
+    ui.closePopup();
+    setValue (p, params::osc1Model, 0.0f);
+    setValue (p, params::osc2Model, 0.0f);
+    setValue (p, params::filterModel, 0.0f);
+    setValue (p, params::otaHpf, 0.0f);
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
+    ui.engineCard (0).setHeadingOpen (true);
+    shoot ("analog-heading-open");
     ui.closePopup();
     ui.openPopup (andor::shell::ShellEditor::advancedPopup);
     shoot ("analog-advanced");

@@ -1,5 +1,8 @@
 # ANDOR ANALOG — Juno Engine Expansion
 
+> **Status (30 Oct 2026):** implemented as part of state version 4. See `docs/UNIFIED_ANALOG_EXPANSION_PLAN.md` (order, decisions, conflicts) and `docs/STATUS.md`. Where this document and the unified plan differ, the plan and the code win: variants are calibrations, the high-pass precedes either filter, and the chorus is opt-in and post-voice.
+
+
 _Queued as an upcoming improvement (owner's specification, 29 October 2026), after V3 Organic
 Morph (docs/V3_ORGANIC_MORPH_SPEC.md); the two share the oscillator-model parameters. Not
 started: the work begins when the owner says so. Recorded below as the owner gave it: Part A

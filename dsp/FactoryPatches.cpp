@@ -656,6 +656,182 @@ namespace
             delay (p, 0.2, 7, 0.5);
             add ("Frozen Glass", "Texture", p, { 60, 67, 72 }, false, 0.6);
         }
+
+        // State version 4: the oscillator models, the OTA filters, the chorus, ring and SUPER
+        // SAW (after the 34 above, which stay exactly as they were: legacyFactoryCount).
+        auto juno = [] (Patch& p, JunoVariant variant, int highPass) {
+            p.filterModel = FilterModel::ota;
+            p.otaVoicing = OtaVoicing::juno;
+            p.junoVariant = variant;
+            p.highPass = highPass;
+            p.osc1Model = p.osc2Model = OscModel::dco;
+        };
+        {
+            auto p = base();
+            juno (p, JunoVariant::juno60, 1);
+            p.dco1 = { true, false, 0.0, PwmSource::manual, 0.0 };
+            p.osc2Level = 0.0;
+            p.tone = hz (2600.0);
+            p.resonance = 0.1;
+            p.envDepthSemitones = 6.0;
+            ampEnv (p, 0.35, 1.0, 0.9, 1.2);
+            p.chorusMode = 1;
+            p.lfoAmount = 0.3;
+            p.lfoDelaySeconds = 0.6;
+            p.lfoRiseSeconds = 0.8;
+            p.lfoPitch1 = 0.12;
+            room (p, 0.3, SpaceType::hall, 3.5);
+            add ("Juno Strings", "Pad", p, chord);
+        }
+        {
+            auto p = base();
+            juno (p, JunoVariant::juno106, 0);   // the 106's bass boost
+            p.dco1 = { false, true, 0.8, PwmSource::manual, 0.0 };
+            p.osc1Width = 0.42;
+            p.osc2Level = 0.0;
+            p.tone = hz (450.0);
+            p.resonance = 0.35;
+            p.envDepthSemitones = 30.0;
+            filterEnv (p, 0.002, 0.22, 0.1, 0.12);
+            p.vcaGate = true;
+            p.space = 0.0;
+            p.voiceMode = VoiceMode::mono;
+            add ("DCO Bass 106", "Bass", p, lowLine, true);
+        }
+        {
+            auto p = base();
+            juno (p, JunoVariant::juno60, 1);
+            p.dco1 = { false, true, 0.3, PwmSource::lfo, 0.75 };
+            p.dco2 = { false, true, 0.0, PwmSource::lfo, 0.6 };
+            p.osc2Coarse = 12.0;
+            p.osc2FineCents = 0.0;
+            p.osc2Level = 0.5;
+            p.lfo.rateHz = 0.7;
+            p.tone = hz (3000.0);
+            p.envDepthSemitones = 0.0;
+            ampEnv (p, 0.5, 1.0, 1.0, 1.5);
+            p.chorusMode = 2;
+            room (p, 0.35, SpaceType::hall, 4.5);
+            add ("PWM Choir", "Pad", p, chord);
+        }
+        {
+            auto p = base();
+            juno (p, JunoVariant::juno106, 1);
+            p.dco1 = { true, false, 0.0, PwmSource::manual, 0.0 };
+            p.osc2Level = 0.0;
+            p.tone = hz (700.0);
+            p.resonance = 0.15;
+            p.envDepthSemitones = 34.0;
+            filterEnv (p, 0.09, 0.6, 0.45, 0.3);
+            p.envLink = true;   // one envelope for both, as a 106
+            p.chorusMode = 1;
+            room (p, 0.25, SpaceType::room, 1.8);
+            add ("Brass Section 106", "Brass", p, chord);
+        }
+        {
+            auto p = base();
+            p.osc1Model = p.osc2Model = OscModel::wide;
+            p.wide1 = { WideWave::saw, 0.5, 0.0 };
+            p.wide2 = { WideWave::saw, 0.5, 0.0 };
+            p.osc2FineCents = 9.0;
+            p.osc2Level = 0.9;
+            p.filterModel = FilterModel::ota;
+            p.otaVoicing = OtaVoicing::jupiter;
+            p.tone = hz (900.0);
+            p.resonance = 0.2;
+            p.envDepthSemitones = 30.0;
+            filterEnv (p, 0.06, 0.7, 0.5, 0.4);
+            ampEnv (p, 0.03, 0.8, 0.85, 0.5);
+            room (p, 0.25, SpaceType::hall, 2.5);
+            add ("Jupiter Brass", "Brass", p, chord);
+        }
+        {
+            auto p = base();
+            p.osc1Model = OscModel::wide;
+            p.wide1 = { WideWave::superSaw, 0.7, 0.45 };
+            p.osc2Level = 0.0;
+            p.filterModel = FilterModel::ota;
+            p.otaVoicing = OtaVoicing::jupiter;
+            p.tone = hz (5000.0);
+            p.resonance = 0.15;
+            p.envDepthSemitones = 8.0;
+            p.voiceMode = VoiceMode::mono;
+            p.glideSeconds = 0.04;
+            p.lfoAmount = 0.15;
+            delay (p, 0.25, 7, 0.35);
+            room (p, 0.2, SpaceType::hall, 2.5);
+            add ("Super Saw Lead", "Lead", p, leadLine, true);
+        }
+        {
+            auto p = base();
+            p.osc1Model = p.osc2Model = OscModel::wide;
+            p.wide1 = { WideWave::superSaw, 0.6, 0.7 };
+            p.wide2 = { WideWave::superSaw, 0.6, 0.5 };
+            p.osc2Coarse = 12.0;
+            p.osc2FineCents = 0.0;
+            p.osc2Level = 0.45;
+            p.filterModel = FilterModel::ota;
+            p.otaVoicing = OtaVoicing::jupiter;
+            p.otaTwoPole = true;
+            p.tone = hz (4200.0);
+            p.envDepthSemitones = 0.0;
+            ampEnv (p, 0.25, 1.0, 1.0, 1.2);
+            p.levelDb = -3.0;
+            room (p, 0.35, SpaceType::hall, 5.0);
+            add ("Trance Stack", "Pad", p, chord);
+        }
+        {
+            auto p = base();
+            p.osc1Model = OscModel::wide;
+            p.wide1 = { WideWave::triangle, 0.6, 0.0 };
+            p.osc2Wave = Osc2Wave::pulse;
+            p.osc2Coarse = 7.0;
+            p.osc2FineCents = 3.0;
+            p.osc2Level = 0.8;
+            p.ringMix = 0.8;
+            p.tone = hz (6000.0);
+            p.envDepthSemitones = 0.0;
+            ampEnv (p, 0.002, 1.6, 0.0, 1.4);
+            room (p, 0.3, SpaceType::hall, 3.0);
+            delay (p, 0.15, 6, 0.3);
+            add ("Ring Bell", "Keys", p, chord);
+        }
+        {
+            auto p = base();
+            p.osc1Model = OscModel::wide;
+            p.wide1 = { WideWave::saw, 0.85, 0.0 };
+            p.osc2Model = OscModel::dco;
+            p.dco2 = { false, true, 0.0, PwmSource::manual, 0.0 };
+            p.osc1Coarse = 7.0;
+            p.osc2Level = 0.3;
+            p.sync = true;
+            p.polyModEnv = 0.55;
+            p.polyModToPitch1 = true;
+            p.tone = hz (3800.0);
+            p.resonance = 0.2;
+            filterEnv (p, 0.002, 0.5, 0.3, 0.3);
+            p.voiceMode = VoiceMode::mono;
+            delay (p, 0.2, 7, 0.3);
+            add ("Sync Wide", "Lead", p, leadLine, true);
+        }
+        {
+            auto p = base();
+            p.osc2Model = OscModel::dco;
+            p.dco2 = { true, false, 0.6, PwmSource::manual, 0.0 };
+            p.osc2FineCents = 0.0;
+            p.osc2Octave = -1;
+            p.osc2Level = 0.5;
+            p.filterModel = FilterModel::ota;
+            p.tone = hz (1800.0);
+            p.envDepthSemitones = 18.0;
+            filterEnv (p, 0.002, 0.7, 0.2, 0.4);
+            ampEnv (p, 0.003, 1.2, 0.4, 0.5);
+            p.chorusMode = 3;
+            p.noiseColor = NoiseColor::juno;
+            p.noiseLevel = 0.06;
+            room (p, 0.25, SpaceType::room, 1.5);
+            add ("Hybrid Keys", "Keys", p, chord);
+        }
         return list;
     }
 }
