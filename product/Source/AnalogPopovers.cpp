@@ -47,7 +47,19 @@ namespace
 
         bool compact() const override { return true; }
 
-        void row (juce::String caption) { rows.push_back ({ std::move (caption), {}, {}, {}, true }); }
+        void row (juce::String caption)
+        {
+            Row r;
+            r.caption = std::move (caption);
+            rows.push_back (std::move (r));
+        }
+
+        /** The last row's caption follows `text` (a state that changes while it is open). */
+        void captionFrom (std::function<juce::String()> text)
+        {
+            rows.back().captionText = std::move (text);
+            rows.back().caption = rows.back().captionText();
+        }
 
         /** The last row shows only while `predicate` holds (a model's own settings): the card
             follows the parameters, its size with it. */
@@ -66,6 +78,13 @@ namespace
 
         void refreshContent() override
         {
+            for (auto& r : rows)
+                if (r.captionText != nullptr)
+                    if (const auto text = r.captionText(); text != r.caption)
+                    {
+                        r.caption = text;
+                        repaint();
+                    }
             if (applyVisibility())
             {
                 resized();
@@ -142,6 +161,7 @@ namespace
             std::vector<Cell> cells;
             juce::Rectangle<int> captionArea;
             std::function<bool()> shown;   ///< null: always
+            std::function<juce::String()> captionText;   ///< null: a fixed caption
             bool visible = true;
         };
 
@@ -344,6 +364,38 @@ namespace
     }
 }
 
+namespace
+{
+    std::unique_ptr<MiniPanel> morphPopover (InstrumentHost& h)
+    {
+        using namespace params;
+        auto p = std::make_unique<AnalogPanel> (h, "MORPH", 520, 0);
+        auto* host = &h;
+        // Its state, as it is: ready, being analysed, or why it cannot be (then the sources
+        // play as they are: nothing pretends to morph).
+        p->row ({});
+        p->captionFrom ([host] {
+            const auto status = host->engineStatus ("morph");
+            return status.isEmpty() ? juce::String ("READY: ORGANIC'S RECORDING INTO THE OSCILLATORS") : status.toUpperCase();
+        });
+        p->toggle (morphEnabled, "ON", 0.8f, "MORPH: the recording and the carrier become one sound (at 0 % the recording, at 100 % the carrier)");
+        p->segments (morphMethod, { "IMPRINT", "FUSE", "WEAVE" }, 3.0f,
+                     "IMPRINT: the recording's envelope on the carrier. FUSE: their partials blended. WEAVE: their partials interleaved");
+        p->segments (morphCarrier, { "OSC 1", "OSC 2", "BOTH" }, 2.4f, "The analog side: oscillator 1, oscillator 2, or the pair as levelled");
+        p->row ({});
+        p->knob (morphPosition, "MORPH");
+        p->knob (morphTexture, "TEXTURE");
+        p->knob (morphAttack, "ATTACK");
+        p->knob (morphFormants, "FORMANTS");
+        p->knob (morphDetail, "DETAIL");
+        p->row ("OUTPUT");
+        p->segments (morphOutput, { "MORPH ONLY", "LAYERED" }, 2.6f, "MORPH ONLY: the morph replaces the recording and the carrier. LAYERED: it joins them");
+        p->toggle (morphLevelMatch, "LEVEL MATCH", 1.4f, "Holds the loudness steady between the recording's and the carrier's");
+        p->knob (organicRoot, "ROOT");
+        return p;
+    }
+}
+
 std::unique_ptr<MiniPanel> createOscillatorPopover (InstrumentHost& host)
 {
     return blendPopover (host);
@@ -353,7 +405,7 @@ std::unique_ptr<MiniPanel> createMacroPopover (int macro, InstrumentHost& host)
 {
     switch (macro)
     {
-        case 0: return nullptr;   // (not assigned yet: shown disabled)
+        case 0: return morphPopover (host);
         case 1: return createMacroPopup (MacroPopup::drive, host);      // ANDOR OSP's own
         case 2: return tonePopover (host);
         case 3: return createMacroPopup (MacroPopup::movement, host);

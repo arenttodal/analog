@@ -28,8 +28,167 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     prepared = true;
 }
 
+//==============================================================================
+// MORPH's analysis thread.
+
+class AnalogEngine::Analyser final : public juce::Thread
+{
+public:
+    explicit Analyser (AnalogEngine& e) : juce::Thread ("ANDOR Analog morph analysis"), engine (e) { startThread (juce::Thread::Priority::low); }
+    ~Analyser() override
+    {
+        cancelling = true;
+        signalThreadShouldExit();
+        notify();
+        stopThread (10000);
+    }
+
+    void request (std::shared_ptr<const osp::plugin::LoadedInstrument> source)
+    {
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            wanted = std::move (source);
+            hasRequest = true;
+            state = wanted != nullptr ? "Analysing ORGANIC's recording for MORPH" : "Load a recording onto ORGANIC to morph";
+        }
+        cancelling = true;   // (a newer recording: the one being analysed is not needed)
+        notify();
+    }
+
+    juce::String status() const
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        return state;
+    }
+
+    void run() override
+    {
+        while (! threadShouldExit())
+        {
+            std::shared_ptr<const osp::plugin::LoadedInstrument> source;
+            {
+                const std::lock_guard<std::mutex> lock (mutex);
+                if (hasRequest)
+                {
+                    source = wanted;
+                    hasRequest = false;
+                    cancelling = false;
+                }
+            }
+            if (source != nullptr && source->model != nullptr && source->model->isValid())
+                analyse (source);
+            else if (source == nullptr)
+                collect();
+            wait (250);
+            collect();
+        }
+    }
+
+private:
+    void analyse (const std::shared_ptr<const osp::plugin::LoadedInstrument>& source)
+    {
+        auto box = std::make_shared<ProfileBox>();
+        box->model = source->model.get();
+        box->source = source;
+        const auto key = source->contentHash;
+        std::shared_ptr<const ProfileBox> cached;
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            for (const auto& [k, p] : cache)
+                if (k == key && ! key.empty())
+                    cached = p;
+        }
+        if (cached != nullptr)
+            box->profile = cached->profile;
+        else
+        {
+            // The recording as ANDOR OSP prepared it, summed to mono (as the voices play it).
+            const auto& src = *source->model->original.source;
+            std::vector<float> mono (static_cast<std::size_t> (src.numFrames()), 0.0f);
+            for (int ch = 0; ch < src.numChannels(); ++ch)
+            {
+                const float* d = src.channelData (ch);   // (the first frame: the padding is before it)
+                for (std::size_t i = 0; i < mono.size(); ++i)
+                    mono[i] += d[i] / static_cast<float> (src.numChannels());
+            }
+            box->profile = morph::analyse (mono.data(), static_cast<std::int64_t> (mono.size()), src.sampleRate(), {}, &cancelling);
+            if (cancelling.load())
+                return;
+        }
+        std::shared_ptr<const ProfileBox> published = box;
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            if (! key.empty() && cached == nullptr)
+            {
+                cache.emplace_back (key, published);
+                if (cache.size() > 4)
+                    cache.erase (cache.begin());
+            }
+            boxes.push_back (published);
+            state = box->profile.kind == morph::MorphProfile::Kind::pitched
+                        ? juce::String()
+                        : "MORPH needs a pitched recording: " + juce::String (box->profile.status) + " (the sources play as they are)";
+        }
+        engine.pending.store (published.get(), std::memory_order_release);
+    }
+
+    /** Frees the profiles the audio thread no longer reads (never the newest, never the one in use). */
+    void collect()
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        const auto* used = engine.inUse.load (std::memory_order_acquire);
+        const auto* next = engine.pending.load (std::memory_order_acquire);
+        for (std::size_t i = 0; i + 1 < boxes.size();)
+        {
+            if (boxes[i].get() != used && boxes[i].get() != next)
+                boxes.erase (boxes.begin() + static_cast<long> (i));
+            else
+                ++i;
+        }
+    }
+
+    AnalogEngine& engine;
+    mutable std::mutex mutex;
+    std::shared_ptr<const osp::plugin::LoadedInstrument> wanted;
+    bool hasRequest = false;
+    std::atomic<bool> cancelling { false };
+    juce::String state = "Load a recording onto ORGANIC to morph";
+    std::vector<std::shared_ptr<const ProfileBox>> boxes;
+    std::vector<std::pair<std::string, std::shared_ptr<const ProfileBox>>> cache;
+};
+
+AnalogEngine::AnalogEngine (int oversampling) : oversamplingFactor (oversampling) {}
+
+AnalogEngine::~AnalogEngine()
+{
+    analyser.reset();   // (before the synth that may read a profile goes)
+}
+
+void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin::LoadedInstrument> source)
+{
+    if (layer != 1)
+        return;
+    if (analyser == nullptr)
+        analyser = std::make_unique<Analyser> (*this);
+    analyser->request (std::move (source));
+}
+
+juce::String AnalogEngine::status (const juce::String& topic) const
+{
+    if (topic != "morph")
+        return {};
+    return analyser != nullptr ? analyser->status() : juce::String ("Load a recording onto ORGANIC to morph");
+}
+
 void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept
 {
+    // MORPH: a profile finished on the analysis thread (it describes the model it names: the
+    // synth uses it only while that model plays).
+    if (const auto* box = pending.exchange (nullptr, std::memory_order_acq_rel))
+    {
+        synth.setMorphProfile (&box->profile, box->model);
+        inUse.store (box, std::memory_order_release);
+    }
     const int total = buffer.getNumSamples();
     if (! prepared || total <= 0 || buffer.getNumChannels() == 0)
         return;

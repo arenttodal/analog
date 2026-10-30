@@ -147,8 +147,6 @@ const juce::StringArray& engineParameterIds()
         // only offered once the engine plays it: the rest stay disabled on screen.
         static const juce::StringArray notPlayedYet = [] {
             juce::StringArray n;
-            for (int i = iMorphEnabled; i < iOrganicLevel; ++i)   // MORPH
-                n.add (ids()[i]);
             n.add ("layerB.pan");   // (each voice is one mono signal through its filter: ORGANIC takes its place)
             return n;
         }();

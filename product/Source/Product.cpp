@@ -141,7 +141,7 @@ const ProductInfo& productInfo()
         // ANDOR OSP). DRIVE, MOVEMENT, SPACE and ECHO are ANDOR OSP's own (parameters,
         // popovers and sound); FILTER is the instrument's. The first is not assigned yet: it
         // shows ANDOR OSP's LIFE knob, which the engine does not read, so it is disabled.
-        p.macros = { { { "life", juce::String::fromUTF8 ("\xe2\x80\x94"), "Not assigned yet" },
+        p.macros = { { { andor::analog::params::morphPosition, "MORPH", "Morph: ORGANIC's recording into the oscillators (IMPRINT, FUSE, WEAVE)" },
                        { "drive", "DRIVE", "Drive: saturation of the whole sound (tube, tape or crunch)" },
                        { andor::analog::params::tone, "FILTER", "Filter: the four-pole filter's cutoff (resonance, envelope, filter drive, LFO amount behind it)" },
                        { "motion", "MOVEMENT", "Movement: drift, tape, chorus, pulse or a rhythmic shaper" },

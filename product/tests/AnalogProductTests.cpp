@@ -134,13 +134,30 @@ namespace
         ~Scratch() { dir.deleteRecursively(); }
     };
 
-    /** Loads a recording into ORGANIC (layer B) and waits for it. */
+    /** Waits until MORPH's analysis of the recording reached the audio thread (blocks are
+        rendered meanwhile: the hand-over happens in one). */
+    void waitForMorph (ShellProcessor& p)
+    {
+        juce::AudioBuffer<float> buffer (2, 256);
+        juce::MidiBuffer none;
+        p.prepareToPlay (48000.0, 256);
+        for (int i = 0; i < 600 && p.engineStatus ("morph").isNotEmpty(); ++i)
+        {
+            juce::Thread::sleep (50);
+            p.processBlock (buffer, none);
+        }
+        REQUIRE (p.engineStatus ("morph").isEmpty());
+        p.processBlock (buffer, none);   // (the profile taken by the audio thread)
+    }
+
+    /** Loads a recording into ORGANIC (layer B), waits for it and for MORPH's analysis. */
     void loadOrganic (ShellProcessor& p, const juce::File& file)
     {
         REQUIRE (p.addLayers ({ file }) == 1);
         REQUIRE (p.waitForLoads (60000));
         p.pollLoads();
         REQUIRE (p.loadState (1) == osp::plugin::InstrumentHost::LoadState::ready);
+        waitForMorph (p);
     }
 
     SoundContext soundContext()
@@ -260,6 +277,13 @@ namespace
             c.filterModel = FilterModel::ota;
         };
         modes[params::chorusNoise] = [] (Patch& c) { c.chorusMode = 1; };
+        // MORPH (a recording loaded and analysed by the test): on, half way.
+        for (const auto& id : { params::morphEnabled, params::morphMethod, params::morphCarrier, params::morphTexture, params::morphAttack,
+                                params::morphFormants, params::morphDetail, params::morphLevelMatch, params::morphOutput, params::morphPosition })
+            modes[id] = [id] (Patch& c) {
+                c.morph.enabled = true;
+                c.morph.position = id == params::morphTexture || id == params::morphAttack ? 0.3 : 0.5;
+            };
 
         // KEY DNA is GRANULAR's, and its settings act while it is on.
         for (const auto& id : { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
@@ -572,6 +596,8 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
     // ANDOR OSP's destinations it plays, by the control that shows each.
     using D = osp::mod::Dest;
     ShellProcessor p;   // (its parameters are made with the product's destinations registered)
+    Scratch scratch;   // (MORPH's destinations act on a recording)
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 2.5));
     std::vector<std::pair<osp::mod::Dest, juce::String>> dests;
     const auto& own = params::modulationDestinations();
     REQUIRE (osp::mod::productDestCount() == static_cast<int> (own.size()));
@@ -879,11 +905,12 @@ TEST_CASE ("analog: OSCILLATORS beside M and S opens the oscillators' settings; 
     detune->setValue (25.0, juce::sendNotificationSync);   // a drag's result
     CHECK (p.parameters.getRawParameterValue (params::osc2Fine)->load() == Approx (25.0f).margin (0.01f));
     CHECK (ui.openPopupIndex() == -1);
-    // The start-control popover route is gone (DETUNE has no door); the first macro has none.
+    // The start-control popover route is gone (DETUNE has no door); the first macro is MORPH's.
     ui.openPopup (andor::shell::ShellEditor::startControlPopup);
     CHECK (ui.openPopupPanel() == nullptr);
     ui.openPopup (0);
-    CHECK (ui.openPopupPanel() == nullptr);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    CHECK (ui.openPopupPanel()->getTitle() == "MORPH");
 }
 
 TEST_CASE ("analog: the OSCILLATORS and FILTER popovers show each model's own controls, and fit the instrument", "[analog][editor]")
@@ -1024,6 +1051,61 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
     ui.refreshNow();
     CHECK (ui.visibleCardCount() == 1);
     CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
+}
+
+TEST_CASE ("analog: MORPH is the first macro; it tells whether it can morph, and turns the recording into the oscillators", "[analog][organic][morph]")
+{
+    Scratch scratch;
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    // Nothing loaded: unavailable, said so; MORPH on changes nothing a musician hears as a morph
+    // (the oscillators play).
+    CHECK (p.engineStatus ("morph").isNotEmpty());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.openPopup (0);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    ui.closePopup();
+    const auto synth = renderShell (p, 0.8);
+    setValue (p, params::morphEnabled, 1.0f);
+    setValue (p, params::morphPosition, 50.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-6);
+
+    loadOrganic (p, writeRecording (scratch.dir, "stand-in A3.wav", 57, 2.5));
+    CHECK (p.engineStatus ("morph").isEmpty());   // ready
+    // The ends: 0 % the recording (the oscillators replaced by it), 100 % the oscillators.
+    setValue (p, params::morphPosition, 100.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-3 * std::max (1.0e-6, rmsOf (synth)) + 1.0e-6);
+    setValue (p, params::morphPosition, 0.0f);
+    const auto recordingEnd = renderShell (p, 0.8);
+    setValue (p, params::morphEnabled, 0.0f);
+    setValue (p, params::osc1Enabled, 0.0f);
+    setValue (p, params::osc2Enabled, 0.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), recordingEnd) < 1.0e-3 * rmsOf (recordingEnd) + 1.0e-6);
+    setValue (p, params::osc1Enabled, 100.0f);
+    setValue (p, params::osc2Enabled, 100.0f);
+    setValue (p, params::morphEnabled, 1.0f);
+    // The middle: each method its own sound.
+    std::vector<juce::AudioBuffer<float>> methods;
+    setValue (p, params::morphPosition, 50.0f);
+    for (int m = 0; m < 3; ++m)
+    {
+        setValue (p, params::morphMethod, static_cast<float> (m));
+        methods.push_back (renderShell (p, 0.8));
+        CHECK (rmsOf (methods.back()) > 1.0e-3);
+    }
+    CHECK (differenceRms (methods[0], methods[1]) > 1.0e-4);
+    CHECK (differenceRms (methods[1], methods[2]) > 1.0e-4);
+    // Recalled with the session, MORPH and all.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (q.waitForLoads (60000));
+    q.pollLoads();
+    waitForMorph (q);
+    CHECK (differenceRms (renderShell (q, 0.8), methods[2]) < 1.0e-6);
 }
 
 TEST_CASE ("analog: SHAPER's custom pattern is played, saved with the session and recalled", "[analog][state][movement]")

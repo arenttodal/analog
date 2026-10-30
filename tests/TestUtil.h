@@ -170,7 +170,8 @@ namespace testutil
         {
             const double t = 2.0 * 3.14159265358979323846 * i / (n - 1);
             const double w = 0.35875 - 0.48829 * std::cos (t) + 0.14128 * std::cos (2 * t) - 0.01168 * std::cos (3 * t);
-            data[static_cast<std::size_t> (i)] = x[from + static_cast<std::size_t> (i)] * w;
+            const std::size_t at = from + static_cast<std::size_t> (i);
+            data[static_cast<std::size_t> (i)] = at < x.size() ? x[at] * w : 0.0;   // (past the end: zeros, never a read beyond it)
         }
         fft.forward (data.data());
         std::vector<double> mag (static_cast<std::size_t> (n / 2));

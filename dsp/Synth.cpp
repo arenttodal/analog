@@ -124,6 +124,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.mirage.prepare (internalRate);
         v.highPass.prepare (internalRate);
         v.organic.prepare (internalRate);
+        v.morph.prepare (internalRate, oversampling);
     }
     // The mode engines' "recording" on a live voice: only its length, rate and root are read.
     auto standIn = [] (double rate, double seconds) {
@@ -559,6 +560,17 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.ampDecaySeconds = compiled.has (D::ampDecay) ? osp::mod::modulatedSeconds (D::ampDecay, current.ampDecay, offsetOf (v, D::ampDecay)) : -1.0;
         v.ampReleaseSeconds = -1.0;
     }
+    // ORGANIC and MORPH start with the note, before its first control update (which sets the
+    // morph's weights at once: a note never begins with another mix and glides to it).
+    if (retrigger || ! wasActive)
+    {
+        if (organicSource != nullptr)
+            v.organic.start (organicSource, current.organic.start, current.organic.reverse);
+        else
+            v.organic.stop();
+        v.morph.start (morphAvailable() ? morphProfile : nullptr, v.seed);
+        v.morphCountdown = 0;
+    }
     applyVoiceModulation (v);
     updateVoiceControl (v, current.lfo.scope == osp::mod::Scope::poly ? static_cast<float> (v.lfo.value) : lfoValue,
                         static_cast<float> (std::clamp (current.lfoAmount + wheel * (1.0 - current.lfoAmount), 0.0, 1.0)));
@@ -585,10 +597,6 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.env.noteOn();
         v.ageSeconds = 0.0;   // (LFO DELAY counts from here)
         v.releaseWhenPlayedOut = false;
-        if (organicSource != nullptr)
-            v.organic.start (organicSource, current.organic.start, current.organic.reverse);
-        else
-            v.organic.stop();
     }
     v.active = true;
     v.hasPlayed = true;
@@ -1052,6 +1060,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.organicOn = ! v.organic.finished();
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
                     && ! v.organicOn;
+    // MORPH: with a profile for the recording this note plays (else the sources as they are).
+    v.morphOn = p.morph.enabled && v.morph.active() && v.organicOn && morphAvailable() && v.organic.playingModel() == organicSource;
     if (! v.classicPair)
     {
         planSlot (v, 1, p, v.dt1);
@@ -1062,6 +1072,33 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
             lfoOffset = c.pwmSource == PwmSource::lfo ? depthNow * lfoRaw : 0.0f;
             envDepth = c.pwmSource == PwmSource::env ? depthNow : 0.0f;
         };
+        if (v.morphOn && --v.morphCountdown <= 0)
+        {
+            v.morphCountdown = 4;   // (every 32 host samples: its gains and partials glide between)
+            // The carrier's spectrum (its slots' waves at their levels) and fundamental.
+            v.carrierSpectrum.fill (0.0f);
+            const auto add = [&v] (const osc::SlotPlan& plan, float width, float g) {
+                morph::addCarrierSpectrum (v.carrierSpectrum, plan.waves.saw, plan.waves.pulse, plan.waves.triangle, plan.squareWidth ? 0.5f : width,
+                                           g * plan.waves.gain);
+            };
+            const auto carrier = p.morph.carrier;
+            if (carrier != MorphCarrier::osc2)
+                add (v.plan1, v.width1, std::max (v.gain1, carrier == MorphCarrier::osc1 ? 1.0f : 0.0f));
+            if (carrier != MorphCarrier::osc1)
+                add (v.plan2, v.width2, std::max (v.gain2, carrier == MorphCarrier::osc2 ? 1.0f : 0.0f));
+            morph::MorphVoice::Control c;
+            c.position = p.morph.position;
+            c.method = p.morph.method;
+            c.texture = p.morph.texture;
+            c.attack = p.morph.attack;
+            c.formants = p.morph.formants;
+            c.detail = p.morph.detail;
+            c.levelMatch = p.morph.levelMatch;
+            c.profileSeconds = v.organic.seconds();
+            c.fundamentalHz = (carrier == MorphCarrier::osc2 ? v.dt2 : v.dt1) * internalRate;
+            c.carrier = &v.carrierSpectrum;
+            v.morph.control (c);
+        }
         pwm (p.dco1, v.pwm1, v.pwmEnv1);
         pwm (p.dco2, v.pwm2, v.pwmEnv2);
         if (p.osc1Model != OscModel::dco)
@@ -1409,7 +1446,8 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
     else
         o1 = osc::renderModel (v.phase1, v.line1, v.extra1, v.plan1, dt1, width1, syncAt, wrap1);
 
-    float mix = o1 * v.gain1 + v.osc2Out * v.gain2;
+    const float c1 = o1 * v.gain1, c2 = v.osc2Out * v.gain2;
+    float mix = c1 + c2;
     // RING MOD: OSC 1 x OSC 2, crossfaded in (never a loud third voice): the product's RMS of
     // two full-scale saws is a third against a saw's 0.58, hence the 1.7; the slots' levels set it.
     if (v.ringNow > 0.0f)
@@ -1424,10 +1462,29 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
             v.noiseColour += c * (n - v.noiseColour);
             n = v.noiseColour * 1.36f;   // (the same loudness as white through the decimator: measured)
         }
-        mix += v.gainNoise * n;
+        lastNoise = v.gainNoise * n;
+        mix += lastNoise;
     }
     if (v.organicOn)
-        mix += v.organicGain * v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
+    {
+        const float o = v.organicGain * v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
+        if (v.morphOn)
+        {
+            // The carrier (BOTH: the levelled pair, ring included) into the morph; MORPH ONLY
+            // replaces the recording and the carrier (the other slot stays), LAYERED adds the
+            // morph's core beside them (the ends are the dry sources themselves: never doubled).
+            const auto carrier = p.morph.carrier;
+            const float pair = mix - (v.gainNoise > 0.0f ? lastNoise : 0.0f);
+            const float c = carrier == MorphCarrier::osc1 ? c1 : (carrier == MorphCarrier::osc2 ? c2 : pair);
+            const float y = v.morph.process (o, c);
+            if (p.morph.output == MorphOutput::morphOnly)
+                mix += y - c;
+            else
+                mix += o + v.morph.lastCore();
+        }
+        else
+            mix += o;
+    }
     return mix;
 }
 

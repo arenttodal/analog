@@ -172,7 +172,7 @@ private:
         const int channels = src.numChannels();
         for (int ch = 0; ch < channels; ++ch)
         {
-            const float* d = src.channelData (ch) + pad + i;   // (padded: d[-1] .. d[2] exist)
+            const float* d = src.channelData (ch) + i;   // (channelData skips the padding: d[-1] .. d[2] exist inside it)
             const float xm1 = d[-1], x0 = d[0], x1 = d[1], x2 = d[2];
             const float c1 = 0.5f * (x1 - xm1), c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2, c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
             sum += ((c3 * f + c2) * f + c1) * f + x0;
