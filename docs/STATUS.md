@@ -34,7 +34,7 @@ package was rendered (20 tracks)._
 | Sessions and presets of version 1 migrated (state version 2) | ✅ done and tested | `analog: a version-1 session or preset is migrated and sounds as it did` |
 | Every enabled control audible, every disabled one inert (all ~400 host parameters) | ✅ done and tested | `analog: every control the interface enables ...` |
 | Generator card (OSCILLATORS + waveform picture, ONE SHOT / GRANULAR and the grain controls), no drop zone, files refused | ✅ done and tested | shell test `a generator engine has one card ...`; screenshots |
-| Macro popovers: DRIVE, MOVEMENT, SPACE, ECHO and REIMAGINED are ANDOR OSP's own (shared from its repository; OSP stays pixel-identical); FILTER (was TONE) and OSCILLATORS (opened by the card's DETUNE name) are the instrument's; the first macro is not assigned yet (disabled) | ✅ done and tested / ⚠️ FILTER and OSCILLATORS reviewed only as screenshots | `analog: DRIVE, MOVEMENT, SPACE and ECHO open ANDOR OSP's popovers …`; `analog: the card's first knob is DETUNE ...`; `[screenshots]` |
+| Macro popovers: DRIVE, MOVEMENT, SPACE, ECHO and REIMAGINED are ANDOR OSP's own (shared from its repository; OSP stays pixel-identical); FILTER (was TONE) is the instrument's (the oscillators' settings are the card's workbench); the first macro is not assigned yet (disabled) | ✅ done and tested / ⚠️ FILTER and OSCILLATORS reviewed only as screenshots | `analog: DRIVE, MOVEMENT, SPACE and ECHO open ANDOR OSP's popovers …`; `analog: the card's first knob is DETUNE ...`; `[screenshots]` |
 | State version 3: BLEND left the screen (the oscillators are mixed by their LEVELs); version-2 sessions and presets fold it into the levels; factory presets likewise (factory set 3) | ✅ done and tested | `analog: a version-2 session's BLEND moves into the oscillators' levels and sounds as it did` |
 | 34 factory presets (10 new for the new engines), installed to Documents/…/Factory | ✅ done and tested | `analog: the factory presets are installed, listed and load exactly`; headroom test |
 | Session recall | ✅ done and tested | `analog: a session recalls the sound exactly` |
@@ -46,14 +46,14 @@ package was rendered (20 tracks)._
 | **State version 4** (one migration: models, OTA, chorus, ORGANIC, MORPH; 44 parameters appended; V1→V2→V3→V4) | ✅ done and tested | `analog: a version-3 session opens with every version-4 setting neutral and sounds as it did`; schema golden |
 | **State version 5**: the OSCILLATORS card's LEVEL / TUNE / MUTE no longer reach ORGANIC; the header's A/B mix (`ab.blend`) plays (oscillators vs ORGANIC; centred on a first drop, after a reset and for version-4 sessions); mode named STANDARD / GRANULAR | ✅ done and tested | `organic: the oscillators' LEVEL, MUTE and TUNE leave the recording alone ...`; `analog: a version-4 session rests at the A/B mix's centre ...`; `analog: ORGANIC takes a recording ...` |
 | Legacy sounds unchanged (34 factory + 6 edge patches, 3 rates; exact hashes on Linux, contours everywhere) | ✅ done and tested | `[legacy]` (tests/golden/legacy-renders.txt) |
-| OSCILLATORS heading (beside M/S) opens the oscillators' settings; DETUNE only tunes | ✅ done and tested | `analog: OSCILLATORS beside M and S ...` (click, toggle, outside, Escape, Return/Space, M/S untouched); ANDOR OSP pixel-identical (design capture) |
+| **Oscillator Workbench** (docs/OSCILLATOR_WORKBENCH.md): OSCILLATORS (beside M/S) swaps the card's dark well between the waveform and an in-card editor — QUICK (both oscillators, by model) and DETAILED (OSC 1 / OSC 2 / PAIR / MORE / KEY DNA), PIN, the EQ taking the well and giving it back when pinned; DETUNE only tunes; the floating OSCILLATORS popover is gone | ✅ done and tested / ⚠️ reviewed as screenshots, not in a DAW | `[workbench]` (3 cases); `[screenshots]` `analog-workbench-*`; ANDOR OSP suite and design capture |
 | DCO model: saw/pulse, divide-by-two sub, PWM (manual/LFO/env), pitch-stable (1/5 tolerance, 1/10 wander) | ✅ done and tested | `[models][dco]` |
 | WIDE model: saw/pulse/triangle/square, SHAPE (pitch-tracking edge), SUPER SAW (7 saws, exact single saw at spread 0) | ✅ done and tested | `[models][wide]`, `[supersaw]`; aliasing at C7 ≤ −67.8 dB |
 | All 9 model pairings with sync and Poly Mod; RING MOD; JUNO noise; slot on/off | ✅ done and tested | `[models][pairs]`, `[ring]`, `[noise]` |
 | OTA filter (Juno/Jupiter, 24/12 dB, 2 solves/sample), ladder↔OTA crossfade; high-pass (Juno 6/60/106, Jupiter) | ✅ done and tested / ⚠️ HPF frequencies approximations (Jupiter's unsourced) | `[ota]`, `[hpf]`, `[models][ota]` |
 | Juno-style BBD chorus (I, II, I+II, hiss), after the voices; OFF bit-exact | ✅ done and tested / ⚠️ rates from public write-ups | `[chorus]` |
 | LFO DELAY/RISE, VCA GATE, ENV LINK | ✅ done and tested | `[models][juno]` |
-| OSCILLATORS/FILTER/MORPH popovers: each model's own controls only; fit the window | ✅ done and tested / ⚠️ reviewed as screenshots | `analog: the OSCILLATORS and FILTER popovers ...` |
+| FILTER/MORPH popovers and the workbench: each model's own controls only; fit the window | ✅ done and tested / ⚠️ reviewed as screenshots | `analog: the FILTER popover ...`; `analog: the workbench shows each model's own controls ...` |
 | 10 version-4 factory sounds (44 in all), factory set 4 | ✅ done and tested / ⚠️ voiced without listening | headroom, distinctness, trip through parameters |
 | ORGANIC: one recording on the shell's layer B (OSP loader, store, card, recall/relocation), played per voice through the filter; LOOP (OSP continuation), REVERSE, FOLLOW, root override, swap without a click | ✅ done and tested | `[organic]`; `analog: ORGANIC takes a recording ...` |
 | MORPH: analysis on its own thread (cached), IMPRINT / FUSE / WEAVE, exact ends, click-free moves, MORPH ONLY / LAYERED, unavailable state; the first macro | ✅ done and tested / ⚠️ only on a synthesized stand-in, not real recordings | `[morph]`, `analog: MORPH is the first macro ...` |
@@ -74,7 +74,7 @@ package was rendered (20 tracks)._
 - TAPE FRAME's FRAME lengths (3.6–11.4 s of tape) are longer than a voice's recording (1.5 s):
   the tape runs for the whole FRAME, its travel scaled into the recording.
 - KEY DNA has no curves here yet (ANDOR OSP has no editor for them either): AMOUNT,
-  INDIVIDUALITY and each parameter's variation (OSCILLATORS popover).
+  INDIVIDUALITY and each parameter's variation (the workbench's KEY DNA section).
 
 ## Version 4 notes
 
