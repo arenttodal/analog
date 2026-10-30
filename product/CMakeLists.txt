@@ -16,9 +16,18 @@ andor_add_instrument(ANDOR_Analog
         Source/AnalogEngine.cpp
         Source/AnalogParameters.cpp
         Source/AnalogPopovers.cpp
+        Source/AnalogOscillatorWorkbench.cpp
     # A synthesizer, not a sampler: hosts file it with the instruments that synthesize.
     VST3_CATEGORIES Instrument Synth)
 target_link_libraries(ANDOR_Analog PUBLIC analog_dsp)
+
+# The walnut materials (tools/make_walnut_skin.py): rendered pieces that replace ANDOR OSP's
+# of the same name in this product only (its housing's cheeks, layer A's badge).
+juce_add_binary_data(analog_materials
+    HEADER_NAME AnalogMaterialsData.h
+    NAMESPACE AnalogMaterialsData
+    SOURCES Resources/walnut-skin.zip)
+target_link_libraries(ANDOR_Analog PRIVATE analog_materials)
 
 andor_add_instrument_tests(ANDOR_Analog andor_analog_tests
     SOURCES tests/AnalogProductTests.cpp

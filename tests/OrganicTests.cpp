@@ -58,6 +58,14 @@ namespace
         return p;
     }
 
+    float maxDifference (const Stereo& a, const Stereo& b)
+    {
+        float d = a.left.size() == b.left.size() ? 0.0f : 1.0f;
+        for (std::size_t i = 0; i < std::min (a.left.size(), b.left.size()); ++i)
+            d = std::max ({ d, std::abs (a.left[i] - b.left[i]), std::abs (a.right[i] - b.right[i]) });
+        return d;
+    }
+
     Stereo play (const Patch& p, const osp::InstrumentModel* model, double seconds, std::vector<Event> events)
     {
         auto s = makeSynth (p);
@@ -188,4 +196,51 @@ TEST_CASE ("organic: layered with the oscillators, through the filter; none load
     auto closed = organicOnly();
     closed.tone = 0.3;
     CHECK (play (closed, model.get(), 0.6, { on (0, 81) }).rms (0.1, 0.5) < 0.5 * play (organicOnly(), model.get(), 0.6, { on (0, 81) }).rms (0.1, 0.5));
+}
+
+TEST_CASE ("organic: the oscillators' LEVEL, MUTE and TUNE leave the recording alone; the A/B mix sets one against the other", "[organic][layers]")
+{
+    const auto model = recording (440.0, 2.0, 69.0);
+    // The recording alone: the oscillators' card's LEVEL, MUTE and TUNE change nothing of it.
+    const auto alone = play (organicOnly(), model.get(), 0.6, { on (0, 69) });
+    for (int which = 0; which < 3; ++which)
+    {
+        auto p = organicOnly();
+        if (which == 0)
+            p.levelDb = -24.0;
+        else if (which == 1)
+            p.mute = true;
+        else
+            p.tuneSemitones = 7.0;
+        INFO ("control " << which);
+        const auto out = play (p, model.get(), 0.6, { on (0, 69) });
+        CHECK (maxDifference (out, alone) == 0.0f);
+    }
+    // The oscillators beside a loaded recording (ORGANIC muted): their LEVEL is theirs (into
+    // the filter, as their own levels: the ladder's gentle saturation moves it by a few tenths).
+    auto oscillators = measurementPatch();
+    oscillators.organic.heard = false;
+    const auto unity = play (oscillators, model.get(), 0.6, { on (0, 57) });
+    oscillators.levelDb = -12.0;
+    const auto quieter = play (oscillators, model.get(), 0.6, { on (0, 57) });
+    CHECK (20.0 * std::log10 (quieter.rms (0.1, 0.5) / unity.rms (0.1, 0.5)) == Catch::Approx (-12.0).margin (0.5));
+    oscillators.levelDb = 0.0;
+
+    // The A/B mix: its centre is both at full level (the sound before it was played); all A
+    // silences the recording, all B the oscillators.
+    auto organic = organicOnly();
+    organic.organic.blend = 0.0;
+    CHECK (play (organic, model.get(), 0.6, { on (0, 69) }).peak() == 0.0f);
+    organic.organic.blend = 1.0;
+    CHECK (maxDifference (play (organic, model.get(), 0.6, { on (0, 69) }), alone) == 0.0f);
+    oscillators.organic.blend = 1.0;
+    CHECK (play (oscillators, model.get(), 0.6, { on (0, 57) }).peak() == 0.0f);
+    oscillators.organic.blend = 0.0;
+    CHECK (maxDifference (play (oscillators, model.get(), 0.6, { on (0, 57) }), unity) == 0.0f);
+    // A quarter towards B: the oscillators 3 dB down from full (sqrt 2 cos), the recording at full.
+    organic.organic.blend = oscillators.organic.blend = 0.75;
+    CHECK (maxDifference (play (organic, model.get(), 0.6, { on (0, 69) }), alone) == 0.0f);
+    const auto lowered = play (oscillators, model.get(), 0.6, { on (0, 57) });
+    CHECK (20.0 * std::log10 (lowered.rms (0.1, 0.5) / unity.rms (0.1, 0.5))
+           == Catch::Approx (20.0 * std::log10 (1.41421356 * std::cos (0.75 * 1.5707963))).margin (0.3));
 }

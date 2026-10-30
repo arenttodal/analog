@@ -233,6 +233,10 @@ private:
         double organicStep = 0.0;     ///< source frames per internal sample (control rate)
         float organicGain = 0.0f;
         bool organicOn = false;       ///< playing, or fading a replaced recording out
+        // With a recording loaded, layer A's LEVEL / MUTE and the A/B mix scale the oscillators
+        // and the mix ORGANIC alone (glided at control rate; set at once on a note's first).
+        float oscLayerGain = 1.0f, organicLayerGain = 1.0f;
+        bool layerGainsFresh = true;
         bool releaseWhenPlayedOut = false;   ///< FOLLOW off: the key was released; the recording plays out first
         // MORPH: the recording turned into the carrier (when its profile is ready).
         morph::MorphVoice morph;
