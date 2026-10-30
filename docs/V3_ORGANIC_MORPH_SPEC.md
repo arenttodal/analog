@@ -1,5 +1,8 @@
 # ANDOR Analog V3 — Organic Morph Expansion
 
+> **Status (30 Oct 2026):** implemented as part of state version 4. See `docs/UNIFIED_ANALOG_EXPANSION_PLAN.md` and `docs/STATUS.md`. BLEND is gone (state v3), so ORGANIC has its own card on the shell's layer B and MORPH its own macro. The ORGANIC card's controls are ANDOR OSP's `layerB.*`. Where this document and the plan differ, the plan and the code win.
+
+
 _Queued as the next improvement (owner's specification, 29 October 2026). Not started: the
 work begins when the owner says so. Recorded verbatim below._
 

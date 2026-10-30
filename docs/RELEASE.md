@@ -62,3 +62,11 @@ decision to sell are the owner's.
 - The host lists all 350 ANDOR parameters plus ANALOG's 57 (the shell's grouped layout is still to come;
   four of ANALOG's own, the first version's LFO, are unused since version 2 and say so in their names).
 - No host or listening validation yet (Linux tests and the macOS CI build with auval, see docs/STATUS.md).
+
+
+## State version 4
+
+- Sessions and presets from versions 1–3 migrate in one chain, ending with V3→V4. The test is `analog: a version-3 session ...`.
+- ORGANIC recordings are saved by content hash and path, with a copy in ANDOR OSP's sample store, so a moved file still loads. A portable preset that embeds the audio is **not** implemented: presets store references.
+- MORPH's profiles are rebuilt on load (about 0.5 s for 10 s of audio, on a worker thread) and are not stored.
+- Still to do before release: pluginval, DAW sessions (Logic, Ableton, REAPER), listening QA (AUDIBLE_QA.md).

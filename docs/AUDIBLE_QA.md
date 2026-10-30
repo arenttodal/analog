@@ -86,3 +86,18 @@ None of the following has been carried out; they are the release gate (spec §8,
 - [ ] Hosts: Logic (AU), Ableton Live (AU/VST3), REAPER (VST3): automation, preset recall, project reopen, offline bounce = realtime.
 
 `./build/analog-render --all renders/` writes every factory sound's demo phrase.
+
+
+## Version 4 listening checklist
+
+Listening package: 20 tracks rendered from `tests/fixtures` (the bowed stand-in, synthesized)
+and the new factory sounds. None of these has been judged by ear yet.
+
+- [ ] CLASSIC vs DCO vs WIDE on the same patch: DCO steadier, WIDE brighter, SUPER SAW wide but not chorused-sounding at small SPREAD.
+- [ ] DCO sub at the bottom and the top of the keyboard (clicks? the octave clean?).
+- [ ] OTA JUNO vs JUPITER vs LADDER at the same cutoff and resonance; self-oscillation pitch.
+- [ ] High-pass positions (the 106's bass boost); Juno-6 vs Juno-60 voicing.
+- [ ] Chorus I / II / I+II on a pad: depth and hiss level.
+- [ ] ORGANIC: a real nyckelharpa/cello recording over two octaves; loop seams on held notes; FOLLOW off; REVERSE.
+- [ ] MORPH IMPRINT / FUSE / WEAVE sweeps 0 → 100 % with CLASSIC, DCO and WIDE carriers; the middle should sound like one instrument, not two.
+- [ ] MORPH with 8-note chords; with LAYERED; at extreme FORMANTS.
