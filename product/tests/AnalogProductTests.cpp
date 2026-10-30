@@ -838,6 +838,81 @@ TEST_CASE ("analog: OSCILLATORS beside M and S opens the oscillators' settings; 
     CHECK (ui.openPopupPanel() == nullptr);
 }
 
+TEST_CASE ("analog: the OSCILLATORS and FILTER popovers show each model's own controls, and fit the instrument", "[analog][editor]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    // A control of the open popover bound to `id`, and whether it shows.
+    auto shown = [&ui] (const juce::String& id) {
+        bool found = false, visible = false;
+        auto* panel = ui.openPopupPanel();
+        auto onScreen = [panel] (juce::Component* c) {   // (it and every parent up to the popover)
+            for (; c != nullptr && c != panel; c = c->getParentComponent())
+                if (! c->isVisible())
+                    return false;
+            return true;
+        };
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (osp::plugin::binding::tagsOf (*child).contains (id))
+                {
+                    found = true;
+                    visible = visible || onScreen (child);
+                }
+                find (*child);
+            }
+        };
+        if (auto* panel = ui.openPopupPanel())
+            find (*panel);
+        REQUIRE (found);
+        return visible;
+    };
+    auto fits = [&ui] {
+        auto* panel = ui.openPopupPanel();
+        REQUIRE (panel != nullptr);
+        const auto area = ui.getLocalArea (panel, panel->getLocalBounds().reduced (osp::plugin::MiniPanel::shadowMargin));
+        INFO ("popover " << area.toString() << " in " << ui.getLocalBounds().toString());
+        CHECK (ui.getLocalBounds().contains (area));
+    };
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
+    fits();
+    CHECK (shown (params::osc1Wave));
+    CHECK_FALSE (shown (params::osc1DcoSub));
+    CHECK_FALSE (shown (params::osc1WideShape));
+    // DCO on OSC 1, WIDE on OSC 2: the card follows while open (the editor's refresh).
+    setValue (p, params::osc1Model, 1.0f);
+    setValue (p, params::osc2Model, 2.0f);
+    ui.refreshNow();
+    CHECK_FALSE (shown (params::osc1Wave));
+    CHECK (shown (params::osc1DcoSub));
+    CHECK (shown (params::osc1DcoPwmSource));
+    CHECK (shown (params::osc2WideShape));
+    CHECK (shown (params::osc2WideWave));
+    CHECK_FALSE (shown (params::osc2Wave));
+    fits();
+    ui.closePopup();
+    // FILTER: the OTA's settings only with the OTA; the Juno variant where it acts.
+    ui.openPopup (2);
+    fits();
+    CHECK_FALSE (shown (params::otaCharacter));
+    CHECK_FALSE (shown (params::junoVariant));
+    setValue (p, params::filterModel, 1.0f);
+    ui.refreshNow();
+    CHECK (shown (params::otaCharacter));
+    CHECK (shown (params::otaSlope));
+    CHECK (shown (params::junoVariant));
+    setValue (p, params::otaCharacter, 1.0f);   // JUPITER: no Juno variant
+    ui.refreshNow();
+    CHECK_FALSE (shown (params::junoVariant));
+    CHECK (shown (params::chorusMode));
+    CHECK (shown (params::lfoDelay));
+    fits();
+}
+
 TEST_CASE ("analog: SHAPER's custom pattern is played, saved with the session and recalled", "[analog][state][movement]")
 {
     ShellProcessor p;
@@ -936,8 +1011,28 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
         shoot (juce::String ("analog-popover-") + names[m]);
         ui.closePopup();
     }
-    ui.openPopup (andor::shell::ShellEditor::startControlPopup);
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
     shoot ("analog-popover-oscillators");
+    ui.closePopup();
+    // Each model's own settings, and the OTA's.
+    setValue (p, params::osc1Model, 1.0f);
+    setValue (p, params::osc2Model, 2.0f);
+    setValue (p, params::osc2WideWave, 4.0f);
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
+    shoot ("analog-popover-oscillators-dco-wide");
+    ui.closePopup();
+    setValue (p, params::filterModel, 1.0f);
+    setValue (p, params::otaHpf, 3.0f);
+    ui.openPopup (2);
+    shoot ("analog-popover-filter-ota");
+    ui.closePopup();
+    setValue (p, params::osc1Model, 0.0f);
+    setValue (p, params::osc2Model, 0.0f);
+    setValue (p, params::filterModel, 0.0f);
+    setValue (p, params::otaHpf, 0.0f);
+    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
+    ui.engineCard (0).setHeadingOpen (true);
+    shoot ("analog-heading-open");
     ui.closePopup();
     ui.openPopup (andor::shell::ShellEditor::advancedPopup);
     shoot ("analog-advanced");

@@ -15,7 +15,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-3";
+    constexpr const char* factoryVersion = "analog-factory-4";
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */

@@ -44,8 +44,11 @@ namespace
     std::vector<Case> cases()
     {
         std::vector<Case> list;
-        for (const auto& f : factoryPatches())
+        for (int i = 0; i < legacyFactoryCount; ++i)
+        {
+            const auto& f = factoryPatches()[static_cast<std::size_t> (i)];
             list.push_back ({ "factory/" + f.name, f.patch, keyDnaOf (f), phrase() });
+        }
         auto edge = [&list] (const std::string& name, auto&& change) {
             Patch p;
             change (p);

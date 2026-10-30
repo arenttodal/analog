@@ -13,8 +13,8 @@ namespace andor::analog
     macro's identity colour; DRIVE, MOVEMENT, SPACE and ECHO are ANDOR OSP's own popovers
     (MacroPopups). The first has none. */
 std::unique_ptr<osp::plugin::MiniPanel> createMacroPopover (int macro, osp::plugin::InstrumentHost& host);
-/** The oscillators' settings (waves, tuning, levels, LFO depths, Poly Mod, noise, voices, KEY
-    DNA): opened by the card's DETUNE name. */
+/** The oscillators' settings (models, waves, tuning, levels, LFO depths, the pair, Poly Mod,
+    noise, voices, KEY DNA): opened by the card's OSCILLATORS heading. */
 std::unique_ptr<osp::plugin::MiniPanel> createOscillatorPopover (osp::plugin::InstrumentHost& host);
 
 } // namespace andor::analog

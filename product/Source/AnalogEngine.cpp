@@ -198,33 +198,85 @@ bool AnalogEngine::sourcePicture (int, const juce::AudioProcessorValueTreeState&
 std::vector<float> AnalogEngine::pictureOf (const Patch& p, int points)
 {
     // One period of OSC 1 (or, synced, of OSC 2, the master): the two oscillators as the
-    // mixer blends them, without the filter. LOW FREQ OSC 2 is a modulator: not drawn.
-    const auto w1 = osc::wavesOf (p.osc1Wave);
-    const auto w2 = osc::wavesOf (p.osc2Wave);
+    // mixer blends them, each in its model, without the filter. LOW FREQ OSC 2 is a
+    // modulator: not drawn. A DCO's sub needs two periods to show its octave: then two are
+    // drawn.
+    auto plan = [&p] (int slot) {
+        osc::SlotPlan s;
+        s.model = slot == 1 ? p.osc1Model : p.osc2Model;
+        if (s.model == OscModel::classic)
+            s.waves = slot == 1 ? osc::wavesOf (p.osc1Wave) : osc::wavesOf (p.osc2Wave);
+        else if (s.model == OscModel::dco)
+        {
+            const auto& c = slot == 1 ? p.dco1 : p.dco2;
+            s.waves = osc::wavesOf (c);
+            s.subLevel = static_cast<float> (c.subLevel);
+        }
+        else
+        {
+            const auto& w = slot == 1 ? p.wide1 : p.wide2;
+            s.waves = osc::wavesOf (w.wave);
+            s.squareWidth = w.wave == WideWave::square;
+            s.superSaw = w.wave == WideWave::superSaw;
+        }
+        return s;
+    };
+    const auto plan1 = plan (1), plan2 = plan (2);
+    const double spread1 = p.wide1.spread, spread2 = p.wide2.spread;
+    // A slot's naive value at `phase` (cycle `n` of its own, for the sub's octave).
+    auto value = [] (const osc::SlotPlan& s, double phase, int n, float width, double spread) {
+        if (s.squareWidth)
+            width = 0.5f;
+        float v = osc::naive (s.waves, phase, width);
+        if (s.subLevel > 0.0f)
+            v += (n % 2 == 0 ? 1.0f : -1.0f) * s.subLevel;
+        if (s.superSaw && spread > 0.0)
+        {
+            // The side saws drawn where their detune has carried them a little way (a still
+            // picture of a moving sound), at the level the engine gives them.
+            const float side = osc::superSawSideLevel (spread);
+            float sum = v;
+            for (int i = 0; i < osc::superSawSides; ++i)
+            {
+                double q = phase + 0.11 * osc::superSawOffsets[static_cast<std::size_t> (i)] * (0.3 + spread);
+                q -= std::floor (q);
+                sum += side * static_cast<float> (2.0 * q - 1.0);
+            }
+            v = sum * osc::superSawNormal (side);
+        }
+        return v;
+    };
     const double pitch1 = 12.0 * p.osc1Octave + p.osc1Coarse;
     const double pitch2 = 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0;
     const double ratio21 = std::exp2 ((pitch2 - pitch1) / 12.0);
     const double theta = p.blend * 1.5707963267948966;
-    const auto g1 = static_cast<float> (p.osc1Level * std::min (1.0, 1.41421356 * std::cos (theta)));
-    const auto g2 = static_cast<float> (p.osc2LowFrequency ? 0.0 : p.osc2Level * std::min (1.0, 1.41421356 * std::sin (theta)));
+    const auto g1 = static_cast<float> (p.osc1Enabled ? p.osc1Level * std::min (1.0, 1.41421356 * std::cos (theta)) : 0.0);
+    const auto g2 = static_cast<float> (p.osc2LowFrequency || ! p.osc2Enabled ? 0.0 : p.osc2Level * std::min (1.0, 1.41421356 * std::sin (theta)));
+    const auto ring = static_cast<float> (std::clamp (p.ringMix, 0.0, 1.0));
+    const double periods = plan1.subLevel > 0.0f || plan2.subLevel > 0.0f ? 2.0 : 1.0;
     std::vector<float> cycle (static_cast<std::size_t> (std::max (2, points)));
     for (std::size_t i = 0; i < cycle.size(); ++i)
     {
-        const double t = static_cast<double> (i) / static_cast<double> (cycle.size());
-        double phase1, phase2;
+        const double t = periods * static_cast<double> (i) / static_cast<double> (cycle.size());
+        double cycles1, cycles2;
         if (p.sync && ! p.osc2LowFrequency)
         {
-            phase2 = t;
-            const double slave = t / ratio21;   // OSC 1's cycles within one of OSC 2's
-            phase1 = slave - std::floor (slave);
+            cycles2 = t;
+            const double inMaster = t - std::floor (t);
+            cycles1 = std::floor (t) * 1.0e3 + inMaster / ratio21;   // (restarted every master cycle)
         }
         else
         {
-            phase1 = t;
-            const double b = t * ratio21;
-            phase2 = b - std::floor (b);
+            cycles1 = t;
+            cycles2 = t * ratio21;
         }
-        cycle[i] = g1 * osc::naive (w1, phase1, static_cast<float> (p.osc1Width)) + g2 * osc::naive (w2, phase2, static_cast<float> (p.osc2Width));
+        const double phase1 = cycles1 - std::floor (cycles1), phase2 = cycles2 - std::floor (cycles2);
+        const float o1 = value (plan1, phase1, static_cast<int> (std::floor (cycles1)), static_cast<float> (p.osc1Width), spread1);
+        const float o2 = value (plan2, phase2, static_cast<int> (std::floor (cycles2)), static_cast<float> (p.osc2Width), spread2);
+        float mix = g1 * o1 + g2 * o2;
+        if (ring > 0.0f)
+            mix += ring * (1.7f * o1 * o2 * 0.5f * (g1 + g2) - mix);
+        cycle[i] = mix;
     }
     return cycle;
 }
