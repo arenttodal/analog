@@ -13,11 +13,16 @@
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
+#include "audio/utility/TestSignals.h"
+#include "core/PitchMath.h"
+#include "io/AudioFileIO.h"
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <map>
 
 using andor::shell::ShellProcessor;
@@ -59,6 +64,14 @@ namespace
                 out.copyFrom (ch, pos, buffer, ch, 0, n);
         }
         return out;
+    }
+
+    double rmsOf (const juce::AudioBuffer<float>& a)
+    {
+        double sum = 0.0;
+        for (int i = 0; i < a.getNumSamples(); ++i)
+            sum += static_cast<double> (a.getSample (0, i)) * a.getSample (0, i);
+        return std::sqrt (sum / std::max (1, a.getNumSamples()));
     }
 
     double differenceRms (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
@@ -103,6 +116,32 @@ namespace
         Patch patch;
         std::map<juce::String, std::function<void (Patch&)>> modes;
     };
+
+    /** A recording for ORGANIC (ANDOR OSP's test vowel), written to `dir`. */
+    juce::File writeRecording (const juce::File& dir, const juce::String& name, int midi, double seconds)
+    {
+        const auto file = dir.getChildFile (name);
+        std::string error;
+        REQUIRE (osp::io::writeAudioFile (std::filesystem::path (file.getFullPathName().toStdString()),
+                                          osp::testsignals::vowel (osp::midiToHz (midi), seconds, 48000.0, 3), osp::io::SampleFormat::pcm24, error));
+        return file;
+    }
+
+    struct Scratch
+    {
+        juce::File dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("andor-analog-test-" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+        Scratch() { dir.createDirectory(); }
+        ~Scratch() { dir.deleteRecursively(); }
+    };
+
+    /** Loads a recording into ORGANIC (layer B) and waits for it. */
+    void loadOrganic (ShellProcessor& p, const juce::File& file)
+    {
+        REQUIRE (p.addLayers ({ file }) == 1);
+        REQUIRE (p.waitForLoads (60000));
+        p.pollLoads();
+        REQUIRE (p.loadState (1) == osp::plugin::InstrumentHost::LoadState::ready);
+    }
 
     SoundContext soundContext()
     {
@@ -474,6 +513,15 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         return false;
     };
     ShellProcessor p;
+    // ORGANIC's card controls act on a recording: one is loaded (long enough to sustain, so
+    // ANDOR OSP's continuation marks loops for LOOP).
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 2.5));
+    // LOOP acts where the recording would end under a held note: START near its end.
+    setups["layerB.loop"] = [] (ShellProcessor& q) {
+        setValue (q, "layerB.start", 50.0f);
+        setValue (q, "layerB.tune", 12.0f);   // (twice as fast: the held notes reach the loop)
+    };
     int checkedBound = 0, checkedUnbound = 0;
     for (auto* base : p.getParameters())
     {
@@ -911,6 +959,71 @@ TEST_CASE ("analog: the OSCILLATORS and FILTER popovers show each model's own co
     CHECK (shown (params::chorusMode));
     CHECK (shown (params::lfoDelay));
     fits();
+}
+
+TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscillators, plays it, recalls it", "[analog][organic]")
+{
+    Scratch scratch;
+    const auto file = writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5);
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    CHECK (ui.visibleCardCount() == 1);   // the oscillators alone: the hero card
+    CHECK (ui.isInterestedInFileDrag ({ file.getFullPathName() }));
+    const auto synth = renderShell (p, 0.6);
+
+    loadOrganic (p, file);
+    CHECK (p.currentInstrument (1)->model->original.continuation.hasJumps());   // (it sustains: LOOP has a loop)
+    ui.refreshNow();
+    CHECK (ui.visibleCardCount() == 2);   // two equal cards
+    CHECK (ui.engineCard (0).hasHeadingDoor());
+    CHECK_FALSE (ui.engineCard (1).hasHeadingDoor());   // ORGANIC's name opens no oscillator settings
+    const auto layered = renderShell (p, 0.6);
+    CHECK (differenceRms (synth, layered) > 1.0e-4);
+    // ORGANIC alone: both oscillators off.
+    setValue (p, params::osc1Enabled, 0.0f);
+    setValue (p, params::osc2Enabled, 0.0f);
+    const auto alone = renderShell (p, 0.6);
+    CHECK (rmsOf (alone) > 1.0e-3);
+    // Its card's M silences it; S on the oscillators' card too; S on its own silences them.
+    setValue (p, "layerB.mute", 1.0f);
+    CHECK (rmsOf (renderShell (p, 0.6)) < 1.0e-6);
+    setValue (p, "layerB.mute", 0.0f);
+    setValue (p, "layerA.solo", 1.0f);
+    CHECK (rmsOf (renderShell (p, 0.6)) < 1.0e-6);
+    setValue (p, "layerA.solo", 0.0f);
+    setValue (p, params::osc1Enabled, 100.0f);
+    setValue (p, params::osc2Enabled, 100.0f);
+    setValue (p, "layerB.solo", 1.0f);
+    CHECK (differenceRms (renderShell (p, 0.6), alone) < 1.0e-6);
+    setValue (p, "layerB.solo", 0.0f);
+
+    // A session recalls the recording (by its content hash, from ANDOR OSP's sample store)
+    // and the sound, exactly; also when the original file has gone.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    for (const bool moved : { false, true })
+    {
+        INFO ((moved ? "the original file moved away" : "in place"));
+        if (moved)
+            REQUIRE (file.moveFileTo (scratch.dir.getChildFile ("elsewhere.wav")));
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (q.waitForLoads (60000));
+        q.pollLoads();
+        REQUIRE (q.loadState (1) == osp::plugin::InstrumentHost::LoadState::ready);
+        CHECK (differenceRms (renderShell (q, 0.6), layered) < 1.0e-6);
+    }
+    // Removed: the oscillators alone again, one card.
+    p.removeLayer (1);
+    p.pollLoads();
+    renderShell (p, 0.05);   // (the hand-over happens in a block)
+    ui.refreshNow();
+    CHECK (ui.visibleCardCount() == 1);
+    CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
 }
 
 TEST_CASE ("analog: SHAPER's custom pattern is played, saved with the session and recalled", "[analog][state][movement]")

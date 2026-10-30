@@ -157,6 +157,9 @@ const ProductInfo& productInfo()
         // heading, OSCILLATORS beside M and S, opens the oscillators' settings.
         p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE", nullptr };
         p.generatorHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorPopover (host); };
+        // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
+        // sample store, card and recall).
+        p.hybridSampleName = "ORGANIC";
         p.stateVersion = 4;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)

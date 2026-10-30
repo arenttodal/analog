@@ -123,6 +123,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.toybox.prepare (internalRate);
         v.mirage.prepare (internalRate);
         v.highPass.prepare (internalRate);
+        v.organic.prepare (internalRate);
     }
     // The mode engines' "recording" on a live voice: only its length, rate and root are read.
     auto standIn = [] (double rate, double seconds) {
@@ -583,13 +584,35 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.amp.noteOn();
         v.env.noteOn();
         v.ageSeconds = 0.0;   // (LFO DELAY counts from here)
+        v.releaseWhenPlayedOut = false;
+        if (organicSource != nullptr)
+            v.organic.start (organicSource, current.organic.start, current.organic.reverse);
+        else
+            v.organic.stop();
     }
     v.active = true;
     v.hasPlayed = true;
 }
 
+void Synth::setOrganic (const osp::InstrumentModel* model) noexcept
+{
+    if (model == organicSource)
+        return;
+    for (auto& v : voices)
+        if (v.organic.playing())
+            v.organic.captureTail (v.organicStep, (v.held || v.sustained) && current.organic.loop);
+    organicSource = model;
+}
+
 void Synth::releaseVoice (Voice& v) noexcept
 {
+    // FOLLOW off: a note playing a recording lets it play out before it is released.
+    if (! current.organic.follow && v.organic.playing() && v.organicGain > 0.0f)
+    {
+        v.releaseWhenPlayedOut = true;
+        return;
+    }
+    v.releaseWhenPlayedOut = false;
     // The release time is taken as the note is released (as ANDOR OSP's voices).
     using D = osp::mod::Dest;
     v.mod.release (modRuntime);
@@ -1022,7 +1045,13 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.ringNow += 0.25f * (static_cast<float> (p.ringMix) - v.ringNow);
     if (v.ringNow < 1.0e-4f && p.ringMix <= 0.0)
         v.ringNow = 0.0f;
-    v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white;
+    // ORGANIC: the note's pitch (its TUNE) against the recording's root (or the override).
+    if (v.organic.playing())
+        v.organicStep = v.organic.stepFor (common + p.organic.tuneSemitones, static_cast<double> (p.organic.rootOverride));
+    v.organicGain = p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
+    v.organicOn = ! v.organic.finished();
+    v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
+                    && ! v.organicOn;
     if (! v.classicPair)
     {
         planSlot (v, 1, p, v.dt1);
@@ -1109,7 +1138,11 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     const float velocityGain = math::dbToGain (-p.velocityRangeDb * soft * soft);
     // LEVEL at its bottom (ANDOR OSP's -48 dB) is silence.
     const float level = p.levelDb <= -47.99 ? 0.0f : math::dbToGain (p.levelDb);
-    v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+    // MUTE (the oscillators' card, or ORGANIC's solo): with a recording playing, only the
+    // oscillators and the noise fall silent (above); without one, the voice as before.
+    if (p.mute && v.organicOn)
+        v.gain1 = v.gain2 = v.gainNoise = 0.0f;
+    v.outGainTarget = p.mute && ! v.organicOn ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
 
     // The source: ONE SHOT <-> GRANULAR glides (about 8 ms); the grains' settings, moved by
     // the REIMAGINED mode's travel and the key's KEY DNA; KALEIDOSCOPE's per-voice parts.
@@ -1264,6 +1297,8 @@ void Synth::controlUpdate() noexcept
             continue;
         v.pitch += (v.pitchTarget - v.pitch) * glideCoef;
         v.ageSeconds += seconds;
+        if (v.releaseWhenPlayedOut && ! v.organic.playing())
+            releaseVoice (v);   // (FOLLOW off: the recording has played out)
         updateDrift (v);
         float lfoNow = lfoValue;
         if (p.lfo.scope == osp::mod::Scope::poly)
@@ -1391,6 +1426,8 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
         }
         mix += v.gainNoise * n;
     }
+    if (v.organicOn)
+        mix += v.organicGain * v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
     return mix;
 }
 

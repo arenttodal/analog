@@ -28,7 +28,12 @@ public:
     juce::StringArray boundParameters() const override { return params::engineParameterIds(); }
     void prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters) override;
     int latencySamples() const override { return synth.latencySamples(); }
-    void setSource (int, const osp::plugin::LoadedInstrument*) noexcept override {}
+    /** Layer B is ORGANIC (the shell's hybrid layer): its model reaches every voice. */
+    void setSource (int layer, const osp::plugin::LoadedInstrument* source) noexcept override
+    {
+        if (layer == 1)
+            synth.setOrganic (source != nullptr ? source->model.get() : nullptr);
+    }
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept override;
     int activeNotes() const noexcept override { return synth.activeVoices(); }
     void setShaperPattern (const osp::ShaperPattern& pattern) noexcept override { shaperPattern = pattern; }

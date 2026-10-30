@@ -120,14 +120,10 @@ namespace andor::analog::params
     inline const juce::String chorusNoise = "analog.juno.chorusNoise";
     inline const juce::String osc1Enabled = "analog.osc1.enabled";
     inline const juce::String osc2Enabled = "analog.osc2.enabled";
-    inline const juce::String organicEnabled = "analog.organic.enabled";
-    inline const juce::String organicLevel = "analog.organic.level";
-    inline const juce::String organicPan = "analog.organic.pan";
+    // ORGANIC is the shell's layer B (ProductInfo::hybridSampleName): its card's own LEVEL,
+    // PAN, TUNE, START, LOOP, FOLLOW, REVERSE, M and S (ANDOR OSP's layerB.*, the same
+    // meaning) play it; only the root override is the instrument's.
     inline const juce::String organicRoot = "analog.organic.root";
-    inline const juce::String organicStart = "analog.organic.start";
-    inline const juce::String organicLoop = "analog.organic.loop";
-    inline const juce::String organicFollow = "analog.organic.follow";
-    inline const juce::String organicReverse = "analog.organic.reverse";
     inline const juce::String morphEnabled = "analog.morph.enabled";
     inline const juce::String morphPosition = "analog.morph.position";
     inline const juce::String morphMethod = "analog.morph.method";

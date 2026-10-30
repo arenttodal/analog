@@ -44,9 +44,12 @@ namespace
         iFilterModel, iOtaCharacter, iOtaSlope, iOtaHpf, iJunoVariant,
         iLfoDelay, iLfoRise, iVcaMode, iEnvLink, iChorusMode, iChorusNoise,
         iOsc1Enabled, iOsc2Enabled,
-        iOrganicEnabled, iOrganicLevel, iOrganicPan, iOrganicRoot, iOrganicStart, iOrganicLoop, iOrganicFollow, iOrganicReverse,
+        iOrganicRoot,
         iMorphEnabled, iMorphPosition, iMorphMethod, iMorphCarrier, iMorphTexture, iMorphAttack, iMorphFormants, iMorphDetail,
         iMorphLevelMatch, iMorphOutput,
+        // ORGANIC: the shell's layer B (ANDOR OSP's own parameters, not version 4's).
+        iOrganicLevel, iOrganicPan, iOrganicTune, iOrganicStart, iOrganicLoop, iOrganicFollow, iOrganicReverse, iOrganicMute,
+        iOrganicSolo, iGeneratorSolo,
         count
     };
 
@@ -87,9 +90,11 @@ namespace
             filterModel, otaCharacter, otaSlope, otaHpf, junoVariant,
             lfoDelay, lfoRise, vcaMode, envLink, chorusMode, chorusNoise,
             osc1Enabled, osc2Enabled,
-            organicEnabled, organicLevel, organicPan, organicRoot, organicStart, organicLoop, organicFollow, organicReverse,
+            organicRoot,
             morphEnabled, morphPosition, morphMethod, morphCarrier, morphTexture, morphAttack, morphFormants, morphDetail,
             morphLevelMatch, morphOutput,
+            "layerB.level", "layerB.pan", "layerB.tune", "layerB.start", "layerB.loop", "layerB.follow", "layerB.reverse", "layerB.mute",
+            "layerB.solo", "layerA.solo",
         };
         jassert (list.size() == count);
         return list;
@@ -128,7 +133,7 @@ const juce::StringArray& version4Ids()
 {
     static const juce::StringArray list = [] {
         juce::StringArray l;
-        for (int i = iOsc1Model; i < count; ++i)
+        for (int i = iOsc1Model; i < iOrganicLevel; ++i)
             l.add (ids()[i]);
         return l;
     }();
@@ -142,8 +147,9 @@ const juce::StringArray& engineParameterIds()
         // only offered once the engine plays it: the rest stay disabled on screen.
         static const juce::StringArray notPlayedYet = [] {
             juce::StringArray n;
-            for (int i = iOsc1Enabled + 2; i < count; ++i)   // ORGANIC and MORPH
+            for (int i = iMorphEnabled; i < iOrganicLevel; ++i)   // MORPH
                 n.add (ids()[i]);
+            n.add ("layerB.pan");   // (each voice is one mono signal through its filter: ORGANIC takes its place)
             return n;
         }();
         juce::StringArray l;
@@ -350,19 +356,12 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     onOff4 (osc1Enabled, "Osc 1 On", d.osc1Enabled);
     onOff4 (osc2Enabled, "Osc 2 On", d.osc2Enabled);
     const auto& o = d.organic;
-    onOff4 (organicEnabled, "Organic On", o.enabled);
-    percent4 (organicLevel, "Organic Level", o.level);
-    bipolar4 (organicPan, "Organic Pan", 100.0f, 100.0 * o.pan, "%", 0);
     layout.add (std::make_unique<juce::AudioParameterInt> (v4 (organicRoot), "Organic Root", -1, 127, o.rootOverride,
                                                            juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) {
                                                                if (v < 0)
                                                                    return juce::String ("Auto");
                                                                return juce::MidiMessage::getMidiNoteName (v, true, true, 4);
                                                            })));
-    percent4 (organicStart, "Organic Start", o.start);
-    onOff4 (organicLoop, "Organic Loop", o.loop);
-    onOff4 (organicFollow, "Organic Follow Env", o.follow);
-    onOff4 (organicReverse, "Organic Reverse", o.reverse);
     const auto& m = d.morph;
     onOff4 (morphEnabled, "Morph On", m.enabled);
     percent4 (morphPosition, "Morph", m.position);
@@ -424,8 +423,6 @@ namespace
             case iOsc1WideSpread: p.wide1.spread = 0.01 * v; break;
             case iOsc2WideSpread: p.wide2.spread = 0.01 * v; break;
             case iRingMix: p.ringMix = 0.01 * v; break;
-            case iOrganicLevel: p.organic.level = 0.01 * v; break;
-            case iOrganicPan: p.organic.pan = 0.01 * v; break;
             case iMorphPosition: p.morph.position = 0.01 * v; break;
             case iMorphTexture: p.morph.texture = 0.01 * v; break;
             case iMorphAttack: p.morph.attack = 0.01 * v; break;
@@ -484,7 +481,7 @@ namespace
             { iOsc1DcoPwmDepth, "OSC 1 PWM DEPTH", O::voice }, { iOsc2DcoPwmDepth, "OSC 2 PWM DEPTH", O::voice },
             { iOsc1WideShape, "OSC 1 SHAPE", O::voice }, { iOsc2WideShape, "OSC 2 SHAPE", O::voice },
             { iOsc1WideSpread, "OSC 1 SPREAD", O::voice }, { iOsc2WideSpread, "OSC 2 SPREAD", O::voice },
-            { iRingMix, "RING MOD", O::voice }, { iOrganicLevel, "ORGANIC LEVEL", O::voice }, { iOrganicPan, "ORGANIC PAN", O::voice },
+            { iRingMix, "RING MOD", O::voice },
             { iMorphPosition, "MORPH", O::voice }, { iMorphTexture, "MORPH TEXTURE", O::voice }, { iMorphAttack, "MORPH ATTACK", O::voice },
             { iMorphFormants, "MORPH FORMANTS", O::voice }, { iMorphDetail, "MORPH DETAIL", O::voice },
         };
@@ -750,15 +747,21 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.chorusNoise = on (iChorusNoise);
     p.osc1Enabled = on (iOsc1Enabled);
     p.osc2Enabled = on (iOsc2Enabled);
+    // ORGANIC (layer B, ANDOR OSP's units: LEVEL dB, PAN %, TUNE semitones, START %). A solo
+    // on one card silences the other (as ANDOR OSP's layers).
     auto& o = p.organic;
-    o.enabled = on (iOrganicEnabled);
-    o.level = 0.01 * v (iOrganicLevel);
-    o.pan = 0.01 * v (iOrganicPan);
     o.rootOverride = std::clamp (juce::roundToInt (at (iOrganicRoot)), -1, 127);
+    o.levelDb = v (iOrganicLevel);
+    o.pan = 0.01 * v (iOrganicPan);
+    o.tuneSemitones = v (iOrganicTune);
     o.start = 0.01 * v (iOrganicStart);
     o.loop = on (iOrganicLoop);
     o.follow = on (iOrganicFollow);
     o.reverse = on (iOrganicReverse);
+    const bool soloA = on (iGeneratorSolo), soloB = on (iOrganicSolo);
+    o.heard = ! on (iOrganicMute) && ! (soloA && ! soloB);
+    if (soloB && ! soloA)
+        p.mute = true;
     auto& m = p.morph;
     m.enabled = on (iMorphEnabled);
     m.position = 0.01 * v (iMorphPosition);
@@ -962,15 +965,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iChorusNoise, p.chorusNoise ? 1.0 : 0.0);
     put (iOsc1Enabled, p.osc1Enabled ? 1.0 : 0.0);
     put (iOsc2Enabled, p.osc2Enabled ? 1.0 : 0.0);
-    const auto& o = p.organic;
-    put (iOrganicEnabled, o.enabled ? 1.0 : 0.0);
-    put (iOrganicLevel, 100.0 * o.level);
-    put (iOrganicPan, 100.0 * o.pan);
-    put (iOrganicRoot, o.rootOverride);
-    put (iOrganicStart, 100.0 * o.start);
-    put (iOrganicLoop, o.loop ? 1.0 : 0.0);
-    put (iOrganicFollow, o.follow ? 1.0 : 0.0);
-    put (iOrganicReverse, o.reverse ? 1.0 : 0.0);
+    put (iOrganicRoot, p.organic.rootOverride);
     const auto& mo = p.morph;
     put (iMorphEnabled, mo.enabled ? 1.0 : 0.0);
     put (iMorphPosition, 100.0 * mo.position);

@@ -88,14 +88,7 @@ analog.juno.chorusMode v4 choice "Chorus" label="" range=0.0000..3.0000/1.0000 s
 analog.juno.chorusNoise v4 bool "Chorus Noise" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.osc1.enabled v4 bool "Osc 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.osc2.enabled v4 bool "Osc 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
-analog.organic.enabled v4 bool "Organic On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.organic.level v4 float "Organic Level" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
-analog.organic.pan v4 float "Organic Pan" label="%" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 %|0 %|+100 %
 analog.organic.root v4 int "Organic Root" label="" range=-1.0000..127.0000/1.0000 skew=1.00000 default=-1.0000 steps=129 texts=Auto|D#4|G9
-analog.organic.start v4 float "Organic Start" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
-analog.organic.loop v4 bool "Organic Loop" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
-analog.organic.follow v4 bool "Organic Follow Env" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
-analog.organic.reverse v4 bool "Organic Reverse" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.morph.enabled v4 bool "Morph On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.morph.position v4 float "Morph" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.morph.method v4 choice "Morph Method" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Imprint|Fuse|Weave [Imprint|Fuse|Weave]

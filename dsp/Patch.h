@@ -52,16 +52,18 @@ struct WideSettings
     double spread = 0.0;          ///< 0..1: SUPER SAW's detune (0: one saw, centred)
 };
 
-/** The ORGANIC source: a recording played by each voice (the file itself is the shell's layer B). */
+/** The ORGANIC source: a recording played by each voice. The file is the shell's layer B and
+    these are its card's settings (ANDOR OSP's layerB.*, same meaning), plus the root override. */
 struct OrganicSettings
 {
-    bool enabled = false;
-    double level = 1.0;           ///< 0..1 (1: unity)
+    bool heard = true;            ///< not muted (or silenced by the other card's solo)
+    double levelDb = 0.0;         ///< the card's LEVEL (-48 dB and below: silent)
     double pan = 0.0;             ///< -1..1
+    double tuneSemitones = 0.0;
     int rootOverride = -1;        ///< MIDI note; < 0: the analysis' root (AUTO)
     double start = 0.0;           ///< 0..1 of the recording
     bool loop = true;             ///< hold a sustaining recording through its loop region
-    bool follow = true;           ///< its level follows the AMP envelope (off: it plays out)
+    bool follow = true;           ///< its level follows the AMP envelope (off: it plays out its natural length)
     bool reverse = false;
 };
 

@@ -191,14 +191,25 @@ plays it.
 | `analog.juno.chorusMode` | choice | Off, I, II, I+II | Off | the chorus after the voices |
 | `analog.juno.chorusNoise` | bool | | off | its hiss |
 | `analog.osc1.enabled`, `analog.osc2.enabled` | bool | | on | a slot silenced (its card hides when both are off) |
-| `analog.organic.enabled` | bool | | off | the ORGANIC source plays |
-| `analog.organic.level` | % | 0..100 | 100 | its level (100: unity) |
-| `analog.organic.pan` | % | −100..100 | 0 | its place |
-| `analog.organic.root` | int | −1..127 | −1 (Auto) | the recording's root note (Auto: the analysis') |
-| `analog.organic.start` | % | 0..100 | 0 | where each note starts in the recording |
-| `analog.organic.loop` | bool | | on | a sustaining recording holds through its loop region |
-| `analog.organic.follow` | bool | | on | its level follows the AMP envelope (off: it plays out) |
-| `analog.organic.reverse` | bool | | off | played backwards |
+| `analog.organic.root` | int | −1..127 | −1 (Auto) | ORGANIC's root note (Auto: ANDOR OSP's analysis) |
+
+**ORGANIC is the shell's layer B** (`ProductInfo::hybridSampleName = "ORGANIC"`). Its card's
+own controls are ANDOR OSP's `layerB.*`, with their meaning there:
+
+| Parameter | Use |
+|---|---|
+| `layerB.level` | ORGANIC's level |
+| `layerB.tune` | its tuning against the note |
+| `layerB.start` | where each note starts in the recording |
+| `layerB.loop` | held notes cycle through ANDOR OSP's continuation loop |
+| `layerB.follow` | the note follows the key (off: the recording plays out first) |
+| `layerB.reverse` | backwards |
+| `layerB.mute`, `layerB.solo` / `layerA.solo` | each card's M and S (a solo silences the other card) |
+
+`layerB.pan` stays disabled: each voice is one mono signal through its filter, and the voice's place applies to ORGANIC too.
+
+The version-4 drafts `analog.organic.enabled/level/pan/start/loop/follow/reverse` were dropped
+before release: they would have duplicated these card controls.
 | `analog.morph.enabled` | bool | | off | MORPH replaces / joins the sources |
 | `analog.morph.position` | % | 0..100 | 0 | 0 the recording .. 100 the carrier |
 | `analog.morph.method` | choice | Imprint, Fuse, Weave | Imprint | the morph algorithm |
@@ -211,5 +222,5 @@ plays it.
 | `analog.morph.output` | choice | Morph Only, Layered | Morph Only | replace the sources, or join them |
 
 Modulation destinations appended (after §C's 72, same order rule): OSC 1/2 SUB, OSC 1/2 PWM
-DEPTH, OSC 1/2 SHAPE, OSC 1/2 SPREAD, RING MOD, ORGANIC LEVEL, ORGANIC PAN, MORPH, MORPH TEXTURE,
+DEPTH, OSC 1/2 SHAPE, OSC 1/2 SPREAD, RING MOD, MORPH, MORPH TEXTURE,
 MORPH ATTACK, MORPH FORMANTS, MORPH DETAIL (all per voice).

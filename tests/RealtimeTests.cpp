@@ -189,3 +189,48 @@ TEST_CASE ("realtime: the oscillator models, RING, the OTA, the high-pass and th
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: ORGANIC (notes, loops, a recording replaced while it plays) never allocates", "[realtime][organic]")
+{
+    auto make = [] (double hz) {
+        osp::AudioData audio;
+        audio.sampleRate = 44100.0;
+        std::vector<float> x (44100);
+        for (std::size_t i = 0; i < x.size(); ++i)
+            x[i] = static_cast<float> (0.5 * std::sin (2.0 * 3.14159265358979 * hz * static_cast<double> (i) / 44100.0));
+        audio.channels = { x };
+        auto m = std::make_shared<osp::InstrumentModel>();
+        m->original.source = std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
+        m->original.continuation.canSustain = true;
+        m->original.continuation.jumps.push_back ({ 30000.0, 8000.0, 400.0, 1.0f, 1.0f });
+        m->original.continuation.backstop = 0;
+        return m;
+    };
+    const auto a = make (220.0), b = make (330.0);
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    Patch p;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 200; ++block)
+    {
+        if (block % 25 == 0)
+            synth.setOrganic (block % 50 == 0 ? a.get() : b.get());
+        p.organic.reverse = block % 60 > 40;
+        p.organic.follow = block % 70 < 50;
+        p.osc1Model = static_cast<OscModel> (block % 3);
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 40) % 48), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    synth.setOrganic (nullptr);
+    synth.render (left.data(), right.data(), 512);
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

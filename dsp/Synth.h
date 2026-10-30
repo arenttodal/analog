@@ -6,6 +6,7 @@
 #include "JunoChorus.h"
 #include "LadderFilter.h"
 #include "Oscillator.h"
+#include "OrganicVoice.h"
 #include "OtaFilter.h"
 #include "LiveGranulator.h"
 #include "Patch.h"
@@ -127,6 +128,12 @@ public:
     /** A raw MIDI message (1-3 bytes); anything the synth does not play is ignored. */
     void handleMidi (const std::uint8_t* data, int size) noexcept;
 
+    /** ORGANIC's recording (ANDOR OSP's prepared model; null: none). Audio thread. The previous
+        one is read no more once this returns: the notes playing it fade it out from a short
+        copy. New notes play the new one. */
+    void setOrganic (const osp::InstrumentModel* model) noexcept;
+    const osp::InstrumentModel* organicModel() const noexcept { return organicSource; }
+
     /** Renders `numSamples` into left/right (overwritten); any length (in pieces of the prepared maximum). */
     void render (float* left, float* right, int numSamples) noexcept;
 
@@ -207,6 +214,12 @@ private:
         VoiceHighPass highPass;
         int highPassTail = 0;         ///< samples the high-pass keeps running after it was switched off
         double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
+        // ORGANIC: the recording this note plays beside the oscillators (into the same mixer).
+        OrganicVoice organic;
+        double organicStep = 0.0;     ///< source frames per internal sample (control rate)
+        float organicGain = 0.0f;
+        bool organicOn = false;       ///< playing, or fading a replaced recording out
+        bool releaseWhenPlayedOut = false;   ///< FOLLOW off: the key was released; the recording plays out first
         float lfoFade = 1.0f;
         Envelope amp, env;
         osp::Prng noise { 1 };
@@ -380,6 +393,7 @@ private:
     std::array<float, modeInterval> scratchAmp {};
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
+    const osp::InstrumentModel* organicSource = nullptr;
     JunoChorus chorus;            ///< state version 4: the chorus after the voices (off: bit-exact bypass)
     osp::PostProcessor effects;
     float dcL = 0.0f, dcR = 0.0f, dcStateL = 0.0f, dcStateR = 0.0f, dcCoef = 0.0f;
