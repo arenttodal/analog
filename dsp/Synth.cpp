@@ -570,6 +570,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
             v.organic.stop();
         v.morph.start (morphAvailable() ? morphProfile : nullptr, v.seed);
         v.morphCountdown = 0;
+        v.layerGainsFresh = true;
     }
     applyVoiceModulation (v);
     updateVoiceControl (v, current.lfo.scope == osp::mod::Scope::poly ? static_cast<float> (v.lfo.value) : lfoValue,
@@ -1053,9 +1054,10 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.ringNow += 0.25f * (static_cast<float> (p.ringMix) - v.ringNow);
     if (v.ringNow < 1.0e-4f && p.ringMix <= 0.0)
         v.ringNow = 0.0f;
-    // ORGANIC: the note's pitch (its TUNE) against the recording's root (or the override).
+    // ORGANIC: the note's pitch with its own TUNE (not the oscillators' card's) against the
+    // recording's root (or the override).
     if (v.organic.playing())
-        v.organicStep = v.organic.stepFor (common + p.organic.tuneSemitones, static_cast<double> (p.organic.rootOverride));
+        v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones, static_cast<double> (p.organic.rootOverride));
     v.organicGain = p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
     v.organicOn = ! v.organic.finished();
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
@@ -1175,11 +1177,37 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     const float velocityGain = math::dbToGain (-p.velocityRangeDb * soft * soft);
     // LEVEL at its bottom (ANDOR OSP's -48 dB) is silence.
     const float level = p.levelDb <= -47.99 ? 0.0f : math::dbToGain (p.levelDb);
-    // MUTE (the oscillators' card, or ORGANIC's solo): with a recording playing, only the
-    // oscillators and the noise fall silent (above); without one, the voice as before.
-    if (p.mute && v.organicOn)
-        v.gain1 = v.gain2 = v.gainNoise = 0.0f;
-    v.outGainTarget = p.mute && ! v.organicOn ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+    // With a recording loaded (or one fading out) the cards are two layers: the oscillators'
+    // LEVEL and MUTE (or ORGANIC's solo) reach the oscillators and the noise only, ORGANIC has
+    // its own, and the A/B mix sets one against the other (both at full level at its centre:
+    // ANALOG's BLEND law). Without one, the voice exactly as before.
+    if (organicSource != nullptr || v.organicOn)
+    {
+        // (In double, the centre exactly 1 and the ends exactly 0: cos (pi / 2) is not 0.)
+        const double theta = std::clamp (p.organic.blend, 0.0, 1.0) * math::pi * 0.5;
+        const double shareA = p.organic.blend >= 1.0 ? 0.0 : std::min (1.0, std::sqrt (2.0) * std::cos (theta));
+        const double shareB = p.organic.blend <= 0.0 ? 0.0 : std::min (1.0, std::sqrt (2.0) * std::sin (theta));
+        const float oscTarget = p.mute ? 0.0f : level * static_cast<float> (shareA);
+        const float organicTarget = static_cast<float> (shareB);
+        if (v.layerGainsFresh)
+        {
+            v.oscLayerGain = oscTarget;
+            v.organicLayerGain = organicTarget;
+            v.layerGainsFresh = false;
+        }
+        v.oscLayerGain += 0.25f * (oscTarget - v.oscLayerGain);
+        v.organicLayerGain += 0.25f * (organicTarget - v.organicLayerGain);
+        v.gain1 *= v.oscLayerGain;
+        v.gain2 *= v.oscLayerGain;
+        v.gainNoise *= v.oscLayerGain;
+        v.organicGain *= v.organicLayerGain;
+        v.outGainTarget = velocityGain * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+    }
+    else
+    {
+        v.layerGainsFresh = true;   // (a recording loaded mid-note starts from its targets)
+        v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+    }
 
     // The source: ONE SHOT <-> GRANULAR glides (about 8 ms); the grains' settings, moved by
     // the REIMAGINED mode's travel and the key's KEY DNA; KALEIDOSCOPE's per-voice parts.

@@ -311,7 +311,14 @@ TEST_CASE ("analog: the parameters' defaults are the INIT patch", "[analog][para
     ShellProcessor p;
     params::Reader reader;
     reader.attach (p.parameters);
-    checkSameValues (params::valuesOf (Patch()), params::valuesOf (reader.read()), p);
+    auto init = params::valuesOf (Patch()), read = params::valuesOf (reader.read());
+    // The one exception: the A/B mix is ANDOR OSP's parameter, its default all A (one layer:
+    // not heard). The INIT patch's 0.5 is where the shell puts it when a recording joins.
+    CHECK (read.at ("ab.blend") == 0.0f);
+    CHECK (init.at ("ab.blend") == 0.5f);
+    init.erase ("ab.blend");
+    read.erase ("ab.blend");
+    checkSameValues (init, read, p);
 }
 
 TEST_CASE ("analog: value texts read as numbers, also where floating point leaves a midpoint near zero", "[analog][parameters]")
@@ -809,6 +816,30 @@ TEST_CASE ("analog: a version-3 session opens with every version-4 setting neutr
             REQUIRE (before.getSample (c, i) == after.getSample (c, i));
 }
 
+TEST_CASE ("analog: a version-4 session rests at the A/B mix's centre, where ORGANIC played beside the oscillators", "[analog][state]")
+{
+    // Version 4 played ORGANIC at full level beside the oscillators whatever the A/B mix
+    // showed (its default: all A). Version 5 plays the mix; its centre is that sound.
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        setValue (old, "ab.blend", 0.0f);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 4);
+    juce::MemoryBlock v4;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v4);
+    ShellProcessor p;
+    p.setStateInformation (v4.getData(), static_cast<int> (v4.getSize()));
+    CHECK (p.parameterValue ("ab.blend") == Approx (0.5f));
+    // A version-5 session keeps the mix it was saved with.
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.parameterValue ("ab.blend") == Approx (0.0f));
+}
+
 TEST_CASE ("analog: OSCILLATORS beside M and S opens the oscillators' settings; DETUNE is a plain control", "[analog][editor]")
 {
     ShellProcessor p;
@@ -1004,6 +1035,7 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
 
     loadOrganic (p, file);
     CHECK (p.currentInstrument (1)->model->original.continuation.hasJumps());   // (it sustains: LOOP has a loop)
+    CHECK (p.parameterValue ("ab.blend") == Catch::Approx (0.5f));   // (it joins at the A/B mix's centre)
     ui.refreshNow();
     CHECK (ui.visibleCardCount() == 2);   // two equal cards
     CHECK (ui.engineCard (0).hasHeadingDoor());
@@ -1027,6 +1059,19 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
     setValue (p, "layerB.solo", 1.0f);
     CHECK (differenceRms (renderShell (p, 0.6), alone) < 1.0e-6);
     setValue (p, "layerB.solo", 0.0f);
+    // The oscillators' card's LEVEL and TUNE are theirs: ORGANIC plays on as it was.
+    setValue (p, "layerA.level", -48.0f);
+    setValue (p, "layerA.tune", 7.0f);
+    CHECK (differenceRms (renderShell (p, 0.6), alone) < 1.0e-6);
+    setValue (p, "layerA.level", 0.0f);
+    setValue (p, "layerA.tune", 0.0f);
+    // The A/B mix: all B is ORGANIC alone, all A the oscillators alone, the centre both.
+    setValue (p, "ab.blend", 1.0f);
+    CHECK (differenceRms (renderShell (p, 0.6), alone) < 1.0e-6);
+    setValue (p, "ab.blend", 0.0f);
+    CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
+    setValue (p, "ab.blend", 0.5f);
+    CHECK (differenceRms (renderShell (p, 0.6), layered) < 1.0e-6);
 
     // A session recalls the recording (by its content hash, from ANDOR OSP's sample store)
     // and the sound, exactly; also when the original file has gone.

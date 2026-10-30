@@ -50,6 +50,8 @@ namespace
         // ORGANIC: the shell's layer B (ANDOR OSP's own parameters, not version 4's).
         iOrganicLevel, iOrganicPan, iOrganicTune, iOrganicStart, iOrganicLoop, iOrganicFollow, iOrganicReverse, iOrganicMute,
         iOrganicSolo, iGeneratorSolo,
+        // State version 5: ANDOR OSP's A/B blend, the oscillators against ORGANIC.
+        iLayerBlend,
         count
     };
 
@@ -95,6 +97,7 @@ namespace
             morphLevelMatch, morphOutput,
             "layerB.level", "layerB.pan", "layerB.tune", "layerB.start", "layerB.loop", "layerB.follow", "layerB.reverse", "layerB.mute",
             "layerB.solo", "layerA.solo",
+            "ab.blend",
         };
         jassert (list.size() == count);
         return list;
@@ -760,6 +763,7 @@ Patch Reader::readWith (const float* raw) const noexcept
     o.heard = ! on (iOrganicMute) && ! (soloA && ! soloB);
     if (soloB && ! soloA)
         p.mute = true;
+    o.blend = std::clamp (v (iLayerBlend), 0.0, 1.0);
     auto& m = p.morph;
     m.enabled = on (iMorphEnabled);
     m.position = 0.01 * v (iMorphPosition);
@@ -964,6 +968,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iOsc1Enabled, p.osc1Enabled ? 1.0 : 0.0);
     put (iOsc2Enabled, p.osc2Enabled ? 1.0 : 0.0);
     put (iOrganicRoot, p.organic.rootOverride);
+    put (iLayerBlend, p.organic.blend);
     const auto& mo = p.morph;
     put (iMorphEnabled, mo.enabled ? 1.0 : 0.0);
     put (iMorphPosition, 100.0 * mo.position);

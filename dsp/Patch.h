@@ -65,6 +65,9 @@ struct OrganicSettings
     bool loop = true;             ///< hold a sustaining recording through its loop region
     bool follow = true;           ///< its level follows the AMP envelope (off: it plays out its natural length)
     bool reverse = false;
+    /** The A/B mix (ANDOR OSP's blend): 0 the oscillators alone .. 1 ORGANIC alone, both at
+        full level at the centre (ANALOG's own BLEND law). Only heard with a recording loaded. */
+    double blend = 0.5;
 };
 
 /** MORPH: the recording turned into the chosen analog carrier. */

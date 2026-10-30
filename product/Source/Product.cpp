@@ -15,7 +15,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-4";
+    constexpr const char* factoryVersion = "analog-factory-5";
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -63,6 +63,14 @@ namespace
         for (const auto& id : andor::analog::params::version4Ids())
             if (auto* parameter = host.apvts().getParameter (id))
                 host.setParameterValue (id, parameter->convertFrom0to1 (parameter->getDefaultValue()));
+    }
+
+    /** Version 5: the A/B mix (ANDOR OSP's blend) sets the oscillators against ORGANIC, which
+        version 4 played at full level beside them whatever it showed. Its centre is that
+        sound (both at full level), so a session or preset from before rests there. */
+    void migrateFromVersion4 (osp::plugin::InstrumentHost& host)
+    {
+        host.setParameterValue ("ab.blend", 0.5f);
     }
 
     juce::String safeFileName (const std::string& name)
@@ -160,7 +168,9 @@ const ProductInfo& productInfo()
         // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
         // sample store, card and recall).
         p.hybridSampleName = "ORGANIC";
-        p.stateVersion = 4;
+        // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
+        p.generatorModeName = "Standard";
+        p.stateVersion = 5;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -168,6 +178,8 @@ const ProductInfo& productInfo()
                 migrateFromVersion2 (host);
             if (from < 4)
                 migrateFromVersion3 (host);
+            if (from < 5)
+                migrateFromVersion4 (host);
         };
         return p;
     }();

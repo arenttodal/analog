@@ -92,7 +92,7 @@ variation; flat curves: the curve editor for them is still to come in ANDOR OSP 
 | `drive`, `drive.mode`, `drive.tone`, `drive.body` | DRIVE: ANDOR OSP's saturation of the whole sound (TUBE, TAPE, CRUNCH) | macro 2 and ANDOR OSP's popover |
 | `motion`, `movement.mode`, `movement.drift.*`, `movement.tape.*`, `movement.chorus.*`, `movement.pulse.*`, `movement.shaper.*` (with the custom pattern) | MOVEMENT: DRIFT in each voice (pitch, tone, level, place), TAPE, CHORUS, PULSE, SHAPER on the mix | macro 4 and ANDOR OSP's popover |
 | `reimagined`, `layerA.reimagined.mode`, `.kaleidoscope.*`, `.tapeFrame.*`, `.toybox.*`, `.mirage.*` | REIMAGINED on the live sound (MOSAIC's settings are not read: it needs a recording) | the card's REIMAGINED and ANDOR OSP's popover |
-| `layerA.sourceMode`, `layerA.granular.position`, `.size`, `.density`, `.tune`, `.spread` | ONE SHOT (the oscillators) or GRANULAR (grains from each voice's own last second; POS: how far back) | the card |
+| `layerA.sourceMode`, `layerA.granular.position`, `.size`, `.density`, `.tune`, `.spread` | STANDARD (the oscillators) or GRANULAR (grains from each voice's own last second; POS: how far back) | the card |
 | `mod.lfo1.shape`, `.rate`, `.sync`, `.division`, `.phase`, `.polarity`, `.mode`, `.scope` (with its CUSTOM curve) | the synth's LFO (its depths are `analog.lfo.*`, its amount `analog.motion`) | the modulation panel's LFO 1 |
 | `mod.lfo2.*`, `mod.env1.*`, `mod.env2.*`, `mod.route1..16.source` / `.dest` / `.depth` / `.enabled` (and the VEL / NOTE curves, CC 1-4's controllers) | ANDOR OSP's modulation: LFO 2, ENV 1 and 2, VEL, NOTE, the mod wheel, CC 1-4 and pressure through 16 routes to any destination below (C) | the modulation panel; drag a source onto a knob |
 | `arp.enabled`, `.pattern`, `.rate`, `.gate`, `.octaves`, `.swing`, `.velocity` | ANDOR OSP's arpeggiator in front of the synth (the shell plays it) | the ARP section |
@@ -104,6 +104,7 @@ variation; flat curves: the curve editor for them is still to come in ANDOR OSP 
 | `fineTune` | master fine tune (cents) | Advanced: FINE |
 | `seed` | the variation seed: ANALOG's tolerances, noise, grains, DRIFT, REIMAGINED, KEY DNA, RANDOM | Advanced: RESEED |
 | `layerA.tune`, `layerA.pan`, `layerA.level`, `layerA.mute` | the generator's TUNE (st), PAN, LEVEL (−48 dB = silent), MUTE | the OSCILLATORS card |
+| `ab.blend` (state version 5) | the A/B mix: the oscillators against ORGANIC (0 the oscillators alone, 1 ORGANIC alone; both at full level at the centre, ANALOG's BLEND law). Heard only with a recording loaded; dropping one onto an empty ORGANIC card centres it | the header's A/B mix (two cards) |
 | `gain` | the master volume (dB) | the header's volume |
 
 The wheels (`midi.pitchWheel`, `midi.modWheel` in the engine's binding list) are not parameters:
@@ -207,6 +208,12 @@ own controls are ANDOR OSP's `layerB.*`, with their meaning there:
 | `layerB.mute`, `layerB.solo` / `layerA.solo` | each card's M and S (a solo silences the other card) |
 
 `layerB.pan` stays disabled: each voice is one mono signal through its filter, and the voice's place applies to ORGANIC too.
+
+State version 5: with a recording loaded, the OSCILLATORS card's `layerA.level`, `layerA.tune`
+and `layerA.mute` reach the oscillators and the noise only (before, LEVEL and TUNE also moved
+ORGANIC). `ab.blend` sets the two cards against each other. A version-4 session or preset opens at
+the mix's centre, which is the sound version 4 made. The generator card's source mode is named
+STANDARD / GRANULAR (the shell's `generatorModeName`; ANDOR OSP keeps ONE SHOT).
 
 The version-4 drafts `analog.organic.enabled/level/pan/start/loop/follow/reverse` were dropped
 before release: they would have duplicated these card controls.
