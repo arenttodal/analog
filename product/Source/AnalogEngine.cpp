@@ -17,7 +17,9 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
 {
     reader.attach (parameters);
     synth.prepare (sampleRate, std::max (1, maximumBlockSize), oversamplingFactor);
-    auto patch = reader.read();
+    synth.setControlModulator (this);
+    reader.snapshot (raw);
+    auto patch = reader.read (raw);
     patch.effects.shaper.customSteps = shaperPattern;
     synth.setPatch (patch);
     synth.setKeyDna (reader.keyDna (patch.seed));
@@ -31,7 +33,21 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     const int total = buffer.getNumSamples();
     if (! prepared || total <= 0 || buffer.getNumChannels() == 0)
         return;
-    auto patch = reader.read();
+    // The knobs as they are, the instrument's own controls moved by their routes (global
+    // sources: one value for the whole instrument), and ANDOR OSP's macros likewise.
+    reader.snapshot (raw);
+    if (modulated)
+    {
+        double offset = 0.0;
+        for (int k = 0; k < osp::mod::productDestCount(); ++k)
+            if (const auto d = osp::mod::productDest (k); osp::mod::destInfo (d).owner == osp::mod::Owner::global && synth.sharedOffset (d, offset))
+                reader.move (raw, k, offset);
+        using D = osp::mod::Dest;
+        for (const auto& [dest, id] : { std::pair<D, const char*> { D::drive, "drive" }, { D::movement, "motion" }, { D::space, "space" }, { D::echo, "echo" } })
+            if (synth.sharedOffset (dest, offset))
+                reader.moveById (raw, id, offset);
+    }
+    auto patch = reader.read (raw);
     patch.effects.shaper.customSteps = shaperPattern;   // MOVEMENT SHAPER's CUSTOM (the shell's)
     synth.setPatch (patch);
     synth.setKeyDna (reader.keyDna (patch.seed));       // recomputed only when it changes
@@ -80,6 +96,82 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     if (buffer.getNumChannels() == 1)
         for (int i = 0; i < total; ++i)
             left[i] = 0.5f * (left[i] + scratch[static_cast<std::size_t> (i)]);
+    publishGrains();
+    publishModulationView();
+}
+
+void AnalogEngine::setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept
+{
+    synth.setModulation (settings, controllers);
+    modulated = synth.modulation().compiled.any;
+}
+
+void AnalogEngine::setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& played) noexcept
+{
+    // VEL and NOTE on the shared stages follow the musician's keys, not the arpeggiator's.
+    synth.setPlayedKeysOnly (arpeggiating);
+    if (arpeggiating)
+        for (const auto m : played)
+            if (m.numBytes >= 3 && (m.data[0] & 0xf0) == 0x90 && m.data[2] > 0)
+                synth.setPlayedKey (m.data[1], m.data[2]);
+}
+
+void AnalogEngine::publishModulationView() noexcept
+{
+    // As ANDOR OSP's engine shows its sources: the LFOs (POLY: the newest note's), the newest
+    // note's envelopes, VEL and NOTE, and the shared controllers.
+    const auto& rt = synth.modulation();
+    const auto* newest = synth.newestModulation();
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        const bool poly = rt.settings.lfo[i].scope == osp::mod::Scope::poly;
+        const auto& lfo = poly && newest != nullptr ? newest->lfo[i] : rt.globalLfo[i];
+        viewPhase[i].store (static_cast<float> (lfo.phase), std::memory_order_relaxed);
+        viewValue[i].store (static_cast<float> (poly && newest != nullptr ? newest->values[i] : lfo.value), std::memory_order_relaxed);
+        const auto* env = newest != nullptr ? &newest->env[i] : nullptr;
+        viewValue[2 + i].store (env != nullptr ? static_cast<float> (env->level) : 0.0f, std::memory_order_relaxed);
+        const double time = env == nullptr ? 0.0 : (rt.settings.env[i].oneShotCurve ? env->elapsed : env->t);
+        viewEnvTime[i].store (static_cast<float> (time), std::memory_order_relaxed);
+        viewEnvStage[i].store (env != nullptr ? static_cast<int> (env->stage) : 0, std::memory_order_relaxed);
+        viewGlobalEnv[i].store (static_cast<float> (rt.globalEnv[i].level), std::memory_order_relaxed);
+    }
+    for (std::size_t i = osp::mod::slot::modWheel; i < viewValue.size(); ++i)
+        viewValue[i].store (rt.sharedValue[i], std::memory_order_relaxed);
+    if (newest != nullptr)
+        for (const auto i : { osp::mod::slot::vel, osp::mod::slot::note })
+            viewValue[static_cast<std::size_t> (i)].store (newest->values[static_cast<std::size_t> (i)], std::memory_order_relaxed);
+    viewVoice.store (newest != nullptr, std::memory_order_release);
+}
+
+osp::InstrumentEngine::ModView AnalogEngine::modulationView() const noexcept
+{
+    osp::InstrumentEngine::ModView view;
+    view.voice = viewVoice.load (std::memory_order_acquire);
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        view.lfoPhase[i] = viewPhase[i].load (std::memory_order_relaxed);
+        view.envTime[i] = viewEnvTime[i].load (std::memory_order_relaxed);
+        view.envStage[i] = viewEnvStage[i].load (std::memory_order_relaxed);
+        view.globalEnv[i] = viewGlobalEnv[i].load (std::memory_order_relaxed);
+    }
+    for (std::size_t i = 0; i < view.value.size(); ++i)
+        view.value[i] = viewValue[i].load (std::memory_order_relaxed);
+    return view;
+}
+
+void AnalogEngine::publishGrains() noexcept
+{
+    using Snapshot = osp::InstrumentEngine::GrainSnapshot;
+    std::array<LiveGranulator::GrainDot, Snapshot::capacity> dots;
+    const int n = synth.collectGrains (dots.data(), Snapshot::capacity);
+    for (int i = 0; i < n; ++i)
+    {
+        const auto k = static_cast<std::size_t> (i);
+        grains.position[k].store (dots[k].position, std::memory_order_relaxed);
+        grains.level[k].store (dots[k].level, std::memory_order_relaxed);
+        grains.lane[k].store (dots[k].lane, std::memory_order_relaxed);
+    }
+    grains.count.store (n, std::memory_order_release);
 }
 
 void AnalogEngine::setModulationCurve (int index, const osp::mod::Curve& curve) noexcept

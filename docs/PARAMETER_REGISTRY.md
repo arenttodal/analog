@@ -24,8 +24,8 @@ Defaults are the INIT patch (`dsp/Patch.h`); values are in the units shown.
 
 | ID | Name | Kind | Range | Default |
 |---|---|---|---|---|
-| `analog.blend` | Blend | float | 0 % … 100 % | 50 % |
-| `analog.tone` | Tone | float | 20 Hz … 18.0 kHz | 62 % |
+| `analog.blend` | Blend (since state version 3 not on screen: the oscillators are mixed by their LEVELs; older settings are folded into the levels, it rests at 50 %, still automatable) | float | 0 % … 100 % | 50 % |
+| `analog.tone` | Filter (named "Tone" until state version 3; the FILTER macro) | float | 20 Hz … 18.0 kHz | 62 % |
 | `analog.motion` | LFO Amount (v1: "Motion", the macro) | float | 0 % … 100 % | 0 % |
 | `analog.osc1.wave` | Osc 1 Wave | choice | Saw, Pulse, Saw+Pulse | 0 |
 | `analog.osc1.octave` | Osc 1 Octave | int | -2 oct … +2 oct | 0 oct |
@@ -94,6 +94,8 @@ variation; flat curves: the curve editor for them is still to come in ANDOR OSP 
 | `reimagined`, `layerA.reimagined.mode`, `.kaleidoscope.*`, `.tapeFrame.*`, `.toybox.*`, `.mirage.*` | REIMAGINED on the live sound (MOSAIC's settings are not read: it needs a recording) | the card's REIMAGINED and ANDOR OSP's popover |
 | `layerA.sourceMode`, `layerA.granular.position`, `.size`, `.density`, `.tune`, `.spread` | ONE SHOT (the oscillators) or GRANULAR (grains from each voice's own last second; POS: how far back) | the card |
 | `mod.lfo1.shape`, `.rate`, `.sync`, `.division`, `.phase`, `.polarity`, `.mode`, `.scope` (with its CUSTOM curve) | the synth's LFO (its depths are `analog.lfo.*`, its amount `analog.motion`) | the modulation panel's LFO 1 |
+| `mod.lfo2.*`, `mod.env1.*`, `mod.env2.*`, `mod.route1..16.source` / `.dest` / `.depth` / `.enabled` (and the VEL / NOTE curves, CC 1-4's controllers) | ANDOR OSP's modulation: LFO 2, ENV 1 and 2, VEL, NOTE, the mod wheel, CC 1-4 and pressure through 16 routes to any destination below (C) | the modulation panel; drag a source onto a knob |
+| `arp.enabled`, `.pattern`, `.rate`, `.gate`, `.octaves`, `.swing`, `.velocity` | ANDOR OSP's arpeggiator in front of the synth (the shell plays it) | the ARP section |
 | `space`, `space.type`, `space.decay`, `space.preDelay`, `space.size`, `space.damping`, `space.modulation`, `space.width`, `space.lowCut`, `space.highCut` | SPACE (ANDOR OSP's reverb, its own mapping) | macro 5 and its popover |
 | `echo`, `echo.type`, `echo.sync`, `echo.division`, `echo.time`, `echo.feedback`, `echo.tone`, `echo.age`, `echo.stereo` | ECHO (ANDOR OSP's delay, host tempo) | macro 6 and its popover |
 | `voiceMode` | Poly / Mono (legato, last note) | Advanced: VOICES |
@@ -108,7 +110,34 @@ The wheels (`midi.pitchWheel`, `midi.modWheel` in the engine's binding list) are
 they enable the on-screen wheels. The pitch wheel bends both oscillators; the mod wheel brings in
 the LFO depths (from the LFO amount, `analog.motion`, to full).
 
-## C. Mapping from the implementation specification's proposed IDs
+## C. Modulation destinations
+
+A route (`mod.routeN.dest`) can reach ANDOR OSP's destinations that the synth plays and
+ANDOR ANALOG's own controls. The routes' choice list is ANDOR OSP's (unchanged, so its indices
+keep their meaning) followed by ANDOR ANALOG's own (`params::modulationDestinations`, in this
+order; **append only**: sessions store the index). Each own destination spans its knob's whole
+travel: depth 100 % takes it from where it is to either end.
+
+- **ANDOR OSP's that the synth plays**: DRIVE, MOVEMENT, SPACE, ECHO (the instrument's);
+  LEVEL A, PAN A, TUNE A, REIMAGINED A, POS / DENS / SIZE / SPREAD A (the grains), the amplitude
+  ATTACK / DECAY (taken as a note starts), SUSTAIN, RELEASE (taken as it is released), ENV 1/2's
+  times, another route's depth, the ARP destinations. The others (LIFE, CHARACTER, START, EQ,
+  DAMPEN, B and C) have no control here and are never offered on a knob.
+- **ANDOR ANALOG's own, per note** (a POLY source moves each note its own way): BLEND (off screen), FILTER,
+  RESONANCE, FILTER ENV AMOUNT, KEY TRACK, VEL TO FILTER, FILTER DRIVE, FILTER TRIM, FILTER
+  ATTACK / DECAY / SUSTAIN / RELEASE, OSC 1 SEMI / WIDTH / LEVEL, OSC 2 SEMI / FINE / WIDTH /
+  LEVEL, NOISE, POLY MOD ENV, POLY MOD OSC 2, LFO AMOUNT, LFO OSC 1 / OSC 2 PITCH, LFO OSC 1 /
+  OSC 2 PW, LFO CUTOFF, ANALOG, VELOCITY RANGE, GRAIN TUNE.
+- **ANDOR ANALOG's own, the instrument's** (global sources, the global envelopes, the latest
+  key's VEL and NOTE): FILTER BIAS, UNISON DETUNE, STEREO SPREAD, GLIDE, FINE TUNE, VOLUME,
+  DRIVE TONE / BODY, DRIFT SPEED / PITCH / TONE, TAPE WOW / FLUTTER / WEAR, CHORUS RATE / WIDTH /
+  STEREO, PULSE RATE / SHAPE / STEREO, SHAPER SMOOTH, SPACE DECAY / PRE-DELAY / SIZE / DAMPING /
+  MODULATION / WIDTH / LOW CUT / HIGH CUT, ECHO TIME / FEEDBACK / TONE / AGE, KALEIDOSCOPE FOCUS /
+  SPREAD, TAPE FRAME AGE / STABILITY, TOYBOX MOTION / DIGITAL, MIRAGE CLOCK / FILTER.
+- Not destinations: switches and choices (waves, sync, modes, octaves), the variation seed, the
+  KEY DNA settings (each change recomputes every key), LFO 1's own settings.
+
+## D. Mapping from the implementation specification's proposed IDs
 
 | Proposed | As built |
 |---|---|

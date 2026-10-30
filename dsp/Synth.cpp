@@ -15,6 +15,15 @@ namespace andor::analog
 
 namespace
 {
+    bool sameLfo (const osp::mod::LfoSettings& a, const osp::mod::LfoSettings& b) noexcept
+    {
+        return a.shape == b.shape && ! (a.rateHz < b.rateHz || a.rateHz > b.rateHz) && a.sync == b.sync && a.division == b.division && ! (a.phase < b.phase || a.phase > b.phase)
+               && a.bipolar == b.bipolar && a.mode == b.mode && a.scope == b.scope;
+    }
+}
+
+namespace
+{
     constexpr double stealFadeSeconds = 0.003;
     /** The mixer's level into the filter: one oscillator at full sits at about -7 dBFS
         into the saturator, so DRIVE 0 is clean but not sterile. */
@@ -155,8 +164,15 @@ void Synth::reset() noexcept
     smoothingPrimed = false;
     driftSeed = current.seed;
     rebuildDrift();
-    lfo = {};
-    lfo.start (current.lfo, current.lfo.phase);
+    // The modulation starts over too (its LFOs, envelopes, controllers): the same seed and
+    // events give the same sound.
+    {
+        const auto settings = modRuntime.settings;
+        modRuntime = osp::mod::Runtime {};
+        modRuntime.setSettings (settings);
+        for (std::size_t i = 0; i < 2; ++i)
+            modRuntime.globalLfo[i].start (settings.lfo[i], settings.lfo[i].phase);
+    }
     lfoValue = 0.0f;
     sharedDriftCents = 0.0;
     stageCountdown = 0;
@@ -178,6 +194,11 @@ void Synth::reset() noexcept
         v.modeFactor = 1.0;
         v.grainMix = current.granular ? 1.0f : 0.0f;
         v.driftNow = v.driftFrom = v.driftTo = {};
+        v.mod = {};
+        v.modulated = false;
+        v.panMod = 0.0f;
+        v.ampAttackSeconds = v.ampDecaySeconds = v.ampReleaseSeconds = -1.0;
+        v.driveGain = 1.0f;
         // Free-running oscillators start where the slot's calibration puts them.
         osp::Prng start (osp::Prng::deriveSeed (current.seed, static_cast<std::uint64_t> (v.slot), 0x5048u));
         v.phase1 = start.nextDouble();
@@ -215,6 +236,14 @@ void Synth::setPatch (const Patch& patch) noexcept
         monoGate = false;
     }
     applyPolyphonyLimit();
+    // LFO 1 is the synth's LFO: the modulation runs the patch's.
+    if (! sameLfo (current.lfo, modSettings.lfo[0]) || modSettings.seed != current.seed)
+    {
+        modSettings.lfo[0] = current.lfo;
+        modSettings.seed = current.seed;
+        rebuildModulation();
+    }
+    ++patchGeneration;   // the voices' patches follow
     if (current.seed != driftSeed)
     {
         driftSeed = current.seed;
@@ -236,19 +265,75 @@ void Synth::setPatch (const Patch& patch) noexcept
 void Synth::setLfoCurve (const osp::mod::Curve& curve) noexcept
 {
     lfoCurve = osp::mod::compileCurve (curve);
+    modSettings.lfoCurve[0] = lfoCurve;
+    rebuildModulation();
+}
+
+void Synth::setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept
+{
+    modSettings = settings;
+    modSettings.lfo[0] = current.lfo;   // (the same parameters: LFO 1 is the patch's)
+    modSettings.seed = current.seed;
+    modControllers = controllers;
+    rebuildModulation();
+}
+
+void Synth::rebuildModulation() noexcept
+{
+    modRuntime.setSettings (modSettings);
+    const auto& compiled = modRuntime.compiled;
+    voiceRoutes = compiled.anyVoiceDest;
+    voiceControlCount = 0;
+    for (int k = 0; k < osp::mod::productDestCount(); ++k)
+        if (const auto d = osp::mod::productDest (k); compiled.has (d) && osp::mod::destInfo (d).owner == osp::mod::Owner::voice)
+            voiceControls[static_cast<std::size_t> (voiceControlCount++)] = k;
+    ++patchGeneration;   // a route gone leaves nothing behind in the voices' patches
+}
+
+bool Synth::sharedOffset (osp::mod::Dest d, double& offset) const noexcept
+{
+    const auto& compiled = modRuntime.compiled;
+    if (! compiled.has (d))
+        return false;
+    offset = osp::mod::destInfo (d).span * compiled.sum (d, modRuntime.sharedValue);
+    return true;
+}
+
+const osp::mod::VoiceState* Synth::newestModulation() const noexcept
+{
+    const Voice* newest = nullptr;
+    for (const auto& v : voices)
+        if (v.active && (newest == nullptr || v.order > newest->order))
+            newest = &v;
+    return newest != nullptr ? &newest->mod : nullptr;
+}
+
+int Synth::collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept
+{
+    if (! current.granular)
+        return 0;
+    int n = 0;
+    for (const auto& v : voices)
+        if (v.active && n < max)
+            n += v.granulator.collect (v.recording, out + n, max - n);
+    return n;
 }
 
 void Synth::setKeyDna (const osp::keydna::Settings& settings) noexcept
 {
-    if (settings == keyDna)
-        return;
+    // AMOUNT scales the profile live (KeyDna's apply): only the rest recomputes the table.
+    auto shape = settings;
+    shape.amount = keyDna.amount;
+    const bool same = shape == keyDna;
     keyDna = settings;
-    keyDnaTable.compute (keyDna);
+    if (! same)
+        keyDnaTable.compute (keyDna);
 }
 
 void Synth::setTransport (const osp::HostTiming& t) noexcept
 {
     timing = t;
+    modRuntime.setTiming (t);
     ppqAtBlock = t.ppq;
     blockOffset = 0;
     effects.setTiming (t);
@@ -375,8 +460,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     // and KALEIDOSCOPE's resonators tune to this note's harmonics.
     if (retrigger && ! anyKeyHeld (&v))
     {
-        if (current.lfo.mode != osp::mod::LfoMode::free)
-            lfo.start (current.lfo, current.lfo.phase);
+        // (LFO 1 restarts in the modulation, which follows the keys: noteOn.)
         resonanceModel ^= 1;
         auto& model = resonanceModels[static_cast<std::size_t> (resonanceModel)];
         const double f0 = math::noteToHz (note + current.tuneSemitones);
@@ -435,11 +519,27 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     if (current.lfo.scope == osp::mod::Scope::poly && (retrigger || ! wasActive))
     {
         if (current.lfo.mode == osp::mod::LfoMode::free)
-            v.lfo = lfo;
+            v.lfo = modRuntime.globalLfo[0];
         else
             v.lfo.start (current.lfo, current.lfo.phase);
         v.lfo.evaluate (current.lfo, lfoCurve, v.seed);
     }
+    // The note's modulation: its VEL and NOTE, its envelopes and POLY LFOs start with it (a
+    // legato note keeps them running); the amplitude's attack and decay are taken now.
+    v.mod.note = note;
+    v.mod.velocity = std::clamp (static_cast<int> (std::lround (v.velocity * 127.0f)), 1, 127);
+    if (retrigger || ! wasActive)
+    {
+        v.mod.start (modRuntime);
+        if (current.lfo.scope == osp::mod::Scope::poly)
+            v.mod.values[0] = static_cast<float> (v.lfo.value);   // (LFO 1: the synth's own, this note's)
+        using D = osp::mod::Dest;
+        const auto& compiled = modRuntime.compiled;
+        v.ampAttackSeconds = compiled.has (D::ampAttack) ? osp::mod::modulatedSeconds (D::ampAttack, current.ampAttack, offsetOf (v, D::ampAttack)) : -1.0;
+        v.ampDecaySeconds = compiled.has (D::ampDecay) ? osp::mod::modulatedSeconds (D::ampDecay, current.ampDecay, offsetOf (v, D::ampDecay)) : -1.0;
+        v.ampReleaseSeconds = -1.0;
+    }
+    applyVoiceModulation (v);
     updateVoiceControl (v, current.lfo.scope == osp::mod::Scope::poly ? static_cast<float> (v.lfo.value) : lfoValue,
                         static_cast<float> (std::clamp (current.lfoAmount + wheel * (1.0 - current.lfoAmount), 0.0, 1.0)));
     v.outGain = wasActive ? v.outGain : v.outGainTarget;
@@ -470,6 +570,16 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
 
 void Synth::releaseVoice (Voice& v) noexcept
 {
+    // The release time is taken as the note is released (as ANDOR OSP's voices).
+    using D = osp::mod::Dest;
+    v.mod.release (modRuntime);
+    if (modRuntime.compiled.has (D::ampRelease))
+    {
+        v.ampReleaseSeconds = osp::mod::modulatedSeconds (D::ampRelease, current.ampRelease, offsetOf (v, D::ampRelease));
+        const auto& p = patchOf (v);
+        v.amp.setTimes (v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack, v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay,
+                        p.ampSustain, v.ampReleaseSeconds);
+    }
     v.amp.noteOff();
     v.env.noteOff();
 }
@@ -483,6 +593,11 @@ void Synth::noteOn (int channel, int note, float velocity) noexcept
         noteOff (channel, note);
         return;
     }
+    // The modulation follows the keys: a global LFO 1 / 2 in RETRIGGER restarts with the first,
+    // the global envelopes start, VEL and NOTE on the shared stages take this key.
+    modRuntime.noteStarted (note, channel);
+    if (! playedKeysOnly)
+        modRuntime.setInputNote (note, std::clamp (static_cast<int> (std::lround (velocity * 127.0f)), 1, 127));
     if (monophonic())
     {
         monoNoteOn (channel, note, velocity);
@@ -520,6 +635,7 @@ void Synth::noteOn (int channel, int note, float velocity) noexcept
 
 void Synth::noteOff (int channel, int note) noexcept
 {
+    modRuntime.noteEnded (note, channel);
     if (monophonic())
     {
         monoNoteOff (channel, note);
@@ -643,11 +759,16 @@ void Synth::monoGoTo (int note, bool retrigger, float velocity, int channel) noe
 }
 
 void Synth::setPitchBend (float value) noexcept { bend = std::clamp (value, -1.0f, 1.0f); }
-void Synth::setModWheel (float value) noexcept { wheel = std::clamp (value, 0.0f, 1.0f); }
+void Synth::setModWheel (float value) noexcept
+{
+    wheel = std::clamp (value, 0.0f, 1.0f);
+    modRuntime.setModWheel (wheel);
+}
 
 void Synth::setSustainPedal (bool down) noexcept
 {
     pedal = down;
+    modRuntime.setPedal (down);
     if (down)
         return;
     if (monophonic())
@@ -675,6 +796,7 @@ void Synth::setSustainPedal (bool down) noexcept
 
 void Synth::allNotesOff() noexcept
 {
+    modRuntime.allNotesOff();
     keyCount = 0;
     monoGate = false;
     for (auto& v : voices)
@@ -692,6 +814,7 @@ void Synth::allNotesOff() noexcept
 
 void Synth::allSoundOff() noexcept
 {
+    modRuntime.allNotesOff();
     keyCount = 0;
     monoGate = false;
     for (auto& v : voices)
@@ -717,7 +840,7 @@ void Synth::allSoundOff() noexcept
 void Synth::resetControllers() noexcept
 {
     bend = 0.0f;
-    wheel = 0.0f;
+    setModWheel (0.0f);
     setSustainPedal (false);
 }
 
@@ -739,7 +862,13 @@ void Synth::handleMidi (const std::uint8_t* data, int size) noexcept
             break;
         case 0x80: noteOff (channel, a); break;
         case 0xe0: setPitchBend (static_cast<float> ((b << 7 | a) - 8192) / 8192.0f); break;
+        case 0xd0: modRuntime.setPressure (static_cast<float> (a) / 127.0f); break;   // PRESSURE
+        case 0xa0: modRuntime.setPressure (static_cast<float> (b) / 127.0f); break;
         case 0xb0:
+            // CC 1-4: the slots following this controller.
+            for (std::size_t slot = 0; slot < modControllers.size(); ++slot)
+                if (modControllers[slot] == a)
+                    modRuntime.setController (static_cast<int> (slot), static_cast<float> (b) / 127.0f);
             switch (a)
             {
                 case 1: setModWheel (static_cast<float> (b) / 127.0f); break;
@@ -766,9 +895,60 @@ float Synth::cutoffG (float note) const noexcept
     return t[0] + f * (t[1] - t[0]);
 }
 
+void Synth::applyVoiceModulation (Voice& v) noexcept
+{
+    v.panMod = 0.0f;
+    if (! voiceRoutes)
+    {
+        v.modulated = false;
+        return;
+    }
+    // From the knobs as they are (`current`), each modulated control moved for this note.
+    if (! v.modulated || v.patchGeneration != patchGeneration)
+    {
+        v.patch = current;
+        v.patchGeneration = patchGeneration;
+    }
+    v.modulated = true;
+    auto& p = v.patch;
+    if (modulator != nullptr)
+        for (int n = 0; n < voiceControlCount; ++n)
+        {
+            const int k = voiceControls[static_cast<std::size_t> (n)];
+            modulator->moveControl (p, k, offsetOf (v, osp::mod::productDest (k)));
+        }
+    // ANDOR OSP's destinations the synth plays, in their own units (as its voices take them).
+    using D = osp::mod::Dest;
+    const auto& compiled = modRuntime.compiled;
+    if (compiled.has (D::levelA))
+    {
+        const double total = std::max (current.levelDb, osp::mod::Runtime::silentLevelDb) + offsetOf (v, D::levelA);
+        p.levelDb = total <= osp::mod::Runtime::silentLevelDb ? -96.0 : std::min (total, osp::mod::Runtime::maxLevelDb);
+    }
+    if (compiled.has (D::panA))
+        v.panMod = static_cast<float> (offsetOf (v, D::panA));
+    if (compiled.has (D::fineTuneA))
+        p.tuneSemitones = std::clamp (current.tuneSemitones + offsetOf (v, D::fineTuneA) / 100.0, -osp::mod::Runtime::maxTuneSemitones,
+                                      osp::mod::Runtime::maxTuneSemitones);
+    if (compiled.has (D::reimaginedA))
+        p.reimagined = std::clamp (current.reimagined + offsetOf (v, D::reimaginedA), 0.0, 1.0);
+    if (compiled.has (D::grainPositionA))
+        p.grains.position = std::clamp (current.grains.position + offsetOf (v, D::grainPositionA), 0.0, 1.0);
+    if (compiled.has (D::grainSpreadA))
+        p.grains.spread = std::clamp (current.grains.spread + offsetOf (v, D::grainSpreadA), 0.0, 1.0);
+    if (compiled.has (D::grainDensityA))
+        p.grains.density = std::clamp (current.grains.density * std::exp2 (offsetOf (v, D::grainDensityA)), 4.0, 40.0);
+    if (compiled.has (D::grainSizeA))
+        p.grains.sizeSeconds = std::clamp (current.grains.sizeSeconds * std::exp2 (offsetOf (v, D::grainSizeA)), 0.02, 0.4);
+    if (compiled.has (D::ampSustain))
+        p.ampSustain = std::clamp (current.ampSustain + offsetOf (v, D::ampSustain), 0.0, 1.0);
+}
+
 void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 {
-    const auto& p = current;
+    const auto& p = patchOf (v);
+    if (v.modulated)   // (LFO AMOUNT may be among the moved controls)
+        depth = static_cast<float> (std::clamp (p.lfoAmount + wheel * (1.0 - p.lfoAmount), 0.0, 1.0));
     const auto& d = drift[static_cast<std::size_t> (v.slot)];
     const auto a = static_cast<float> (std::clamp (p.analogAmount, 0.0, 1.0));
     const float lfoD = lfoNow * depth;
@@ -792,7 +972,10 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.width2 = static_cast<float> (std::clamp (p.osc2Width + 0.04 * a * d.width2 + lfoD * p.lfoWidth2, 0.02, 0.98));
 
     // Mixer: BLEND crossfades (equal power) between the two oscillators' own levels.
-    const float theta = blendSmoothed * static_cast<float> (math::pi) * 0.5f;
+    // (A control moved for this note moves its smoothed value by as much.)
+    const auto moved = [&v, this] (double now, double knob) { return v.modulated ? static_cast<float> (now - knob) : 0.0f; };
+    const float blendNow = std::clamp (blendSmoothed + moved (p.blend, current.blend), 0.0f, 1.0f);
+    const float theta = blendNow * static_cast<float> (math::pi) * 0.5f;
     const float levelDrift = 0.17f * a;   // +-1.5 dB at 100 %
     v.gain1 = static_cast<float> (p.osc1Level) * std::min (1.0f, 1.41421356f * std::cos (theta)) * (1.0f + levelDrift * d.level1);
     v.gain2 = static_cast<float> (p.osc2Level) * std::min (1.0f, 1.41421356f * std::sin (theta)) * (1.0f + levelDrift * d.level2);
@@ -800,21 +983,35 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 
     // Filter: TONE, keyboard tracking around C4, the slot's tolerance (+-1 semitone at 100 %)
     // and wander, the LFO; the envelope (scaled by velocity) is added per sample.
-    v.cutoffNote = toneNote + static_cast<float> (p.keyTrack * (v.pitch - 60.0)) + a * (1.0f * d.cutoff + 0.2f * d.wander)
+    float toneMoved = 0.0f;
+    if (v.modulated && (p.tone < current.tone || p.tone > current.tone))
+        toneMoved = static_cast<float> (math::hzToNote (math::toneToHz (p.tone)) - math::hzToNote (math::toneToHz (current.tone)));
+    v.cutoffNote = toneNote + toneMoved + static_cast<float> (p.keyTrack * (v.pitch - 60.0)) + a * (1.0f * d.cutoff + 0.2f * d.wander)
                    + lfoD * static_cast<float> (p.lfoCutoff) + static_cast<float> (12.0 * v.driftNow[1]);
     const double velocityScale = 1.0 - p.velocityToFilter + p.velocityToFilter * v.velocity;
     v.envDepth = static_cast<float> (p.envDepthSemitones * velocityScale);
-    v.k = std::clamp (4.15f * resonanceSmoothed * (1.0f + 0.06f * a * d.resonance), 0.0f, 4.2f);
-    equalPower (v.pan + static_cast<float> (v.driftNow[3]), v.panL, v.panR);   // its place, as DRIFT moves it
-    v.makeUp = (1.0f + 0.35f * v.k) / std::sqrt (driveGain) * math::dbToGain (p.driveTrimDb);
+    const float resonanceNow = std::clamp (resonanceSmoothed + moved (p.resonance, current.resonance), 0.0f, 1.0f);
+    v.k = std::clamp (4.15f * resonanceNow * (1.0f + 0.06f * a * d.resonance), 0.0f, 4.2f);
+    equalPower (v.pan + static_cast<float> (v.driftNow[3]) + v.panMod, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
+    const float driveMoved = moved (p.filterDrive, current.filterDrive);
+    v.driveGain = driveMoved != 0.0f ? std::exp2 (4.0f * std::clamp (driveSmoothed + driveMoved, 0.0f, 1.0f)) : driveGain;
+    v.makeUp = (1.0f + 0.35f * v.k) / std::sqrt (v.driveGain) * math::dbToGain (p.driveTrimDb);
 
     // Envelopes: the slot's tolerance on the times (+-20 % at 100 %).
     const double t = 0.2 * a;
     v.env.setTimes (p.filterAttack * (1.0 + t * d.attack), p.filterDecay * (1.0 + t * d.decay), p.filterSustain, p.filterRelease * (1.0 + t * d.release));
-    v.amp.setTimes (p.ampAttack * (1.0 + t * d.attack), p.ampDecay * (1.0 + t * d.decay), p.ampSustain, p.ampRelease * (1.0 + t * d.release));
+    v.amp.setTimes ((v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack) * (1.0 + t * d.attack),
+                    (v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay) * (1.0 + t * d.decay), p.ampSustain,
+                    (v.ampReleaseSeconds >= 0.0 ? v.ampReleaseSeconds : p.ampRelease) * (1.0 + t * d.release));
 
     // Level: velocity (VELOCITY RANGE dB between the hardest and softest note), LEVEL, MUTE.
-    const double soft = 1.0 - v.velocity;
+    // APPLY TO AMP: VEL's curve shapes the velocity the loudness follows (a straight curve,
+    // the default, leaves it exactly as played).
+    double velocity = v.velocity;
+    if (modRuntime.settings.velocityToAmp)
+        if (const double shaped = modRuntime.velocityValue (v.mod.velocity); std::abs (shaped - velocity) > 1.0e-4)
+            velocity = shaped;
+    const double soft = 1.0 - velocity;
     const float velocityGain = math::dbToGain (-p.velocityRangeDb * soft * soft);
     // LEVEL at its bottom (ANDOR OSP's -48 dB) is silence.
     const float level = p.levelDb <= -47.99 ? 0.0f : math::dbToGain (p.levelDb);
@@ -841,7 +1038,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         if (v.modeEngine != nullptr)
             g.position = std::clamp (g.position + v.modeEngine->grainPositionOffset(), 0.0, 1.0);
         if (keyDnaTable.active())
-            osp::keydna::apply (keyDnaTable.at (v.note), g);
+            osp::keydna::apply (keyDnaTable.at (v.note), keyDna.amount, g);
         v.granulator.setParams (g);
     }
     else
@@ -892,7 +1089,7 @@ void Synth::updateDrift (Voice& v) noexcept
 osp::ReimaginedControl Synth::modeControl (const Voice& v) const noexcept
 {
     osp::ReimaginedControl c;
-    c.amount = std::clamp (current.reimagined, 0.0, 1.0);
+    c.amount = std::clamp (patchOf (v).reimagined, 0.0, 1.0);
     c.settings = &current.reimaginedSettings;
     c.step = std::exp2 ((v.notePitch - 60.0) / 12.0);   // the "recording" is rooted at C4
     return c;
@@ -951,13 +1148,10 @@ void Synth::controlUpdate() noexcept
     driveBias = 0.6f * static_cast<float> (std::clamp (p.driveBias, 0.0, 1.0));
     driveBiasOffset = math::tanhFast (driveBias);
 
-    // The LFO (ANDOR OSP's LFO 1): on the host's beat while it plays (SYNC), else free.
-    if (p.lfo.sync && timing.valid && timing.playing)
-        lfo.follow (p.lfo, ppqAtBlock + static_cast<double> (blockOffset) / hostRate * timing.bpm / 60.0);
-    else
-        lfo.advance (p.lfo, seconds, timing.valid ? timing.bpm : 120.0);
-    lfo.evaluate (p.lfo, lfoCurve, p.seed);
-    lfoValue = static_cast<float> (lfo.value);
+    // The modulation's shared sources; among them the LFO (ANDOR OSP's LFO 1): on the host's
+    // beat while it plays (SYNC, FREE), else free.
+    modRuntime.advanceGlobal (controlPeriod, hostRate);
+    lfoValue = static_cast<float> (modRuntime.globalLfo[0].value);
 
     // MOVEMENT DRIFT's shared part: the whole instrument wanders a little together.
     sharedDriftCents = 0.0;
@@ -986,6 +1180,12 @@ void Synth::controlUpdate() noexcept
             v.lfo.evaluate (p.lfo, lfoCurve, v.seed);   // (RANDOM: each note its own values)
             lfoNow = static_cast<float> (v.lfo.value);
         }
+        // This note's sources (LFO 1 POLY: the synth's own, as the classic depths hear it), and
+        // what its routes move.
+        v.mod.advance (modRuntime, seconds);
+        if (p.lfo.scope == osp::mod::Scope::poly)
+            v.mod.values[0] = lfoNow;
+        applyVoiceModulation (v);
         updateVoiceControl (v, lfoNow, depth);
     }
 }
@@ -995,7 +1195,7 @@ void Synth::controlUpdate() noexcept
 
 float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
 {
-    const auto& p = current;
+    const auto& p = patchOf (v);
     const auto w1 = osc::wavesOf (p.osc1Wave);
     const auto w2 = osc::wavesOf (p.osc2Wave);
 
@@ -1115,7 +1315,7 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             float cutoff = v.cutoffNote + scratchEnv[ks] * v.envDepth;
             if (p.polyModToCutoff)
                 cutoff += scratchPolyMod[ks] * polyModCutoffSemitones;
-            const float y = v.filter.process (scratchSource[ks] * driveGain, cutoffG (cutoff), v.k, driveBias, driveBiasOffset);
+            const float y = v.filter.process (scratchSource[ks] * v.driveGain, cutoffG (cutoff), v.k, driveBias, driveBiasOffset);
             v.outGain += 0.004f * (v.outGainTarget - v.outGain);
             float out = y * v.makeUp * scratchAmp[ks] * v.outGain;
             if (v.fade > 0)

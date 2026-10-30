@@ -5,6 +5,8 @@
 #include "engine/ReimaginedModes.h"
 #include "engine/Shaping.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 namespace andor::analog
@@ -29,6 +31,18 @@ inline int syncDivisionOfLegacy (int index) noexcept
 {
     constexpr int m[lfoDivisionCount] = { 8, 7, 6, 5, 4, 14, 3, 11, 2, 10, 1, 9, 0 };
     return m[index < 0 ? 0 : (index >= lfoDivisionCount ? lfoDivisionCount - 1 : index)];
+}
+
+/**
+    BLEND folded into the oscillators' levels (version 3: the oscillators are mixed by their own
+    LEVELs and BLEND rests at its centre, where it leaves both as they are). The levels the
+    synth's equal-power BLEND law gave them: the same sound with BLEND at 50 %.
+*/
+inline void foldBlend (double blend, double& level1, double& level2) noexcept
+{
+    const double theta = std::clamp (blend, 0.0, 1.0) * 1.5707963267948966;
+    level1 *= std::min (1.0, 1.4142135623730951 * std::cos (theta));
+    level2 *= std::min (1.0, 1.4142135623730951 * std::sin (theta));
 }
 
 /** The polyphony choices (analog.polyphony). */

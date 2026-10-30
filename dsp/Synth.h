@@ -28,6 +28,19 @@ namespace andor::analog
 {
 
 /**
+    The instrument's own controls as modulation moves them, one voice at a time (the product
+    knows its parameters and how each sets the patch): mod::productDest (k) is the k-th.
+*/
+class ControlModulator
+{
+public:
+    virtual ~ControlModulator() = default;
+    /** Sets in `patch` what product destination `k` controls, its knob moved by `offset`
+        (a share of the knob's whole travel, clamped at its ends). Audio thread. */
+    virtual void moveControl (Patch& patch, int k, double offset) const noexcept = 0;
+};
+
+/**
     ANDOR ANALOG's sound engine: a 16-voice, two-oscillator subtractive synthesizer after the
     classic five-voice polyphonic instruments of 1978-80, in pure C++ (no JUCE).
 
@@ -79,6 +92,25 @@ public:
     /** MOVEMENT SHAPER's playhead (0..1), for its picture. */
     float shaperPhase() const noexcept { return effects.shaperPhase(); }
 
+    /** The modulation (ANDOR OSP's: LFO 1 and 2, ENV 1 and 2, VEL, NOTE, the wheel, CC 1-4
+        and pressure through 16 routes) and the controllers CC 1-4 follow. LFO 1 is the
+        synth's LFO (the patch's): its classic depths and the routes hear the same one.
+        Real-time safe (no allocation). Without it: no routes, LFO 1 from the patch. */
+    void setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept;
+    /** Who moves the product's own controls per voice (null: they are not moved per voice). */
+    void setControlModulator (const ControlModulator* m) noexcept { modulator = m; }
+    /** The modulation's state (the shared sources, the routes compiled). */
+    const osp::mod::Runtime& modulation() const noexcept { return modRuntime; }
+    /** A destination's offset as the shared stages hear it now (global sources, the global
+        envelopes, the latest key's VEL and NOTE), in its own units; false: no route. */
+    bool sharedOffset (osp::mod::Dest d, double& offset) const noexcept;
+    /** While an arpeggiator plays the synth: VEL and NOTE on the shared stages follow the
+        keys the musician pressed (setPlayedKey), not the notes it is given. */
+    void setPlayedKeysOnly (bool on) noexcept { playedKeysOnly = on; }
+    void setPlayedKey (int note, int velocity) noexcept { modRuntime.setInputNote (note, velocity); }
+    /** The newest sounding voice's modulation (the panel's meters), or null. */
+    const osp::mod::VoiceState* newestModulation() const noexcept;
+
     // Events, applied at the current position (between render calls).
     void noteOn (int channel, int note, float velocity) noexcept;
     void noteOff (int channel, int note) noexcept;
@@ -111,6 +143,9 @@ public:
 
     /** The variation each voice slot carries at ANALOG 100 % (cents of OSC 1 pitch). */
     double slotPitchOffsetCents (int slot) const noexcept;
+    /** The grains playing now in every sounding voice, while GRANULAR is on (the card's
+        picture); returns how many were written (at most `max`). Audio thread. */
+    int collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept;
     /** A voice's grains now (tests). */
     int grainCount (int slot) const noexcept { return voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))].granulator.grainCount(); }
     /** How long each voice's recording is (seconds), and the longest a mode engine runs per call. */
@@ -181,6 +216,14 @@ private:
         int modeCountdown = 0;
         double modeFactor = 1.0;      ///< the mode's read-speed factor (wow, self-modulation)
         osp::mod::LfoState lfo;       ///< LFO 1 with POLY voices: this note's own
+        // Modulation: this note's sources, and its patch where routes move its controls.
+        osp::mod::VoiceState mod;
+        Patch patch;                  ///< `current` with this voice's modulated controls (when `modulated`)
+        bool modulated = false;
+        std::uint64_t patchGeneration = 0;
+        float panMod = 0.0f;          ///< PAN's offset (-1..1)
+        double ampAttackSeconds = -1.0, ampDecaySeconds = -1.0, ampReleaseSeconds = -1.0;   ///< taken at note start / release (< 0: the knob's)
+        float driveGain = 1.0f;       ///< FILTER DRIVE's gain for this voice
         // MOVEMENT DRIFT (and KALEIDOSCOPE's own instability): slow random glides of pitch
         // (cents), tone (octaves), level (dB) and place, as ANDOR OSP's voices wander.
         std::array<double, 4> driftFrom {}, driftTo {}, driftNow {};
@@ -200,6 +243,11 @@ private:
     Voice* allocate() noexcept;
     void controlUpdate() noexcept;
     void updateVoiceControl (Voice& v, float lfoValue, float depth) noexcept;
+    /** This voice's patch for the control period: `current` moved by its routes. */
+    void applyVoiceModulation (Voice& v) noexcept;
+    const Patch& patchOf (const Voice& v) const noexcept { return v.modulated ? v.patch : current; }
+    double offsetOf (const Voice& v, osp::mod::Dest d) const noexcept { return v.mod.offset (modRuntime, d); }
+    void rebuildModulation() noexcept;
     void updateDrift (Voice& v) noexcept;
     void startModeEngine (Voice& v) noexcept;
     osp::ReimaginedControl modeControl (const Voice& v) const noexcept;
@@ -247,8 +295,19 @@ private:
     float bend = 0.0f, wheel = 0.0f;
     bool pedal = false;
 
+    // Modulation: ANDOR OSP's runtime (its global LFO 1 is the synth's LFO), the settings
+    // it runs, the controllers CC 1-4 follow, and the product destinations moved per voice.
+    osp::mod::Settings modSettings;
+    osp::mod::Runtime modRuntime;
+    std::array<int, osp::mod::ccSlots> modControllers { 2, 11, 16, 17 };
+    std::array<int, osp::mod::maxProductDests> voiceControls {};   ///< product destinations with routes, per voice
+    int voiceControlCount = 0;
+    bool voiceRoutes = false;   ///< a route reaches something a voice reads
+    std::uint64_t patchGeneration = 1;   ///< a new one: the voices' patches are copied from `current` again
+    bool playedKeysOnly = false;
+    const ControlModulator* modulator = nullptr;
+
     // LFO (ANDOR OSP's LFO 1) and transport.
-    osp::mod::LfoState lfo;
     osp::mod::CurveTable lfoCurve {};
     float lfoValue = 0.0f;
     osp::HostTiming timing;

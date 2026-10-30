@@ -101,3 +101,47 @@ TEST_CASE ("realtime: GRANULAR, the REIMAGINED modes, MOVEMENT, DRIVE and KEY DN
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: modulation (routes, a product control, controllers, reset) never allocates", "[realtime][modulation]")
+{
+    namespace mod = osp::mod;
+    struct Tone final : ControlModulator
+    {
+        void moveControl (Patch& p, int, double offset) const noexcept override { p.tone = std::clamp (0.5 + offset, 0.0, 1.0); }
+    } tone;
+    mod::setProductDestinations ({ { "test.tone", "TONE", mod::Owner::voice, mod::Update::continuous } });
+    mod::Settings settings;
+    settings.routes[0] = { mod::Source::lfo2, mod::productDest (0), 0.5, true, -1 };
+    settings.routes[1] = { mod::Source::env1, mod::Dest::levelA, -0.3, true, -1 };
+    settings.routes[2] = { mod::Source::vel, mod::Dest::ampRelease, 0.4, true, -1 };
+    settings.routes[3] = { mod::Source::cc1, mod::Dest::panA, 0.4, true, -1 };
+    settings.routes[4] = { mod::Source::modWheel, mod::Dest::drive, 0.4, true, -1 };
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    synth.setPatch (factoryPatches()[1].patch);
+    synth.setControlModulator (&tone);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    const std::array<int, mod::ccSlots> controllers { 2, 11, 16, 17 };
+    counting = true;
+    synth.setModulation (settings, controllers);
+    for (int block = 0; block < 40; ++block)
+    {
+        if (block % 5 == 0)
+        {
+            const std::uint8_t note[3] { 0x90, static_cast<std::uint8_t> (48 + block / 5), 100 };
+            synth.handleMidi (note, 3);
+            const std::uint8_t controller[3] { 0xb0, 2, static_cast<std::uint8_t> (3 * block) };
+            synth.handleMidi (controller, 3);
+        }
+        if (block % 7 == 6)
+        {
+            const std::uint8_t release[3] { 0x80, static_cast<std::uint8_t> (48 + block / 7), 0 };
+            synth.handleMidi (release, 3);
+        }
+        synth.render (left.data(), right.data(), 512);
+    }
+    synth.reset();
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

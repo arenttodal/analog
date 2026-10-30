@@ -174,7 +174,7 @@ namespace
     std::unique_ptr<MiniPanel> blendPopover (InstrumentHost& h)
     {
         using namespace params;
-        auto p = std::make_unique<AnalogPanel> (h, "BLEND", 640, 0);
+        auto p = std::make_unique<AnalogPanel> (h, "OSCILLATORS", 640, 0);
         p->row ("OSCILLATOR 1");
         p->segments (osc1Wave, { "SAW", "PULSE", "BOTH" }, 2.4f, "Oscillator 1's waveform: saw, pulse, or both");
         p->knob (osc1Octave, "OCT");
@@ -187,7 +187,7 @@ namespace
         p->selector (osc2Wave, "WAVE", 1.4f, "Oscillator 2's waveforms: saw, triangle and pulse, alone or together");
         p->knob (osc2Octave, "OCT");
         p->knob (osc2Coarse, "SEMI");
-        p->knob (osc2Fine, "FINE");
+        p->knob (osc2Fine, "DETUNE");   // (the card's DETUNE)
         p->knob (osc2Width, "WIDTH");
         p->knob (osc2Level, "LEVEL");
         p->knob (lfoPitch2, "LFO PITCH");
@@ -206,7 +206,7 @@ namespace
         p->knob (noise, "NOISE");
         p->segments (polyphony, { "1", "2", "4", "8", "16" }, 2.6f, "How many voices play (with UNISON: how many stack on one note)");
         p->toggle (unison, "UNISON", 1.1f, "Every voice on one note, detuned: a thick mono sound");
-        p->knob (unisonDetune, "DETUNE");
+        p->knob (unisonDetune, "UNI DETUNE");
         p->knob (spread, "SPREAD");
         p->row ("KEY DNA  (GRANULAR: each key its own grains)");
         p->toggle (keyDna, "ON", 0.8f, "KEY DNA: every key plays its own grains (where, how long, how dense, how wide), the same each time");
@@ -223,8 +223,8 @@ namespace
     std::unique_ptr<MiniPanel> tonePopover (InstrumentHost& h)
     {
         using namespace params;
-        auto p = std::make_unique<AnalogPanel> (h, "TONE", 400, 2);
-        p->row ("FILTER");
+        auto p = std::make_unique<AnalogPanel> (h, "FILTER", 400, 2);
+        p->row ({});
         p->knob (resonance, "RESO");
         p->knob (envDepth, "ENV");
         p->knob (keyTrack, "KEYS");
@@ -248,11 +248,16 @@ namespace
     }
 }
 
+std::unique_ptr<MiniPanel> createOscillatorPopover (InstrumentHost& host)
+{
+    return blendPopover (host);
+}
+
 std::unique_ptr<MiniPanel> createMacroPopover (int macro, InstrumentHost& host)
 {
     switch (macro)
     {
-        case 0: return blendPopover (host);
+        case 0: return nullptr;   // (not assigned yet: shown disabled)
         case 1: return createMacroPopup (MacroPopup::drive, host);      // ANDOR OSP's own
         case 2: return tonePopover (host);
         case 3: return createMacroPopup (MacroPopup::movement, host);

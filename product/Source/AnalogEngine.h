@@ -17,7 +17,7 @@ namespace andor::analog
     Threads: prepare() on the message thread (allocates); process() on the audio thread
     (no allocation, no locks); sourcePicture() on the message thread (parameters only).
 */
-class AnalogEngine final : public andor::shell::Engine
+class AnalogEngine final : public andor::shell::Engine, private ControlModulator
 {
 public:
     /** 4x is the shipping quality; tests may ask for less. */
@@ -35,6 +35,11 @@ public:
     float shaperPhase() const noexcept override { return synth.shaperPhase(); }
     void setModulationCurve (int index, const osp::mod::Curve& curve) noexcept override;
     juce::String reimaginedModeUnavailable (int layer, int mode) const override;
+    const osp::InstrumentEngine::GrainSnapshot* grainSnapshot (int layer) const noexcept override { return layer == 0 ? &grains : nullptr; }
+    void setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept override;
+    bool arpModulation (osp::mod::Dest dest, double& offset) const noexcept override { return synth.sharedOffset (dest, offset); }
+    void setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& played) noexcept override;
+    osp::InstrumentEngine::ModView modulationView() const noexcept override;
     bool sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const override;
 
     /** One period of the oscillators' mix for a patch (the card's picture). */
@@ -46,6 +51,19 @@ private:
     params::Reader reader;
     osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
     std::vector<float> scratch;
+    osp::InstrumentEngine::GrainSnapshot grains;   ///< written by process(), read by the card
+    void publishGrains() noexcept;
+
+    // Modulation: the knobs as the block starts (the instrument's controls moved by their
+    // routes), the controls a voice's routes move (ControlModulator), the panel's meters.
+    void moveControl (Patch& patch, int k, double offset) const noexcept override { reader.moveControl (patch, raw, k, offset); }
+    void publishModulationView() noexcept;
+    params::Reader::Values raw {};
+    bool modulated = false;
+    std::array<std::atomic<float>, osp::mod::sourceCount> viewValue {};
+    std::array<std::atomic<float>, 2> viewPhase {}, viewEnvTime {}, viewGlobalEnv {};
+    std::array<std::atomic<int>, 2> viewEnvStage {};
+    std::atomic<bool> viewVoice { false };
     float lastScreenPitch = 0.0f, lastScreenMod = 0.0f;
     bool prepared = false;
 };
