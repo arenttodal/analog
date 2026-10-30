@@ -142,7 +142,7 @@ const juce::StringArray& engineParameterIds()
         // only offered once the engine plays it: the rest stay disabled on screen.
         static const juce::StringArray notPlayedYet = [] {
             juce::StringArray n;
-            for (int i = iOsc1Model; i < count; ++i)
+            for (int i = iOsc1Enabled + 2; i < count; ++i)   // ORGANIC and MORPH
                 n.add (ids()[i]);
             return n;
         }();

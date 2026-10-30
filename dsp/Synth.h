@@ -2,7 +2,11 @@
 
 #include "Envelope.h"
 #include "HalfBand.h"
+#include "HighPassFilter.h"
+#include "JunoChorus.h"
 #include "LadderFilter.h"
+#include "Oscillator.h"
+#include "OtaFilter.h"
 #include "LiveGranulator.h"
 #include "Patch.h"
 #include "PolyBlep.h"
@@ -187,6 +191,23 @@ private:
         BlepLine line1, line2;
         float osc2Out = 0.0f;
         LadderFilter filter;
+        // State version 4: each slot's model state and plan (control rate), the pair's ring
+        // mix, NOISE's colour, the OTA low-pass and the high-pass before the filter.
+        osc::SlotExtra extra1, extra2;
+        osc::SlotPlan plan1, plan2;
+        bool classicPair = true;      ///< both slots CLASSIC, no ring, white noise: the original path
+        float ringNow = 0.0f;         ///< RING MOD, glided (a change never clicks)
+        float pwm1 = 0.0f, pwm2 = 0.0f;           ///< DCO PWM from LFO 1 (width offset, control rate)
+        float pwmEnv1 = 0.0f, pwmEnv2 = 0.0f;     ///< DCO PWM depth from the filter envelope (per sample)
+        float noiseColour = 0.0f;     ///< JUNO noise: its low-pass state
+        OtaFilter ota;
+        float otaMix = 0.0f, otaTarget = 0.0f;    ///< LADDER 0 .. OTA 1 (a model change crossfades)
+        float resonance01 = 0.0f;
+        float otaCutoffOffset = 0.0f; ///< semitones (the Juno-6's calibration)
+        VoiceHighPass highPass;
+        int highPassTail = 0;         ///< samples the high-pass keeps running after it was switched off
+        double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
+        float lfoFade = 1.0f;
         Envelope amp, env;
         osp::Prng noise { 1 };
 
@@ -197,6 +218,7 @@ private:
         float k = 0.0f;
         float gain1 = 1.0f, gain2 = 1.0f, gainNoise = 0.0f, outGain = 0.0f, outGainTarget = 0.0f;
         float makeUp = 1.0f;   ///< resonance and DRIVE make-up gain after the filter
+        float otaMakeUp = 1.0f;   ///< the same after the OTA (DRIVE and TRIM only)
 
         // The live sound: its recording, the grains read from it, KALEIDOSCOPE's parts.
         LiveRecording recording;
@@ -256,6 +278,9 @@ private:
     /** One sample of a voice's source: oscillators, noise, the recording and the grains;
         `polyMod` is Poly Mod's value at this sample (for the cutoff). */
     float sourceSample (Voice& v, float envValue, float& polyMod) noexcept;
+    /** The mixer's output (at the filter's input level) through the voice's recording,
+        GRANULAR, KALEIDOSCOPE's doubling and saturation. */
+    float liveStages (Voice& v, float x) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
@@ -267,6 +292,10 @@ private:
     void updateWander (Drift& d) noexcept;
     float cutoffG (float note) const noexcept;
     void applyPolyphonyLimit() noexcept;
+    /** A slot's plan for the control period (its model's sums and extras). */
+    void planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept;
+    /** One sample of OSC 1 and OSC 2 and their mix for a voice playing any model pair. */
+    float modelPairSample (Voice& v, const Patch& p, float envValue, float& polyMod) noexcept;
 
     Patch current;
     double hostRate = 48000.0, internalRate = 192000.0;
@@ -351,6 +380,7 @@ private:
     std::array<float, modeInterval> scratchAmp {};
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
+    JunoChorus chorus;            ///< state version 4: the chorus after the voices (off: bit-exact bypass)
     osp::PostProcessor effects;
     float dcL = 0.0f, dcR = 0.0f, dcStateL = 0.0f, dcStateR = 0.0f, dcCoef = 0.0f;
 

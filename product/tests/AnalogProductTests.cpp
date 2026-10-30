@@ -181,6 +181,47 @@ namespace
             { "movement.shaper.smooth", movementMode (osp::MovementMode::shaper) },
             { "movement.shaper.custom", movementMode (osp::MovementMode::shaper) },
         };
+        // State version 4: each model's settings act in that model; PWM depth with a source
+        // (and the source with a depth); SUPER SAW's spread on SUPER SAW; the OTA's voicing and
+        // slope on the OTA; the Juno variant through the high-pass; the chorus' hiss with it on.
+        auto model = [] (int slot, OscModel m) { return [slot, m] (Patch& c) { (slot == 1 ? c.osc1Model : c.osc2Model) = m; }; };
+        for (int slot = 1; slot <= 2; ++slot)
+        {
+            const bool first = slot == 1;
+            for (const auto& id : { first ? params::osc1DcoSaw : params::osc2DcoSaw, first ? params::osc1DcoPulse : params::osc2DcoPulse,
+                                    first ? params::osc1DcoSub : params::osc2DcoSub })
+                modes[id] = model (slot, OscModel::dco);
+            modes[first ? params::osc1DcoPwmSource : params::osc2DcoPwmSource] = [slot] (Patch& c) {
+                (slot == 1 ? c.osc1Model : c.osc2Model) = OscModel::dco;
+                auto& d = slot == 1 ? c.dco1 : c.dco2;
+                d.pulse = true;
+                d.pwmDepth = 0.6;
+            };
+            modes[first ? params::osc1DcoPwmDepth : params::osc2DcoPwmDepth] = [slot] (Patch& c) {
+                (slot == 1 ? c.osc1Model : c.osc2Model) = OscModel::dco;
+                auto& d = slot == 1 ? c.dco1 : c.dco2;
+                d.pulse = true;
+                d.pwmSource = PwmSource::lfo;
+            };
+            modes[first ? params::osc1WideWave : params::osc2WideWave] = model (slot, OscModel::wide);
+            modes[first ? params::osc1WideShape : params::osc2WideShape] = model (slot, OscModel::wide);
+            modes[first ? params::osc1WideSpread : params::osc2WideSpread] = [slot] (Patch& c) {
+                (slot == 1 ? c.osc1Model : c.osc2Model) = OscModel::wide;
+                (slot == 1 ? c.wide1 : c.wide2).wave = WideWave::superSaw;
+            };
+        }
+        modes[params::noiseColor] = [] (Patch& c) { c.noiseLevel = 0.5; };
+        modes[params::otaCharacter] = [] (Patch& c) {
+            c.filterModel = FilterModel::ota;
+            c.resonance = 0.6;
+        };
+        modes[params::otaSlope] = [] (Patch& c) { c.filterModel = FilterModel::ota; };
+        modes[params::junoVariant] = [] (Patch& c) {
+            c.highPass = 2;
+            c.filterModel = FilterModel::ota;
+        };
+        modes[params::chorusNoise] = [] (Patch& c) { c.chorusMode = 1; };
+
         // KEY DNA is GRANULAR's, and its settings act while it is on.
         for (const auto& id : { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
                                 params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune })

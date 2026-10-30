@@ -145,3 +145,47 @@ TEST_CASE ("realtime: modulation (routes, a product control, controllers, reset)
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: the oscillator models, RING, the OTA, the high-pass and the chorus never allocate", "[realtime][models]")
+{
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    Patch p;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 240; ++block)
+    {
+        p.osc1Model = static_cast<OscModel> (block / 8 % 3);
+        p.osc2Model = static_cast<OscModel> (block / 24 % 3);
+        p.wide1.wave = static_cast<WideWave> (block / 5 % 5);
+        p.wide1.spread = (block % 7) / 7.0;
+        p.dco2.subLevel = 0.5;
+        p.dco2.pwmSource = static_cast<PwmSource> (block % 3);
+        p.dco2.pwmDepth = 0.5;
+        p.ringMix = block % 40 < 20 ? 0.6 : 0.0;
+        p.noiseLevel = 0.2;
+        p.noiseColor = static_cast<NoiseColor> (block / 30 % 2);
+        p.filterModel = static_cast<FilterModel> (block / 16 % 2);
+        p.otaVoicing = static_cast<OtaVoicing> (block / 32 % 2);
+        p.otaTwoPole = block % 50 < 25;
+        p.highPass = block / 12 % 5 - 1;
+        p.chorusMode = block / 20 % 4;
+        p.chorusNoise = block % 2 == 0;
+        p.lfoDelaySeconds = 0.1;
+        p.lfoRiseSeconds = 0.2;
+        p.vcaGate = block % 60 < 10;
+        p.envLink = block % 60 > 50;
+        p.sync = block % 9 < 4;
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 40) % 48), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
