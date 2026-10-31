@@ -9,6 +9,7 @@
 #include "AnalogPopovers.h"
 #include "FactoryPatches.h"
 #include "KeyDnaState.h"
+#include "SampleSourceUI.h"
 #include "ShellProduct.h"
 
 namespace andor::shell
@@ -218,6 +219,10 @@ const ProductInfo& productInfo()
         // Empty, ORGANIC is a compact ADD SAMPLE dock beside the oscillators' card (about a
         // fifth of the area); a recording opens its own card, the two then sharing equally.
         p.hybridSampleDock = true;
+        // The Sample Source importer: a Kontakt patch (its NKI and samples) into native sounds that
+        // play in ORGANIC's place; ORGANIC's heading then picks among them.
+        p.hybridAction = { "Import Kontakt patch", [] (osp::plugin::InstrumentHost& host) { andor::analog::runKontaktImport (host); } };
+        p.hybridHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSoundPopover (host); };
         // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
         p.generatorModeName = "Standard";
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own

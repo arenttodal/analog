@@ -12,6 +12,9 @@
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
 #include "SampleImport.h"
+#include "SamplePatches.h"
+#include "KontaktImport.h"
+#include "SampleSourceUI.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
@@ -2398,7 +2401,11 @@ TEST_CASE ("analog: Bukkehorn 4.5's Voxx imports complete and plays its recordin
     const auto& source = *voxx.source;
     CHECK (source.name == "Voxx");
     CHECK (source.zones.size() == 13);
-    CHECK (source.gain == Approx (3.866971 * 1.2795722).epsilon (1.0e-4));   // (the group's volume times the instrument's)
+    // The source's level is the instrument's raised to Kontakt's (each zone keeps its own times
+    // the group's, +11.75 dB).
+    CHECK (source.gain == Approx (1.2795722 * juce::Decibels::decibelsToGain (andor::analog::import::kontaktLevelMatchDb)).epsilon (1.0e-4));
+    for (const auto& z : source.zones)
+        CHECK (z.gain >= 0.1f * 3.866971f - 1.0e-3f);
     for (const auto& z : source.zones)
     {
         INFO (z.file);
@@ -2440,6 +2447,20 @@ TEST_CASE ("analog: Bukkehorn 4.5's Voxx imports complete and plays its recordin
     }
     UNSCOPED_INFO ("key 40 correlation with its recording: " << best);
     CHECK (best > 0.97);
+    // Level: what Kontakt's chain gives (the recording x the zone's and group's volume x the
+    // instrument's), within 1.5 dB.
+    {
+        double o = 0.0, k = 0.0;
+        const double kontakt = static_cast<double> (single.gain) * 1.2795722;
+        for (std::size_t i = from; i < to; ++i)
+        {
+            o += static_cast<double> (out[i]) * out[i];
+            k += kontakt * kontakt * static_cast<double> (expected[i]) * expected[i];
+        }
+        const double db = 10.0 * std::log10 (o / k);
+        UNSCOPED_INFO ("level against Kontakt's chain: " << db << " dB");
+        CHECK (std::abs (db) < 1.5);
+    }
     CHECK (synth.sampleZonesSounding() == 1);
 
     // Overlapping zones sound together, as in Kontakt: key 52 three, 57 three, 47, 48 and 50 two.
@@ -2493,4 +2514,453 @@ TEST_CASE ("analog: Bukkehorn 4.5's Voxx imports complete and plays its recordin
         synth.reset();
         writeListening ("voxx-phrase", renderSynthMono (synth, static_cast<double> (t) / rate + 1.5, phrase));
     }
+}
+
+namespace
+{
+    /** A small Kontakt-like manifest (two groups, two lanes) over recordings written to `dir`. */
+    juce::var syntheticManifest (const juce::File& dir)
+    {
+        writeRecording (dir, "Low [1].wav", 48, 1.5);
+        writeRecording (dir, "High [2].wav", 60, 1.5);
+        writeRecording (dir, "Other [3].wav", 55, 1.5);
+        const juce::String json = R"({ "schemaVersion": 1,
+            "source": { "nki": "Test.nki", "program": "Studio - Test Horn", "programVolumeLinear": 1.0 },
+            "lanes": { "A": { "firstGroup": 0, "selectedSlot": 0, "selectedGroup": 0 }, "B": { "firstGroup": 1, "selectedSlot": 0, "selectedGroup": 1 } },
+            "groups": [
+              { "index": 0, "lane": "A", "slot": 0, "name": "Horn", "volumeLinear": 1.0, "zones": [
+                  { "file": "Low [1].wav", "keyLo": 36, "keyHi": 53, "root": 48, "velLo": 1, "velHi": 127, "tuneCents": 0, "volumeLinear": 1.0, "sampleStart": 0,
+                    "loops": [ { "mode": 1, "start": 12000, "length": 36000, "count": 0, "alternating": false, "xfade": 4000 } ] },
+                  { "file": "High [2].wav", "keyLo": 54, "keyHi": 72, "root": 60, "velLo": 1, "velHi": 127, "tuneCents": 0, "volumeLinear": 1.0, "sampleStart": 0, "loops": [] } ] },
+              { "index": 1, "lane": "B", "slot": 0, "name": "Texture", "volumeLinear": 0.5, "zones": [
+                  { "file": "Other [3].wav", "keyLo": 40, "keyHi": 70, "root": 55, "velLo": 1, "velHi": 127, "tuneCents": 10, "volumeLinear": 1.0, "sampleStart": 0, "loops": [] } ] },
+              { "index": 2, "lane": "C", "slot": 0, "name": "Empty", "volumeLinear": 1.0, "zones": [] } ] })";
+        return juce::JSON::parse (json);
+    }
+}
+
+TEST_CASE ("analog: an imported patch becomes native presets that play, save, reopen and relink", "[analog][samplesource][presets]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto store = scratch.dir.getChildFile ("Store");
+    const auto presets = scratch.dir.getChildFile ("Presets");
+
+    // One preset per playable group, the saved lanes and the hybrid; the empty group none.
+    const auto made = andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), presets);
+    CHECK (made.missing.isEmpty());
+    CHECK (made.skipped.isEmpty());
+    juce::StringArray names;
+    for (const auto& f : made.files)
+        names.add (f.getFileNameWithoutExtension());
+    CHECK (names == juce::StringArray { "A1 Horn", "B1 Texture", "Saved Lanes", "Hybrid - Horn + Oscillators" });
+    CHECK (made.files[0].getParentDirectory().getFileName() == "Test Horn");
+    // The recordings are kept in the store, named by their content (three files), beside the
+    // import's record (its sounds).
+    CHECK (store.getChildFile ("Imported").findChildFiles (juce::File::findFiles, false, "*.wav").size() == 3);
+    CHECK (made.record.getFileName() == "Test Horn.import.xml");
+
+    // A preset opened: the source loads and plays in ORGANIC's place, the oscillators off.
+    auto open = [&] (ShellProcessor& q, const juce::File& file) {
+        osp::plugin::InstrumentHost::PresetEntry entry;   // (as the preset list opens one)
+        entry.name = file.getFileNameWithoutExtension();
+        entry.file = file;
+        q.openPresetEntry (entry);
+    };
+    // (The shell's sample store is where the engine looks for the kept recordings.)
+    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    open (p, made.files[0]);
+    REQUIRE (engine.waitForSampleSource (30000));
+    CHECK (engine.sampleSourceState().name == "A1 Horn");
+    CHECK (engine.sampleSourceState().missing.isEmpty());
+    CHECK (p.engineStatus ("sample").isEmpty());
+    CHECK (p.parameterValue (params::osc1Enabled) < 0.5f);
+    const std::vector<Note> note { { 0, 48, 100 } };
+    const auto played = renderShell (p, 1.0, note, false);
+    CHECK (rmsOf (played) > 1.0e-3);
+
+    // Saved with the session and reopened: the same source, the same sound.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    {
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        auto& e = dynamic_cast<AnalogEngine&> (q.productEngine());
+        REQUIRE (e.waitForSampleSource (30000));
+        CHECK (e.sampleSourceState().name == "A1 Horn");
+        CHECK (differenceRms (renderShell (q, 1.0, note, false), played) < 1.0e-6);
+    }
+
+    // The layered saved lanes: both groups sound where they overlap (Horn's Low and Texture).
+    open (p, made.files[2]);
+    REQUIRE (engine.waitForSampleSource (30000));
+    CHECK (engine.sampleSourceState().zones == 3);
+
+    // A factory preset (or a reset) has no imported source: back to none, silent ORGANIC.
+    p.resetSettings();
+    CHECK (engine.sampleSourceDefinition() == nullptr);
+
+    // A recording gone from the store: reported by name, and the rest still plays; relinked
+    // from a folder that has it, complete again.
+    open (p, made.files[0]);
+    REQUIRE (engine.waitForSampleSource (30000));
+    auto definition = engine.sampleSourceDefinition();
+    REQUIRE (definition != nullptr);
+    juce::File lowAsset;
+    for (const auto* z : definition->getChildWithTagNameIterator ("Zone"))
+        if (z->getStringAttribute ("file") == "Low [1].wav")
+            lowAsset = store.getChildFile ("Imported").getChildFile (z->getStringAttribute ("asset"));
+    REQUIRE (lowAsset.existsAsFile());
+    lowAsset.deleteFile();
+    {
+        // (A session reopened later, on a machine without that recording.)
+        ShellProcessor q;
+        auto& e = dynamic_cast<AnalogEngine&> (q.productEngine());
+        open (q, made.files[0]);
+        REQUIRE (e.waitForSampleSource (30000));
+        CHECK (e.sampleSourceState().missing == juce::StringArray { "Low [1].wav" });
+        CHECK (q.engineStatus ("sample").contains ("relink"));
+        CHECK (rmsOf (renderShell (q, 0.6, { { 0, 60, 100 } }, false)) > 1.0e-3);   // (High still plays)
+        CHECK (andor::analog::import::relink (*definition, samples, store.getChildFile ("Imported")) == 1);
+        e.setSampleSourceDefinition (std::move (definition), store.getChildFile ("Imported"));
+        REQUIRE (e.waitForSampleSource (30000));
+        CHECK (e.sampleSourceState().missing.isEmpty());
+        CHECK (q.engineStatus ("sample").isEmpty());
+    }
+    ::unsetenv ("ANDOR_SAMPLE_STORE");
+}
+
+TEST_CASE ("analog: Bukkehorn 4.5 becomes native presets; Voxx's plays complete through the instrument", "[analog][bukkehorn][presets]")
+{
+    const char* folder = std::getenv ("ANALOG_BUKKEHORN_SAMPLES");
+    if (folder == nullptr)
+    {
+        SKIP ("ANALOG_BUKKEHORN_SAMPLES not set (the recordings are not in the repository)");
+    }
+    Scratch scratch;
+    const auto store = scratch.dir.getChildFile ("Store");
+    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto manifest = andor::analog::import::readManifest (bukkehornManifest());
+    const auto made = andor::analog::import::generatePatches (p, manifest, juce::File (folder), store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+    juce::StringArray names;
+    for (const auto& f : made.files)
+        names.add (f.getFileNameWithoutExtension());
+    UNSCOPED_INFO ("generated: " << names.joinIntoString (", "));
+    UNSCOPED_INFO ("skipped (none of their recordings here): " << made.skipped.size());
+    CHECK (names.contains ("A8 Voxx"));
+    CHECK (names.contains ("Saved Lanes"));
+    CHECK (names.contains ("Hybrid - Voxx + Oscillators"));
+    CHECK (made.files[0].getParentDirectory().getFileName() == "Bukkehorn 4.5");
+
+    const auto voxx = made.files[names.indexOf ("A8 Voxx")];
+    osp::plugin::InstrumentHost::PresetEntry entry;
+    entry.name = "A8 Voxx";
+    entry.file = voxx;
+    p.openPresetEntry (entry);
+    REQUIRE (engine.waitForSampleSource (60000));
+    CHECK (engine.sampleSourceState().missing.isEmpty());
+    CHECK (engine.sampleSourceState().zones == 13);
+    // The definition keeps its link to the NKI group it came from.
+    const auto definition = engine.sampleSourceDefinition();
+    REQUIRE (definition != nullptr);
+    CHECK (definition->getStringAttribute ("origin") == "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5.nki");
+    CHECK (definition->getChildByName ("Group")->getIntAttribute ("index") == 7);
+
+    std::vector<Note> phrase;
+    int t = 0;
+    for (const int key : { 40, 45, 47, 50, 52, 57, 60 })
+    {
+        phrase.push_back ({ t, key, 100 });
+        phrase.push_back ({ t + 72000, key, 0 });
+        t += 96000;
+    }
+    const auto played = renderShell (p, static_cast<double> (t) / rate + 1.5, phrase, false);
+    CHECK (rmsOf (played) > 1.0e-3);
+    if (std::getenv ("ANALOG_RENDER_DIR") != nullptr)
+    {
+        std::vector<float> mono (static_cast<std::size_t> (played.getNumSamples()));
+        for (int i = 0; i < played.getNumSamples(); ++i)
+            mono[static_cast<std::size_t> (i)] = 0.5f * (played.getSample (0, i) + played.getSample (1, i));
+        writeListening ("preset-A8-Voxx", mono);
+        entry.name = "Hybrid";
+        entry.file = made.files[names.indexOf ("Hybrid - Voxx + Oscillators")];
+        p.openPresetEntry (entry);
+        REQUIRE (engine.waitForSampleSource (60000));
+        const auto hybrid = renderShell (p, static_cast<double> (t) / rate + 1.5, phrase, false);
+        for (int i = 0; i < hybrid.getNumSamples(); ++i)
+            mono[static_cast<std::size_t> (i)] = 0.5f * (hybrid.getSample (0, i) + hybrid.getSample (1, i));
+        writeListening ("preset-Hybrid-Voxx", mono);
+    }
+    ::unsetenv ("ANDOR_SAMPLE_STORE");
+}
+
+TEST_CASE ("analog: the NKI reader refuses what it cannot read, with a reason, never a crash", "[analog][samplesource][nki]")
+{
+    Scratch scratch;
+    auto attempt = [&] (const juce::String& name, const juce::MemoryBlock& bytes) {
+        const auto f = scratch.dir.getChildFile (name);
+        f.replaceWithData (bytes.getData(), bytes.getSize());
+        return andor::analog::import::readNki (f);
+    };
+    juce::MemoryBlock garbage;
+    juce::Random random (7);
+    for (int i = 0; i < 4096; ++i)
+        garbage.append (&i, 1);
+    for (auto* r = static_cast<juce::uint8*> (garbage.getData()); r < static_cast<juce::uint8*> (garbage.getData()) + garbage.getSize(); ++r)
+        *r = static_cast<juce::uint8> (random.nextInt (256));
+    const auto bad = attempt ("garbage.nki", garbage);
+    CHECK (bad.manifest.isVoid());
+    CHECK (bad.error.isNotEmpty());
+    CHECK (attempt ("empty.nki", {}).error.isNotEmpty());
+    CHECK (andor::analog::import::readNki (scratch.dir.getChildFile ("absent.nki")).error.isNotEmpty());
+
+    // The real NKI (not in the repository) when given: every truncation refused cleanly, and the
+    // whole file read exactly as tools/kontakt reads it (the committed manifest).
+    const char* nkiPath = std::getenv ("ANALOG_BUKKEHORN_NKI");
+    if (nkiPath == nullptr)
+        return;
+    juce::MemoryBlock nki;
+    REQUIRE (juce::File (nkiPath).loadFileAsData (nki));
+    for (size_t cut : { size_t { 20 }, size_t { 300 }, nki.getSize() / 2, nki.getSize() - 1 })
+    {
+        INFO ("cut at " << cut);
+        CHECK (attempt ("cut.nki", juce::MemoryBlock (nki.getData(), cut)).error.isNotEmpty());
+    }
+    const auto read = andor::analog::import::readNki (juce::File (nkiPath));
+    INFO (read.error);
+    REQUIRE (read.manifest.isObject());
+    const auto tools = andor::analog::import::readManifest (bukkehornManifest());
+    CHECK (read.manifest["source"]["program"].toString() == tools["source"]["program"].toString());
+    CHECK (static_cast<double> (read.manifest["source"]["programVolumeLinear"]) == Approx (static_cast<double> (tools["source"]["programVolumeLinear"])));
+    for (const char* lane : { "A", "B", "C", "D" })
+        CHECK (static_cast<int> (read.manifest["lanes"][lane]["selectedGroup"]) == static_cast<int> (tools["lanes"][lane]["selectedGroup"]));
+    const auto* mine = read.manifest["groups"].getArray();
+    const auto* theirs = tools["groups"].getArray();
+    REQUIRE (mine != nullptr);
+    REQUIRE (theirs != nullptr);
+    REQUIRE (mine->size() == theirs->size());
+    int zones = 0;
+    for (int g = 0; g < mine->size(); ++g)
+    {
+        const auto& a = mine->getReference (g);
+        const auto& b = theirs->getReference (g);
+        INFO ("group " << g << " " << b["name"].toString());
+        CHECK (a["name"].toString() == b["name"].toString());
+        CHECK (a["lane"].toString() == b["lane"].toString());
+        CHECK (static_cast<int> (a["slot"]) == static_cast<int> (b["slot"]));
+        const auto* za = a["zones"].getArray();
+        const auto* zb = b["zones"].getArray();
+        REQUIRE (za->size() == zb->size());
+        for (int z = 0; z < za->size(); ++z)
+        {
+            const auto& x = za->getReference (z);
+            const auto& y = zb->getReference (z);
+            CHECK (x["file"].toString() == y["file"].toString());
+            for (const char* key : { "keyLo", "keyHi", "velLo", "velHi", "root", "frames", "rate", "channels", "sampleStart" })
+                CHECK (static_cast<int> (x[key]) == static_cast<int> (y[key]));
+            CHECK (static_cast<double> (x["tuneCents"]) == Approx (static_cast<double> (y["tuneCents"])).margin (0.01));
+            CHECK (static_cast<double> (x["volumeLinear"]) == Approx (static_cast<double> (y["volumeLinear"])).epsilon (1.0e-5));
+            CHECK (x["loops"].size() == y["loops"].size());
+            if (x["loops"].size() > 0)
+            {
+                CHECK (static_cast<int> (x["loops"][0]["start"]) == static_cast<int> (y["loops"][0]["start"]));
+                CHECK (static_cast<int> (x["loops"][0]["length"]) == static_cast<int> (y["loops"][0]["length"]));
+                CHECK (static_cast<int> (x["loops"][0]["xfade"]) == static_cast<int> (y["loops"][0]["xfade"]));
+            }
+            ++zones;
+        }
+    }
+    CHECK (zones == 333);
+    // Its samples are expected beside it, in the folder its file list names.
+    CHECK (read.manifest["source"]["sampleFolder"].toString() == "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5 Samples");
+}
+
+TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are picked from its heading; the A/B mix blends it", "[analog][samplesource][editor]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    const auto store = scratch.dir.getChildFile ("Store");
+    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto made = andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+    REQUIRE (made.record.existsAsFile());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.refreshNow();
+    REQUIRE (ui.recordingDock().isVisible());   // (empty: the dock)
+
+    auto open = [&] (int index) {
+        osp::plugin::InstrumentHost::PresetEntry entry;
+        entry.name = made.files[index].getFileNameWithoutExtension();
+        entry.file = made.files[index];
+        p.openPresetEntry (entry);
+        REQUIRE (engine.waitForSampleSource (30000));
+        ui.refreshNow();
+    };
+    // An imported sound: ORGANIC's card shows it (its name, its picture), the dock gives way.
+    open (0);
+    CHECK_FALSE (ui.recordingDock().isVisible());
+    CHECK (ui.visibleCardCount() == 2);
+    osp::plugin::InstrumentHost::GeneratedSource shown;
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == juce::String::fromUTF8 ("Test Horn \xc2\xb7 A1 Horn"));
+    CHECK (shown.cycle.size() > 16);
+    CHECK (ui.engineCard (1).hasHeadingDoor());
+
+    // Its heading opens the sounds; a click plays another (the patch's settings stay).
+    const auto tone = p.parameterValue (params::tone);
+    ui.openPopup (andor::shell::ShellEditor::hybridHeaderPopup);
+    auto* panel = ui.openPopupPanel();
+    REQUIRE (panel != nullptr);
+    juce::TextButton* texture = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText() == "B1 Texture")
+                texture = b;
+            find (*child);
+        }
+    };
+    find (*panel);
+    REQUIRE (texture != nullptr);
+    texture->onClick();
+    REQUIRE (engine.waitForSampleSource (30000));
+    CHECK (engine.sampleSourceState().name == "B1 Texture");
+    CHECK (p.parameterValue (params::tone) == tone);
+    ui.closePopup();
+
+    // A/B mix (the hybrid preset: the oscillators and the source): all A is the oscillators
+    // alone, all B the source alone.
+    open (3);
+    const std::vector<Note> note { { 0, 48, 100 } };
+    p.setParameterValue ("ab.blend", 0.0f);
+    const auto allA = renderShell (p, 0.6, note, false);
+    p.setParameterValue ("ab.blend", 1.0f);
+    const auto allB = renderShell (p, 0.6, note, false);
+    p.setParameterValue ("ab.blend", 0.5f);
+    const auto both = renderShell (p, 0.6, note, false);
+    engine.setSampleSourceDefinition (nullptr, {});
+    REQUIRE (engine.waitForSampleSource (30000));
+    p.setParameterValue ("ab.blend", 0.0f);
+    const auto oscillatorsOnly = renderShell (p, 0.6, note, false);
+    CHECK (differenceRms (allA, oscillatorsOnly) < 1.0e-5);
+    CHECK (rmsOf (allB) > 1.0e-3);
+    CHECK (differenceRms (both, allA) > 1.0e-4);
+    CHECK (differenceRms (both, allB) > 1.0e-4);
+    ui.refreshNow();
+    CHECK (ui.recordingDock().isVisible());   // (none: the dock again)
+
+    // A recording dropped onto ORGANIC replaces an imported source; removing it, the dock.
+    open (0);
+    CHECK (engine.sampleSourceDefinition() != nullptr);
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 1.0));
+    ui.refreshNow();
+    CHECK (engine.sampleSourceDefinition() == nullptr);
+    CHECK (ui.visibleCardCount() == 2);
+    open (0);
+    p.removeLayer (ShellProcessor::hybridLayer);
+    ui.refreshNow();
+    CHECK (engine.sampleSourceDefinition() == nullptr);
+    CHECK (ui.recordingDock().isVisible());
+    editor.reset();
+    ::unsetenv ("ANDOR_SAMPLE_STORE");
+}
+
+TEST_CASE ("analog: the import review counts what it found and what is missing", "[analog][samplesource][nki]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    {
+        andor::analog::ImportReview review (manifest, samples);
+        CHECK (review.groupsFound() == 2);
+        CHECK (review.recordingsTotal() == 3);
+        CHECK (review.recordingsMissing() == 0);
+        int started = -2;
+        review.onImport = [&started] (int g) { started = g; };
+        review.setSize (560, 520);
+        CHECK (review.summary().contains ("2 sounds"));
+    }
+    samples.getChildFile ("High [2].wav").deleteFile();
+    andor::analog::ImportReview partial (manifest, samples);
+    CHECK (partial.recordingsMissing() == 1);
+    CHECK (partial.summary().contains ("1 not in the folder"));
+}
+
+TEST_CASE ("analog: screenshots of the Sample Source importer (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-import]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Scratch scratch;
+    // The real Bukkehorn manifest and recordings when given, else the synthetic ones.
+    const char* folder = std::getenv ("ANALOG_BUKKEHORN_SAMPLES");
+    juce::var manifest;
+    juce::File samples;
+    if (folder != nullptr)
+    {
+        manifest = andor::analog::import::readManifest (bukkehornManifest());
+        samples = juce::File (folder);
+    }
+    else
+    {
+        samples = scratch.dir.getChildFile ("Test Horn Samples");
+        samples.createDirectory();
+        manifest = syntheticManifest (samples);
+    }
+    const auto store = scratch.dir.getChildFile ("Store");
+    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    {
+        ShellProcessor p;
+        p.setWellViewState ({});
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        auto shoot = [&] (const juce::String& name, juce::Component& c) {
+            ui.refreshNow();
+            const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile (name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        editor->setSize (1448, 1086);
+        shoot ("import-dock", *editor);
+
+        andor::analog::ImportReview review (manifest, samples);
+        review.setSize (560, 520);
+        shoot ("import-review", review);
+
+        const auto made = andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+        int index = 0;
+        for (int i = 0; i < made.files.size(); ++i)
+            if (made.files[i].getFileNameWithoutExtension().contains ("Voxx") && ! made.files[i].getFileNameWithoutExtension().contains ("Hybrid"))
+                index = i;
+        osp::plugin::InstrumentHost::PresetEntry entry;
+        entry.name = made.files[index].getFileNameWithoutExtension();
+        entry.file = made.files[index];
+        p.openPresetEntry (entry);
+        REQUIRE (engine.waitForSampleSource (60000));
+        renderShell (p, 0.8, { { 0, 45, 100 }, { 0, 52, 100 } }, false);
+        shoot ("import-card-b-playing", *editor);
+        ui.openPopup (andor::shell::ShellEditor::hybridHeaderPopup);
+        shoot ("import-sound-popover", *editor);
+        ui.closePopup();
+        editor.reset();
+    }
+    ::unsetenv ("ANDOR_SAMPLE_STORE");
+    osp::plugin::skin::setLook (before);
 }

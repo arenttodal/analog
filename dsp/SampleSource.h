@@ -44,7 +44,7 @@ struct SampleSource
 {
     static constexpr int schemaVersion = 1;
     /** The most zones one note sounds at once (overlapping zones play together, as in Kontakt). */
-    static constexpr int maxLayers = 4;
+    static constexpr int maxLayers = 8;   // (a combined patch layers four groups, each with its own overlaps)
 
     std::string name;                    ///< e.g. the Kontakt group's name
     std::vector<SampleZone> zones;

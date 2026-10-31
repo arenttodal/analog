@@ -4,6 +4,7 @@
 #include "ShellEngine.h"
 #include "Synth.h"
 
+#include "model/ModelExchange.h"
 #include "morph/MorphAnalyzer.h"
 
 #include <atomic>
@@ -64,6 +65,32 @@ public:
     juce::String status (const juce::String& topic) const override;
     ~AnalogEngine() override;
 
+    // An imported sample source (the Sample Source importer): its definition (a `SampleSource`
+    // element, import::makeDefinition) is kept with presets and sessions; its recordings load on
+    // their own thread and reach the audio thread through an exchange, in ORGANIC's place.
+    void saveState (juce::XmlElement& state) const override;
+    void restoreState (const juce::XmlElement& state, const juce::File& assetFolder) override;
+    /** Message thread: a definition to play (null: none), its recordings in `assetFolder`. */
+    void setSampleSourceDefinition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder);
+    /** Message thread: a copy of the definition in use (null: none). */
+    std::unique_ptr<juce::XmlElement> sampleSourceDefinition() const;
+    /** The source's state for the interface: its name, loading, and what is missing. */
+    struct SampleSourceState
+    {
+        juce::String name;
+        bool loading = false, loaded = false;
+        juce::StringArray missing, unreadable;
+        int zones = 0;
+    };
+    SampleSourceState sampleSourceState() const;
+    /** Tests: waits until the definition in use has loaded (and reached the synth on the next
+        block). True when it did within the time. */
+    bool waitForSampleSource (int timeoutMs) const;
+    /** ORGANIC's card while the imported source plays: its collection and sound ("Bukkehorn 4.5
+        · A8 Voxx"), its picture (sourcePicture, layer 1). */
+    juce::String engineSourceName (int layer) const override;
+    void removeEngineSource (int layer) override;
+
     /** One period of the oscillators' mix for a patch (the card's picture). */
     static std::vector<float> pictureOf (const Patch& patch, int points = 256);
 
@@ -105,6 +132,21 @@ private:
     std::unique_ptr<Analyser> analyser;
     std::atomic<const ProfileBox*> pending { nullptr }, inUse { nullptr };
     friend class Analyser;
+
+    struct LoadedSource
+    {
+        std::uint64_t generation = 0;
+        std::shared_ptr<const SampleSource> source;   ///< null: none
+    };
+    mutable std::mutex sourceMutex;                     ///< the definition and the load's outcome
+    std::unique_ptr<juce::XmlElement> sourceDefinition;
+    SampleSourceState sourceState;
+    std::shared_ptr<const SampleSource> sourceLoaded;   ///< the loaded source (its picture)
+    std::uint64_t sourceGeneration = 0;
+    osp::ModelExchange<LoadedSource> sourceExchange;   ///< (published under sourceMutex)
+    const LoadedSource* sourcePlaying = nullptr;       ///< audio thread
+    juce::ThreadPool sourceLoader { 1 };
+    void loadSampleSource (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation);
 };
 
 } // namespace andor::analog

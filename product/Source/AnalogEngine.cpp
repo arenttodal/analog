@@ -1,6 +1,7 @@
 #include "AnalogEngine.h"
 
 #include "InstrumentHost.h"
+#include "SampleImport.h"
 
 #include "Oscillator.h"
 
@@ -163,13 +164,112 @@ AnalogEngine::AnalogEngine (int oversampling) : oversamplingFactor (oversampling
 
 AnalogEngine::~AnalogEngine()
 {
+    sourceLoader.removeAllJobs (true, 30000);
     analyser.reset();   // (before the synth that may read a profile goes)
+}
+
+//==============================================================================
+// The imported sample source.
+
+void AnalogEngine::saveState (juce::XmlElement& state) const
+{
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    if (sourceDefinition != nullptr)
+        state.addChildElement (new juce::XmlElement (*sourceDefinition));
+}
+
+void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File& assetFolder)
+{
+    const auto* definition = state.getChildByName ("SampleSource");
+    setSampleSourceDefinition (definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr, assetFolder.getChildFile ("Imported"));
+}
+
+void AnalogEngine::setSampleSourceDefinition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder)
+{
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        const bool same = (definition == nullptr && sourceDefinition == nullptr)
+                          || (definition != nullptr && sourceDefinition != nullptr && definition->isEquivalentTo (sourceDefinition.get(), false));
+        if (same && ! (sourceState.loaded && (! sourceState.missing.isEmpty() || ! sourceState.unreadable.isEmpty())))
+            return;   // (the same one, already loading or loaded complete: nothing to do)
+        sourceDefinition = definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr;
+        generation = ++sourceGeneration;
+        sourceState = {};
+        sourceLoaded.reset();
+        if (sourceDefinition != nullptr)
+        {
+            sourceState.name = sourceDefinition->getStringAttribute ("name");
+            sourceState.loading = true;
+        }
+    }
+    if (definition == nullptr)
+    {
+        // None: an empty source (the synth plays ORGANIC's recording, or nothing).
+        auto none = std::make_shared<LoadedSource>();
+        none->generation = generation;
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        sourceExchange.publish (std::move (none));
+        sourceExchange.collectGarbage();
+        return;
+    }
+    sourceLoader.addJob ([this, d = std::make_shared<juce::XmlElement> (*definition), assetFolder, generation] {
+        loadSampleSource (std::make_unique<juce::XmlElement> (*d), assetFolder, generation);
+    });
+}
+
+void AnalogEngine::loadSampleSource (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation)
+{
+    auto result = import::loadDefinition (*definition, assetFolder);
+    auto loaded = std::make_shared<LoadedSource>();
+    loaded->generation = generation;
+    loaded->source = result.source;
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    if (generation != sourceGeneration)
+        return;   // (another definition was asked for meanwhile)
+    sourceState.loading = false;
+    sourceState.loaded = true;
+    sourceState.missing = result.missing;
+    sourceState.unreadable = result.unreadable;
+    sourceState.zones = result.zones;
+    sourceLoaded = result.source;
+    sourceExchange.publish (std::move (loaded));
+    sourceExchange.collectGarbage();
+}
+
+std::unique_ptr<juce::XmlElement> AnalogEngine::sampleSourceDefinition() const
+{
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    return sourceDefinition != nullptr ? std::make_unique<juce::XmlElement> (*sourceDefinition) : nullptr;
+}
+
+AnalogEngine::SampleSourceState AnalogEngine::sampleSourceState() const
+{
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    return sourceState;
+}
+
+bool AnalogEngine::waitForSampleSource (int timeoutMs) const
+{
+    const auto until = juce::Time::getMillisecondCounter() + static_cast<juce::uint32> (timeoutMs);
+    while (juce::Time::getMillisecondCounter() < until)
+    {
+        {
+            const std::lock_guard<std::mutex> lock (sourceMutex);
+            if (! sourceState.loading)
+                return true;
+        }
+        juce::Thread::sleep (5);
+    }
+    return false;
 }
 
 void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin::LoadedInstrument> source)
 {
     if (layer != 1)
         return;
+    if (source != nullptr)
+        setSampleSourceDefinition (nullptr, {});   // (a recording dropped onto ORGANIC replaces an imported source)
     if (analyser == nullptr)
         analyser = std::make_unique<Analyser> (*this);
     analyser->request (std::move (source));
@@ -177,6 +277,17 @@ void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin
 
 juce::String AnalogEngine::status (const juce::String& topic) const
 {
+    if (topic == "sample")
+    {
+        // The imported source in words (empty: none, or playing complete).
+        const auto st = sampleSourceState();
+        if (st.loading)
+            return "Loading " + st.name + juce::String::fromUTF8 ("\xe2\x80\xa6");
+        if (! st.missing.isEmpty() || ! st.unreadable.isEmpty())
+            return st.name + ": " + juce::String (st.missing.size() + st.unreadable.size()) + " of " + juce::String (st.zones)
+                   + " recordings missing - relink to play them";
+        return {};
+    }
     if (topic != "morph")
         return {};
     return analyser != nullptr ? analyser->status() : juce::String ("Load a recording onto ORGANIC to morph");
@@ -191,6 +302,15 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         synth.setMorphProfile (&box->profile, box->model);
         inUse.store (box, std::memory_order_release);
     }
+    // The imported sample source: a newly loaded one replaces the old (the synth stops reading
+    // the old before this returns; it is freed on the message side once newer ones are in use).
+    if (const auto* next = sourceExchange.takePending())
+    {
+        synth.setSampleSource (next->source != nullptr ? next->source.get() : nullptr);
+        sourcePlaying = next;
+    }
+    if (sourcePlaying != nullptr)
+        sourceExchange.publishOldestInUse (sourcePlaying->generation);
     const int total = buffer.getNumSamples();
     if (! prepared || total <= 0 || buffer.getNumChannels() == 0)
         return;
@@ -361,8 +481,63 @@ juce::String AnalogEngine::reimaginedModeUnavailable (int, int mode) const
     return mode == static_cast<int> (osp::ReimaginedMode::mosaic) ? juce::String ("NEEDS A RECORDING: PLAYS UNCHANGED") : juce::String();
 }
 
-bool AnalogEngine::sourcePicture (int, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
+juce::String AnalogEngine::engineSourceName (int layer) const
 {
+    if (layer != 1)
+        return {};
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    if (sourceDefinition == nullptr)
+        return {};
+    const auto collection = sourceDefinition->getStringAttribute ("collection");
+    const auto name = sourceDefinition->getStringAttribute ("name");
+    return collection.isNotEmpty() ? collection + juce::String::fromUTF8 (" \xc2\xb7 ") + name : name;
+}
+
+void AnalogEngine::removeEngineSource (int layer)
+{
+    if (layer == 1)
+        setSampleSourceDefinition (nullptr, {});
+}
+
+bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
+{
+    if (layer == 1)
+    {
+        // The imported source at a glance: its longest recording's outline (its peaks, drawn as
+        // a waveform), not a period (it is a recording, not an oscillator).
+        std::shared_ptr<const SampleSource> source;
+        {
+            const std::lock_guard<std::mutex> lock (sourceMutex);
+            source = sourceLoaded;
+        }
+        cycle.clear();
+        if (source == nullptr)
+            return true;
+        const osp::PlaybackSource* longest = nullptr;
+        for (const auto& z : source->zones)
+            if (z.audio != nullptr && (longest == nullptr || z.audio->numFrames() > longest->numFrames()))
+                longest = z.audio.get();
+        if (longest == nullptr)
+            return true;
+        constexpr int points = 256;
+        const auto frames = longest->numFrames();
+        for (int i = 0; i < points; ++i)
+        {
+            float peak = 0.0f;
+            const auto a = frames * i / points, b = std::max (a + 1, frames * (i + 1) / points);
+            for (auto f = a; f < b; f += std::max<std::int64_t> (1, (b - a) / 64))
+                for (int ch = 0; ch < longest->numChannels(); ++ch)
+                    peak = std::max (peak, std::abs (longest->channelData (ch)[f]));
+            cycle.push_back (i % 2 == 0 ? peak : -peak);
+        }
+        // (Shown full height: the outline's shape, not its loudness.)
+        float top = 1.0e-6f;
+        for (const float v : cycle)
+            top = std::max (top, std::abs (v));
+        for (auto& v : cycle)
+            v /= top;
+        return true;
+    }
     params::Reader r;
     r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));   // reads only
     cycle = pictureOf (r.read());
