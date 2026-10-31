@@ -33,7 +33,7 @@ def main(dump_path, supplied_dir=None):
     out = {
         'schemaVersion': 1,
         'source': {'nki': os.path.basename(r.get('nkiPath', 'Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5.nki')),
-                   'program': r['programName'], 'resource': r['files']['special'][0],
+                   'program': r['programName'], 'programVolumeLinear': r.get('programVolume'), 'resource': r['files']['special'][0],
                    'sampleFolder': files[0].split('/')[0] if files else None},
         'savedState': {k.lstrip('$%'): v for k, v in saved.items()},
         'lanes': {name: {'firstGroup': start, 'selectedSlot': int(saved.get('$ENGINE_%s_SELECT' % name, 0)),

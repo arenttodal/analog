@@ -7,6 +7,8 @@
 #include "LadderFilter.h"
 #include "Oscillator.h"
 #include "OrganicVoice.h"
+#include "SampleSource.h"
+#include "ZonePlayer.h"
 #include "VoiceEq.h"
 #include "OtaFilter.h"
 #include "morph/MorphVoice.h"
@@ -142,6 +144,22 @@ public:
         one is read no more once this returns: the notes playing it fade it out from a short
         copy. New notes play the new one. */
     void setOrganic (const osp::InstrumentModel* model) noexcept;
+    /** An imported sample source (the Sample Source importer) in ORGANIC's place: each note
+        sounds the zones its key and velocity select (overlapping ones together), through
+        ORGANIC's level, the A/B mix and card B. Null: ORGANIC's recording (or nothing). The
+        same lifetime contract as setOrganic (the old one is not read after this returns).
+        Real-time safe. */
+    void setSampleSource (const SampleSource* source) noexcept;
+    const SampleSource* sampleSourceInUse() const noexcept { return sampleSource; }
+    /** The imported source's zones sounding now, over every voice (tests, the status line). */
+    int sampleZonesSounding() const noexcept
+    {
+        int n = 0;
+        for (const auto& v : voices)
+            for (int i = 0; i < v.zoneCount; ++i)
+                n += v.zones[static_cast<std::size_t> (i)].playing() ? 1 : 0;
+        return n;
+    }
     const osp::InstrumentModel* organicModel() const noexcept { return organicSource; }
     /** MORPH's analysis of ORGANIC's recording (built off the audio thread), for `model`: it
         applies while that model is the one playing. Null: none (MORPH unavailable: the
@@ -247,6 +265,10 @@ private:
         double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
         // ORGANIC: the recording this note plays beside the oscillators (into the same mixer).
         OrganicVoice organic;
+        std::array<ZonePlayer, SampleSource::maxLayers> zones;   ///< an imported source's zones for this note
+        std::array<double, SampleSource::maxLayers> zoneSteps {};
+        std::array<float, SampleSource::maxLayers> zoneGains {};
+        int zoneCount = 0;
         double organicStep = 0.0;     ///< source frames per internal sample (control rate)
         float organicGain = 0.0f;
         bool organicOn = false;       ///< playing, or fading a replaced recording out
@@ -440,6 +462,9 @@ private:
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
     const osp::InstrumentModel* organicSource = nullptr;
+    const SampleSource* sampleSource = nullptr;
+    /** ORGANIC's part is sounding in a voice (its recording or an imported source's zones). */
+    static bool organicPlaying (const Voice& v) noexcept;
     const morph::MorphProfile* morphProfile = nullptr;
     float lastNoise = 0.0f;   ///< this sample's noise in the voice's mix (MORPH takes the pair without it)
     const osp::InstrumentModel* morphModel = nullptr;

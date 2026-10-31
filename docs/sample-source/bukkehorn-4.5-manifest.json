@@ -3,6 +3,7 @@
  "source": {
   "nki": "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5.nki",
   "program": "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5",
+  "programVolumeLinear": 1.2795722484588623,
   "resource": "../../Evenant Engine 1.1.nkr",
   "sampleFolder": "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5 Samples"
  },
@@ -2875,7 +2876,7 @@
        "xfade": 23400
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "VOK ADLIB-St [2025-10-13 100555]-2.wav",
@@ -2904,7 +2905,7 @@
        "xfade": 19000
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "VOK ADLIB-St [2025-10-13 100555]-3.wav",
@@ -2933,7 +2934,7 @@
        "xfade": 28200
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "VOK ADLIB-St [2025-10-13 100555]-4.wav",
@@ -2962,7 +2963,7 @@
        "xfade": 24100
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "VOK MOODS-St [2025-10-13 100821].wav",
@@ -2991,7 +2992,7 @@
        "xfade": 29600
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "VOK MOODS-St [2025-10-13 100936].wav",
@@ -3020,7 +3021,7 @@
        "xfade": 21900
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "VOK MOODS-St [2025-10-13 100936]-1.wav",
@@ -3049,7 +3050,7 @@
        "xfade": 23400
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "VOK MOODS-St [2025-10-13 101112].wav",
@@ -3141,7 +3142,7 @@
        "xfade": 0
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "LV INTRO_01 [2025-10-13 101549].wav",
@@ -3233,7 +3234,7 @@
        "xfade": 0
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "LV INTRO_01 [2025-10-13 101649].wav",
@@ -3325,7 +3326,7 @@
        "xfade": 0
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "LV BRIDGE_01 [2025-10-13 101813].wav",
@@ -3417,7 +3418,7 @@
        "xfade": 0
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "LV BRIDGE_01 [2025-10-13 101813]-1.wav",
@@ -3446,7 +3447,7 @@
        "xfade": 21800
       }
      ],
-     "supplied": false
+     "supplied": true
     },
     {
      "file": "LV BRIDGE_01 [2025-10-13 101924].wav",
@@ -3538,7 +3539,7 @@
        "xfade": 0
       }
      ],
-     "supplied": false
+     "supplied": true
     }
    ]
   },

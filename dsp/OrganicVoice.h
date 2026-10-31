@@ -171,8 +171,8 @@ public:
         tailLength = tailAt = 0;
     }
 
-private:
-    /** Hermite (4-point) between frames, the channels averaged; zero outside the recording. */
+    /** Hermite (4-point) between frames, the channels averaged; zero outside the recording.
+        (Also the imported sample source's read: ZonePlayer.) */
     static float read (const osp::PlaybackSource& src, double at) noexcept
     {
         const auto i = static_cast<std::int64_t> (std::floor (at));
@@ -192,6 +192,7 @@ private:
         return sum / static_cast<float> (std::max (1, channels));
     }
 
+private:
     double rate = 192000.0;
     const osp::InstrumentModel* model = nullptr;
     const osp::ContinuationJump* jump = nullptr;

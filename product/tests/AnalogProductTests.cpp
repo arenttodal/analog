@@ -11,6 +11,7 @@
 #include "MacroPopups.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
+#include "SampleImport.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
@@ -2303,5 +2304,193 @@ TEST_CASE ("analog: empty, ORGANIC is a compact ADD SAMPLE dock; a recording ope
         u.refreshNow();
         CHECK_FALSE (u.recordingDock().isVisible());
         CHECK (u.visibleCardCount() == 2);
+    }
+}
+
+//==============================================================================
+// The Sample Source importer (MVP A1) on the real Bukkehorn 4.5 recordings: they are not in the
+// repository, so these run when ANALOG_BUKKEHORN_SAMPLES names a folder holding them (and are
+// skipped otherwise). ANALOG_RENDER_DIR: renders for listening.
+namespace
+{
+    juce::File bukkehornManifest()
+    {
+        return juce::File (__FILE__).getParentDirectory().getParentDirectory().getParentDirectory().getChildFile ("docs/sample-source/bukkehorn-4.5-manifest.json");
+    }
+
+    /** ORGANIC's part only (the oscillators off), the filter open, no effects, a plain gate. */
+    Patch sampleSourcePatch()
+    {
+        Patch p;
+        p.osc1Enabled = p.osc2Enabled = false;
+        p.osc2Level = 0.0;
+        p.analogAmount = 0.0;
+        p.tone = 1.0;
+        p.resonance = 0.0;
+        p.keyTrack = 0.0;
+        p.envDepthSemitones = 0.0;
+        p.space = p.echo = p.motion = 0.0;
+        p.ampAttack = 0.001;
+        p.ampSustain = 1.0;
+        p.ampRelease = 0.02;
+        p.velocityRangeDb = 0.0;
+        p.stereoSpread = 0.0;
+        return p;
+    }
+
+    std::vector<float> renderSynthMono (Synth& synth, double seconds, const std::vector<Note>& notes)
+    {
+        const int total = static_cast<int> (seconds * rate);
+        std::vector<float> l (static_cast<std::size_t> (total)), r (l.size()), out (l.size());
+        int pos = 0;
+        while (pos < total)
+        {
+            const int n = std::min (256, total - pos);
+            for (const auto& note : notes)
+                if (note.sample >= pos && note.sample < pos + n)
+                {
+                    const std::uint8_t m[3] { static_cast<std::uint8_t> (note.velocity > 0 ? 0x90 : 0x80), static_cast<std::uint8_t> (note.note),
+                                              static_cast<std::uint8_t> (note.velocity) };
+                    synth.handleMidi (m, 3);
+                }
+            synth.render (l.data() + pos, r.data() + pos, n);
+            pos += n;
+        }
+        for (std::size_t i = 0; i < out.size(); ++i)
+            out[i] = 0.5f * (l[i] + r[i]);
+        return out;
+    }
+
+    void writeListening (const juce::String& name, const std::vector<float>& mono)
+    {
+        const char* dir = std::getenv ("ANALOG_RENDER_DIR");
+        if (dir == nullptr)
+            return;
+        juce::AudioBuffer<float> b (1, static_cast<int> (mono.size()));
+        b.copyFrom (0, 0, mono.data(), static_cast<int> (mono.size()));
+        const auto file = juce::File (dir).getChildFile (name + ".wav");
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        if (auto stream = std::unique_ptr<juce::OutputStream> (file.createOutputStream()))
+            if (auto writer = std::unique_ptr<juce::AudioFormatWriter> (wav.createWriterFor (stream.get(), rate, 1, 24, {}, 0)))
+            {
+                stream.release();
+                writer->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+            }
+    }
+}
+
+TEST_CASE ("analog: Bukkehorn 4.5's Voxx imports complete and plays its recordings at their keys", "[analog][bukkehorn]")
+{
+    const char* folder = std::getenv ("ANALOG_BUKKEHORN_SAMPLES");
+    if (folder == nullptr)
+    {
+        SKIP ("ANALOG_BUKKEHORN_SAMPLES not set (the recordings are not in the repository)");
+    }
+    const auto manifest = andor::analog::import::readManifest (bukkehornManifest());
+    REQUIRE (manifest.isObject());
+    // The 33 playable groups, in lane order; Voxx is lane A's eighth (group 7).
+    const auto groups = andor::analog::import::playableGroups (manifest);
+    CHECK (groups.size() == 33);
+    const auto voxx = andor::analog::import::loadGroup (manifest, 7, juce::File (folder));
+    INFO ("missing: " << voxx.missing.joinIntoString (", ") << " unreadable: " << voxx.unreadable.joinIntoString (", "));
+    REQUIRE (voxx.complete());
+    const auto& source = *voxx.source;
+    CHECK (source.name == "Voxx");
+    CHECK (source.zones.size() == 13);
+    CHECK (source.gain == Approx (3.866971 * 1.2795722).epsilon (1.0e-4));   // (the group's volume times the instrument's)
+    for (const auto& z : source.zones)
+    {
+        INFO (z.file);
+        CHECK (z.loop.on);   // (every Voxx zone loops)
+        CHECK (z.audio->sampleRate() == 44100.0);
+    }
+
+    Synth synth;
+    synth.prepare (rate, block, 4);
+    synth.setPatch (sampleSourcePatch());
+    synth.setSampleSource (&source);
+    synth.reset();
+
+    // Key 40: one zone (VOK MOODS-St [100936], keys 36-40, root 40): the output is that
+    // recording. (Many Voxx keys sound two or three overlapping zones, as below.)
+    const auto out = renderSynthMono (synth, 1.2, { { 0, 40, 100 } });
+    writeListening ("voxx-key40", out);
+    const auto& single = *std::find_if (source.zones.begin(), source.zones.end(), [] (const SampleZone& z) { return z.keyLo == 36 && z.keyHi == 40; });
+    std::vector<float> expected (out.size());
+    {
+        const auto& src = *single.audio;
+        for (std::size_t i = 0; i < expected.size(); ++i)
+            expected[i] = andor::analog::OrganicVoice::read (src, static_cast<double> (i) * src.sampleRate() / rate);
+    }
+    // Shape: correlated with the recording (best lag within 2 ms: the filter's small delay).
+    double best = 0.0;
+    const auto from = static_cast<std::size_t> (0.05 * rate), to = static_cast<std::size_t> (1.0 * rate);
+    for (int lag = 0; lag < 96; ++lag)
+    {
+        double xy = 0.0, xx = 0.0, yy = 0.0;
+        for (std::size_t i = from; i < to; ++i)
+        {
+            const double x = out[i + static_cast<std::size_t> (lag)], y = expected[i];
+            xy += x * y;
+            xx += x * x;
+            yy += y * y;
+        }
+        best = std::max (best, xy / std::sqrt (std::max (1.0e-20, xx * yy)));
+    }
+    UNSCOPED_INFO ("key 40 correlation with its recording: " << best);
+    CHECK (best > 0.97);
+    CHECK (synth.sampleZonesSounding() == 1);
+
+    // Overlapping zones sound together, as in Kontakt: key 52 three, 57 three, 47, 48 and 50 two.
+    for (const auto& [key, layers] : { std::pair<int, int> { 52, 3 }, { 57, 3 }, { 47, 2 }, { 48, 2 }, { 50, 2 }, { 45, 1 } })
+    {
+        INFO ("key " << key);
+        synth.reset();
+        renderSynthMono (synth, 0.1, { { 0, key, 100 } });
+        CHECK (synth.sampleZonesSounding() == layers);
+    }
+
+    // A held note outlives its recordings on the zones' loops (key 47's are 3.6 and 4.4 s long).
+    synth.reset();
+    const auto held = renderSynthMono (synth, 6.0, { { 0, 47, 100 } });
+    writeListening ("voxx-key47-held-6s", held);
+    auto rmsOver = [] (const std::vector<float>& x, double a, double b) {
+        double sum = 0.0;
+        const auto i0 = static_cast<std::size_t> (a * rate), i1 = std::min (x.size(), static_cast<std::size_t> (b * rate));
+        for (std::size_t i = i0; i < i1; ++i)
+            sum += static_cast<double> (x[i]) * x[i];
+        return std::sqrt (sum / static_cast<double> (std::max<std::size_t> (1, i1 - i0)));
+    };
+    CHECK (rmsOver (held, 5.0, 5.8) > 0.1 * rmsOver (held, 0.2, 1.5));
+
+    // A chord, released: nothing left sounding. Then the source removed mid-note: silent, finite.
+    synth.reset();
+    const auto chord = renderSynthMono (synth, 3.0, { { 0, 45, 100 }, { 0, 50, 100 }, { 0, 57, 100 }, { 96000, 45, 0 }, { 96000, 50, 0 }, { 96000, 57, 0 } });
+    writeListening ("voxx-chord", chord);
+    CHECK (rmsOver (chord, 2.7, 3.0) < 1.0e-6);
+    CHECK (synth.activeVoices() == 0);
+    renderSynthMono (synth, 0.3, { { 0, 52, 100 } });
+    synth.setSampleSource (nullptr);
+    const auto after = renderSynthMono (synth, 0.3, {});
+    for (const float x : after)
+        REQUIRE (std::isfinite (x));
+    CHECK (rmsOver (after, 0.1, 0.3) < 1.0e-4);   // (-80 dB: the filter's state dying away)
+    CHECK (synth.sampleZonesSounding() == 0);
+
+    // For listening: every zone at its root (one after another), and a phrase over the range.
+    if (std::getenv ("ANALOG_RENDER_DIR") != nullptr)
+    {
+        synth.setSampleSource (&source);
+        std::vector<Note> phrase;
+        int t = 0;
+        for (const int key : { 36, 40, 45, 47, 48, 50, 52, 53, 57, 60, 64 })
+        {
+            phrase.push_back ({ t, key, 100 });
+            phrase.push_back ({ t + 60000, key, 0 });
+            t += 72000;
+        }
+        synth.reset();
+        writeListening ("voxx-phrase", renderSynthMono (synth, static_cast<double> (t) / rate + 1.5, phrase));
     }
 }

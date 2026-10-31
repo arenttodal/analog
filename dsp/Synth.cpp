@@ -124,6 +124,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.mirage.prepare (internalRate);
         v.highPass.prepare (internalRate);
         v.organic.prepare (internalRate);
+        for (auto& z : v.zones)
+            z.prepare (internalRate);
         v.eqA.prepare (internalRate);
         v.eqB.prepare (internalRate);
         v.morph.prepare (internalRate, oversampling);
@@ -338,7 +340,9 @@ int Synth::collectPlayheads (float* where, float* level, int max) const noexcept
     {
         if (n >= max)
             break;
-        if (! v.active || ! v.organicOn || ! v.organic.playing() || ! v.organic.playhead (where[n]))
+        if (! v.active || ! v.organicOn)
+            continue;
+        if (! (v.organic.playhead (where[n]) || (v.zoneCount > 0 && v.zones[0].playhead (where[n]))))
             continue;
         level[n] = std::clamp (v.amp.value(), 0.0f, 1.0f);
         ++n;
@@ -592,7 +596,25 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     // morph's weights at once: a note never begins with another mix and glides to it).
     if (retrigger || ! wasActive)
     {
-        if (organicSource != nullptr)
+        // An imported sample source sounds the zones this key and velocity select (in
+        // ORGANIC's place); else ORGANIC's recording.
+        for (auto& z : v.zones)
+            z.stop();
+        v.zoneCount = 0;
+        if (sampleSource != nullptr)
+        {
+            v.organic.stop();
+            std::array<int, SampleSource::maxLayers> picked {};
+            const int velocity127 = std::clamp (static_cast<int> (std::lround (v.velocity * 127.0f)), 1, 127);
+            v.zoneCount = sampleSource->select (v.note, velocity127, picked);
+            for (int i = 0; i < v.zoneCount; ++i)
+            {
+                const auto& zone = sampleSource->zones[static_cast<std::size_t> (picked[static_cast<std::size_t> (i)])];
+                v.zones[static_cast<std::size_t> (i)].start (&zone);
+                v.zoneGains[static_cast<std::size_t> (i)] = zone.gain * sampleSource->gain;
+            }
+        }
+        else if (organicSource != nullptr)
             v.organic.start (organicSource, current.organic.start, current.organic.reverse);
         else
             v.organic.stop();
@@ -641,10 +663,30 @@ void Synth::setOrganic (const osp::InstrumentModel* model) noexcept
     organicSource = model;
 }
 
+void Synth::setSampleSource (const SampleSource* source) noexcept
+{
+    if (source == sampleSource)
+        return;
+    for (auto& v : voices)
+        for (int i = 0; i < v.zoneCount; ++i)
+            v.zones[static_cast<std::size_t> (i)].captureTail (v.zoneSteps[static_cast<std::size_t> (i)]);
+    sampleSource = source;
+}
+
+bool Synth::organicPlaying (const Voice& v) noexcept
+{
+    if (v.organic.playing())
+        return true;
+    for (int i = 0; i < v.zoneCount; ++i)
+        if (v.zones[static_cast<std::size_t> (i)].playing())
+            return true;
+    return false;
+}
+
 void Synth::releaseVoice (Voice& v) noexcept
 {
     // FOLLOW off: a note playing a recording lets it play out before it is released.
-    if (! current.organic.follow && v.organic.playing() && v.organicGain > 0.0f)
+    if (! current.organic.follow && organicPlaying (v) && v.organicGain > 0.0f)
     {
         v.releaseWhenPlayedOut = true;
         return;
@@ -1087,7 +1129,15 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     if (v.organic.playing())
         v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones, static_cast<double> (p.organic.rootOverride));
     v.organicGain = p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
-    v.organicOn = ! v.organic.finished();
+    bool zonesOn = false;
+    for (int i = 0; i < v.zoneCount; ++i)
+    {
+        auto& zone = v.zones[static_cast<std::size_t> (i)];
+        if (zone.playing())
+            v.zoneSteps[static_cast<std::size_t> (i)] = zone.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones);
+        zonesOn = zonesOn || ! zone.finished();
+    }
+    v.organicOn = ! v.organic.finished() || zonesOn;
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
                     && ! v.organicOn;
     // MORPH: with a profile for the recording this note plays (else the sources as they are).
@@ -1400,7 +1450,7 @@ void Synth::controlUpdate() noexcept
             continue;
         v.pitch += (v.pitchTarget - v.pitch) * glideCoef;
         v.ageSeconds += seconds;
-        if (v.releaseWhenPlayedOut && ! v.organic.playing())
+        if (v.releaseWhenPlayedOut && ! organicPlaying (v))
             releaseVoice (v);   // (FOLLOW off: the recording has played out)
         updateDrift (v);
         float lfoNow = lfoValue;
@@ -1535,7 +1585,10 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
     float organic = 0.0f;
     if (v.organicOn)
     {
-        const float o = v.organicGain * v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
+        float source = v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
+        for (int i = 0; i < v.zoneCount; ++i)
+            source += v.zoneGains[static_cast<std::size_t> (i)] * v.zones[static_cast<std::size_t> (i)].next (v.zoneSteps[static_cast<std::size_t> (i)], p.organic.loop);
+        const float o = v.organicGain * source;
         if (v.morphOn)
         {
             // The carrier (BOTH: the levelled pair, ring included) into the morph; MORPH ONLY
@@ -1755,6 +1808,9 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             {
                 v.active = false;
                 v.held = v.sustained = false;
+                for (auto& z : v.zones)   // (the note is over: its zones are not read again)
+                    z.stop();
+                v.zoneCount = 0;
                 // (`clock` is this control period's first host sample.)
                 v.stoppedAt = clock + static_cast<std::uint64_t> (at / oversampling);
                 if (v.modeEngine != nullptr)

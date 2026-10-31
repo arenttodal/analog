@@ -236,6 +236,9 @@ def main(path):
     for p in progs:
         pb = io.BytesIO(p.pub)
         report['programName'] = utf16(pb)
+        pb.read(8); transpose = pb.read(1)[0]
+        report['programVolume'] = f32(pb); report['programPan'] = f32(pb); report['programTune'] = f32(pb)
+        report['programTranspose'] = transpose - 256 if transpose > 127 else transpose
         gl = [k for k in p.kids if k.id == GROUP_LIST]
         report['groups'] = [parse_group(g) for g in (gl[0].kids if gl else [])]
         zl = find_all(p.kids, ZONE_LIST)

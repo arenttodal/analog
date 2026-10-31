@@ -146,13 +146,14 @@ Note: the screenshots are taken with **Edit All Groups**; the group shown is Vio
 
 - 258 zones have no loop: they play to the sample's end, or until release.
 - 9 zones have one loop (mode "until end").
-- 66 zones carry eight loop slots: slot 1 is the whole sample, alternating; slots 2–8 are
-  consecutive one-second spans. These are in **Granulated, Voxx, Plucked Tex, String Tex (2),
+- 66 zones carry eight loop slots: in **Granulated, Voxx, Plucked Tex, String Tex (2),
   Soft Moog, Bright Moog, D6, D7**.
 
-Which slots are active in Kontakt is not certain from the data. The first import will play the
-sample with its first loop where one exists (mode "until end"), and will flag these groups in
-the review.
+**Resolved with Voxx's recordings (A1.1).** Loop 1 repeats with no count (it never ends), so
+Kontakt never reaches slots 2–8. In Voxx, loop 1 is a proper forward loop with a long crossfade
+(17,600–32,600 frames, e.g. 30,694 + 162,782 frames in `VOK ADLIB-St [100555]-1`). Slots 2–8 are
+equal-length spans after it (e.g. 24,429 frames). The importer plays loop 1. Plucked Tex's loop 1 is the
+whole sample, alternating; that group's own design.
 
 ## 5. The saved instrument (the one combined patch that can be reconstructed)
 
@@ -263,3 +264,35 @@ So String Tex has 3 of its 9 zones here. No group is complete.
 
 **Next (needs the sample folder):** A1.1 plays one complete group, e.g. String Tex (27), or any
 group you choose, from the manifest, checked against the zones in §8.
+
+## 10. A1.1 result (Voxx playing in ANDOR ANALOG)
+
+All 13 Voxx recordings were supplied. Each matches its NKI zone exactly (frames, 44.1 kHz,
+channels).
+
+- **Engine:**
+  - `dsp/SampleSource.h` and `dsp/ZonePlayer.h`: an immutable zone map on ANDOR OSP's
+    `PlaybackSource`. A note sounds up to four overlapping zones.
+  - Pitch comes from each zone's root and tune.
+  - Kontakt loop 1 is played forward with an equal-power crossfade into the material before
+    its start, or back and forth.
+  - It plays in ORGANIC's place in every voice (ORGANIC's level, the A/B mix, card B, the
+    filter and effects); the card's LOOP turns the loops off.
+  - Real-time safe (no allocation, tested). Replacing the source mid-note fades and never
+    sticks.
+- **Loading:** `product/Source/SampleImport.cpp` turns the manifest plus a sample folder into
+  that source. Files are found by name (forgiving of renamed copies). Missing or unreadable
+  files are reported by name.
+- **Checked on the real recordings** (`[bukkehorn]`; runs when `ANALOG_BUKKEHORN_SAMPLES` names
+  the folder):
+  - key 40 (one zone) correlates **0.99996** with its recording;
+  - keys 52 and 57 sound three zones, 47 / 48 / 50 two, as the overlaps say;
+  - a note held for 6 s sustains on the loops;
+  - a released chord leaves nothing sounding;
+  - removing the source mid-note is silent and finite.
+- **Level:** ANDOR ANALOG's voice path plays the group about 18 dB below Kontakt's gain chain
+  (zone × group +11.75 dB × instrument +2.1 dB). The generated patches (A1.2) will set
+  ORGANIC's level to match.
+- **Not yet:** stereo. A voice in ANDOR ANALOG is one mono signal, so the recordings' channels
+  are summed, as ORGANIC's are; the width comes from the instrument's effects. Envelopes and
+  velocity come from the patch (A1.2).
