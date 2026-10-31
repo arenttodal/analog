@@ -129,6 +129,18 @@ public:
         return model != nullptr ? position / std::max (1.0, model->original.source->sampleRate()) : 0.0;
     }
 
+    /** Where the read head is, 0..1 of the recording the card shows (ANDOR OSP's playhead:
+        a model's display range maps it). False when not playing. */
+    bool playhead (float& where) const noexcept
+    {
+        if (! playing())
+            return false;
+        const auto frames = static_cast<double> (std::max<std::int64_t> (1, model->original.source->numFrames()));
+        const double inSource = std::clamp (position / frames, 0.0, 1.0);
+        where = static_cast<float> (std::clamp (model->displayStart + inSource * (model->displayEnd - model->displayStart), 0.0, 1.0));
+        return true;
+    }
+
     /** The model is about to be replaced (the old one is still readable now, not after):
         the next few milliseconds of what this voice plays are copied and faded out, then the
         voice stops reading it. */

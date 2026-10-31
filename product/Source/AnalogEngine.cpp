@@ -1,5 +1,7 @@
 #include "AnalogEngine.h"
 
+#include "InstrumentHost.h"
+
 #include "Oscillator.h"
 
 namespace andor::analog
@@ -331,12 +333,25 @@ void AnalogEngine::publishGrains() noexcept
         grains.lane[k].store (dots[k].lane, std::memory_order_relaxed);
     }
     grains.count.store (n, std::memory_order_release);
+
+    // Card B (ORGANIC): one read head per voice playing the recording.
+    std::array<float, Snapshot::playheadCapacity> where {}, level {};
+    const int heads = synth.collectPlayheads (where.data(), level.data(), Snapshot::playheadCapacity);
+    for (int i = 0; i < heads; ++i)
+    {
+        const auto k = static_cast<std::size_t> (i);
+        organicHeads.playheadPosition[k].store (where[k], std::memory_order_relaxed);
+        organicHeads.playheadLevel[k].store (level[k], std::memory_order_relaxed);
+    }
+    organicHeads.playheads.store (heads, std::memory_order_release);
 }
 
 void AnalogEngine::setModulationCurve (int index, const osp::mod::Curve& curve) noexcept
 {
     if (index == 0)
         synth.setLfoCurve (curve);   // LFO 1's CUSTOM shape (the synth's one LFO)
+    else if (index == osp::plugin::InstrumentHost::dampenCurveIndex (0) || index == osp::plugin::InstrumentHost::dampenCurveIndex (1))
+        synth.setDampenCurve (index - osp::plugin::InstrumentHost::dampenCurveIndex (0), curve);   // each card's DAMPEN over the keys
 }
 
 juce::String AnalogEngine::reimaginedModeUnavailable (int, int mode) const

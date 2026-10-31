@@ -124,6 +124,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.mirage.prepare (internalRate);
         v.highPass.prepare (internalRate);
         v.organic.prepare (internalRate);
+        v.eqA.prepare (internalRate);
+        v.eqB.prepare (internalRate);
         v.morph.prepare (internalRate, oversampling);
     }
     // The mode engines' "recording" on a live voice: only its length, rate and root are read.
@@ -274,6 +276,11 @@ void Synth::setLfoCurve (const osp::mod::Curve& curve) noexcept
     rebuildModulation();
 }
 
+void Synth::setDampenCurve (int layer, const osp::mod::Curve& curve) noexcept
+{
+    dampenCurves[static_cast<std::size_t> (std::clamp (layer, 0, 1))] = osp::mod::compileCurve (curve);
+}
+
 void Synth::setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept
 {
     modSettings = settings;
@@ -321,6 +328,21 @@ int Synth::collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept
     for (const auto& v : voices)
         if (v.active && n < max)
             n += v.granulator.collect (v.recording, out + n, max - n);
+    return n;
+}
+
+int Synth::collectPlayheads (float* where, float* level, int max) const noexcept
+{
+    int n = 0;
+    for (const auto& v : voices)
+    {
+        if (n >= max)
+            break;
+        if (! v.active || ! v.organicOn || ! v.organic.playing() || ! v.organic.playhead (where[n]))
+            continue;
+        level[n] = std::clamp (v.amp.value(), 0.0f, 1.0f);
+        ++n;
+    }
     return n;
 }
 
@@ -514,6 +536,11 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.ota.reset();
         v.otaMix = v.otaTarget = current.filterModel == FilterModel::ota ? 1.0f : 0.0f;
         v.highPass.reset();
+        v.eqA.reset();
+        v.eqB.reset();
+        v.dampenA.reset();
+        v.dampenB.reset();
+        v.dampenFresh = true;
         v.highPassTail = 0;
         v.osc2Out = 0.0f;
         v.outGain = 0.0f;
@@ -1235,6 +1262,16 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     }
     else
         v.granulator.setParams (cloudGrains());
+
+    // Each card's EQ and DAMPEN (ANDOR OSP's), on its own part of the voice before the filter.
+    // DAMPEN's damping glides about 10 ms, as OSP's voice; a new note's lands at once.
+    const int internalSamples = controlPeriod * oversampling;
+    v.eqA.control (p.eqA, internalSamples);
+    v.eqB.control (p.eqB, internalSamples);
+    const double dampenSmoothing = 1.0 - std::exp (-static_cast<double> (controlPeriod) / (0.01 * hostRate));
+    v.dampenA.control (p.dampenA, dampenCurves[0], v.note, internalRate, dampenSmoothing, v.dampenFresh);
+    v.dampenB.control (p.dampenB, dampenCurves[1], v.note, internalRate, dampenSmoothing, v.dampenFresh);
+    v.dampenFresh = false;
 }
 
 void Synth::updateDrift (Voice& v) noexcept
@@ -1493,6 +1530,8 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
         lastNoise = v.gainNoise * n;
         mix += lastNoise;
     }
+    // ORGANIC's part (with MORPH: what the morph adds to the oscillators), card B's.
+    float organic = 0.0f;
     if (v.organicOn)
     {
         const float o = v.organicGain * v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
@@ -1506,14 +1545,36 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
             const float c = carrier == MorphCarrier::osc1 ? c1 : (carrier == MorphCarrier::osc2 ? c2 : pair);
             const float y = v.morph.process (o, c);
             if (p.morph.output == MorphOutput::morphOnly)
-                mix += y - c;
+                organic = y - c;
             else
-                mix += o + v.morph.lastCore();
+                organic = o + v.morph.lastCore();
         }
         else
-            mix += o;
+            organic = o;
     }
+    // Each card's DAMPEN and EQ on its own part (skipped while off: nothing touched).
+    mix = cardA (v, mix);
+    if (v.organicOn)
+        mix += cardB (v, organic);
     return mix;
+}
+
+float Synth::cardA (Voice& v, float x) noexcept
+{
+    if (v.dampenA.active())
+        x = v.dampenA.process (x);
+    if (v.eqA.active())
+        x = v.eqA.process (x);
+    return x;
+}
+
+float Synth::cardB (Voice& v, float x) noexcept
+{
+    if (v.dampenB.active())
+        x = v.dampenB.process (x);
+    if (v.eqB.active())
+        x = v.eqB.process (x);
+    return x;
 }
 
 float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
@@ -1555,7 +1616,7 @@ float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
     float mix = o1 * v.gain1 + v.osc2Out * v.gain2;
     if (v.gainNoise > 0.0f)
         mix += v.gainNoise * static_cast<float> (v.noise.bipolar());
-    return liveStages (v, mix * filterInputGain);
+    return liveStages (v, cardA (v, mix) * filterInputGain);
 }
 
 float Synth::liveStages (Voice& v, float x) noexcept

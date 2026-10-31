@@ -537,6 +537,33 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         for (const char* name : { "source", "dest", "depth", "enabled" })
             setups[osp::plugin::InstrumentHost::modRouteId (r, name)] = route (r, 1);   // LFO 1 -> TONE
 
+    // Each card's EQ and DAMPEN (ANDOR OSP's): a band's settings act while the EQ and that band
+    // are on (a shelf or bell with gain); DAMPEN's while it is on (its corner in its own mode).
+    using Host = osp::plugin::InstrumentHost;
+    for (int layer = 0; layer < 2; ++layer)
+    {
+        for (const auto& name : Host::eqParameterNames())
+            setups[Host::eqParameterId (layer, name)] = [layer, name] (ShellProcessor& q) {
+                const auto band = name == "enabled" ? juce::String ("bell") : name.upToFirstOccurrenceOf (".", false, false);
+                setValue (q, Host::eqParameterId (layer, "enabled"), 1.0f);
+                setValue (q, Host::eqParameterId (layer, band + ".enabled"), 1.0f);
+                setValue (q, Host::eqParameterId (layer, band + ".frequency"), 2000.0f);
+                if (q.parameters.getParameter (Host::eqParameterId (layer, band + ".gain")) != nullptr)
+                    setValue (q, Host::eqParameterId (layer, band + ".gain"), 12.0f);
+                if (name == "enabled")
+                    setValue (q, Host::eqParameterId (layer, "enabled"), 0.0f);   // (then switched)
+                else if (name.endsWith (".enabled"))
+                    setValue (q, Host::eqParameterId (layer, name), 0.0f);
+            };
+        for (const char* name : { "mode", "amount", "frequency", "cutoff" })
+            setups[Host::dampenParameterId (layer, name)] = [layer, name] (ShellProcessor& q) {
+                setValue (q, Host::dampenParameterId (layer, "enabled"), 1.0f);
+                setValue (q, Host::dampenParameterId (layer, "amount"), 100.0f);
+                setValue (q, Host::dampenParameterId (layer, "cutoff"), 500.0f);
+                setValue (q, Host::dampenParameterId (layer, "mode"), juce::String (name) == "cutoff" ? 1.0f : 0.0f);
+            };
+    }
+
     const auto bound = params::engineParameterIds();
     auto isBound = [&bound] (const juce::String& id) {
         for (const auto& b : bound)
@@ -595,7 +622,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
     // and the modulation's: LFO 2, ENV 1 and 2, the 16 routes ("mod.*"; LFO 1's are listed).
     CHECK (checkedBound == bound.size() - 4 + 7 + (8 + 2 * 7 + 4 * osp::mod::maxRoutes));
-    CHECK (checkedUnbound > 150);
+    CHECK (checkedUnbound > 100);
 }
 
 TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL through a route)", "[analog][modulation]")
@@ -1849,4 +1876,30 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     ui.showWellEditor (false);
     p.setWellViewState ({});
     osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: ORGANIC's card shows a read head per playing note, as ANDOR OSP's One Shot", "[analog][organic][display]")
+{
+    ShellProcessor p;
+    const auto& heads = p.grainSnapshot (1);
+    const std::vector<Note> held { { 0, 57, 100 } };
+    renderShell (p, 0.2, held, false);
+    CHECK (heads.playheads.load() == 0);   // nothing loaded: none
+
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 2.5));
+    renderShell (p, 0.5, held, false);
+    REQUIRE (heads.playheads.load() == 1);
+    const float early = heads.playheadPosition[0].load();
+    CHECK (early > 0.05f);
+    CHECK (early < 0.5f);
+    CHECK (heads.playheadLevel[0].load() > 0.1f);
+
+    // A chord: one head per note; further on as it plays.
+    const std::vector<Note> chord { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } };
+    renderShell (p, 0.9, chord, false);
+    CHECK (heads.playheads.load() >= 3);
+    CHECK (heads.playheadPosition[0].load() > early);
+    // The oscillators' card has no read head (its own grains are its picture).
+    CHECK (p.grainSnapshot (0).playheads.load() == 0);
 }

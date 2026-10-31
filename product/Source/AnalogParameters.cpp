@@ -1,6 +1,7 @@
 #include "AnalogParameters.h"
 
 #include "AnalogMath.h"
+#include "InstrumentHost.h"
 
 #include "engine/Shaping.h"
 
@@ -52,6 +53,10 @@ namespace
         iOrganicSolo, iGeneratorSolo,
         // State version 5: ANDOR OSP's A/B blend, the oscillators against ORGANIC.
         iLayerBlend,
+        // Each card's EQ and DAMPEN (ANDOR OSP's own layerA/B.eq.* and .dampen.*, in its
+        // order: InstrumentHost::eqParameterNames, dampenParameterNames), before the filter.
+        iEqA, iEqALast = iEqA + 18, iEqB, iEqBLast = iEqB + 18,
+        iDampenA, iDampenALast = iDampenA + 4, iDampenB, iDampenBLast = iDampenB + 4,
         count
     };
 
@@ -99,8 +104,18 @@ namespace
             "layerB.solo", "layerA.solo",
             "ab.blend",
         };
-        jassert (list.size() == count);
-        return list;
+        static const juce::StringArray withCards = [] {
+            auto l = list;
+            for (const int layer : { 0, 1 })
+                for (const auto& name : osp::plugin::InstrumentHost::eqParameterNames())
+                    l.add (osp::plugin::InstrumentHost::eqParameterId (layer, name));
+            for (const int layer : { 0, 1 })
+                for (const auto& name : osp::plugin::InstrumentHost::dampenParameterNames())
+                    l.add (osp::plugin::InstrumentHost::dampenParameterId (layer, name));
+            return l;
+        }();
+        jassert (withCards.size() == count);
+        return withCards;
     }
 
     // Value texts.
@@ -590,6 +605,25 @@ Patch Reader::readWith (const float* raw) const noexcept
     auto v = [&at] (int i) { return static_cast<double> (at (i)); };
     auto on = [&at] (int i) { return at (i) >= 0.5f; };
     auto index = [&at] (int i, int n) { return std::clamp (juce::roundToInt (at (i)), 0, n - 1); };
+    // Each card's EQ and DAMPEN (ANDOR OSP's parameters, read as ANDOR OSP reads them; the
+    // DAMPEN curves are the shell's, the synth's own).
+    auto cardEq = [&at] (int first) {
+        std::array<float, 19> e {};
+        for (std::size_t i = 0; i < e.size(); ++i)
+            e[i] = at (first + static_cast<int> (i));
+        return osp::plugin::InstrumentHost::eqFromValues (e);
+    };
+    p.eqA = cardEq (iEqA);
+    p.eqB = cardEq (iEqB);
+    auto cardDampen = [&] (int first, osp::dampen::Settings& d) {
+        d.enabled = on (first);
+        d.mode = static_cast<osp::dampen::Mode> (index (first + 1, 2));
+        d.amount = 0.01 * v (first + 2);
+        d.shelfHz = v (first + 3);
+        d.minCutoffHz = v (first + 4);
+    };
+    cardDampen (iDampenA, p.dampenA);
+    cardDampen (iDampenB, p.dampenB);
     p.blend = 0.01 * v (iBlend);
     p.tone = 0.01 * v (iTone);
     p.lfoAmount = 0.01 * v (iMotion);

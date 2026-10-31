@@ -7,6 +7,7 @@
 #include "LadderFilter.h"
 #include "Oscillator.h"
 #include "OrganicVoice.h"
+#include "VoiceEq.h"
 #include "OtaFilter.h"
 #include "morph/MorphVoice.h"
 #include "LiveGranulator.h"
@@ -92,6 +93,9 @@ public:
     void setTransport (const osp::HostTiming& timing) noexcept;
     /** LFO 1's CUSTOM shape (its drawn curve). Real-time safe. */
     void setLfoCurve (const osp::mod::Curve& curve) noexcept;
+    /** A card's DAMPEN curve over the keys (layer 0 the oscillators, 1 ORGANIC: the shell's
+        DAMPEN curves). Real-time safe. */
+    void setDampenCurve (int layer, const osp::mod::Curve& curve) noexcept;
     /** GRANULAR's KEY DNA (each key's own granular identity); recomputed only when it
         changes. Real-time safe. */
     void setKeyDna (const osp::keydna::Settings& settings) noexcept;
@@ -171,6 +175,10 @@ public:
     /** The grains playing now in every sounding voice, while GRANULAR is on (the card's
         picture); returns how many were written (at most `max`). Audio thread. */
     int collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept;
+    /** ORGANIC's read heads (card B's playheads, as ANDOR OSP's One Shot voices): one per voice
+        playing the recording, where it reads (0..1 of the recording shown) and how loud the
+        note is (its amplitude envelope, 0..1). Returns how many. Any thread that renders. */
+    int collectPlayheads (float* where, float* level, int max) const noexcept;
     /** A voice's grains now (tests). */
     int grainCount (int slot) const noexcept { return voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))].granulator.grainCount(); }
     /** How long each voice's recording is (seconds), and the longest a mode engine runs per call. */
@@ -226,6 +234,10 @@ private:
         float resonance01 = 0.0f;
         float otaCutoffOffset = 0.0f; ///< semitones (the Juno-6's calibration)
         VoiceHighPass highPass;
+        // Each card's EQ and DAMPEN on its own part, before the filter (Patch::eqA ...).
+        VoiceEq eqA, eqB;
+        VoiceDampen dampenA, dampenB;
+        bool dampenFresh = true;      ///< a new note: its damping lands at once
         int highPassTail = 0;         ///< samples the high-pass keeps running after it was switched off
         double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
         // ORGANIC: the recording this note plays beside the oscillators (into the same mixer).
@@ -317,6 +329,9 @@ private:
     /** The mixer's output (at the filter's input level) through the voice's recording,
         GRANULAR, KALEIDOSCOPE's doubling and saturation. */
     float liveStages (Voice& v, float x) noexcept;
+    /** A card's DAMPEN and EQ on its own part of the voice (A: the oscillators, B: ORGANIC). */
+    float cardA (Voice& v, float x) noexcept;
+    float cardB (Voice& v, float x) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
@@ -374,6 +389,8 @@ private:
 
     // LFO (ANDOR OSP's LFO 1) and transport.
     osp::mod::CurveTable lfoCurve {};
+    std::array<osp::mod::CurveTable, 2> dampenCurves { osp::mod::compileCurve (osp::dampen::defaultCurve()),
+                                                       osp::mod::compileCurve (osp::dampen::defaultCurve()) };
     float lfoValue = 0.0f;
     osp::HostTiming timing;
     double ppqAtBlock = 0.0;

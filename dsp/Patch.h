@@ -1,6 +1,8 @@
 #pragma once
 
+#include "engine/Dampen.h"
 #include "engine/GranularSource.h"
+#include "engine/LayerEq.h"
 #include "engine/Modulation.h"
 #include "engine/ReimaginedModes.h"
 #include "engine/Shaping.h"
@@ -246,6 +248,12 @@ struct Patch
     bool chorusNoise = false;
     OrganicSettings organic;
     MorphSettings morph;
+    /** Each card's EQ and DAMPEN (ANDOR OSP's layerA/B.eq.* and .dampen.*), on that card's
+        own part of each voice, before the filter: A the oscillators and the noise, B ORGANIC
+        (and MORPH's result). Off by default: a patch without them sounds exactly as before.
+        DAMPEN's curve over the keys is the synth's (the shell's DAMPEN curves). */
+    osp::eq::Settings eqA, eqB;
+    osp::dampen::Settings dampenA, dampenB;
 };
 
 } // namespace andor::analog

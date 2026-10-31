@@ -70,6 +70,7 @@ if(OSP_BUILD_TESTS)
         tests/OrganicTests.cpp
         tests/MorphAnalysisTests.cpp
         tests/MorphTests.cpp
+        tests/CardEqTests.cpp
         tools/Wav.cpp)
     target_include_directories(analog_dsp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/tools)
     target_link_libraries(analog_dsp_tests PRIVATE analog_dsp Catch2::Catch2WithMain)

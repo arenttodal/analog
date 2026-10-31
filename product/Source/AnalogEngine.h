@@ -44,7 +44,7 @@ public:
     float shaperPhase() const noexcept override { return synth.shaperPhase(); }
     void setModulationCurve (int index, const osp::mod::Curve& curve) noexcept override;
     juce::String reimaginedModeUnavailable (int layer, int mode) const override;
-    const osp::InstrumentEngine::GrainSnapshot* grainSnapshot (int layer) const noexcept override { return layer == 0 ? &grains : nullptr; }
+    const osp::InstrumentEngine::GrainSnapshot* grainSnapshot (int layer) const noexcept override { return layer == 0 ? &grains : layer == 1 ? &organicHeads : nullptr; }
     void setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept override;
     bool arpModulation (osp::mod::Dest dest, double& offset) const noexcept override { return synth.sharedOffset (dest, offset); }
     void setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& played) noexcept override;
@@ -66,6 +66,7 @@ private:
     osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
     std::vector<float> scratch;
     osp::InstrumentEngine::GrainSnapshot grains;   ///< written by process(), read by the card
+    osp::InstrumentEngine::GrainSnapshot organicHeads;   ///< ORGANIC's read heads (card B's playheads), as ANDOR OSP's
     void publishGrains() noexcept;
 
     // Modulation: the knobs as the block starts (the instrument's controls moved by their
