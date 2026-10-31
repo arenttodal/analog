@@ -286,10 +286,8 @@ namespace
                 c.morph.position = id == params::morphTexture || id == params::morphAttack ? 0.3 : 0.5;
             };
 
-        // KEY DNA is GRANULAR's, and its settings act while it is on.
-        for (const auto& id : { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
-                                params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune })
-            modes[id] = granular;
+        // KEY DNA is GRANULAR's, and its AMOUNT acts while it is on (the test switches it on).
+        modes[osp::plugin::InstrumentHost::keyDnaAmountId (0)] = granular;
         return { context, modes };
     }
 
@@ -370,12 +368,18 @@ TEST_CASE ("analog: the factory presets are installed, listed and load exactly",
         params::Reader reader;
         reader.attach (p.parameters);
         checkSameValues (params::valuesOf (factory.patch), params::valuesOf (reader.read()), p);
-        // KEY DNA (not part of the patch): on, with the sound's variation, where it has one.
-        const auto dna = reader.keyDna (factory.patch.seed);
-        const auto wanted = keyDnaOf (factory);
-        CHECK (dna.enabled == wanted.enabled);
-        if (wanted.enabled)
-            CHECK (dna[osp::keydna::Param::size].variation == Approx (wanted[osp::keydna::Param::size].variation).margin (1.0e-3));
+        // KEY DNA (not part of the patch; ANDOR OSP's, in the preset's KeyDna tree): on, with
+        // the sound's own profile, where it has one; otherwise off.
+        const auto dna = p.keyDnaSettings (0);
+        if (factory.keyDna > 0.0)
+        {
+            auto wanted = keyDnaOf (factory);
+            wanted.amount = 1.0;
+            CHECK (dna == wanted);
+        }
+        else
+            CHECK_FALSE (dna.enabled);
+        CHECK (p.parameterValue (osp::plugin::InstrumentHost::keyDnaAmountId (0)) == 100.0f);
     }
     // A second instance does not write them again (same version), and a musician's preset
     // beside them is kept.
@@ -497,8 +501,7 @@ TEST_CASE ("analog: GRANULAR's grains are shown on the card where they read, on 
 TEST_CASE ("analog: every control the interface enables moves the sound; every one it disables does not", "[analog][bindings]")
 {
     auto [context, modes] = soundContext();
-    const juce::StringArray keyDnaOn { params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
-                                       params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune };
+    const juce::StringArray keyDnaOn { osp::plugin::InstrumentHost::keyDnaAmountId (0) };
 
     // The arpeggiator's settings act while it plays (in 32nds: a few cycles in the phrase).
     // The modulation's sources and routes act through a route: each tried with one to TONE.
@@ -594,7 +597,13 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         p.resetSettings();
         apply (p, patch);
         if (keyDnaOn.contains (id))
-            setValue (p, params::keyDna, 1.0f);
+        {
+            osp::keydna::Settings dna;   // (ANDOR OSP's editor's settings: on, each key its own grains)
+            dna.enabled = true;
+            for (const auto param : { osp::keydna::Param::position, osp::keydna::Param::size, osp::keydna::Param::density })
+                dna[param].variation = 0.6;
+            p.setKeyDnaSettings (0, dna, "KEY DNA", false);
+        }
         if (const auto setup = setups.find (id); setup != setups.end())
             setup->second (p);
         const auto reference = renderShell (p, 0.6);
@@ -750,6 +759,125 @@ TEST_CASE ("analog: a version-1 session or preset is migrated and sounds as it d
     ShellProcessor r;
     r.setStateInformation (withMovement.getData(), static_cast<int> (withMovement.getSize()));
     CHECK (r.parameters.getRawParameterValue ("motion")->load() == Approx (50.0f));
+}
+
+TEST_CASE ("analog: a version-5 session's KEY DNA moves into ANDOR OSP's editor and sounds as it did", "[analog][state][keydna]")
+{
+    // Version 5 kept KEY DNA in analog.keyDna.* (seeded by the patch's seed); version 6 in
+    // ANDOR OSP's KEY DNA (the session's KeyDna tree, AMOUNT layerA.keyDna.amount).
+    auto prepare = [] (ShellProcessor& q) {
+        apply (q, factoryPatches()[1].patch);
+        setValue (q, "space", 0.0f);
+        setValue (q, "echo", 0.0f);
+        setValue (q, "layerA.sourceMode", 1.0f);   // GRANULAR
+        setValue (q, "seed", 4242.0f);
+    };
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        prepare (old);
+        setValue (old, params::keyDna, 1.0f);
+        setValue (old, params::keyDnaAmount, 70.0f);
+        setValue (old, params::keyDnaIndividuality, 80.0f);
+        setValue (old, params::keyDnaPosition, 60.0f);
+        setValue (old, params::keyDnaSize, 45.0f);
+        setValue (old, params::keyDnaDensity, 30.0f);
+        setValue (old, params::keyDnaSpread, 20.0f);
+        setValue (old, params::keyDnaTune, 10.0f);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 5);   // as version 5 wrote it: no KeyDna tree
+    xml->deleteAllChildElementsWithTagName ("KeyDna");
+    juce::MemoryBlock v5;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v5);
+
+    // What version 5 played: its parameters' profile (Reader::keyDna, the patch's seed).
+    ShellProcessor reference;
+    prepare (reference);
+    osp::keydna::Settings expected;
+    expected.enabled = true;
+    expected.individuality = 0.8;
+    expected.seed = 4242;
+    using osp::keydna::Param;
+    expected[Param::position].variation = 0.6;
+    expected[Param::size].variation = 0.45;
+    expected[Param::density].variation = 0.3;
+    expected[Param::spread].variation = 0.2;
+    expected[Param::tune].variation = 0.1;
+    reference.setKeyDnaSettings (0, expected, "KEY DNA", false);
+    setValue (reference, osp::plugin::InstrumentHost::keyDnaAmountId (0), 70.0f);
+    const auto played = renderShell (reference, 0.8);
+
+    ShellProcessor p;
+    p.setStateInformation (v5.getData(), static_cast<int> (v5.getSize()));
+    const auto dna = p.keyDnaSettings (0);
+    CHECK (dna.enabled);
+    CHECK (dna.seed == 4242u);
+    CHECK (dna.individuality == Approx (0.8).margin (1.0e-4));
+    CHECK (dna[Param::size].variation == Approx (0.45).margin (1.0e-4));
+    CHECK (p.parameterValue (osp::plugin::InstrumentHost::keyDnaAmountId (0)) == Approx (70.0f));
+    const auto migrated = renderShell (p, 0.8);
+    CHECK (differenceRms (migrated, played) < 1.0e-6);
+
+    // KEY DNA is heard (off, the sound differs), and today's session keeps it exactly.
+    ShellProcessor off;
+    prepare (off);
+    CHECK (differenceRms (renderShell (off, 0.8), played) > 1.0e-4);
+    juce::MemoryBlock now;
+    p.getStateInformation (now);
+    ShellProcessor q;
+    q.setStateInformation (now.getData(), static_cast<int> (now.getSize()));
+    CHECK (q.keyDnaSettings (0) == p.keyDnaSettings (0));
+    CHECK (differenceRms (renderShell (q, 0.8), played) < 1.0e-6);
+}
+
+TEST_CASE ("analog: KEY DNA is ANDOR OSP's editor: opened from the card, edits undoable, saved with the session", "[analog][editor][keydna]")
+{
+    ShellProcessor p;
+    CHECK (p.hasKeyDna());
+    setValue (p, "layerA.sourceMode", 1.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.refreshNow();
+    REQUIRE (ui.engineCard (0).onKeyDna != nullptr);
+    ui.engineCard (0).onKeyDna (0);
+    auto* panel = ui.keyDnaWindow();
+    REQUIRE (panel != nullptr);
+    CHECK (panel->layer() == 0);
+    CHECK (panel->isVisible());
+    CHECK (panel->getHeight() > 300);   // (ANDOR OSP's place: over the instrument, above the keys)
+
+    // An edit through the host (as the editor makes it): one undo step.
+    auto dna = p.keyDnaSettings (0);
+    dna.enabled = true;
+    dna[osp::keydna::Param::size].variation = 0.5;
+    p.setKeyDnaSettings (0, dna, "KEY DNA", true);
+    CHECK (p.keyDnaSettings (0).enabled);
+    p.undo().undo();
+    CHECK_FALSE (p.keyDnaSettings (0).enabled);
+    p.undo().redo();
+    CHECK (p.keyDnaSettings (0).enabled);
+    // A drawn curve is kept as drawn.
+    osp::mod::Curve curve;
+    curve.count = 3;
+    curve.points[0] = { 0.0f, 0.2f, 0.0f };
+    curve.points[1] = { 0.5f, 0.8f, 0.0f };
+    curve.points[2] = { 1.0f, 0.4f, 0.0f };
+    p.setKeyDnaCurve (0, osp::keydna::Param::position, curve, true);
+    CHECK (p.keyDnaCurve (0, osp::keydna::Param::position) == curve);
+    panel->refresh();
+    ui.closeKeyDna();
+    CHECK (ui.keyDnaWindow() == nullptr);
+
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.keyDnaSettings (0) == p.keyDnaSettings (0));
+    CHECK (q.keyDnaCurve (0, osp::keydna::Param::position) == curve);
+    editor.reset();
 }
 
 TEST_CASE ("analog: a version-2 session's BLEND moves into the oscillators' levels and sounds as it did", "[analog][state]")
@@ -1118,10 +1246,58 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
     f.ui->showWellEditor (true);
     REQUIRE (f.ui->isWellEditorShown());
 
-    // Two dimensions: the page (WAVE, OSC 1, OSC 2, PAIR) and the depth (QUICK, DETAILED).
-    // QUICK on OSC 1 / OSC 2: ON, the model, its waves, its pitch, shape and level.
+    // The pages: BOTH (first: the two oscillators at once), OSC 1, OSC 2, PAIR; the focused
+    // pages have a depth (QUICK, DETAILED). QUICK on OSC 1 / OSC 2: ON, the model, its
+    // waves, its pitch, shape and level.
     CHECK_FALSE (f.bench()->viewState().detailed);
-    CHECK (f.bench()->viewState().section == 0);   // (WAVE first)
+    CHECK (f.bench()->viewState().section == 0);   // (BOTH first)
+    {
+        // BOTH: each oscillator its own equal section (model, ON, waves, character, OCT, SEMI,
+        // LEVEL), side by side in the wide well; no depth (one view).
+        f.view (false, 0);
+        for (const auto& id : { params::osc1Model, params::osc1Enabled, params::osc1Wave, params::osc1Width, params::lfoWidth1, params::osc1Octave,
+                                params::osc1Coarse, params::osc1Level, params::osc2Model, params::osc2Enabled, params::osc2Wave, params::osc2Width,
+                                params::lfoWidth2, params::osc2Octave, params::osc2Coarse, params::osc2Level })
+        {
+            INFO ("BOTH: " << id);
+            CHECK (f.shown (id));
+        }
+        CHECK (f.control (params::osc2Fine) == nullptr);   // (the card's DETUNE, below the well)
+        auto area = [&f] (const juce::String& id) { return f.bench()->getLocalArea (f.control (id), f.control (id)->getLocalBounds()); };
+        CHECK (area (params::osc1Level).getWidth() == area (params::osc2Level).getWidth());
+        CHECK (area (params::osc1Level).getY() == area (params::osc2Level).getY());
+        CHECK (area (params::osc1Model).getRight() < area (params::osc2Model).getX());   // (side by side)
+        CHECK (area (params::osc2Model).getX() - area (params::osc1Model).getX() == area (params::osc2Level).getX() - area (params::osc1Level).getX());
+        auto* detailTabs = f.bench()->findChildWithID ("detail");
+        REQUIRE (detailTabs != nullptr);
+        CHECK_FALSE (detailTabs->isVisible());
+        // The models' own character: WIDE's SHAPE and SPREAD side by side; the DCO's SUB, PWM
+        // and its source. The same knob size and row in every model.
+        const auto classicWidth = area (params::osc1Width);
+        setValue (f.p, params::osc1Model, 2.0f);
+        setValue (f.p, params::osc2Model, 1.0f);
+        f.ui->refreshNow();
+        CHECK (f.shown (params::osc1WideShape));
+        CHECK (f.shown (params::osc1WideSpread));
+        CHECK_FALSE (f.shown (params::osc1Width));
+        CHECK (area (params::osc1WideShape) == classicWidth);
+        CHECK (area (params::osc1WideShape).getY() == area (params::osc1WideSpread).getY());
+        CHECK (f.shown (params::osc2DcoSub));
+        CHECK (f.shown (params::osc2DcoPwmDepth));
+        CHECK (f.shown (params::osc2DcoPwmSource));
+        CHECK (area (params::osc2DcoSub).getHeight() == classicWidth.getHeight());
+        f.checkLayout();
+        setValue (f.p, params::osc1Model, 0.0f);
+        setValue (f.p, params::osc2Model, 0.0f);
+        f.ui->refreshNow();
+        // The waveform key: back to the large waveform (as OSCILLATORS).
+        auto* waveform = dynamic_cast<juce::Button*> (f.bench()->findChildWithID ("waveform"));
+        REQUIRE (waveform != nullptr);
+        waveform->onClick();
+        CHECK_FALSE (f.ui->isWellEditorShown());
+        f.ui->showWellEditor (true);
+        CHECK (f.ui->isWellEditorShown());
+    }
     f.view (false, 1);
     for (const auto& id : { params::osc1Model, params::osc1Enabled, params::osc1Wave, params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level })
     {
@@ -1186,14 +1362,16 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
         std::vector<juce::String> ids;
     };
     const std::vector<Expect> expected {
-        { 0, true, { params::osc1Level, params::osc2Level, params::noise, params::noiseColor } },
+        { 0, false, { params::osc1Model, params::osc1Enabled, params::osc1Octave, params::osc1Coarse, params::osc1Level, params::osc2Model,
+                      params::osc2Enabled, params::osc2Octave, params::osc2Coarse, params::osc2Level } },
         { 1, true, { params::osc1Model, params::osc1Enabled, params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::lfoPitch1,
                      params::lfoWidth1 } },
         { 2, true, { params::osc2Model, params::osc2Enabled, params::osc2Octave, params::osc2Coarse, params::osc2Fine, params::osc2Width, params::osc2Level,
                      params::lfoPitch2, params::lfoWidth2, params::osc2WideWave, params::osc2WideShape, params::osc2WideSpread } },
         { 3, false, { params::sync, params::osc2KeyTrack, params::osc2LowFreq, params::ringMix, params::polyModEnv, params::polyModOsc2, params::polyModToPitch1,
                       params::polyModToWidth1, params::polyModToCutoff } },
-        { 3, true, { params::sync, params::ringMix, params::polyModToCutoff, params::polyphony, params::unison, params::unisonDetune, params::spread } },
+        { 3, true, { params::sync, params::ringMix, params::polyModToCutoff, params::polyphony, params::unison, params::unisonDetune, params::spread,
+                     params::noise, params::noiseColor } },
     };
     for (const auto& e : expected)
     {
@@ -1266,6 +1444,19 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
         REQUIRE (f.ui->isWellEditorShown());
         CHECK (f.bench()->getBounds() == f.card().display().getBounds());
         CHECK (f.bench()->getWidth() < 800);
+        {
+            // BOTH, compact: the two oscillators as strips, one over the other, both names,
+            // models, ON keys and levels in view.
+            f.view (false, 0);
+            for (const auto& id : { params::osc1Model, params::osc1Enabled, params::osc1Level, params::osc2Model, params::osc2Enabled, params::osc2Level })
+            {
+                INFO ("BOTH compact: " << id);
+                CHECK (f.shown (id));
+            }
+            auto area = [&f] (const juce::String& id) { return f.bench()->getLocalArea (f.control (id), f.control (id)->getLocalBounds()); };
+            CHECK (area (params::osc2Model).getY() > area (params::osc1Model).getBottom());
+            CHECK (area (params::osc2Model).getX() == area (params::osc1Model).getX());
+        }
         for (int page = 0; page < 4; ++page)
             for (const bool detailed : { false, true })
             {
@@ -1902,4 +2093,215 @@ TEST_CASE ("analog: ORGANIC's card shows a read head per playing note, as ANDOR 
     CHECK (heads.playheadPosition[0].load() > early);
     // The oscillators' card has no read head (its own grains are its picture).
     CHECK (p.grainSnapshot (0).playheads.load() == 0);
+}
+
+TEST_CASE ("analog: screenshots of KEY DNA, the cards' EQ and ORGANIC's playhead (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-cards]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Scratch scratch;
+    {
+        ShellProcessor p;
+        p.setWellViewState ({});
+        loadOrganic (p, writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5));
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        auto shoot = [&] (const juce::String& name, float scale = 1.0f) {
+            ui.refreshNow();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, scale);
+            const auto file = out.getChildFile (name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        editor->setSize (1448, 1086);
+
+        // ORGANIC's read heads while a chord plays.
+        renderShell (p, 0.9, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
+        shoot ("analog-organic-playheads");
+        shoot ("analog-organic-playheads@2x", 2.0f);
+
+        // Each card's EQ (a low cut and a presence lift on A; a high cut on B).
+        using Host = osp::plugin::InstrumentHost;
+        setValue (p, Host::eqParameterId (0, "enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (0, "hp.enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (0, "hp.frequency"), 120.0f);
+        setValue (p, Host::eqParameterId (0, "bell.enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (0, "bell.frequency"), 2500.0f);
+        setValue (p, Host::eqParameterId (0, "bell.gain"), 6.0f);
+        ui.engineCard (0).onEqToggle (0, true);
+        shoot ("analog-eq-card-a");
+        ui.engineCard (0).onEqToggle (0, false);
+        setValue (p, Host::eqParameterId (1, "enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (1, "lp.enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (1, "lp.frequency"), 3500.0f);
+        ui.engineCard (1).onEqToggle (1, true);
+        shoot ("analog-eq-card-b");
+        ui.engineCard (1).onEqToggle (1, false);
+        shoot ("analog-eq-keys-lit");
+
+        // KEY DNA: the card's key in GRANULAR, then ANDOR OSP's editor.
+        setValue (p, "layerA.sourceMode", 1.0f);
+        osp::keydna::Settings dna;
+        dna.enabled = true;
+        dna.individuality = 0.5;
+        for (const auto param : { osp::keydna::Param::position, osp::keydna::Param::size, osp::keydna::Param::density, osp::keydna::Param::spread })
+            dna[param].variation = 0.45;
+        p.setKeyDnaSettings (0, dna, "KEY DNA", false);
+        ui.engineCard (0).showGranularControls (true, true);
+        shoot ("analog-keydna-key");
+        ui.engineCard (0).onKeyDna (0);
+        shoot ("analog-keydna-editor");
+        shoot ("analog-keydna-editor@2x", 2.0f);
+        ui.closeKeyDna();
+        editor.reset();
+    }
+    osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: screenshots of BOTH, wide and compact (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-both]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Scratch scratch;
+    {
+        ShellProcessor p;
+        p.setWellViewState ({});
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        auto shoot = [&] (const juce::String& name, float scale = 1.0f) {
+            ui.refreshNow();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, scale);
+            const auto file = out.getChildFile (name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        editor->setSize (1448, 1086);
+        auto models = [&] (bool wideDco) {
+            setValue (p, params::osc1Model, wideDco ? 2.0f : 0.0f);
+            setValue (p, params::osc1WideWave, wideDco ? 4.0f : 0.0f);
+            setValue (p, params::osc1WideSpread, wideDco ? 45.0f : 0.0f);
+            setValue (p, params::osc2Model, wideDco ? 1.0f : 0.0f);
+            setValue (p, params::osc2DcoPulse, wideDco ? 1.0f : 0.0f);
+            setValue (p, params::osc2DcoSub, wideDco ? 50.0f : 0.0f);
+            setValue (p, params::osc2DcoPwmSource, wideDco ? 1.0f : 0.0f);
+            setValue (p, params::osc2DcoPwmDepth, wideDco ? 35.0f : 0.0f);
+        };
+        // The new instance: the oscillators' card and the ADD SAMPLE dock (80/20).
+        shoot ("analog-dock-empty");
+        ui.fileDragEnter ({ "/tmp/a.wav" }, 1300, 400);
+        shoot ("analog-dock-drag");
+        ui.fileDragExit ({ "/tmp/a.wav" });
+        {
+            const auto broken = scratch.dir.getChildFile ("broken.wav");
+            broken.replaceWithText ("not audio");
+            p.loadFile (broken, ShellProcessor::hybridLayer);
+            REQUIRE (p.waitForLoads (60000));
+            p.pollLoads();
+            shoot ("analog-dock-failed");
+        }
+        ui.showWellEditor (true);
+        for (const bool organic : { false, true })
+        {
+            if (organic)
+                loadOrganic (p, writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5));
+            const juce::String width = organic ? "compact" : "wide";
+            models (false);
+            shoot ("analog-both-" + width + "-classic");
+            models (true);
+            shoot ("analog-both-" + width + "-wide-dco");
+            if (! organic)
+                shoot ("analog-both-" + width + "-wide-dco@2x", 2.0f);
+            setValue (p, params::osc2Enabled, 0.0f);
+            shoot ("analog-both-" + width + "-osc2-off");
+            setValue (p, params::osc2Enabled, 1.0f);
+            models (false);
+        }
+        editor.reset();
+    }
+    osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: empty, ORGANIC is a compact ADD SAMPLE dock; a recording opens its card and the two share the area", "[analog][editor][organic][dock]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.refreshNow();
+    auto& dock = ui.recordingDock();
+    auto& oscillators = ui.engineCard (0);
+    // A new instance: the oscillators' card at about 80 %, the dock beside it at about 20 %.
+    REQUIRE (dock.isVisible());
+    CHECK (ui.visibleCardCount() == 1);
+    const double share = static_cast<double> (dock.getWidth()) / static_cast<double> (dock.getRight() - oscillators.getX());
+    CHECK (share == Approx (0.2).margin (0.02));
+    CHECK (dock.getX() > oscillators.getRight());
+    CHECK (dock.getY() == oscillators.getY());
+    CHECK (dock.getHeight() == oscillators.getHeight());
+    // The workbench is the wide one beside the dock.
+    ui.showWellEditor (true);
+    CHECK (oscillators.wellEditorComponent()->getWidth() >= 900);
+    // The dock never changes a sound: the oscillators play as they did, at full level.
+    const auto values = [&p] {
+        std::vector<float> v;
+        for (auto* param : p.getParameters())
+            v.push_back (param->getValue());
+        return v;
+    };
+    const auto before = values();
+    // A file dragged over the instrument lights the dock.
+    ui.fileDragEnter ({ "/tmp/a.wav" }, 10, 10);
+    CHECK (dock.isHighlighted());
+    ui.fileDragExit ({ "/tmp/a.wav" });
+    CHECK_FALSE (dock.isHighlighted());
+    REQUIRE (dock.onBrowse != nullptr);
+    CHECK (values() == before);
+
+    // A recording: the dock gives way to ORGANIC's own card, the two equal.
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 1.5));
+    ui.refreshNow();
+    CHECK_FALSE (dock.isVisible());
+    REQUIRE (ui.visibleCardCount() == 2);
+    CHECK (std::abs (ui.engineCard (0).getWidth() - ui.engineCard (1).getWidth()) <= 1);
+    CHECK (ui.isWellEditorShown());   // (the workbench stays, compact)
+    // Removed: the dock comes back; the oscillators' settings are unchanged.
+    p.removeLayer (ShellProcessor::hybridLayer);
+    ui.refreshNow();
+    CHECK (dock.isVisible());
+    CHECK (ui.visibleCardCount() == 1);
+    // A file that cannot be read: the dock says so and offers another try; nothing else moves.
+    const auto broken = scratch.dir.getChildFile ("broken.wav");
+    broken.replaceWithText ("not audio");
+    p.loadFile (broken, ShellProcessor::hybridLayer);
+    REQUIRE (p.waitForLoads (60000));
+    p.pollLoads();
+    ui.refreshNow();
+    CHECK (dock.isVisible());
+    CHECK (dock.problemText().isNotEmpty());
+    // A session with a recording opens with both cards; one without, with the dock.
+    loadOrganic (p, writeRecording (scratch.dir, "organic2.wav", 57, 1.5));
+    juce::MemoryBlock withRecording;
+    p.getStateInformation (withRecording);
+    editor.reset();
+    {
+        ShellProcessor q;
+        q.setStateInformation (withRecording.getData(), static_cast<int> (withRecording.getSize()));
+        REQUIRE (q.waitForLoads (60000));
+        q.pollLoads();
+        std::unique_ptr<juce::AudioProcessorEditor> e (q.createEditor());
+        auto& u = dynamic_cast<andor::shell::ShellEditor&> (*e);
+        u.refreshNow();
+        CHECK_FALSE (u.recordingDock().isVisible());
+        CHECK (u.visibleCardCount() == 2);
+    }
 }

@@ -355,6 +355,7 @@ void Synth::setKeyDna (const osp::keydna::Settings& settings) noexcept
     keyDna = settings;
     if (! same)
         keyDnaTable.compute (keyDna);
+    keyDnaInUse = &keyDnaTable;
 }
 
 void Synth::setTransport (const osp::HostTiming& t) noexcept
@@ -1256,8 +1257,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         auto g = p.grains;
         if (v.modeEngine != nullptr)
             g.position = std::clamp (g.position + v.modeEngine->grainPositionOffset(), 0.0, 1.0);
-        if (keyDnaTable.active())
-            osp::keydna::apply (keyDnaTable.at (v.note), keyDna.amount, g);
+        if (keyDnaInUse != nullptr && keyDnaInUse->active())
+            osp::keydna::apply (keyDnaInUse->at (v.note), keyDna.amount, g);
         v.granulator.setParams (g);
     }
     else

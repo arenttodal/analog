@@ -57,6 +57,7 @@ namespace
         // order: InstrumentHost::eqParameterNames, dampenParameterNames), before the filter.
         iEqA, iEqALast = iEqA + 18, iEqB, iEqBLast = iEqB + 18,
         iDampenA, iDampenALast = iDampenA + 4, iDampenB, iDampenBLast = iDampenB + 4,
+        iKeyDnaCardAmount,
         count
     };
 
@@ -112,6 +113,9 @@ namespace
             for (const int layer : { 0, 1 })
                 for (const auto& name : osp::plugin::InstrumentHost::dampenParameterNames())
                     l.add (osp::plugin::InstrumentHost::dampenParameterId (layer, name));
+            // KEY DNA (state version 6): ANDOR OSP's own, its editor's settings in the shell's
+            // state and its AMOUNT this host parameter.
+            l.add (osp::plugin::InstrumentHost::keyDnaAmountId (0));
             return l;
         }();
         jassert (withCards.size() == count);
@@ -166,6 +170,10 @@ const juce::StringArray& engineParameterIds()
         static const juce::StringArray notPlayedYet = [] {
             juce::StringArray n;
             n.add ("layerB.pan");   // (each voice is one mono signal through its filter: ORGANIC takes its place)
+            // KEY DNA before state version 6 (ANDOR OSP's editor plays it now; these stay,
+            // frozen, for older sessions' migration).
+            for (const auto& id : { keyDna, keyDnaAmount, keyDnaIndividuality, keyDnaPosition, keyDnaSize, keyDnaDensity, keyDnaSpread, keyDnaTune })
+                n.add (id);
             return n;
         }();
         juce::StringArray l;
@@ -810,6 +818,11 @@ Patch Reader::readWith (const float* raw) const noexcept
     m.levelMatch = on (iMorphLevelMatch);
     m.output = static_cast<MorphOutput> (index (iMorphOutput, 2));
     return p;
+}
+
+double Reader::keyDnaCardAmount() const noexcept
+{
+    return values.size() == static_cast<std::size_t> (count) ? 0.01 * value (iKeyDnaCardAmount) : 1.0;
 }
 
 osp::keydna::Settings Reader::keyDna (std::uint32_t seed) const noexcept

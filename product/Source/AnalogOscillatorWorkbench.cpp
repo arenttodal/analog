@@ -536,6 +536,35 @@ namespace
         return v;
     }
 
+    /** The engine's own picture of one oscillator alone (AnalogEngine::pictureOf): at full
+        level, the other silent, OSC 2 on its own period (no detune against OSC 1), OSC 1 still
+        synced to OSC 2 when SYNC is on (its synced shape). `sounding`: it is switched on. */
+    std::vector<float> oscillatorPicture (const params::Reader& reader, int slot, bool& sounding, int points)
+    {
+        auto p = reader.read();
+        sounding = slot == 1 ? p.osc1Enabled : p.osc2Enabled;
+        p.blend = 0.5;
+        p.ringMix = 0.0;
+        if (slot == 1)
+        {
+            p.osc1Enabled = true;
+            p.osc1Level = 1.0;
+            p.osc2Enabled = false;
+        }
+        else
+        {
+            p.osc2Enabled = true;
+            p.osc2Level = 1.0;
+            p.osc2LowFrequency = false;
+            p.osc1Enabled = false;
+            p.sync = false;
+            p.osc1Octave = p.osc2Octave;
+            p.osc1Coarse = p.osc2Coarse;
+            p.osc2FineCents = 0.0;
+        }
+        return AnalogEngine::pictureOf (p, points);
+    }
+
     /**
         OSC 1 / OSC 2: one oscillator in focus, on the same grid for both (so changing the page
         changes which oscillator is in focus, nothing moves). The heading: ON, the model, its
@@ -746,31 +775,9 @@ namespace
 
         void updatePicture()
         {
-            // The engine's own picture (AnalogEngine::pictureOf), of this oscillator alone: at
-            // full level, the other silent, OSC 2 on its own period (no detune against OSC 1),
-            // OSC 1 still synced to OSC 2 when SYNC is on (its synced shape).
-            auto p = reader.read();
-            const bool sounding = slot == 1 ? p.osc1Enabled : p.osc2Enabled;
-            p.blend = 0.5;
-            p.ringMix = 0.0;
-            if (slot == 1)
-            {
-                p.osc1Enabled = true;
-                p.osc1Level = 1.0;
-                p.osc2Enabled = false;
-            }
-            else
-            {
-                p.osc2Enabled = true;
-                p.osc2Level = 1.0;
-                p.osc2LowFrequency = false;
-                p.osc1Enabled = false;
-                p.sync = false;
-                p.osc1Octave = p.osc2Octave;
-                p.osc1Coarse = p.osc2Coarse;
-                p.osc2FineCents = 0.0;
-            }
-            thumb->setCycle (AnalogEngine::pictureOf (p, 192), sounding);
+            bool sounding = true;
+            auto cycle = oscillatorPicture (reader, slot, sounding, 192);
+            thumb->setCycle (std::move (cycle), sounding);
         }
 
         struct Ids
@@ -807,235 +814,375 @@ namespace
     };
 
     //==========================================================================
-    /** An oscillator at a glance on the WAVE page (its light, name, model and waves); a click
-        brings its page into focus. Not a parameter: it only shows them. */
-    class OscillatorChip final : public juce::Button
+    /** An oscillator's name on BOTH ("OSC 1", its light): it opens the oscillator's own page. */
+    class OscillatorName final : public juce::Button
     {
     public:
-        OscillatorChip (InstrumentHost& h, int slotNumber) : juce::Button (slotNumber == 1 ? "OSC 1" : "OSC 2"), host (h), slot (slotNumber)
+        explicit OscillatorName (int slot) : juce::Button (slot == 1 ? "OSC 1" : "OSC 2")
         {
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
-            setTooltip (slot == 1 ? "Oscillator 1: open its page" : "Oscillator 2: open its page");
+            setWantsKeyboardFocus (true);
             setTitle (getButtonText());
+            setTooltip (juce::String ("Oscillator ") + juce::String (slot) + ": open its own page (every setting)");
         }
-
-        void refresh()
-        {
-            if (const auto now = summary(); now != shown)
-            {
-                shown = now;
-                repaint();
-            }
-        }
+        bool sounding = true;
 
         void paintButton (juce::Graphics& g, bool over, bool) override
         {
-            using namespace params;
-            const auto r = getLocalBounds().toFloat().reduced (1.0f);
-            const bool sounding = host.parameterValue (slot == 1 ? osc1Enabled : osc2Enabled) >= 0.5f;
-            g.setColour (cellFill.withAlpha (over ? 1.0f : 0.85f));
-            g.fillRoundedRectangle (r, 6.0f);
-            g.setColour (hasKeyboardFocus (false) ? accent() : (over ? cellEdgeHot : cellEdge));
-            g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
-            auto row = r.reduced (12.0f, 0.0f);
-            design::draw::led (g, { row.getX() + 3.0f, row.getCentreY() }, 6.0f, sounding ? accent() : juce::Colour (0xff4a5050), sounding ? 0.6f : 0.0f);
-            row.removeFromLeft (14.0f);
-            g.setFont (fonts::make (12.5f, fonts::Weight::medium, 0.08f));
-            g.setColour (cream.withAlpha (sounding ? 0.95f : 0.55f));
-            g.drawText (getButtonText(), row.removeFromLeft (52.0f), juce::Justification::centredLeft, false);
-            icons::draw (g, icons::Kind::chevronRight, row.removeFromRight (12.0f).withSizeKeepingCentre (10.0f, 10.0f), cream.withAlpha (0.45f), 1.3f);
-            g.setFont (type::popupLabel (11.0f));
-            g.setColour (sounding ? accent().interpolatedWith (juce::Colour (0xfffff0e4), 0.25f) : cream.withAlpha (0.4f));
-            const auto [modelName, waves] = summaryParts();
-            const float modelWidth = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), modelName) + 10.0f;
-            g.drawText (modelName, row.removeFromLeft (modelWidth), juce::Justification::centredLeft, false);
-            g.setColour (cream.withAlpha (sounding ? 0.62f : 0.35f));
-            g.drawText (sounding ? waves : juce::String ("OFF"), row, juce::Justification::centredLeft, true);
-        }
-
-    private:
-        std::pair<juce::String, juce::String> summaryParts() const
-        {
-            using namespace params;
-            const bool first = slot == 1;
-            const int m = choiceOf (host, first ? osc1Model : osc2Model);
-            auto valueText = [this] (const juce::String& id) { return host.apvts().getParameter (id)->getCurrentValueAsText().toUpperCase(); };
-            if (m == 1)
+            auto r = getLocalBounds().toFloat();
+            design::draw::led (g, { r.getX() + 4.0f, r.getCentreY() }, 6.0f, sounding ? accent() : juce::Colour (0xff4a5050), sounding ? 0.6f : 0.0f);
+            r.removeFromLeft (14.0f);
+            g.setFont (fonts::make (13.0f, fonts::Weight::semibold, 0.08f));
+            g.setColour (cream.withAlpha (sounding ? (over ? 1.0f : 0.94f) : 0.55f));
+            const float w = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), getButtonText());
+            g.drawText (getButtonText(), r.removeFromLeft (w + 2.0f), juce::Justification::centredLeft, false);
+            icons::draw (g, icons::Kind::chevronRight, r.removeFromLeft (14.0f).withSizeKeepingCentre (9.0f, 9.0f), cream.withAlpha (over ? 0.8f : 0.4f), 1.3f);
+            if (hasKeyboardFocus (false))
             {
-                juce::StringArray parts;
-                if (host.parameterValue (first ? osc1DcoSaw : osc2DcoSaw) >= 0.5f)
-                    parts.add ("SAW");
-                if (host.parameterValue (first ? osc1DcoPulse : osc2DcoPulse) >= 0.5f)
-                    parts.add ("PULSE");
-                if (host.parameterValue (first ? osc1DcoSub : osc2DcoSub) > 0.5f)
-                    parts.add ("SUB");
-                return { "DCO", parts.isEmpty() ? juce::String ("SILENT") : parts.joinIntoString (" + ") };
-            }
-            if (m == 2)
-                return { "WIDE", valueText (first ? osc1WideWave : osc2WideWave) };
-            return { "CLASSIC", valueText (first ? osc1Wave : osc2Wave) };
-        }
-        juce::String summary() const
-        {
-            const auto [a, b] = summaryParts();
-            return a + "|" + b + "|" + juce::String (host.parameterValue (slot == 1 ? params::osc1Enabled : params::osc2Enabled));
-        }
-
-        InstrumentHost& host;
-        int slot;
-        juce::String shown;
-    };
-
-    /** The pair at a glance on the WAVE page: SYNC, RING, POLY MOD and LO FREQ, each lit when
-        it acts; a click opens PAIR. */
-    class PairChip final : public juce::Button
-    {
-    public:
-        explicit PairChip (InstrumentHost& h) : juce::Button ("PAIR"), host (h)
-        {
-            setMouseCursor (juce::MouseCursor::PointingHandCursor);
-            setTooltip ("How the oscillators act on each other: open PAIR");
-            setTitle ("Pair");
-        }
-
-        void refresh()
-        {
-            if (const auto now = states(); now != shown)
-            {
-                shown = now;
-                repaint();
+                g.setColour (accent().withAlpha (0.6f));
+                g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 4.0f, 1.0f);
             }
         }
-
-        void paintButton (juce::Graphics& g, bool over, bool) override
-        {
-            const auto r = getLocalBounds().toFloat().reduced (1.0f);
-            g.setColour (cellFill.withAlpha (over ? 0.9f : 0.6f));
-            g.fillRoundedRectangle (r, 6.0f);
-            g.setColour (hasKeyboardFocus (false) ? accent() : (over ? cellEdgeHot : cellEdge.withAlpha (0.8f)));
-            g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
-            auto row = r.reduced (12.0f, 0.0f);
-            icons::draw (g, icons::Kind::chevronRight, row.removeFromRight (12.0f).withSizeKeepingCentre (10.0f, 10.0f), cream.withAlpha (0.45f), 1.3f);
-            g.setFont (type::popupLabel (10.5f));
-            const auto s = states();
-            const char* names[] = { "SYNC", "RING", "POLY MOD", "LO FREQ" };
-            // Evenly spaced by their own widths (never crowded in a narrow well).
-            float textWidth = 0.0f;
-            for (const auto* n : names)
-                textWidth += juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), n);
-            const float space = std::max (8.0f, (row.getWidth() - textWidth) / 3.0f);
-            for (int i = 0; i < 4; ++i)
-            {
-                const bool lit = s[i] == '1';
-                g.setColour (lit ? accent().interpolatedWith (juce::Colour (0xfffff0e4), 0.25f) : cream.withAlpha (0.36f));
-                const float w = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), names[i]);
-                g.drawText (names[i], row.removeFromLeft (w + 1.0f), juce::Justification::centredLeft, false);
-                row.removeFromLeft (space);
-            }
-        }
-
-    private:
-        juce::String states() const
-        {
-            using namespace params;
-            const bool polyMod = (host.parameterValue (polyModEnv) > 0.0f || host.parameterValue (polyModOsc2) > 0.0f)
-                                 && (host.parameterValue (polyModToPitch1) >= 0.5f || host.parameterValue (polyModToWidth1) >= 0.5f
-                                     || host.parameterValue (polyModToCutoff) >= 0.5f);
-            auto bit = [] (bool b) { return b ? juce::String ("1") : juce::String ("0"); };
-            return bit (host.parameterValue (sync) >= 0.5f) + bit (host.parameterValue (ringMix) > 0.0f) + bit (polyMod) + bit (host.parameterValue (osc2LowFreq) >= 0.5f);
-        }
-
-        InstrumentHost& host;
-        juce::String shown;
     };
 
     /**
-        WAVE: the instrument's sound, in front. The oscillators' mix as one picture (the
-        engine's own, as the card shows it), the two oscillators and the pair at a glance (a
-        click opens their page). DETAILED adds the sources' contributions: OSC 1 and OSC 2's
-        levels, the noise and its colour.
+        One oscillator on BOTH, the same component for each (so the two are equal by
+        construction). Its zones, top to bottom: identity (name, model, ON), the wave and its
+        character (the oscillator's own picture under its wave choice; the model's character
+        controls beside it), pitch and output (OCT, SEMI, LEVEL). Compact (a two-card well):
+        one strip (identity and wave choice on a line; under it a small picture, the
+        character, LEVEL). A model's controls the others lack are hidden, never reset; a
+        setting that does nothing now is faded, never moved.
     */
-    class WavePage final : public Page
+    class OscillatorSection final : public Page
     {
     public:
-        WavePage (InstrumentHost& h, bool detailedView, std::function<void (int)> openPage)
-            : Page (h), detailed (detailedView), one (h, 1), two (h, 2), pair (h)
+        OscillatorSection (InstrumentHost& h, int slotNumber, std::function<void (int)> openPage) : Page (h), slot (slotNumber), name (slotNumber)
         {
             using namespace params;
-            wave = add (std::make_unique<WaveThumb> (2, false));
-            for (auto* chip : std::initializer_list<juce::Button*> { &one, &two, &pair })
-                addAndMakeVisible (*chip);
-            one.onClick = [openPage] { openPage (1); };
-            two.onClick = [openPage] { openPage (2); };
-            pair.onClick = [openPage] { openPage (3); };
-            if (detailed)
-            {
-                level1 = knob (osc1Level, "OSC 1", "Oscillator 1's level in the mixer");
-                level2 = knob (osc2Level, "OSC 2", "Oscillator 2's level in the mixer");
-                noiseLevel = knob (noise, "NOISE", "The noise source's level in the mixer");
-                noiseColour = segments (noiseColor, { "WHITE", "JUNO" }, "The noise's colour: white, or the Juno's darker hiss");
-            }
-            setTitle ("Wave");
+            const bool first = slot == 1;
+            ids.model = first ? osc1Model : osc2Model;
+            ids.enabled = first ? osc1Enabled : osc2Enabled;
+            ids.dcoPulse = first ? osc1DcoPulse : osc2DcoPulse;
+            ids.dcoSource = first ? osc1DcoPwmSource : osc2DcoPwmSource;
+            ids.wideWave = first ? osc1WideWave : osc2WideWave;
+
+            addAndMakeVisible (name);
+            name.onClick = [openPage, this] { openPage (slot); };
+            on = toggle (ids.enabled, "ON", "The oscillator sounds (off: silent; as a sync or Poly Mod source it keeps running)");
+            model = segments (ids.model, { "CLASSIC", "DCO", "WIDE" },
+                              "The oscillator's model: CLASSIC (the original), DCO (stable, after the Juno), WIDE (after the Jupiter-8, with SUPER SAW)");
+            if (first)
+                classicWave = segments (osc1Wave, { "SAW", "PULSE", "BOTH" }, "Oscillator 1's waveform: saw, pulse, or both");
+            else
+                classicWaveSelector = selector (osc2Wave, "Oscillator 2's waveforms: saw, triangle and pulse, alone or together");
+            dcoSaw = toggle (first ? osc1DcoSaw : osc2DcoSaw, "SAW", "The DCO's sawtooth");
+            dcoPulse = toggle (ids.dcoPulse, "PULSE", "The DCO's pulse (its width: WIDTH, swept by PWM)");
+            wideWave = selector (ids.wideWave, "WIDE's wave: saw, pulse, triangle, square, or SUPER SAW (seven detuned saws, a modern addition)");
+            thumb = add (std::make_unique<WaveThumb> (2, false));
+
+            width = knob (first ? osc1Width : osc2Width, "WIDTH", "Pulse width (it acts on the pulse wave)");
+            lfoWidth = knob (first ? lfoWidth1 : lfoWidth2, "LFO PW", "How far LFO 1 moves its pulse width");
+            sub = knob (first ? osc1DcoSub : osc2DcoSub, "SUB", "The DCO's sub-oscillator: a square one octave down");
+            pwm = knob (first ? osc1DcoPwmDepth : osc2DcoPwmDepth, "PWM", "How far the PWM source sweeps the pulse width");
+            dcoSource = segments (ids.dcoSource, { "MAN", "LFO", "ENV" }, "What sweeps the DCO's pulse width: the WIDTH knob alone (MAN), LFO 1, or the filter envelope");
+            shape = knob (first ? osc1WideShape : osc2WideShape, "SHAPE", "The wave's edge: soft .. calibrated (centre) .. raw");
+            spread = knob (first ? osc1WideSpread : osc2WideSpread, "SPREAD", "SUPER SAW's detune (it acts on SUPER SAW)");
+            octave = knob (first ? osc1Octave : osc2Octave, "OCT", "Octave");
+            semi = knob (first ? osc1Coarse : osc2Coarse, "SEMI", "Semitones");
+            level = knob (first ? osc1Level : osc2Level, "LEVEL", "The oscillator's level in the mixer");
+            setTitle (first ? "Oscillator 1" : "Oscillator 2");
             reader.attach (h.apvts());
+            updateStates();
+        }
+
+        /** Compact: one strip (a two-card well). */
+        void setCompact (bool c)
+        {
+            if (c == compact)
+                return;
+            compact = c;
+            updateStates();
+            resized();
         }
 
         void refresh() override
         {
-            one.refresh();
-            two.refresh();
-            pair.refresh();
+            Page::refresh();
             if (auto now = pictureSignature (host); now != pictured)
             {
                 pictured = std::move (now);
-                const auto p = reader.read();
-                wave->setCycle (AnalogEngine::pictureOf (p, 256), p.osc1Enabled || p.osc2Enabled);
+                bool sounding = true;
+                auto cycle = oscillatorPicture (reader, slot, sounding, 192);
+                thumb->setCycle (std::move (cycle), sounding);
             }
         }
 
         void resized() override
         {
             notes.clear();
-            auto area = getLocalBounds();
-            Grid grid (area);
-            const int columnWidth = grid.narrow ? 252 : 340;
-            auto column = area.removeFromRight (columnWidth);
-            area.removeFromRight (grid.gap);
-            wave->setBounds (area);
-            // The column: the oscillators, the pair (and DETAILED: the sources), centred.
-            const int chip = grid.narrow ? 32 : 38;
-            const int mixer = detailed ? (grid.narrow ? 10 : 18) + grid.caption + 4 + grid.band : 0;
-            const int height = 3 * chip + 2 * 8 + mixer;
-            auto block = column.withSizeKeepingCentre (column.getWidth(), std::min (column.getHeight(), height));
-            one.setBounds (block.removeFromTop (chip));
-            block.removeFromTop (8);
-            two.setBounds (block.removeFromTop (chip));
-            block.removeFromTop (8);
-            pair.setBounds (block.removeFromTop (chip));
-            if (! detailed)
-                return;
-            block.removeFromTop (grid.narrow ? 10 : 18);
-            note (block.removeFromTop (grid.caption), "SOURCES");
-            block.removeFromTop (4);
-            auto band = block.removeFromTop (grid.band);
-            const int cell = band.getWidth() * 10 / 46;
-            level1->setBounds (band.removeFromLeft (cell));
-            level2->setBounds (band.removeFromLeft (cell));
-            noiseLevel->setBounds (band.removeFromLeft (cell));
-            band.removeFromLeft (6);
-            noiseColour->setBounds (band.withSizeKeepingCentre (band.getWidth(), keyHeight));
+            if (compact)
+                layoutStrip();
+            else
+                layoutWide();
         }
 
     private:
-        bool detailed;
-        OscillatorChip one, two;
-        PairChip pair;
-        WaveThumb* wave = nullptr;
-        MiniKnob* level1 = nullptr;
-        MiniKnob* level2 = nullptr;
-        MiniKnob* noiseLevel = nullptr;
-        SegmentedControl* noiseColour = nullptr;
+        static constexpr int nameWidth = 76, onWidth = 58, caption = 14;
+
+        void layoutIdentity (juce::Rectangle<int> row, int modelWidth)
+        {
+            name.setBounds (row.removeFromLeft (nameWidth));
+            on->setBounds (row.removeFromRight (onWidth));
+            row.removeFromLeft (8);
+            model->setBounds (row.removeFromLeft (std::min (modelWidth, row.getWidth() - 8)));
+        }
+
+        /** The wave choice for the model in `row`. */
+        void layoutWaves (juce::Rectangle<int> row, int m)
+        {
+            if (m == 0)
+            {
+                if (classicWave != nullptr)
+                    classicWave->setBounds (row);
+                if (classicWaveSelector != nullptr)
+                    classicWaveSelector->setBounds (row);
+            }
+            else if (m == 1)
+            {
+                const int w = (row.getWidth() - 8) / 2;
+                dcoSaw->setBounds (row.removeFromLeft (w));
+                row.removeFromLeft (8);
+                dcoPulse->setBounds (row);
+            }
+            else
+                wideWave->setBounds (row);
+        }
+
+        /** The model's character controls, two to a row, from `area`'s left (cell wide). */
+        void layoutCharacter (juce::Rectangle<int> area, int cell, int band, int m, bool withSource)
+        {
+            auto at = [&] (int column) { return juce::Rectangle<int> (area.getX() + column * cell, area.getY(), cell, band); };
+            if (m == 0)
+            {
+                width->setBounds (at (0));
+                lfoWidth->setBounds (at (1));
+            }
+            else if (m == 1)
+            {
+                sub->setBounds (at (0));
+                pwm->setBounds (at (1));
+                if (withSource)
+                    dcoSource->setBounds (juce::Rectangle<int> (area.getX() + 6, area.getY() + band + 2, 2 * cell - 12, 24));
+            }
+            else
+            {
+                shape->setBounds (at (0));
+                spread->setBounds (at (1));
+            }
+        }
+
+        void layoutWide()
+        {
+            const auto area = getLocalBounds();
+            const int m = choiceOf (host, ids.model);
+            // One knob band for every model and both rows (the same knob size everywhere);
+            // the row under CHARACTER is kept for the DCO's PWM source in every model, so
+            // nothing moves when the model changes.
+            const int cap = 12, sourceRow = 28, rowGap = 6;
+            const int avail = area.getHeight() - keyHeight - 8;
+            const int band = juce::jlimit (60, 84, (avail - 2 * (cap + 2) - sourceRow - rowGap) / 2);
+            const int zoneB = cap + 2 + band + sourceRow;
+            const int waveWidth = area.getWidth() * 56 / 100, gutter = 14;
+            const int charWidth = area.getWidth() - waveWidth - gutter;
+            const int cell = std::min (112, charWidth / 2);
+            const int charX = area.getX() + waveWidth + gutter + (charWidth - 2 * cell) / 2;
+
+            // Zone A: identity.
+            layoutIdentity (area.withHeight (keyHeight), 268);
+
+            // Zone B: the wave choice over its picture; CHARACTER beside it.
+            const int yB = area.getY() + keyHeight + 8;
+            const int choice = 24;
+            layoutWaves (juce::Rectangle<int> (area.getX(), yB, waveWidth, choice), m);
+            thumb->setBounds (area.getX(), yB + choice + 2, waveWidth, zoneB - choice - 2);
+            note ({ charX, yB, 2 * cell, cap }, "CHARACTER");
+            layoutCharacter ({ charX, yB + cap + 2, 2 * cell, band }, cell, band, m, true);
+
+            // Zone C: PITCH (OCT, SEMI) under the picture, OUTPUT (LEVEL) under the character.
+            const int yC = yB + zoneB + rowGap;
+            note ({ area.getX(), yC, 2 * cell, cap }, "PITCH");
+            note ({ charX, yC, cell, cap }, "OUTPUT");
+            octave->setBounds (area.getX(), yC + cap + 2, cell, band);
+            semi->setBounds (area.getX() + cell, yC + cap + 2, cell, band);
+            level->setBounds (charX, yC + cap + 2, cell, band);
+        }
+
+        void layoutStrip()
+        {
+            const auto area = getLocalBounds();
+            const int m = choiceOf (host, ids.model);
+            // The line: name, model, wave choice, ON.
+            auto line = area.withHeight (keyHeight);
+            name.setBounds (line.removeFromLeft (nameWidth));
+            on->setBounds (line.removeFromRight (onWidth));
+            line.removeFromRight (8);
+            line.removeFromLeft (4);
+            const int modelWidth = std::min (204, line.getWidth() * 52 / 100);
+            model->setBounds (line.removeFromLeft (modelWidth));
+            line.removeFromLeft (8);
+            layoutWaves (line, m);
+            // Under it: a small picture, the character, LEVEL.
+            auto row = area.withTrimmedTop (keyHeight + 4);
+            const int cell = juce::jlimit (64, 92, (row.getWidth() * 60 / 100) / 3);
+            const int band = std::min (80, row.getHeight());
+            auto knobs = row.removeFromRight (3 * cell);
+            row.removeFromRight (10);
+            thumb->setBounds (row);
+            const int y = knobs.getY() + (knobs.getHeight() - band) / 2;
+            layoutCharacter ({ knobs.getX(), y, 2 * cell, band }, cell, band, m, false);
+            level->setBounds (knobs.getX() + 2 * cell, y, cell, band);
+        }
+
+        bool updateStates() override
+        {
+            const int m = choiceOf (host, ids.model);
+            bool changed = m != shownModel;
+            shownModel = m;
+            changed |= show (classicWave, m == 0);
+            changed |= show (classicWaveSelector, m == 0);
+            changed |= show (dcoSaw, m == 1);
+            changed |= show (dcoPulse, m == 1);
+            changed |= show (wideWave, m == 2);
+            changed |= show (width, m == 0);
+            changed |= show (lfoWidth, m == 0);
+            changed |= show (sub, m == 1);
+            changed |= show (pwm, m == 1);
+            changed |= show (dcoSource, m == 1 && ! compact);
+            changed |= show (shape, m == 2);
+            changed |= show (spread, m == 2);
+            changed |= show (octave, ! compact);
+            changed |= show (semi, ! compact);
+
+            const bool hasPulse = m == 0 ? (slot == 1 ? choiceOf (host, params::osc1Wave) != 0 : pulseInClassic2()) : onOf (host, ids.dcoPulse);
+            fade (width, ! hasPulse);
+            fade (lfoWidth, ! hasPulse);
+            fade (pwm, m == 1 && (! hasPulse || choiceOf (host, ids.dcoSource) == 0));
+            fade (spread, m == 2 && choiceOf (host, ids.wideWave) != 4);
+            // Switched off: its settings stay editable, quieter (nothing moves or hides).
+            const bool sounding = onOf (host, ids.enabled);
+            if (name.sounding != sounding)
+            {
+                name.sounding = sounding;
+                name.repaint();
+            }
+            for (auto* c : std::initializer_list<juce::Component*> { model, classicWave, classicWaveSelector, dcoSaw, dcoPulse, wideWave })
+                if (c != nullptr && (c->getAlpha() > 0.5f) != sounding)
+                    c->setAlpha (sounding ? 1.0f : 0.55f);
+            return changed;
+        }
+
+        bool pulseInClassic2() const
+        {
+            // OSC 2's classic waves: Saw, Triangle, Pulse, Saw+Tri, Saw+Pulse, Tri+Pulse, All.
+            const int w = choiceOf (host, params::osc2Wave);
+            return w == 2 || w == 4 || w == 5 || w == 6;
+        }
+
+        struct Ids
+        {
+            juce::String model, enabled, dcoPulse, dcoSource, wideWave;
+        } ids;
+        int slot;
+        bool compact = false;
+        int shownModel = -1;
         params::Reader reader;
         std::vector<float> pictured;
+
+        OscillatorName name;
+        WellKey* on = nullptr;
+        SegmentedControl* model = nullptr;
+        SegmentedControl* classicWave = nullptr;
+        ValueSelector* classicWaveSelector = nullptr;
+        WellKey* dcoSaw = nullptr;
+        WellKey* dcoPulse = nullptr;
+        SegmentedControl* dcoSource = nullptr;
+        ValueSelector* wideWave = nullptr;
+        WaveThumb* thumb = nullptr;
+        MiniKnob* width = nullptr;
+        MiniKnob* lfoWidth = nullptr;
+        MiniKnob* sub = nullptr;
+        MiniKnob* pwm = nullptr;
+        MiniKnob* shape = nullptr;
+        MiniKnob* spread = nullptr;
+        MiniKnob* octave = nullptr;
+        MiniKnob* semi = nullptr;
+        MiniKnob* level = nullptr;
+    };
+
+    /**
+        BOTH (the first page): the two oscillators at once, each its own equal section.
+        Wide (one card, or beside the ORGANIC dock): side by side about one quiet hairline.
+        Compact (beside a loaded ORGANIC card): two strips, one above the other, each name
+        opening that oscillator's own page.
+    */
+    class BothPage final : public Page
+    {
+    public:
+        BothPage (InstrumentHost& h, std::function<void (int)> openPage) : Page (h), one (h, 1, openPage), two (h, 2, openPage)
+        {
+            addAndMakeVisible (one);
+            addAndMakeVisible (two);
+            setTitle ("Both oscillators");
+        }
+
+        /** The well width from which the two sit side by side. */
+        static constexpr int wideFrom = 900;
+
+        void refresh() override
+        {
+            one.refresh();
+            two.refresh();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.setColour (cellEdge.withAlpha (0.8f));
+            g.fillRect (divider);
+        }
+
+        void resized() override
+        {
+            const auto area = getLocalBounds();
+            const bool wide = area.getWidth() >= wideFrom;
+            one.setCompact (! wide);
+            two.setCompact (! wide);
+            if (wide)
+            {
+                // Two equal halves about a hairline, at most 620 px each (centred in a wider well).
+                const int gutter = 32;
+                const int half = std::min (620, (area.getWidth() - gutter) / 2);
+                const int x0 = area.getX() + (area.getWidth() - 2 * half - gutter) / 2;
+                const int height = std::min (area.getHeight(), 262);
+                const int y0 = area.getY() + (area.getHeight() - height) / 2;
+                one.setBounds (x0, y0, half, height);
+                two.setBounds (x0 + half + gutter, y0, half, height);
+                divider = { x0 + half + gutter / 2, y0 + 4, 1, height - 8 };
+            }
+            else
+            {
+                const int gap = 14;
+                const int strip = std::min (122, (area.getHeight() - gap) / 2);
+                const int y0 = area.getY() + (area.getHeight() - 2 * strip - gap) / 2;
+                one.setBounds (area.getX(), y0, area.getWidth(), strip);
+                two.setBounds (area.getX(), y0 + strip + gap, area.getWidth(), strip);
+                divider = { area.getX() + 8, y0 + strip + gap / 2, area.getWidth() - 16, 1 };
+            }
+        }
+
+    private:
+        OscillatorSection one, two;
+        juce::Rectangle<int> divider;
     };
 
     //==========================================================================
@@ -1043,7 +1190,7 @@ namespace
         PAIR: what the two oscillators do together, in two groups under one grid. INTERACTION
         (SYNC, KEYBOARD, LO FREQ, RING) on the left, POLY MOD (its two amounts, its three
         destinations) on the right. DETAILED adds VOICES under INTERACTION (polyphony, unison
-        and its detune, the stereo spread). (KEY DNA is ANDOR OSP's own editor, opened from the
+        and its detune, the stereo spread) and NOISE under POLY MOD (its level and colour). (KEY DNA is ANDOR OSP's own editor, opened from the
         card's KEY DNA key in GRANULAR.)
     */
     class PairPage final : public Page
@@ -1067,6 +1214,8 @@ namespace
                 unisonKey = toggle (unison, "UNISON", "Every voice on one note, detuned: a thick mono sound");
                 uniDetune = knob (unisonDetune, "UNI DETUNE", "How far the stacked voices are detuned");
                 spreadKnob = knob (spread, "SPREAD", "How wide the voices are spread in the stereo field");
+                noiseLevel = knob (noise, "NOISE", "The noise source's level in the mixer");
+                noiseColour = segments (noiseColor, { "WHITE", "JUNO" }, "The noise's colour: white, or the Juno's darker hiss");
             }
             setTitle ("Pair");
         }
@@ -1133,6 +1282,13 @@ namespace
                 voicesArea.removeFromLeft (10);
                 uniDetune->setBounds (voicesArea.removeFromLeft (grid.cell));
                 spreadKnob->setBounds (voicesArea.removeFromLeft (grid.cell));
+                // NOISE (the third source, beside the oscillators) under POLY MOD.
+                auto noiseArea = juce::Rectangle<int> (rx, top2, right, grid.caption + 4 + grid.band);
+                note (noiseArea.removeFromTop (grid.caption), "NOISE");
+                noiseArea.removeFromTop (4);
+                noiseLevel->setBounds (noiseArea.removeFromLeft (grid.cell));
+                noiseArea.removeFromLeft (10);
+                noiseColour->setBounds (noiseArea.removeFromLeft (std::min (noiseArea.getWidth(), segWidth)).withSizeKeepingCentre (std::min (noiseArea.getWidth(), segWidth), keyHeight));
                 bottom = top2 + grid.caption + 4 + grid.band;
             }
             dividers.push_back ({ rx - grid.gap / 2, y0, 1, bottom - y0 });
@@ -1164,6 +1320,8 @@ namespace
         WellKey* unisonKey = nullptr;
         MiniKnob* uniDetune = nullptr;
         MiniKnob* spreadKnob = nullptr;
+        MiniKnob* noiseLevel = nullptr;
+        SegmentedControl* noiseColour = nullptr;
     };
 
     //==========================================================================
@@ -1173,13 +1331,13 @@ namespace
     {
     public:
         explicit OscillatorWorkbench (InstrumentHost& h)
-            : host (h), pageTabs ({ "WAVE", "OSC 1", "OSC 2", "PAIR" }, false, true), depthTabs ({ "QUICK", "DETAILED" }, true)
+            : host (h), pageTabs ({ "BOTH", "OSC 1", "OSC 2", "PAIR" }), depthTabs ({ "QUICK", "DETAILED" }, true)
         {
             setTitle ("Oscillator workbench");
             setWantsKeyboardFocus (false);
             pageTabs.setComponentID ("pages");
             pageTabs.setTitle ("Page");
-            pageTabs.setTooltip ("WAVE: the sound and its sources. OSC 1, OSC 2: one oscillator in focus. PAIR: what they do together");
+            pageTabs.setTooltip ("BOTH: the two oscillators at once. OSC 1, OSC 2: one oscillator in focus, every setting. PAIR: what they do together");
             pageTabs.onChange = [this] (int i) {
                 auto v = viewState();
                 v.section = i;
@@ -1195,6 +1353,15 @@ namespace
                 setView (v);
             };
             addAndMakeVisible (depthTabs);
+            waveKey.setComponentID ("waveform");
+            waveKey.showText = false;
+            waveKey.setTitle ("Show the waveform");
+            waveKey.setTooltip ("Back to the waveform (as OSCILLATORS)");
+            waveKey.onClick = [this] {
+                if (onShowWaveform != nullptr)
+                    onShowWaveform();
+            };
+            addAndMakeVisible (waveKey);
             pinKey.setComponentID ("pin");
             pinKey.showText = false;
             pinKey.setTitle ("Pin the oscillator editor");
@@ -1235,10 +1402,15 @@ namespace
             // pin at the right, a hairline between them.
             pageTabs.setBounds (bar.removeFromLeft (narrow ? 292 : 360));
             pinKey.setBounds (bar.removeFromRight (toolbarHeight));
+            bar.removeFromRight (6);
+            waveKey.setBounds (bar.removeFromRight (toolbarHeight));
             bar.removeFromRight (10);
             separator = bar.removeFromRight (1).withSizeKeepingCentre (1, 16);
             bar.removeFromRight (10);
+            // The depth belongs to the focused pages (BOTH has one depth).
             depthTabs.setBounds (bar.removeFromRight (narrow ? 140 : 160).withSizeKeepingCentre (narrow ? 140 : 160, 24));
+            if (! depthTabs.isVisible())
+                separator = {};
             r.removeFromTop (narrow ? 8 : 12);
             viewport.setBounds (r);
             layoutPage();
@@ -1252,7 +1424,12 @@ namespace
             depthTabs.setSelected (v.detailed ? 1 : 0);
             const int section = juce::jlimit (0, static_cast<int> (WorkbenchSection::count) - 1, v.section);
             pageTabs.setSelected (section);
-            const int wanted = 2 * section + (v.detailed ? 1 : 0);
+            if (const bool depth = section != static_cast<int> (WorkbenchSection::both); depth != depthTabs.isVisible())
+            {
+                depthTabs.setVisible (depth);
+                resized();
+            }
+            const int wanted = section == static_cast<int> (WorkbenchSection::both) ? 0 : 2 * section + (v.detailed ? 1 : 0);
             if (page == nullptr || wanted != shownPage)
             {
                 // Only the page shown exists: its controls are attached, no others.
@@ -1269,7 +1446,7 @@ namespace
                 };
                 switch (static_cast<WorkbenchSection> (section))
                 {
-                    case WorkbenchSection::wave: page = std::make_unique<WavePage> (host, v.detailed, open); break;
+                    case WorkbenchSection::both: page = std::make_unique<BothPage> (host, open); break;
                     case WorkbenchSection::osc1: page = std::make_unique<OscillatorPage> (host, 1, v.detailed); break;
                     case WorkbenchSection::osc2: page = std::make_unique<OscillatorPage> (host, 2, v.detailed); break;
                     case WorkbenchSection::pair:
@@ -1299,6 +1476,7 @@ namespace
 
         InstrumentHost& host;
         ViewTabs pageTabs, depthTabs;
+        WellKey waveKey { "WAVE", WellKey::Glyph::wave };
         WellKey pinKey { "PIN", WellKey::Glyph::pin };
         juce::Viewport viewport;
         juce::Rectangle<int> separator;

@@ -8,6 +8,7 @@
 #include "AnalogOscillatorWorkbench.h"
 #include "AnalogPopovers.h"
 #include "FactoryPatches.h"
+#include "KeyDnaState.h"
 #include "ShellProduct.h"
 
 namespace andor::shell
@@ -17,7 +18,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-5";
+    constexpr const char* factoryVersion = "analog-factory-6";
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -75,6 +76,28 @@ namespace
         host.setParameterValue ("ab.blend", 0.5f);
     }
 
+    /** Version 6: KEY DNA is ANDOR OSP's own (its editor; its settings in the session's KeyDna
+        tree, its AMOUNT layerA.keyDna.amount). The analog.keyDna.* parameters an older session
+        stored move there, seeded as they were (the patch's seed): the same profile, the same
+        sound. The old parameters stay, unread. */
+    void migrateFromVersion5 (osp::plugin::InstrumentHost& host)
+    {
+        namespace p = andor::analog::params;
+        auto percent = [&host] (const juce::String& id) { return 0.01 * static_cast<double> (host.parameterValue (id)); };
+        osp::keydna::Settings k;
+        k.enabled = host.parameterValue (p::keyDna) >= 0.5f;
+        k.individuality = percent (p::keyDnaIndividuality);
+        k.seed = static_cast<std::uint64_t> (std::max (1L, std::lround (host.parameterValue ("seed"))));
+        using osp::keydna::Param;
+        k[Param::position].variation = percent (p::keyDnaPosition);
+        k[Param::size].variation = percent (p::keyDnaSize);
+        k[Param::density].variation = percent (p::keyDnaDensity);
+        k[Param::spread].variation = percent (p::keyDnaSpread);
+        k[Param::tune].variation = percent (p::keyDnaTune);
+        host.setKeyDnaSettings (0, k, {}, false);
+        host.setParameterValue (osp::plugin::InstrumentHost::keyDnaAmountId (0), host.parameterValue (p::keyDnaAmount));
+    }
+
     /** ANDOR ANALOG's materials: aged copper for ANDOR OSP's coral, layer A's amber trace,
         the walnut housing and copper badge (tools/make_walnut_skin.py). The ceramic is the
         family's. */
@@ -106,12 +129,6 @@ namespace
     {
         namespace p = andor::analog::params;
         auto values = p::valuesOf (factory.patch);
-        if (factory.keyDna > 0.0)
-        {
-            values[p::keyDna] = 1.0f;
-            for (const auto& id : { p::keyDnaPosition, p::keyDnaSize, p::keyDnaDensity, p::keyDnaSpread })
-                values[id] = static_cast<float> (100.0 * factory.keyDna);
-        }
         auto tree = host.apvts().copyState();
         for (auto* p : host.apvts().processor.getParameters())
             if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
@@ -132,6 +149,12 @@ namespace
         xml->setAttribute ("productVersion", productInfo().stateVersion);
         if (auto params = tree.createXml())
             xml->addChildElement (params.release());
+        // KEY DNA (ANDOR OSP's tree): the sound's own profile on the oscillators' card.
+        std::array<osp::keydna::Settings, osp::plugin::keyDnaState::layerCount> keyDna {};
+        if (factory.keyDna > 0.0)
+            keyDna[0] = andor::analog::keyDnaOf (factory);
+        if (auto dna = osp::plugin::keyDnaState::toTree (keyDna, {}).createXml())
+            xml->addChildElement (dna.release());
         return xml;
     }
 
@@ -192,12 +215,15 @@ const ProductInfo& productInfo()
         // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
         // sample store, card and recall).
         p.hybridSampleName = "ORGANIC";
+        // Empty, ORGANIC is a compact ADD SAMPLE dock beside the oscillators' card (about a
+        // fifth of the area); a recording opens its own card, the two then sharing equally.
+        p.hybridSampleDock = true;
         // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
         p.generatorModeName = "Standard";
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();
-        p.stateVersion = 5;
+        p.stateVersion = 6;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -207,6 +233,8 @@ const ProductInfo& productInfo()
                 migrateFromVersion3 (host);
             if (from < 5)
                 migrateFromVersion4 (host);
+            if (from < 6)
+                migrateFromVersion5 (host);
         };
         return p;
     }();

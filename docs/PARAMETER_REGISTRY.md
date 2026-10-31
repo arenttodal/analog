@@ -83,6 +83,15 @@ The four `analog.lfo.*` of version 1 are read only to migrate an older state; th
 parameters are ANDOR OSP's `keydna::Settings` (amount, individuality, each parameter's
 variation; flat curves: the curve editor for them is still to come in ANDOR OSP too).
 
+**State version 6:** KEY DNA is ANDOR OSP's own: its settings (switch, individuality, seed,
+each parameter's depth, variation and curve) in the session's `KeyDna` tree (ANDOR OSP's
+schema 1), its AMOUNT the shared `layerA.keyDna.amount`. The `analog.keyDna.*` parameters are
+kept (frozen IDs, unread, shown nowhere); a version-5 session's values move into the tree,
+seeded by the patch's `seed`, so it plays the same profile. Each card's EQ and DAMPEN
+(`layerA.eq.*`, `layerA.dampen.*`, `layerB.eq.*`, `layerB.dampen.*`: ANDOR OSP's) are read by
+the engine from this version's build on; they existed (at their off defaults) before, so no
+migration is needed.
+
 ## B. ANDOR OSP's parameters that ANDOR ANALOG reads (same meaning)
 
 | ID | What it does here | Where it shows |

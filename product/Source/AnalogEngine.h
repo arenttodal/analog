@@ -51,6 +51,14 @@ public:
     osp::InstrumentEngine::ModView modulationView() const noexcept override;
     bool sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const override;
 
+    // KEY DNA: ANDOR OSP's (its editor, its profile), on the oscillators' GRANULAR (card A).
+    bool hasKeyDna() const noexcept override { return true; }
+    void setKeyDnaTable (int layer, const osp::keydna::Table* table) noexcept override
+    {
+        if (layer == 0)
+            synth.setKeyDnaTable (table);
+    }
+
     void sourcePublished (int layer, std::shared_ptr<const osp::plugin::LoadedInstrument> source) override;
     /** "morph": MORPH's state in words (empty: ready) for its popover. */
     juce::String status (const juce::String& topic) const override;

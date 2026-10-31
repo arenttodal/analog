@@ -47,6 +47,11 @@ package was rendered (20 tracks)._
 | **State version 5**: the OSCILLATORS card's LEVEL / TUNE / MUTE no longer reach ORGANIC; the header's A/B mix (`ab.blend`) plays (oscillators vs ORGANIC; centred on a first drop, after a reset and for version-4 sessions); mode named STANDARD / GRANULAR | ✅ done and tested | `organic: the oscillators' LEVEL, MUTE and TUNE leave the recording alone ...`; `analog: a version-4 session rests at the A/B mix's centre ...`; `analog: ORGANIC takes a recording ...` |
 | **Walnut finish** (docs/WALNUT_VISUAL_DESIGN.md): walnut cheeks, aged copper accents and badge, graphite knobs and copper-brown keys on the dark wells; the family's ivory ceramic; ANDOR OSP's finish untouched (opt-in product materials) | ✅ done and tested / ⚠️ reviewed as screenshots on Linux, not in a DAW | `[materials]`; visual regression (parity with ANDOR OSP's materials); ANDOR OSP suite |
 | Legacy sounds unchanged (34 factory + 6 edge patches, 3 rates; exact hashes on Linux, contours everywhere) | ✅ done and tested | `[legacy]` (tests/golden/legacy-renders.txt) |
+| **EQ and DAMPEN per card** (ANDOR OSP's, `layerX.eq.*` / `layerX.dampen.*` now bound): card A's on the oscillators and noise, card B's on ORGANIC (and MORPH's result), in every voice before the filter (`dsp/VoiceEq.h`); off they are skipped (legacy renders bit-exact) | ✅ done and tested / ⚠️ not yet judged by ear | `[cardeq]` (5 cases), `[bindings]` covers every EQ/DAMPEN control; `analog-eq-card-*` screenshots |
+| **KEY DNA is ANDOR OSP's** (state version 6): its editor (opened from the card's KEY DNA key in GRANULAR), its curves, undo and its `KeyDna` tree in the session (one codec with ANDOR OSP: `KeyDnaState`); AMOUNT is `layerA.keyDna.amount`. Version-5 sessions' `analog.keyDna.*` migrate (seeded by the patch's seed: the same sound); factory presets carry their profile (`analog-factory-6`) | ✅ done and tested | `[keydna]` (migration renders identical; editor, undo, curves, recall), `[presets]`, `[bindings]` |
+| **ORGANIC's playhead**: one read head per playing note on card B, as ANDOR OSP's One Shot | ✅ done and tested | `[display]`; `analog-organic-playheads` |
+| **BOTH** (the workbench's first page): the two oscillators at once, equal sections, wide (side by side) and compact (two strips); waveform key in the header; NOISE moved to PAIR, DETAILED | ✅ done and tested / ⚠️ reviewed as screenshots, not in a DAW | `[workbench]`; `analog-both-*` |
+| **ORGANIC dock**: empty, a compact ADD SAMPLE dock (80 / 20); a recording opens its card (50 / 50); removed or failed, the dock again | ✅ done and tested | `[dock]`; `analog-dock-*` |
 | **Oscillator Workbench** (docs/OSCILLATOR_WORKBENCH.md): OSCILLATORS (beside M/S) swaps the card's dark well between the waveform and an in-card editor — QUICK (both oscillators, by model) and DETAILED (OSC 1 / OSC 2 / PAIR / MORE / KEY DNA), PIN, the EQ taking the well and giving it back when pinned; DETUNE only tunes; the floating OSCILLATORS popover is gone | ✅ done and tested / ⚠️ reviewed as screenshots, not in a DAW | `[workbench]` (3 cases); `[screenshots]` `analog-workbench-*`; ANDOR OSP suite and design capture |
 | DCO model: saw/pulse, divide-by-two sub, PWM (manual/LFO/env), pitch-stable (1/5 tolerance, 1/10 wander) | ✅ done and tested | `[models][dco]` |
 | WIDE model: saw/pulse/triangle/square, SHAPE (pitch-tracking edge), SUPER SAW (7 saws, exact single saw at spread 0) | ✅ done and tested | `[models][wide]`, `[supersaw]`; aliasing at C7 ≤ −67.8 dB |
@@ -74,8 +79,7 @@ package was rendered (20 tracks)._
   so ("NEEDS A RECORDING: PLAYS UNCHANGED"). Its settings are shown disabled.
 - TAPE FRAME's FRAME lengths (3.6–11.4 s of tape) are longer than a voice's recording (1.5 s):
   the tape runs for the whole FRAME, its travel scaled into the recording.
-- KEY DNA has no curves here yet (ANDOR OSP has no editor for them either): AMOUNT,
-  INDIVIDUALITY and each parameter's variation (the workbench's KEY DNA section).
+- KEY DNA is ANDOR OSP's own editor (curves included) since state version 6.
 
 ## Version 4 notes
 

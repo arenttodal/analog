@@ -99,6 +99,11 @@ public:
     /** GRANULAR's KEY DNA (each key's own granular identity); recomputed only when it
         changes. Real-time safe. */
     void setKeyDna (const osp::keydna::Settings& settings) noexcept;
+    /** GRANULAR's KEY DNA from outside (the shell's: ANDOR OSP's editor computes the profile
+        off the audio thread): its table, valid until the next call (null: none), and AMOUNT
+        (0..1, live). Replaces what setKeyDna set. Real-time safe. */
+    void setKeyDnaTable (const osp::keydna::Table* table) noexcept { keyDnaInUse = table; }
+    void setKeyDnaAmount (double amount) noexcept { keyDna.amount = std::clamp (amount, 0.0, 1.0); }
     /** MOVEMENT SHAPER's playhead (0..1), for its picture. */
     float shaperPhase() const noexcept { return effects.shaperPhase(); }
 
@@ -416,6 +421,7 @@ private:
     // GRANULAR's KEY DNA, REIMAGINED's live parts.
     osp::keydna::Settings keyDna;
     osp::keydna::Table keyDnaTable;
+    const osp::keydna::Table* keyDnaInUse = &keyDnaTable;   ///< setKeyDna's, or the shell's
     /** What the mode engines take for "the recording" on a live voice (they read only its
         length, rate and root there): TOYBOX the voice's own recording's length; TAPE FRAME a
         twelve-second tape (its FRAMEs, 3.6 to 11.4 s, are longer than what a voice keeps: its

@@ -162,7 +162,10 @@ namespace andor::analog::params
         /** The patch the parameters describe now (real-time safe). */
         Patch read() const noexcept;
         /** GRANULAR's KEY DNA as the parameters describe it (real-time safe; flat curves). */
+        /** KEY DNA before state version 6 (the analog.keyDna.* parameters): for migration. */
         osp::keydna::Settings keyDna (std::uint32_t seed) const noexcept;
+        /** KEY DNA's AMOUNT (layerA.keyDna.amount), 0..1. */
+        double keyDnaCardAmount() const noexcept;
 
         // Modulation (real-time safe).
         static constexpr int maxValues = 256;
