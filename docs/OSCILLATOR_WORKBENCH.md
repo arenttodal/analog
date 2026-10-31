@@ -12,8 +12,7 @@ is an ordinary tuning knob.
 | Action | Result |
 |---|---|
 | Click OSCILLATORS (or Return/Space on it, when focused) | Waveform → workbench; workbench → waveform (this also unpins it) |
-| WAVE (the toolbar's first key) | Same as clicking OSCILLATORS |
-| Escape (no popover open) | Back to the waveform, like WAVE |
+| Escape (no popover open) | Back to the waveform, like clicking OSCILLATORS |
 | QUICK / DETAILED | Changes the view only; no value moves |
 | PIN | Keeps the workbench: it comes back after the EQ, and when the window or the plugin opens again |
 | EQ opens | The EQ takes the well. When it closes: the workbench if pinned, otherwise the waveform |
@@ -25,26 +24,29 @@ is an ordinary tuning knob.
 - While the workbench is shown, the waveform is hidden and does not repaint underneath.
 - The card never moves or resizes.
 
-**QUICK** shows both oscillators side by side. Each half has its name, ON, the model
-(CLASSIC / DCO / WIDE), that model's waves, a picture of its own cycle, and its main
-controls:
+### Navigation (final, 31 October 2026)
 
-| Model | Waves | Main controls |
+There are two dimensions only:
+
+- **Page:** WAVE | OSC 1 | OSC 2 | PAIR, on the left of the header.
+- **Depth:** QUICK | DETAILED, on the right with the pin. It is smaller and quieter than the
+  page tabs. All three sit on one centre line.
+
+Changing the page or the depth changes the view only, never a value. WAVE is the first page;
+the page and depth chosen are remembered as interface preferences.
+
+| Page | QUICK | DETAILED adds |
 |---|---|---|
-| CLASSIC | OSC 1: SAW / PULSE / BOTH. OSC 2: its 7-way list | OCT, SEMI, WIDTH, LEVEL |
-| DCO | SAW, PULSE | OCT, WIDTH, SUB, LEVEL |
-| WIDE | Saw, Pulse, Triangle, Square, SUPER SAW | OCT, SHAPE, SPREAD, LEVEL |
+| WAVE | The oscillators' mix as one large picture (the engine's own); OSC 1, OSC 2 and PAIR chips (light, model, waves; SYNC / RING / POLY MOD / LO FREQ lit when active). A click on a chip opens that page | SOURCES: OSC 1 and OSC 2 level, NOISE, noise colour (WHITE / JUNO) |
+| OSC 1 / OSC 2 (one grid for both) | Heading: ON, model, its waves. Then CYCLE (the oscillator's own picture) → PITCH (OCT, SEMI, DETUNE on OSC 2) → SHAPE (CLASSIC: WIDTH; DCO: WIDTH, SUB; WIDE: SHAPE, SPREAD) → OUTPUT (LEVEL) | A second row under the same families: LFO PITCH; CLASSIC: LFO PW; DCO: PWM, LFO PW, and PWM BY (source); WIDE: WIDTH, LFO PW. Nothing in the first row moves across |
+| PAIR | INTERACTION (SYNC, KEYBOARD, LO FREQ, RING) and POLY MOD (FILT ENV, OSC 2, to PITCH 1, WIDTH 1, FILTER), centred about one hairline | VOICES under INTERACTION: polyphony, UNISON, UNI DETUNE, SPREAD |
 
-**DETAILED** shows one section at a time:
+**Where the former MORE and KEY DNA went:**
 
-| Section | Controls |
-|---|---|
-| OSC 1, OSC 2 | Every control the engine plays for that oscillator: OCT, SEMI, DETUNE (OSC 2), WIDTH, PWM and its source (DCO), SUB, SHAPE, SPREAD, LEVEL, LFO PITCH, LFO PW |
-| PAIR | SYNC, KEYBOARD, LO FREQ, RING; POLY MOD with FILT ENV and OSC 2, sent to PITCH 1, WIDTH 1 and FILTER |
-| MORE | NOISE and its colour; VOICES, UNISON, UNI DETUNE, SPREAD |
-| KEY DNA | ON and its 7 controls (heard in GRANULAR; the page says so) |
-
-Together these sections hold every control the old popover had.
+- NOISE and its colour → WAVE, DETAILED, SOURCES.
+- Polyphony, UNISON, UNI DETUNE, SPREAD → PAIR, DETAILED, VOICES.
+- KEY DNA → ANDOR OSP's own KEY DNA editor, opened from the card's KEY DNA key in GRANULAR.
+  It is no longer in the workbench.
 
 Controls that do nothing in the current state are faded, not hidden, and stay editable:
 

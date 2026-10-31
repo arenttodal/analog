@@ -1009,15 +1009,22 @@ TEST_CASE ("analog: OSCILLATORS beside M and S opens the workbench in the wavefo
     CHECK (f.bench() != nullptr);   // (kept, hidden: it never intercepts a click)
     CHECK_FALSE (f.bench()->isVisible());
     CHECK (card.getComponentAt (well.getCentre()) == &card.display());
-    // WAVE in its toolbar does the same as the heading; so does Escape.
+    // The header: the pages (WAVE | OSC 1 | OSC 2 | PAIR) at the left, the depth and the pin at
+    // the right, all on one centre line. Escape closes it, as the heading does.
     press (*door, door->getLocalBounds().getCentre().toFloat());
     REQUIRE (ui.isWellEditorShown());
-    auto* wave = dynamic_cast<juce::Button*> (f.bench()->findChildWithID ("wave"));
-    REQUIRE (wave != nullptr);
-    wave->onClick();
-    CHECK_FALSE (ui.isWellEditorShown());
-    press (*door, door->getLocalBounds().getCentre().toFloat());
-    REQUIRE (ui.isWellEditorShown());
+    {
+        auto* pages = f.bench()->findChildWithID ("pages");
+        auto* depth = f.bench()->findChildWithID ("detail");
+        auto* pin = f.bench()->findChildWithID ("pin");
+        REQUIRE (pages != nullptr);
+        REQUIRE (depth != nullptr);
+        REQUIRE (pin != nullptr);
+        CHECK (pages->getBounds().getCentreY() == pin->getBounds().getCentreY());
+        CHECK (std::abs (depth->getBounds().getCentreY() - pin->getBounds().getCentreY()) <= 1);
+        CHECK (depth->getHeight() < pages->getHeight());   // (quieter, smaller)
+        CHECK (pages->getRight() < depth->getX());
+    }
     ui.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
     CHECK_FALSE (ui.isWellEditorShown());
     // The keyboard: Return and Space on the focused word.
@@ -1084,36 +1091,51 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
     f.ui->showWellEditor (true);
     REQUIRE (f.ui->isWellEditorShown());
 
-    // QUICK (the default): both oscillators, each its model, ON, its waves, its main controls.
+    // Two dimensions: the page (WAVE, OSC 1, OSC 2, PAIR) and the depth (QUICK, DETAILED).
+    // QUICK on OSC 1 / OSC 2: ON, the model, its waves, its pitch, shape and level.
     CHECK_FALSE (f.bench()->viewState().detailed);
-    for (const auto& id : { params::osc1Model, params::osc2Model, params::osc1Enabled, params::osc2Enabled, params::osc1Wave, params::osc2Wave,
-                            params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::osc2Octave, params::osc2Level })
+    CHECK (f.bench()->viewState().section == 0);   // (WAVE first)
+    f.view (false, 1);
+    for (const auto& id : { params::osc1Model, params::osc1Enabled, params::osc1Wave, params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level })
     {
         INFO (id);
         CHECK (f.shown (id));
     }
     CHECK_FALSE (f.shown (params::osc1DcoSub));
     CHECK_FALSE (f.shown (params::osc1WideShape));
-    CHECK (f.control (params::lfoPitch1) == nullptr);   // (Detailed's: not made in Quick)
+    CHECK (f.control (params::osc2Level) == nullptr);   // (one oscillator in focus)
+    CHECK (f.control (params::lfoPitch1) == nullptr);   // (DETAILED's: not made in QUICK)
     f.checkLayout();
+    // OSC 1 and OSC 2 share one grid: the same families in the same places.
+    const auto octave1 = f.bench()->getLocalArea (f.control (params::osc1Octave), f.control (params::osc1Octave)->getLocalBounds());
+    const auto level1 = f.bench()->getLocalArea (f.control (params::osc1Level), f.control (params::osc1Level)->getLocalBounds());
+    f.view (false, 2);
+    CHECK (f.bench()->getLocalArea (f.control (params::osc2Octave), f.control (params::osc2Octave)->getLocalBounds()) == octave1);
+    CHECK (f.bench()->getLocalArea (f.control (params::osc2Level), f.control (params::osc2Level)->getLocalBounds()) == level1);
+    CHECK (f.shown (params::osc2Fine));   // (OSC 2's fine tuning: the card's DETUNE)
+    // DETAILED adds a row under the same families: the first row stays where it was across.
+    f.view (true, 2);
+    CHECK (f.bench()->getLocalArea (f.control (params::osc2Level), f.control (params::osc2Level)->getLocalBounds()).getX() == level1.getX());
+    CHECK (f.shown (params::lfoPitch2));
+    CHECK (f.shown (params::lfoWidth2));
     // DCO on OSC 1, WIDE on OSC 2: the view follows (also a change from elsewhere: automation,
     // a preset). A model's settings are kept while another is shown.
     setValue (f.p, params::osc1Width, 30.0f);
     setValue (f.p, params::osc1Model, 1.0f);
     setValue (f.p, params::osc2Model, 2.0f);
-    f.ui->refreshNow();
+    f.view (false, 1);
     CHECK_FALSE (f.shown (params::osc1Wave));
     CHECK (f.shown (params::osc1DcoSaw));
     CHECK (f.shown (params::osc1DcoPulse));
     CHECK (f.shown (params::osc1DcoSub));
     CHECK (f.shown (params::osc1Width));
+    f.checkLayout();
+    f.view (false, 2);
     CHECK (f.shown (params::osc2WideWave));
     CHECK (f.shown (params::osc2WideShape));
     CHECK (f.shown (params::osc2WideSpread));
     CHECK_FALSE (f.shown (params::osc2Wave));
     f.checkLayout();
-    setValue (f.p, params::osc1Model, 0.0f);
-    CHECK (f.p.parameterValue (params::osc1Width) == Approx (30.0f).margin (0.1f));
     // A control in the workbench moves its parameter (and so the sound): its attachment.
     auto* level = dynamic_cast<osp::plugin::MiniKnob*> (f.control (params::osc2Level));
     REQUIRE (level != nullptr);
@@ -1124,34 +1146,48 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
     setValue (f.p, params::osc2WideWave, 4.0f);
     f.ui->refreshNow();
     CHECK (f.control (params::osc2WideSpread)->getAlpha() == Approx (1.0f));
+    setValue (f.p, params::osc1Model, 0.0f);
+    CHECK (f.p.parameterValue (params::osc1Width) == Approx (30.0f).margin (0.1f));
 
-    // QUICK <-> DETAILED changes the view only, never a value.
+    // Changing the page or the depth changes the view only, never a value. Every setting
+    // the old popover had (and its MORE section) has a page; KEY DNA has ANDOR OSP's editor.
     const auto before = f.values();
-    // DETAILED: one section at a time; together they hold every oscillator setting the old
-    // popover had (and that the engine plays).
-    const std::vector<std::vector<juce::String>> sections {
-        { params::osc1Model, params::osc1Enabled, params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::lfoPitch1, params::lfoWidth1 },
-        { params::osc2Model, params::osc2Enabled, params::osc2Octave, params::osc2Coarse, params::osc2Fine, params::osc2Width, params::osc2Level, params::lfoPitch2,
-          params::lfoWidth2, params::osc2WideWave, params::osc2WideShape, params::osc2WideSpread },
-        { params::sync, params::osc2KeyTrack, params::osc2LowFreq, params::ringMix, params::polyModEnv, params::polyModOsc2, params::polyModToPitch1,
-          params::polyModToWidth1, params::polyModToCutoff },
-        { params::noise, params::noiseColor, params::polyphony, params::unison, params::unisonDetune, params::spread },
-        { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize, params::keyDnaDensity,
-          params::keyDnaSpread, params::keyDnaTune },
-    };
-    for (int section = 0; section < 5; ++section)
+    struct Expect
     {
-        f.view (true, section);
-        for (const auto& id : sections[static_cast<std::size_t> (section)])
+        int page;
+        bool detailed;
+        std::vector<juce::String> ids;
+    };
+    const std::vector<Expect> expected {
+        { 0, true, { params::osc1Level, params::osc2Level, params::noise, params::noiseColor } },
+        { 1, true, { params::osc1Model, params::osc1Enabled, params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::lfoPitch1,
+                     params::lfoWidth1 } },
+        { 2, true, { params::osc2Model, params::osc2Enabled, params::osc2Octave, params::osc2Coarse, params::osc2Fine, params::osc2Width, params::osc2Level,
+                     params::lfoPitch2, params::lfoWidth2, params::osc2WideWave, params::osc2WideShape, params::osc2WideSpread } },
+        { 3, false, { params::sync, params::osc2KeyTrack, params::osc2LowFreq, params::ringMix, params::polyModEnv, params::polyModOsc2, params::polyModToPitch1,
+                      params::polyModToWidth1, params::polyModToCutoff } },
+        { 3, true, { params::sync, params::ringMix, params::polyModToCutoff, params::polyphony, params::unison, params::unisonDetune, params::spread } },
+    };
+    for (const auto& e : expected)
+    {
+        f.view (e.detailed, e.page);
+        for (const auto& id : e.ids)
         {
-            INFO ("section " << section << ": " << id);
+            INFO ("page " << e.page << (e.detailed ? " detailed: " : " quick: ") << id);
             CHECK (f.shown (id));
         }
         f.checkLayout();
     }
-    // OSC 1 as a DCO in Detailed: its PWM source and depth as well.
+    for (int page = 0; page < 4; ++page)
+        for (const bool detailed : { false, true })
+        {
+            f.view (detailed, page);
+            CHECK (f.control (params::keyDna) == nullptr);   // (not in the workbench)
+            f.checkLayout();
+        }
+    // OSC 1 as a DCO in DETAILED: its PWM source and depth as well.
     setValue (f.p, params::osc1Model, 1.0f);
-    f.view (true, 0);
+    f.view (true, 1);
     CHECK (f.shown (params::osc1DcoPwmSource));
     CHECK (f.shown (params::osc1DcoPwmDepth));
     CHECK (f.shown (params::osc1DcoSub));
@@ -1159,8 +1195,8 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
     setValue (f.p, params::osc1Model, 0.0f);
     f.view (false);
     CHECK (f.values() == before);
-    // The section chosen is kept while Quick is shown, and comes back with Detailed (the
-    // toolbar's own QUICK | DETAILED; the shell keeps the choice).
+    // The page is kept while the depth changes (the header's own QUICK | DETAILED; the
+    // shell keeps the choice); the WAVE page's chips open an oscillator's page.
     f.view (true, 3);
     auto* detail = f.bench()->findChildWithID ("detail");
     REQUIRE (detail != nullptr);
@@ -1168,11 +1204,28 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
     CHECK_FALSE (f.bench()->viewState().detailed);
     CHECK_FALSE (f.p.wellViewState().detailed);
     CHECK (f.p.wellViewState().section == 3);
-    CHECK (f.control (params::noise) == nullptr);   // (MORE's controls are gone with it)
+    CHECK (f.control (params::polyphony) == nullptr);   // (VOICES is DETAILED's)
     detail->mouseDown (mouseEventFor (*detail, { static_cast<float> (detail->getWidth()) - 5.0f, 5.0f }));   // DETAILED
     CHECK (f.bench()->viewState().detailed);
     CHECK (f.bench()->viewState().section == 3);
-    CHECK (f.shown (params::noise));
+    CHECK (f.shown (params::polyphony));
+    f.view (false, 0);
+    {
+        juce::Button* chip = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (auto* b = dynamic_cast<juce::Button*> (child); b != nullptr && b->getButtonText() == "OSC 2")
+                    chip = b;
+                find (*child);
+            }
+        };
+        find (*f.bench());
+        REQUIRE (chip != nullptr);
+        chip->onClick();
+        CHECK (f.bench()->viewState().section == 2);
+        CHECK (f.p.wellViewState().section == 2);
+    }
     f.view (false);
     CHECK (f.values() == before);
 
@@ -1186,14 +1239,13 @@ TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Det
         REQUIRE (f.ui->isWellEditorShown());
         CHECK (f.bench()->getBounds() == f.card().display().getBounds());
         CHECK (f.bench()->getWidth() < 800);
-        f.view (false);
-        f.checkLayout();
-        for (int section = 0; section < 5; ++section)
-        {
-            INFO ("narrow, section " << section);
-            f.view (true, section);
-            f.checkLayout();
-        }
+        for (int page = 0; page < 4; ++page)
+            for (const bool detailed : { false, true })
+            {
+                INFO ("narrow, page " << page << (detailed ? " detailed" : " quick"));
+                f.view (detailed, page);
+                f.checkLayout();
+            }
         // ORGANIC's card has no oscillator editor; its heading opens nothing.
         CHECK_FALSE (f.ui->engineCard (1).hasHeadingDoor());
         CHECK (f.ui->engineCard (1).wellEditorComponent() == nullptr);
@@ -1663,37 +1715,55 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
         if (auto* bench = ui.engineCard (0).wellEditorComponent())
             bench->setViewState (v);
     };
+    // Every page at both depths (WAVE, OSC 1, OSC 2, PAIR x QUICK, DETAILED).
+    const char* pages[] = { "wave", "osc1", "osc2", "pair" };
     view (false, 0);
     ui.showWellEditor (true);
-    shoot ("analog-workbench-quick");
-    shoot ("analog-workbench-quick@2x", 2.0f);
-    const char* sections[] = { "osc1", "osc2", "pair", "more", "keydna" };
-    for (int section = 0; section < 5; ++section)
-    {
-        view (true, section);
-        shoot (juce::String ("analog-workbench-detailed-") + sections[section]);
-    }
+    for (int page = 0; page < 4; ++page)
+        for (const bool detailed : { false, true })
+        {
+            view (detailed, page);
+            shoot (juce::String ("analog-workbench-") + pages[page] + (detailed ? "-detailed" : "-quick"));
+        }
+    view (false, 1);
+    shoot ("analog-workbench-osc1-quick@2x", 2.0f);
+    // The models: OSC 1 a DCO (pulse, sub, PWM by LFO), OSC 2 WIDE's SUPER SAW.
     setValue (p, params::osc1Model, 1.0f);
     setValue (p, params::osc1DcoPulse, 1.0f);
     setValue (p, params::osc1DcoSub, 60.0f);
+    setValue (p, params::osc1DcoPwmSource, 1.0f);
+    setValue (p, params::osc1DcoPwmDepth, 40.0f);
     setValue (p, params::osc2Model, 2.0f);
     setValue (p, params::osc2WideWave, 4.0f);
     setValue (p, params::osc2WideSpread, 45.0f);
+    for (const bool detailed : { false, true })
+    {
+        view (detailed, 1);
+        shoot (juce::String ("analog-workbench-osc1-dco-") + (detailed ? "detailed" : "quick"));
+        view (detailed, 2);
+        shoot (juce::String ("analog-workbench-osc2-wide-") + (detailed ? "detailed" : "quick"));
+    }
     view (false, 0);
-    shoot ("analog-workbench-quick-dco-wide");
-    view (true, 0);
-    shoot ("analog-workbench-detailed-osc1-dco");
-    view (true, 1);
-    shoot ("analog-workbench-detailed-osc2-wide");
+    shoot ("analog-workbench-wave-quick-dco-wide");
+    // OSC 2 switched off.
+    setValue (p, params::osc2Enabled, 0.0f);
+    view (false, 0);
+    shoot ("analog-workbench-wave-osc2-off");
+    view (false, 2);
+    shoot ("analog-workbench-osc2-off");
+    setValue (p, params::osc2Enabled, 1.0f);
     view (false, 0);
     // The EQ takes the well; the heading shows which view is open.
     ui.engineCard (0).onEqToggle (0, true);
     shoot ("analog-workbench-eq-priority");
     ui.engineCard (0).onEqToggle (0, false);
     ui.showWellEditor (false);
+    shoot ("analog-workbench-hidden");
     setValue (p, params::osc1Model, 0.0f);
     setValue (p, params::osc1DcoPulse, 0.0f);
     setValue (p, params::osc1DcoSub, 0.0f);
+    setValue (p, params::osc1DcoPwmSource, 0.0f);
+    setValue (p, params::osc1DcoPwmDepth, 0.0f);
     setValue (p, params::osc2Model, 0.0f);
     setValue (p, params::osc2WideWave, 0.0f);
     setValue (p, params::osc2WideSpread, 0.0f);
@@ -1759,6 +1829,7 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     shoot ("analog-window-869");
     apply (p, Patch());
     ui.showWellEditor (true);
+    view (false, 1);
     shoot ("analog-workbench-window-869");
     editor->setSize (1810, juce::roundToInt (1810.0f * 1086.0f / 1448.0f));
     shoot ("analog-workbench-window-1810");
@@ -1767,12 +1838,12 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
         // Two cards (ORGANIC loaded): the narrower well, QUICK and a DETAILED section.
         Scratch scratch;
         loadOrganic (p, writeRecording (scratch.dir, "workbench stand-in A3.wav", 57, 1.0));
-        view (false, 0);
-        shoot ("analog-workbench-two-cards-quick");
-        view (true, 1);
-        shoot ("analog-workbench-two-cards-detailed-osc2");
-        view (true, 2);
-        shoot ("analog-workbench-two-cards-detailed-pair");
+        for (int page = 0; page < 4; ++page)
+            for (const bool detailed : { false, true })
+            {
+                view (detailed, page);
+                shoot (juce::String ("analog-workbench-two-cards-") + pages[page] + (detailed ? "-detailed" : "-quick"));
+            }
         view (false, 0);
     }
     ui.showWellEditor (false);
