@@ -36,6 +36,21 @@ using Catch::Approx;
 
 namespace
 {
+    /** Points the shell's sample store at `folder` (empty: back to the default). POSIX setenv /
+        unsetenv do not exist on Windows; the CRT's _putenv_s does what the shell's getenv reads. */
+    void setSampleStore (const juce::File& folder)
+    {
+        const auto path = folder == juce::File() ? juce::String() : folder.getFullPathName();
+       #if JUCE_WINDOWS
+        ::_putenv_s ("ANDOR_SAMPLE_STORE", path.toRawUTF8());
+       #else
+        if (path.isEmpty())
+            ::unsetenv ("ANDOR_SAMPLE_STORE");
+        else
+            ::setenv ("ANDOR_SAMPLE_STORE", path.toRawUTF8(), 1);
+       #endif
+    }
+
     constexpr double rate = 48000.0;
     constexpr int block = 512;
 
@@ -2602,7 +2617,7 @@ TEST_CASE ("analog: an imported patch becomes native presets that play, save, re
         q.openPresetEntry (entry);
     };
     // (The shell's sample store is where the engine looks for the kept recordings.)
-    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    setSampleStore (store);
     open (p, made.files[0]);
     REQUIRE (engine.waitForSampleSource (30000));
     CHECK (engine.sampleSourceState().name == "A1 Horn");
@@ -2661,7 +2676,7 @@ TEST_CASE ("analog: an imported patch becomes native presets that play, save, re
         CHECK (e.sampleSourceState().missing.isEmpty());
         CHECK (q.engineStatus ("sample").isEmpty());
     }
-    ::unsetenv ("ANDOR_SAMPLE_STORE");
+    setSampleStore ({});
 }
 
 TEST_CASE ("analog: Bukkehorn 4.5 becomes native presets; Voxx's plays complete through the instrument", "[analog][bukkehorn][presets]")
@@ -2673,7 +2688,7 @@ TEST_CASE ("analog: Bukkehorn 4.5 becomes native presets; Voxx's plays complete 
     }
     Scratch scratch;
     const auto store = scratch.dir.getChildFile ("Store");
-    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    setSampleStore (store);
     ShellProcessor p;
     auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
     const auto manifest = andor::analog::import::readManifest (bukkehornManifest());
@@ -2727,7 +2742,7 @@ TEST_CASE ("analog: Bukkehorn 4.5 becomes native presets; Voxx's plays complete 
             mono[static_cast<std::size_t> (i)] = 0.5f * (hybrid.getSample (0, i) + hybrid.getSample (1, i));
         writeListening ("preset-Hybrid-Voxx", mono);
     }
-    ::unsetenv ("ANDOR_SAMPLE_STORE");
+    setSampleStore ({});
 }
 
 TEST_CASE ("analog: the NKI reader refuses what it cannot read, with a reason, never a crash", "[analog][samplesource][nki]")
@@ -2818,7 +2833,7 @@ TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are pick
     samples.createDirectory();
     const auto manifest = syntheticManifest (samples);
     const auto store = scratch.dir.getChildFile ("Store");
-    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    setSampleStore (store);
     ShellProcessor p;
     auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
     const auto made = andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
@@ -2902,7 +2917,7 @@ TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are pick
     CHECK (engine.sampleSourceDefinition() == nullptr);
     CHECK (ui.recordingDock().isVisible());
     editor.reset();
-    ::unsetenv ("ANDOR_SAMPLE_STORE");
+    setSampleStore ({});
 }
 
 TEST_CASE ("analog: the import review counts what it found and what is missing", "[analog][samplesource][nki]")
@@ -2952,7 +2967,7 @@ TEST_CASE ("analog: screenshots of the Sample Source importer (ANALOG_SCREENSHOT
         manifest = syntheticManifest (samples);
     }
     const auto store = scratch.dir.getChildFile ("Store");
-    ::setenv ("ANDOR_SAMPLE_STORE", store.getFullPathName().toRawUTF8(), 1);
+    setSampleStore (store);
     {
         ShellProcessor p;
         p.setWellViewState ({});
@@ -2991,6 +3006,6 @@ TEST_CASE ("analog: screenshots of the Sample Source importer (ANALOG_SCREENSHOT
         ui.closePopup();
         editor.reset();
     }
-    ::unsetenv ("ANDOR_SAMPLE_STORE");
+    setSampleStore ({});
     osp::plugin::skin::setLook (before);
 }
