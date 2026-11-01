@@ -16,8 +16,29 @@ andor::shell::Engine::Description AnalogEngine::describe() const
     return d;
 }
 
+void AnalogEngine::attachParameters (juce::AudioProcessorValueTreeState& parameters)
+{
+    state = &parameters;
+    hybridTypeValue = parameters.getRawParameterValue (params::hybridType);
+}
+
+HybridType AnalogEngine::hybridType() const noexcept
+{
+    return static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+}
+
+void AnalogEngine::setHybridType (HybridType type)
+{
+    if (state == nullptr)
+        return;
+    if (auto* p = state->getParameter (params::hybridType))
+        p->setValueNotifyingHost (p->convertTo0to1 (static_cast<float> (type)));
+}
+
 void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters)
 {
+    if (state == nullptr)
+        attachParameters (parameters);
     reader.attach (parameters);
     synth.prepare (sampleRate, std::max (1, maximumBlockSize), oversamplingFactor);
     synth.setControlModulator (this);
@@ -182,6 +203,10 @@ void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File
 {
     const auto* definition = state.getChildByName ("SampleSource");
     setSampleSourceDefinition (definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr, assetFolder.getChildFile ("Imported"));
+    // State version 8: before it, an imported source played whenever it was there; now card C
+    // plays it as its INSTRUMENT PATCH (a session or preset from before keeps its sound).
+    if (definition != nullptr && state.getIntAttribute ("productVersion", 1) < 8)
+        setHybridType (HybridType::instrumentPatch);
 }
 
 void AnalogEngine::setSampleSourceDefinition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder)
@@ -269,7 +294,7 @@ void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin
     if (layer != 1)
         return;
     if (source != nullptr)
-        setSampleSourceDefinition (nullptr, {});   // (a recording dropped onto ORGANIC replaces an imported source)
+        setHybridType (HybridType::sample);   // (a recording dropped on card C plays: an imported source stays, dormant)
     if (analyser == nullptr)
         analyser = std::make_unique<Analyser> (*this);
     analyser->request (std::move (source));
@@ -290,7 +315,15 @@ juce::String AnalogEngine::status (const juce::String& topic) const
     }
     if (topic != "morph")
         return {};
-    return analyser != nullptr ? analyser->status() : juce::String ("Load a recording onto ORGANIC to morph");
+    // MORPH acts on card C's recording only while C is a SAMPLE (never on one kept dormant).
+    switch (hybridType())
+    {
+        case HybridType::oscillator: return "Card C is OSC 3: MORPH needs a recording (C as a SAMPLE)";
+        case HybridType::noise: return "Card C is NOISE: MORPH needs a recording (C as a SAMPLE)";
+        case HybridType::instrumentPatch: return "Card C is an instrument patch: MORPH needs one recording (C as a SAMPLE)";
+        case HybridType::sample: break;
+    }
+    return analyser != nullptr ? analyser->status() : juce::String ("Load a recording onto card C to morph");
 }
 
 void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept
@@ -305,9 +338,23 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // The imported sample source: a newly loaded one replaces the old (the synth stops reading
     // the old before this returns; it is freed on the message side once newer ones are in use).
     if (const auto* next = sourceExchange.takePending())
-    {
-        synth.setSampleSource (next->source != nullptr ? next->source.get() : nullptr);
         sourcePlaying = next;
+    // Card C plays only its selected type: the recording as a SAMPLE, the imported zones as an
+    // INSTRUMENT PATCH (OSC 3 and NOISE are the voices' own). The others stay loaded, silent.
+    {
+        const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+        const auto* recording = type == HybridType::sample ? shellRecording : nullptr;
+        const SampleSource* zones = type == HybridType::instrumentPatch && sourcePlaying != nullptr ? sourcePlaying->source.get() : nullptr;
+        if (recording != recordingApplied)
+        {
+            synth.setOrganic (recording);
+            recordingApplied = recording;
+        }
+        if (zones != zonesApplied)
+        {
+            synth.setSampleSource (zones);
+            zonesApplied = zones;
+        }
     }
     if (sourcePlaying != nullptr)
         sourceExchange.publishOldestInUse (sourcePlaying->generation);
@@ -488,9 +535,16 @@ juce::String AnalogEngine::engineSourceName (int layer) const
 {
     if (layer != 1)
         return {};
+    switch (hybridType())
+    {
+        case HybridType::oscillator: return "OSC 3";
+        case HybridType::noise: return "NOISE";
+        case HybridType::sample: return {};   // (the shell's recording, or the empty card)
+        case HybridType::instrumentPatch: break;
+    }
     const std::lock_guard<std::mutex> lock (sourceMutex);
     if (sourceDefinition == nullptr)
-        return {};
+        return "INSTRUMENT PATCH";   // (none chosen yet: the card says so; its well offers the sounds)
     const auto collection = sourceDefinition->getStringAttribute ("collection");
     const auto name = sourceDefinition->getStringAttribute ("name");
     return collection.isNotEmpty() ? collection + juce::String::fromUTF8 (" \xc2\xb7 ") + name : name;
@@ -498,12 +552,36 @@ juce::String AnalogEngine::engineSourceName (int layer) const
 
 void AnalogEngine::removeEngineSource (int layer)
 {
-    if (layer == 1)
+    if (layer != 1)
+        return;
+    if (hybridType() == HybridType::instrumentPatch)
         setSampleSourceDefinition (nullptr, {});
+    setHybridType (HybridType::sample);   // (card C back to its SAMPLE: a recording, or the empty card)
 }
 
 bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
 {
+    if (layer == 1 && hybridType() != HybridType::instrumentPatch)
+    {
+        // OSC 3 alone (OSC 2's picture with OSC 3's settings), or NOISE's.
+        params::Reader r;
+        r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));
+        auto p = r.read();
+        if (p.hybridType == HybridType::noise)
+        {
+            cycle = noisePictureOf (p);
+            return true;
+        }
+        p.osc2Model = p.osc3Model;
+        p.osc2Wave = p.osc3Wave;
+        p.dco2 = p.dco3;
+        p.wide2 = p.wide3;
+        p.osc2Width = p.osc3Width;
+        p.osc2Octave = p.osc3Octave;
+        p.osc2Coarse = p.osc3Coarse;
+        cycle = oscillatorPictureOf (p, 2);
+        return true;
+    }
     if (layer == 1)
     {
         // The imported source at a glance: its longest recording's outline (its peaks, drawn as
@@ -546,6 +624,34 @@ bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTree
     // Three engines: each oscillator's card pictures that oscillator alone.
     cycle = oscillatorPictureOf (r.read(), layer == 2 ? 2 : 1);
     return true;
+}
+
+std::vector<float> AnalogEngine::noisePictureOf (const Patch& p, int points)
+{
+    // A fixed seeded stretch of the noise, through its COLOR and TONE (what the card shows; the
+    // voices play their own sequences).
+    osp::Prng noise (0x484eu);
+    const double rate = 48000.0;
+    const double toneHz = 200.0 * std::pow (90.0, std::clamp (p.hybridNoiseTone, 0.0, 1.0));
+    const float coef = p.hybridNoiseTone >= 0.999 ? 1.0f : static_cast<float> (1.0 - std::exp (-2.0 * math::pi * toneHz / rate));
+    const float colourCoef = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * 5000.0 / rate));
+    float colour = 0.0f, tone = 0.0f, top = 1.0e-6f;
+    std::vector<float> cycle (static_cast<std::size_t> (std::max (2, points)));
+    for (auto& v : cycle)
+    {
+        float n = static_cast<float> (noise.bipolar());
+        if (p.hybridNoiseColor == NoiseColor::juno)
+        {
+            colour += colourCoef * (n - colour);
+            n = colour * 1.36f;
+        }
+        tone += coef * (n - tone);
+        v = tone;
+        top = std::max (top, std::abs (v));
+    }
+    for (auto& v : cycle)
+        v /= top;
+    return cycle;
 }
 
 std::vector<float> AnalogEngine::oscillatorPictureOf (Patch p, int slot, int points)

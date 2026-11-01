@@ -333,3 +333,46 @@ TEST_CASE ("realtime: an imported sample source (zones, loops, swaps) never allo
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: three engines (each card's EQ and M / S, OSC 3, NOISE, the hybrid's type switching) never allocate", "[realtime][threeengines]")
+{
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    Patch p;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    osp::eq::Settings bell;
+    bell.enabled = true;
+    bell.bands[static_cast<std::size_t> (osp::eq::Band::bell)].enabled = true;
+    bell.bands[static_cast<std::size_t> (osp::eq::Band::bell)].gainDb = 9.0;
+    counting = true;
+    for (int block = 0; block < 240; ++block)
+    {
+        p.hybridType = static_cast<HybridType> (block / 10 % 3);   // SAMPLE (none), OSC 3, NOISE
+        p.osc3Model = static_cast<OscModel> (block / 7 % 3);
+        p.wide3.wave = static_cast<WideWave> (block / 5 % 5);
+        p.dco3.pwmSource = static_cast<PwmSource> (block % 3);
+        p.dco3.pwmDepth = 0.4;
+        p.hybridNoiseColor = static_cast<NoiseColor> (block / 13 % 2);
+        p.hybridNoiseTone = (block % 9) / 9.0;
+        p.hybridNoiseMovement = 0.6;
+        p.eqA = block % 30 < 15 ? bell : osp::eq::Settings();
+        p.eqC = block % 20 < 10 ? bell : osp::eq::Settings();
+        p.dampenC.enabled = block % 40 < 20;
+        p.dampenC.amount = 0.5;
+        p.osc1Heard = block % 17 != 0;
+        p.osc2Heard = block % 23 != 0;
+        p.osc1FineCents = (block % 11) - 5.0;
+        p.ringMix = block % 40 < 20 ? 0.4 : 0.0;
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 40) % 48), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

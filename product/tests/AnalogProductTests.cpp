@@ -287,6 +287,27 @@ namespace
             };
         }
         modes[params::noiseColor] = [] (Patch& c) { c.noiseLevel = 0.5; };
+        // State version 8: card C as OSC 3 (each model's settings in that model) or NOISE.
+        auto osc3 = [] (OscModel m, std::function<void (Patch&)> more = {}) {
+            return [m, more] (Patch& c) {
+                c.hybridType = HybridType::oscillator;
+                c.osc3Model = m;
+                c.osc3Wave = Osc2Wave::all;
+                if (more != nullptr)
+                    more (c);
+            };
+        };
+        for (const auto& id : { params::osc3Model, params::osc3Wave, params::osc3Octave, params::osc3Coarse, params::osc3Fine, params::osc3Width, params::lfoWidth3 })
+            modes[id] = osc3 (OscModel::classic);
+        for (const auto& id : { params::osc3DcoSaw, params::osc3DcoPulse, params::osc3DcoSub })
+            modes[id] = osc3 (OscModel::dco);
+        modes[params::osc3DcoPwmSource] = osc3 (OscModel::dco, [] (Patch& c) { c.dco3.pulse = true; c.dco3.pwmDepth = 0.6; });
+        modes[params::osc3DcoPwmDepth] = osc3 (OscModel::dco, [] (Patch& c) { c.dco3.pulse = true; c.dco3.pwmSource = PwmSource::lfo; });
+        modes[params::osc3WideWave] = osc3 (OscModel::wide);
+        modes[params::osc3WideShape] = osc3 (OscModel::wide);
+        modes[params::osc3WideSpread] = osc3 (OscModel::wide, [] (Patch& c) { c.wide3.wave = WideWave::superSaw; });
+        for (const auto& id : { params::hybridNoiseColor, params::hybridNoiseTone, params::hybridNoiseMovement })
+            modes[id] = [] (Patch& c) { c.hybridType = HybridType::noise; };
         modes[params::otaCharacter] = [] (Patch& c) {
             c.filterModel = FilterModel::ota;
             c.resonance = 0.6;
@@ -2346,19 +2367,34 @@ TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are pick
     CHECK (differenceRms (both, allA) > 1.0e-4);
     CHECK (differenceRms (both, allB) > 1.0e-4);
     ui.refreshNow();
-    CHECK (ui.recordingDock().isVisible());   // (none: the dock again)
+    // (Card C still an INSTRUMENT PATCH, none chosen: its card says so; Remove makes it a SAMPLE again.)
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == "INSTRUMENT PATCH");
+    p.removeLayer (ShellProcessor::hybridLayer);   // (the card's Remove: what it shows)
+    ui.refreshNow();
+    CHECK (engine.hybridType() == andor::analog::HybridType::sample);
+    CHECK (ui.recordingDock().isVisible());   // (nothing: the empty card again)
 
-    // A recording dropped onto ORGANIC replaces an imported source; removing it, the dock.
+    // A recording dropped onto card C plays (C becomes a SAMPLE); the imported sound stays,
+    // dormant, and plays again when C is an INSTRUMENT PATCH. Nothing is lost on the way.
     open (0);
-    CHECK (engine.sampleSourceDefinition() != nullptr);
+    CHECK (engine.hybridType() == andor::analog::HybridType::instrumentPatch);
+    const auto patchSound = renderShell (p, 0.6, note, false);
     loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 1.0));
     ui.refreshNow();
-    CHECK (engine.sampleSourceDefinition() == nullptr);
+    CHECK (engine.hybridType() == andor::analog::HybridType::sample);
+    CHECK (engine.sampleSourceDefinition() != nullptr);
     CHECK (ui.visibleCardCount() == 3);
-    open (0);
+    const auto recordingSound = renderShell (p, 0.6, note, false);
+    CHECK (differenceRms (recordingSound, patchSound) > 1.0e-4);
+    engine.setHybridType (andor::analog::HybridType::instrumentPatch);
+    CHECK (differenceRms (renderShell (p, 0.6, note, false), patchSound) < 2.0e-3);
+    CHECK (p.loadState (ShellProcessor::hybridLayer) == osp::plugin::InstrumentHost::LoadState::ready);   // (the recording kept)
+    engine.setHybridType (andor::analog::HybridType::sample);
+    CHECK (differenceRms (renderShell (p, 0.6, note, false), recordingSound) < 2.0e-3);
     p.removeLayer (ShellProcessor::hybridLayer);
     ui.refreshNow();
-    CHECK (engine.sampleSourceDefinition() == nullptr);
+    CHECK (engine.sampleSourceDefinition() != nullptr);   // (still kept for its type)
     CHECK (ui.recordingDock().isVisible());
     editor.reset();
     setSampleStore ({});
@@ -2629,4 +2665,291 @@ TEST_CASE ("analog: each oscillator's well reveals its model's own controls on h
     setValue (p, osc1Model, 1.0f);
     CHECK (p.parameterValue (osc1DcoSub) == Approx (60.0f));
     CHECK (p.parameterValue (osc1WideSpread) == Approx (30.0f));
+}
+
+TEST_CASE ("analog: card C is a SAMPLE, OSC 3, NOISE or an INSTRUMENT PATCH; only the selected one plays, and each survives save and reload", "[analog][hybrid]")
+{
+    using namespace params;
+    using andor::analog::HybridType;
+    const std::vector<Note> note { { 0, 57, 100 } };
+    auto prepare = [] (ShellProcessor& q) {
+        setValue (q, "space", 0.0f);
+        setValue (q, "echo", 0.0f);
+        setValue (q, osc1Enabled, 0.0f);   // (the analog pair silent: card C alone)
+        setValue (q, osc2Enabled, 0.0f);
+        q.setParameterValue ("ab.blend", 0.5f);
+    };
+    ShellProcessor p;
+    prepare (p);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    // A new instance: an empty SAMPLE, no sound from C.
+    CHECK (engine.hybridType() == HybridType::sample);
+    CHECK (rmsOf (renderShell (p, 0.5, note, false)) < 1.0e-5);
+
+    // OSC 3: a third oscillator, tuned by its own card knobs.
+    engine.setHybridType (HybridType::oscillator);
+    const auto osc3 = renderShell (p, 0.5, note, false);
+    CHECK (rmsOf (osc3) > 1.0e-3);
+    setValue (p, osc3Coarse, 7.0f);
+    CHECK (differenceRms (renderShell (p, 0.5, note, false), osc3) > 1.0e-3);
+    osp::plugin::InstrumentHost::GeneratedSource shown;
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == "OSC 3");
+    CHECK (shown.periodic);
+
+    // NOISE: its own, not following the key, the same on every render (seeded).
+    engine.setHybridType (HybridType::noise);
+    setValue (p, hybridNoiseTone, 40.0f);
+    setValue (p, keyTrack, 0.0f);   // (the shared filter's key tracking off: the source itself is what is measured)
+    const auto low = renderShell (p, 0.5, { { 0, 40, 100 } }, false), high = renderShell (p, 0.5, { { 0, 84, 100 } }, false);
+    REQUIRE (rmsOf (low) > 1.0e-3);
+    CHECK (std::abs (20.0 * std::log10 (rmsOf (high) / rmsOf (low))) < 1.5);
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == "NOISE");
+    setValue (p, hybridNoiseColor, 1.0f);
+    setValue (p, hybridNoiseMovement, 70.0f);
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    {
+        ShellProcessor a, b;
+        a.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        b.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        auto& ea = dynamic_cast<AnalogEngine&> (a.productEngine());
+        CHECK (ea.hybridType() == HybridType::noise);
+        CHECK (a.parameterValue (hybridNoiseMovement) == Approx (70.0f));
+        CHECK (differenceRms (renderShell (a, 0.5, note, false), renderShell (b, 0.5, note, false)) < 1.0e-7);
+    }
+
+    // A recording loaded while C is NOISE: C becomes a SAMPLE and plays it; NOISE comes back as it was.
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "hybrid.wav", 57, 1.5));
+    CHECK (engine.hybridType() == HybridType::sample);
+    const auto recording = renderShell (p, 0.5, note, false);
+    CHECK (rmsOf (recording) > 1.0e-3);
+    engine.setHybridType (HybridType::noise);
+    const auto noiseAgain = renderShell (p, 0.5, note, false);
+    CHECK (differenceRms (noiseAgain, recording) > 1.0e-3);   // (the recording silent beneath)
+    engine.setHybridType (HybridType::sample);
+    CHECK (differenceRms (renderShell (p, 0.5, note, false), recording) < 2.0e-3);
+
+    // The cards' knobs and the well follow C's type.
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (1448, 1086);
+        for (const auto type : { HybridType::sample, HybridType::oscillator, HybridType::noise, HybridType::instrumentPatch })
+        {
+            INFO ("type " << static_cast<int> (type));
+            engine.setHybridType (type);
+            ui.refreshNow();
+            auto& card = ui.engineCard (1);
+            REQUIRE (card.isVisible());
+            CHECK (card.hasControl ("layerB.level"));
+            CHECK (card.hasControl (osc3Fine) == (type == HybridType::oscillator));
+            CHECK (card.hasControl (osc3Octave) == (type == HybridType::oscillator));
+            auto* o = card.wellOverlayComponent();
+            REQUIRE (o != nullptr);
+            o->setRevealedForTest (false);
+            CHECK (OverlayFixture::shown (*o, hybridType));   // (its type, always)
+            o->setRevealedForTest (true);
+            OverlayFixture::checkLayout (*o, 1);
+            CHECK (OverlayFixture::shown (*o, hybridNoiseTone) == (type == HybridType::noise));
+            CHECK (OverlayFixture::shown (*o, hybridNoiseMovement) == (type == HybridType::noise));
+            CHECK (OverlayFixture::shown (*o, osc3Model) == (type == HybridType::oscillator));
+            CHECK (OverlayFixture::shown (*o, osc3Wave) == (type == HybridType::oscillator));
+        }
+        engine.setHybridType (HybridType::sample);
+    }
+}
+
+TEST_CASE ("analog: a session from before three engines that held an imported sound opens with card C its INSTRUMENT PATCH", "[analog][hybrid][state][samplesource]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    const auto store = scratch.dir.getChildFile ("Store");
+    setSampleStore (store);
+    juce::MemoryBlock v7;
+    {
+        ShellProcessor p;
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        auto definition = andor::analog::import::makeDefinition (manifest, { 0 }, "A1 Horn", samples, store.getChildFile ("Imported"));
+        REQUIRE (definition.xml != nullptr);
+        engine.setSampleSourceDefinition (std::move (definition.xml), store.getChildFile ("Imported"));
+        REQUIRE (engine.waitForSampleSource (30000));
+        juce::MemoryBlock session;
+        p.getStateInformation (session);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (xml != nullptr);
+        xml->setAttribute ("productVersion", 7);   // as version 7 wrote it: no hybrid type
+        std::function<void (juce::XmlElement&)> drop = [&] (juce::XmlElement& e) {
+            for (auto* child = e.getFirstChildElement(); child != nullptr;)
+            {
+                auto* next = child->getNextElement();
+                if (child->getStringAttribute ("id") == params::hybridType)
+                    e.removeChildElement (child, true);
+                else
+                    drop (*child);
+                child = next;
+            }
+        };
+        drop (*xml);
+        juce::AudioProcessor::copyXmlToBinary (*xml, v7);
+    }
+    ShellProcessor q;
+    q.setStateInformation (v7.getData(), static_cast<int> (v7.getSize()));
+    auto& e = dynamic_cast<AnalogEngine&> (q.productEngine());
+    REQUIRE (e.waitForSampleSource (30000));
+    CHECK (e.hybridType() == andor::analog::HybridType::instrumentPatch);
+    setValue (q, "space", 0.0f);
+    CHECK (rmsOf (renderShell (q, 0.5, { { 0, 57, 100 } }, false)) > 1.0e-3);
+    setSampleStore ({});
+}
+
+TEST_CASE ("analog: MIX sets the analog pair against whatever card C plays; MORPH only on C's recording as a SAMPLE", "[analog][hybrid][morph]")
+{
+    using namespace params;
+    using andor::analog::HybridType;
+    const std::vector<Note> note { { 0, 57, 100 } };
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    setValue (p, "echo", 0.0f);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto pairOnly = renderShell (p, 0.5, note, false);   // (C empty: the INIT pair, untouched)
+    for (const auto type : { HybridType::oscillator, HybridType::noise })
+    {
+        INFO ("type " << static_cast<int> (type));
+        engine.setHybridType (type);
+        p.setParameterValue ("ab.blend", 0.0f);   // all the analog pair
+        CHECK (differenceRms (renderShell (p, 0.5, note, false), pairOnly) < 2.0e-3);
+        p.setParameterValue ("ab.blend", 1.0f);   // all card C
+        const auto cOnly = renderShell (p, 0.5, note, false);
+        CHECK (rmsOf (cOnly) > 1.0e-3);
+        CHECK (differenceRms (cOnly, pairOnly) > 1.0e-3);
+        p.setParameterValue ("ab.blend", 0.5f);   // both, each at full level (the centre's law)
+        const auto both = renderShell (p, 0.5, note, false);
+        CHECK (differenceRms (both, pairOnly) > 1.0e-3);
+        CHECK (differenceRms (both, cOnly) > 1.0e-3);
+        // MORPH says it cannot act: C plays no recording.
+        CHECK (p.engineStatus ("morph").isNotEmpty());
+    }
+    engine.setHybridType (HybridType::sample);
+    // With a recording as C's SAMPLE, MORPH analyses it; C as NOISE, the dormant recording is not morphed.
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "morph.wav", 57, 2.5));
+    engine.setHybridType (HybridType::noise);
+    CHECK (p.engineStatus ("morph").contains ("NOISE"));
+    engine.setHybridType (HybridType::sample);
+    CHECK_FALSE (p.engineStatus ("morph").contains ("NOISE"));
+}
+
+TEST_CASE ("analog: screenshots of the three engines in their combinations, every width (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-three]")
+{
+    using namespace params;
+    using andor::analog::HybridType;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Scratch scratch;
+    const auto store = scratch.dir.getChildFile ("Store");
+    setSampleStore (store);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto reveal = [&] (int layer, bool shown) {
+        ui.refreshNow();
+        if (auto* o = ui.engineCard (layer).wellOverlayComponent())
+            o->setRevealedForTest (shown);
+    };
+    auto models = [&] (int one, int two) {
+        setValue (p, osc1Model, static_cast<float> (one));
+        setValue (p, osc2Model, static_cast<float> (two));
+    };
+    // A synthetic imported instrument (its sounds) for the INSTRUMENT PATCH state.
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+    const auto recording = writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5);
+    for (const int width : { 1448, 869, 1810 })
+    {
+        const auto w = juce::String (width);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+        p.removeLayer (ShellProcessor::hybridLayer);
+        engine.setSampleSourceDefinition (nullptr, {});
+        engine.setHybridType (HybridType::sample);
+        models (0, 0);
+        shoot ("three-" + w + "-1-classic-classic-empty");
+        models (2, 1);
+        setValue (p, osc1WideWave, 4.0f);
+        setValue (p, osc1WideSpread, 45.0f);
+        setValue (p, osc2DcoPulse, 1.0f);
+        setValue (p, osc2DcoSub, 50.0f);
+        shoot ("three-" + w + "-2-wide-dco-empty");
+        reveal (0, true);
+        shoot ("three-" + w + "-2-wide-dco-empty-osc1-hover");
+        reveal (0, false);
+        reveal (2, true);
+        shoot ("three-" + w + "-2-wide-dco-empty-osc2-hover");
+        reveal (2, false);
+        models (0, 2);
+        loadOrganic (p, recording);
+        shoot ("three-" + w + "-3-classic-wide-sample");
+        models (1, 0);
+        andor::analog::chooseSound (p, *andor::analog::import::readRecord (store.getChildFile ("Imported"), "Test Horn.import.xml")->getFirstChildElement());
+        REQUIRE (engine.waitForSampleSource (30000));
+        shoot ("three-" + w + "-4-dco-classic-instrument");
+        reveal (1, true);
+        shoot ("three-" + w + "-4-dco-classic-instrument-c-hover");
+        reveal (1, false);
+        models (0, 1);
+        engine.setHybridType (HybridType::oscillator);
+        setValue (p, osc3Model, 2.0f);
+        setValue (p, osc3WideWave, 4.0f);
+        shoot ("three-" + w + "-5-classic-dco-osc3-wide");
+        reveal (1, true);
+        shoot ("three-" + w + "-5-classic-dco-osc3-wide-c-hover");
+        reveal (1, false);
+        engine.setHybridType (HybridType::noise);
+        setValue (p, hybridNoiseTone, 55.0f);
+        shoot ("three-" + w + "-6-classic-dco-noise");
+        reveal (1, true);
+        shoot ("three-" + w + "-6-classic-dco-noise-c-hover");
+        reveal (1, false);
+        if (width == 1448)
+        {
+            // Each card's EQ (A OSC 1, B OSC 2, C the hybrid).
+            for (const int layer : { 0, 2, 1 })
+            {
+                ui.engineCard (layer).onEqToggle (layer, true);
+                shoot ("three-1448-7-eq-" + osp::plugin::InstrumentHost::shownLayerName (layer));
+                ui.engineCard (layer).onEqToggle (layer, false);
+            }
+            ui.openPopup (2);   // FILTER: the oscillator pair's settings now there
+            shoot ("three-1448-8-filter-popover");
+            ui.closePopup();
+        }
+        setValue (p, osc3Model, 0.0f);
+        setValue (p, osc3WideWave, 0.0f);
+        setValue (p, osc1WideWave, 0.0f);
+        setValue (p, osc1WideSpread, 0.0f);
+        setValue (p, osc2DcoPulse, 0.0f);
+        setValue (p, osc2DcoSub, 0.0f);
+    }
+    editor.reset();
+    setSampleStore ({});
+    osp::plugin::skin::setLook (before);
 }

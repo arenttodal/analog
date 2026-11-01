@@ -9,6 +9,12 @@ The evidence behind every mapping is in
 
 ## Using it
 
+> **Three engines (1 November 2026).** The imported sounds now play as card C's **INSTRUMENT PATCH**
+> (card C's TYPE dropdown; SOUNDS in its well picks one). Choosing a sound there changes only
+> card C, never OSC 1, OSC 2, the filter or the effects. A recording dropped on C makes it a
+> SAMPLE; the imported sound stays, dormant, until C is an INSTRUMENT PATCH again. The steps
+> below still apply; where they say ORGANIC, read card C.
+
 1. **Start the import.** On the empty ORGANIC dock, click **IMPORT KONTAKT PATCH**. (It is also
    in ORGANIC's card menu.)
 2. **Choose the NKI.** Its sample folder is found beside it, named as the NKI's file list says

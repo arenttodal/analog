@@ -117,3 +117,74 @@ The workbench (and its pages) is retired. Its controls move:
 - **Each oscillator's timbre:** the inline overlay in that oscillator's well (by model).
 - **OSC 2's LOW FREQ and KEY TRACK:** OSC 2's overlay.
 - **SYNC, RING, POLY MOD, the noise mixer and VOICES:** the FILTER popover, which already holds the instrument's shared settings. One place, no floating oscillator popover.
+
+## 8. As built (phases 1–6)
+
+### Interaction
+
+- **Three cards, always shown.**
+  - Empty, C is its ADD SAMPLE card (badge C, HYBRID), drop or browse.
+  - Loading or removing never moves a card; A, B and C keep their columns.
+  - The header MIX reads **A+B — C**.
+- **Inline sound design.**
+  - Each oscillator's well shows its MODEL dropdown (top right).
+  - The pointer in the well reveals the model's controls on one grid along its foot (WellOverlay: about 140 ms fade, kept while focused or dragged, Escape dismisses).
+  - Nothing opens; the waveform stays visible above.
+  - A control the wave leaves inactive (WIDTH on a saw, SPREAD off SUPER SAW) is dimmed in its place.
+- **Card C.**
+  - Its TYPE dropdown (top right) is always there, in the empty card too.
+  - OSC 3: the oscillator overlay (its MODEL beside the TYPE); NOISE: COLOR, TONE, MOVEMENT; INSTRUMENT PATCH: SOUNDS (the imported sounds, import, remove); SAMPLE: ANDOR OSP's own card controls.
+  - Card C's knobs follow its type:
+    - SAMPLE and INSTRUMENT PATCH: START, TUNE, LEVEL;
+    - OSC 3: DETUNE, TUNE, OCT, LEVEL;
+    - NOISE: LEVEL.
+  - The recording's keys (LINK, REVERSE, LOOP, FOLLOW) show only for a SAMPLE or a patch.
+- **Card Remove takes what the card shows.** A recording kept dormant under OSC 3, NOISE or a patch stays.
+
+### Engine modes
+
+| Type | What plays | Kept while another type plays |
+|---|---|---|
+| SAMPLE | the shell's recording (layer B), ANDOR OSP's playback, MORPH eligible | the imported definition |
+| OSCILLATOR | OSC 3 in each parent voice (the slots' `renderModel` and plans, no sync or Poly Mod) | the recording, the definition |
+| NOISE | each voice's own seeded noise: COLOR (white / Juno), TONE (200 Hz – 18 kHz low-pass), MOVEMENT (seeded level drift); not keyed | the recording, the definition |
+| INSTRUMENT PATCH | the imported zones (`SampleSource` / `ZonePlayer`) | the recording |
+
+- **Choosing a sound on card C changes only card C.** OSC 1, OSC 2, the filter and the effects stay. Importing writes the full presets as before.
+- **A recording dropped on C makes it a SAMPLE.** A version-7 session or preset holding an import opens as an INSTRUMENT PATCH (`AnalogEngine::restoreState`).
+- **MORPH needs a SAMPLE.** It acts only on C's recording as a SAMPLE, and says why when C is anything else. It never morphs a dormant recording.
+
+### Tests
+
+- **Migration:** a migrated pair equals the legacy pair within 1e-4 (EQ and DAMPEN, with and without ring).
+- **Per-card controls and overlays:**
+  - each card's M/S, EQ and fine tune act only on their own oscillator;
+  - the overlays at 869, 1448 and 1810 px sit inside the well with nothing overlapping, SHAPE beside SPREAD, and no pitch or level control inside them.
+- **Hybrid types:**
+  - each type plays (or is silent) as it should;
+  - switching types keeps the others;
+  - NOISE is seeded and does not follow the key;
+  - each type survives save and reload; card knobs and overlays follow the type.
+- **Older sessions:** a version-7 import opens as an INSTRUMENT PATCH.
+- **MIX and MORPH:** MIX works against OSC 3 and NOISE; MORPH is unavailable off SAMPLE.
+- **Real time:** no allocation (`realtime: three engines ...`).
+- **Legacy:** renders unchanged; schema golden adds only the appended version-8 parameters.
+
+### CPU
+
+16 voices, 48 kHz, 4x, one core of the build VM (`analog-render --benchmark`):
+
+| Setup | CPU |
+|---|---|
+| INIT | 24.0 % (unchanged) |
+| C as OSC 3 (WIDE super saw) | 33.2 % |
+| C as NOISE | 29.6 % |
+| OSC 3 with the three card EQs on | 41.5 % |
+
+### Limits
+
+- **Mono voices:** no per-source PAN on A or B (or C).
+- **Pair processes:** REIMAGINED, GRANULAR and KEY DNA process the analog pair (card A's). Card B has none of its own.
+- **OSC 3:** has no LFO PITCH and no cross-modulation routes yet.
+- **Imported patches:** not morphable (not validated).
+- **Validation:** screenshots reviewed on Linux; no DAW session, pluginval or listening test yet. The importer's A1.5 musical validation stays open.

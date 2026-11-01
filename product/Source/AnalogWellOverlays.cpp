@@ -1,6 +1,7 @@
 #include "AnalogWellOverlays.h"
 
 #include "AnalogParameters.h"
+#include "SampleSourceUI.h"
 #include "Binding.h"
 #include "Design.h"
 #include "OspLookAndFeel.h"
@@ -60,6 +61,12 @@ namespace
         juce::Colour accent;
     };
 
+    /** Card C's type, short enough for its dropdown in a narrow well (its list says it in full). */
+    juce::String shortTypeText (InstrumentHost& host)
+    {
+        return juce::roundToInt (host.parameterValue (params::hybridType)) == static_cast<int> (HybridType::instrumentPatch) ? juce::String ("Instrument") : juce::String();
+    }
+
     struct SlotIds
     {
         juce::String model, wave, width, lfoWidth, dcoSaw, dcoPulse, dcoSub, dcoSource, dcoDepth, wideWave, wideShape, wideSpread, keyTrack, lowFreq;
@@ -90,6 +97,19 @@ namespace
         OscillatorOverlay (InstrumentHost& h, int slotIndex, int layer)
             : host (h), slot (slotIndex), ids (slotIds (slotIndex)), model (modelOf (h, slotIndex)), accent (palette::layer (InstrumentHost::shownLayer (layer)))
         {
+            if (slot == 3)
+            {
+                // Card C as OSC 3: its TYPE first (always shown), the model beside it.
+                typeSelector = std::make_unique<ValueSelector> (*host.apvts().getParameter (params::hybridType), juce::String());
+                typeSelector->setPlain (true);
+                typeSelector->setOnDark (true);
+                typeSelector->setAccent (accent);
+                typeSelector->setTooltip ("What card C plays: a SAMPLE, a third OSCILLATOR, NOISE or an imported INSTRUMENT PATCH (the others are kept, silent)");
+                typeSelector->setTitle ("Card C type");
+                typeSelector->textOverride = [this] { return shortTypeText (host); };
+                binding::tag (*typeSelector, params::hybridType);
+                addAndMakeVisible (*typeSelector);
+            }
             setTitle ("OSC " + juce::String (slot) + " sound design");
             // Always shown: the model, a compact dropdown at the top right (it names what plays).
             modelSelector = std::make_unique<ValueSelector> (*host.apvts().getParameter (ids.model), juce::String());
@@ -139,7 +159,13 @@ namespace
         {
             WellOverlay::resized();
             const int w = getWidth();
-            modelSelector->setBounds (w - 12 - 92, 6, 92, 22);
+            if (typeSelector != nullptr)
+            {
+                typeSelector->setBounds (w - 12 - 118, 6, 118, 22);
+                modelSelector->setBounds (w - 12 - 118 - 8 - 92, 6, 92, 22);
+            }
+            else
+                modelSelector->setBounds (w - 12 - 92, 6, 92, 22);
             const auto b = band().reduced (8, 4);
             const int cellWidth = b.getWidth() / static_cast<int> (cells.size());
             for (std::size_t i = 0; i < cells.size(); ++i)
@@ -253,7 +279,7 @@ namespace
         const SlotIds ids;
         const int model;
         const juce::Colour accent;
-        std::unique_ptr<ValueSelector> modelSelector;
+        std::unique_ptr<ValueSelector> modelSelector, typeSelector;
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;
         std::unique_ptr<juce::Component> switchPair;
@@ -261,6 +287,121 @@ namespace
         juce::Component *width = nullptr, *lfoPw = nullptr, *pwm = nullptr, *pwmSource = nullptr, *shape = nullptr, *spread = nullptr, *waveSelector = nullptr;
         WellSwitch *keyTrack = nullptr, *lowFreq = nullptr;
     };
+}
+
+namespace
+{
+    /** Card C as a SAMPLE, NOISE or INSTRUMENT PATCH (as an oscillator: OscillatorOverlay, slot 3). */
+    class HybridOverlay final : public WellOverlay
+    {
+    public:
+        explicit HybridOverlay (InstrumentHost& h)
+            : host (h), type (static_cast<HybridType> (std::clamp (juce::roundToInt (h.parameterValue (params::hybridType)), 0, 3))),
+              accent (palette::layer (InstrumentHost::shownLayer (1)))
+        {
+            setTitle ("Card C");
+            typeSelector = std::make_unique<ValueSelector> (*host.apvts().getParameter (params::hybridType), juce::String());
+            typeSelector->setPlain (true);
+            typeSelector->setOnDark (true);
+            typeSelector->setAccent (accent);
+            typeSelector->setTooltip ("What card C plays: a SAMPLE, a third OSCILLATOR, NOISE or an imported INSTRUMENT PATCH (the others are kept, silent)");
+            typeSelector->setTitle ("Card C type");
+            typeSelector->textOverride = [this] { return shortTypeText (host); };
+            binding::tag (*typeSelector, params::hybridType);
+            addAndMakeVisible (*typeSelector);
+            if (type == HybridType::noise)
+            {
+                cells = { selector (params::hybridNoiseColor, "COLOR", "The noise: WHITE, or the Juno's darker hiss"),
+                          knob (params::hybridNoiseTone, "TONE", "Its brightness: a low-pass from 200 Hz to 18 kHz"),
+                          knob (params::hybridNoiseMovement, "MOVEMENT", "A slow drift of its level, each voice its own (seeded: every render the same)") };
+            }
+            else if (type == HybridType::instrumentPatch)
+            {
+                soundKey = std::make_unique<juce::TextButton> ("SOUNDS");
+                soundKey->setTooltip ("The imported sounds: pick one for card C, import a Kontakt patch, or remove it (OSC 1, OSC 2 and the effects stay)");
+                soundKey->onClick = [this] { showSoundMenu (host, *soundKey); };
+                soundKey->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2b3031));
+                soundKey->setColour (juce::TextButton::textColourOffId, juce::Colour (0xffeee8dd));
+                revealed().addAndMakeVisible (*soundKey);
+                cells = { soundKey.get(), nullptr, nullptr };
+            }
+        }
+
+        int rulerReserve() const override { return 118 + 24; }
+
+        juce::Rectangle<float> revealBand() const override
+        {
+            return type == HybridType::sample ? juce::Rectangle<float>() : getLocalBounds().withTrimmedTop (std::max (0, getHeight() - 92)).toFloat();
+        }
+
+        void resized() override
+        {
+            WellOverlay::resized();
+            typeSelector->setBounds (getWidth() - 12 - 118, 6, 118, 22);
+            const auto b = getLocalBounds().withTrimmedTop (std::max (0, getHeight() - 92)).reduced (8, 4);
+            const int cellWidth = b.getWidth() / 3;
+            for (std::size_t i = 0; i < cells.size(); ++i)
+                if (auto* c = cells[i])
+                {
+                    auto cell = juce::Rectangle<int> (b.getX() + static_cast<int> (i) * cellWidth, b.getY(), cellWidth, b.getHeight());
+                    if (dynamic_cast<ValueSelector*> (c) != nullptr)
+                        c->setBounds (cell.withSizeKeepingCentre (cellWidth - 10, 44));
+                    else if (dynamic_cast<juce::TextButton*> (c) != nullptr)
+                        c->setBounds (cell.withSizeKeepingCentre (cellWidth - 10, 28));
+                    else
+                        c->setBounds (cell.withSizeKeepingCentre (std::min (cellWidth, 100), b.getHeight()));
+                }
+        }
+
+    private:
+        juce::Component* knob (const juce::String& id, const char* caption, const char* tooltip)
+        {
+            auto* p = host.apvts().getParameter (id);
+            auto k = std::make_unique<MiniKnob> (host.apvts(), id, caption, [p] (double v) { return p->getText (p->convertTo0to1 (static_cast<float> (v)), 0); });
+            k->setOnDark (true);
+            k->slider.getProperties().set ("arc", static_cast<juce::int64> (accent.getARGB()));
+            k->slider.getProperties().set ("graphite", true);
+            k->slider.setTooltip (tooltip);
+            auto* raw = k.get();
+            revealed().addAndMakeVisible (*raw);
+            owned.push_back (std::move (k));
+            return raw;
+        }
+
+        juce::Component* selector (const juce::String& id, const char* caption, const char* tooltip)
+        {
+            auto s = std::make_unique<ValueSelector> (*host.apvts().getParameter (id), juce::String (caption));
+            s->setOnDark (true);
+            s->setTooltip (tooltip);
+            s->setTitle (host.apvts().getParameter (id)->getName (64));
+            binding::tag (*s, id);
+            auto* raw = s.get();
+            revealed().addAndMakeVisible (*raw);
+            owned.push_back (std::move (s));
+            return raw;
+        }
+
+        InstrumentHost& host;
+        const HybridType type;
+        const juce::Colour accent;
+        std::unique_ptr<ValueSelector> typeSelector;
+        std::unique_ptr<juce::TextButton> soundKey;
+        std::vector<std::unique_ptr<juce::Component>> owned;
+        std::array<juce::Component*, 3> cells {};
+    };
+}
+
+std::unique_ptr<WellOverlay> createHybridOverlay (InstrumentHost& host)
+{
+    if (juce::roundToInt (host.parameterValue (params::hybridType)) == static_cast<int> (HybridType::oscillator))
+        return std::make_unique<OscillatorOverlay> (host, 3, 1);
+    return std::make_unique<HybridOverlay> (host);
+}
+
+juce::String hybridOverlayKey (InstrumentHost& host)
+{
+    const int type = juce::roundToInt (host.parameterValue (params::hybridType));
+    return "hybrid/" + juce::String (type) + (type == static_cast<int> (HybridType::oscillator) ? "/" + juce::String (modelOf (host, 3)) : juce::String());
 }
 
 std::unique_ptr<WellOverlay> createOscillatorOverlay (InstrumentHost& host, int slot, int layer)

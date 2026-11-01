@@ -290,6 +290,17 @@ private:
         float lfoFade = 1.0f;
         Envelope amp, env;
         osp::Prng noise { 1 };
+        // State version 8: the hybrid as an oscillator (OSC 3: the slots' code, no sync or Poly
+        // Mod) or a noise source (its own seeded noise, COLOR, TONE, MOVEMENT).
+        HybridType hybridGen = HybridType::sample;   ///< oscillator / noise: this voice generates the hybrid
+        double phase3 = 0.0, dt3 = 0.0;
+        BlepLine line3;
+        osc::SlotExtra extra3;
+        osc::SlotPlan plan3;
+        float width3 = 0.5f, pwm3 = 0.0f, pwmEnv3 = 0.0f;
+        osp::Prng hybridNoise { 1 };
+        float hybridColour = 0.0f, hybridTone = 0.0f, hybridToneCoef = 1.0f, hybridMove = 1.0f, hybridMoveTarget = 1.0f;
+        int hybridMoveCountdown = 0;
 
         // Control rate: what each sample starts from.
         double dt1 = 0.0, dt2 = 0.0;
@@ -365,6 +376,9 @@ private:
     float cardA (Voice& v, float x) noexcept;
     float cardB (Voice& v, float x) noexcept;
     float cardC (Voice& v, float x) noexcept;
+    /** The hybrid's own sound this sample (OSC 3 or NOISE), at full level (its card's LEVEL and
+        the A/B mix apply as to a recording). */
+    float hybridSample (Voice& v, float envValue) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;

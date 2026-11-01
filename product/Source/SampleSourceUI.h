@@ -22,6 +22,14 @@ namespace andor::analog
 std::unique_ptr<osp::plugin::MiniPanel> createSoundPopover (osp::plugin::InstrumentHost& host);
 
 void runKontaktImport (osp::plugin::InstrumentHost& host);
+/** Card C as an INSTRUMENT PATCH: plays this imported sound (its definition, from the import's
+    record). Only the hybrid changes: OSC 1, OSC 2, the filter and the effects stay as they are. */
+void chooseSound (osp::plugin::InstrumentHost& host, const juce::XmlElement& definition);
+/** The imported sounds as a menu under `target` (card C's well): pick one, import a Kontakt
+    patch, or remove it. */
+void showSoundMenu (osp::plugin::InstrumentHost& host, juce::Component& target);
+/** What card C plays as an INSTRUMENT PATCH, in words (its name, or how to choose one). */
+juce::String instrumentPatchName (osp::plugin::InstrumentHost& host);
 
 /** The review of an NKI and its folder (the window's content; tests build it directly). */
 class ImportReview final : public juce::Component, private juce::ListBoxModel

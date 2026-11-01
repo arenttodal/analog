@@ -4,7 +4,8 @@
 //   analog-render --patch "Warm Poly" --out warm.wav [--notes 48,55,60,64] [--seconds 4]
 //                 [--hold 2.5] [--rate 48000] [--oversampling 4] [--seed 1] [--analog 0.5]
 //   analog-render --all <folder>          every factory sound's demo phrase
-//   analog-render --benchmark [--voices 16] [--seconds 10]
+//   analog-render --benchmark [--voices 16] [--seconds 10] [--hybrid osc|noise] [--card-eq]
+//                 (three engines: card C as OSC 3 (a WIDE super saw) or NOISE; each oscillator's EQ on)
 
 #include "FactoryPatches.h"
 #include "Synth.h"
@@ -31,7 +32,8 @@ namespace
         int oversampling = 4, voices = 16;
         long seed = -1;
         double analog = -1.0;
-        bool list = false, benchmark = false;
+        bool list = false, benchmark = false, cardEq = false;
+        std::string hybrid;
     };
 
     std::vector<int> parseNotes (const std::string& text)
@@ -101,6 +103,23 @@ namespace
         synth.prepare (o.rate, 512, o.oversampling);
         auto patch = find ("Warm Poly")->patch;
         patch.polyphony = 16;
+        if (o.hybrid == "osc")
+        {
+            patch.hybridType = HybridType::oscillator;
+            patch.osc3Model = OscModel::wide;
+            patch.wide3.wave = WideWave::superSaw;
+            patch.wide3.spread = 0.5;
+        }
+        else if (o.hybrid == "noise")
+            patch.hybridType = HybridType::noise;
+        if (o.cardEq)
+        {
+            osp::eq::Settings bell;
+            bell.enabled = true;
+            bell.bands[static_cast<std::size_t> (osp::eq::Band::bell)].enabled = true;
+            bell.bands[static_cast<std::size_t> (osp::eq::Band::bell)].gainDb = 6.0;
+            patch.eqA = patch.eqC = patch.eqB = bell;
+        }
         synth.setPatch (patch);
         synth.reset();
         for (int v = 0; v < o.voices; ++v)
@@ -140,6 +159,8 @@ int main (int argc, char** argv)
         else if (a == "--analog") o.analog = std::atof (value().c_str());
         else if (a == "--voices") o.voices = std::atoi (value().c_str());
         else if (a == "--benchmark") o.benchmark = true;
+        else if (a == "--hybrid") o.hybrid = value();
+        else if (a == "--card-eq") o.cardEq = true;
         else
         {
             std::fprintf (stderr, "unknown option %s (see the comment at the top of tools/analog-render.cpp)\n", a.c_str());

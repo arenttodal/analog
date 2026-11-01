@@ -12,6 +12,7 @@ Patch makePatch (bool hybrid)
     Patch p;   // (INIT: the oscillators' CLASSIC pair)
     p.osc1Enabled = p.osc2Enabled = hybrid;
     p.noiseLevel = 0.0;
+    p.hybridType = HybridType::instrumentPatch;   // (card C plays the imported source)
     // ORGANIC (the imported source) at its level, the A/B mix at its centre (both at full level).
     p.organic.levelDb = 0.0;
     p.organic.blend = 0.5;

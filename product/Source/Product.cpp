@@ -246,7 +246,16 @@ const ProductInfo& productInfo()
         // where they are). Each oscillator's card: DETUNE, TUNE, OCT, LEVEL of its own.
         p.threeEngines.enabled = true;
         p.threeEngines.order = { 0, 2, 1 };
-        p.cardControls = [] (int layer, osp::plugin::InstrumentHost&) {
+        p.mixEndLabels = { "A+B", "C" };   // (the header MIX: the analog pair against card C)
+        // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
+        // a SAMPLE or INSTRUMENT PATCH only.
+        p.cardModifiersShown = [] (int layer, osp::plugin::InstrumentHost& host) {
+            if (layer != 1)
+                return false;
+            const int type = juce::roundToInt (host.parameterValue (andor::analog::params::hybridType));
+            return type == static_cast<int> (andor::analog::HybridType::sample) || type == static_cast<int> (andor::analog::HybridType::instrumentPatch);
+        };
+        p.cardControls = [] (int layer, osp::plugin::InstrumentHost& host) {
             namespace ap = andor::analog::params;
             using K = andor::shell::ProductInfo::CardKnob;
             std::array<K, 5> k {};
@@ -254,6 +263,20 @@ const ProductInfo& productInfo()
                 k = { K { ap::osc1Fine, "DETUNE" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" }, K { ap::osc1Level, "LEVEL" }, K {} };
             else if (layer == 2)   // (REIMAGINED processes the analog pair: card A's, never twice)
                 k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K { {}, {}, true } };
+            else
+            {
+                // Card C by its type: a recording's or an imported patch's own knobs (ANDOR OSP's);
+                // OSC 3's tuning; NOISE only its LEVEL (its colour and tone are in its well).
+                using andor::analog::HybridType;
+                const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (ap::hybridType)), 0, 3));
+                const K hidden { {}, {}, true };
+                if (type == HybridType::oscillator)
+                    k = { K { ap::osc3Fine, "DETUNE" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, K { "layerB.level", "LEVEL" }, hidden };
+                else if (type == HybridType::noise)
+                    k = { hidden, hidden, hidden, K { "layerB.level", "LEVEL" }, hidden };
+                else   // (a recording or a patch: START, TUNE, LEVEL; each voice is mono, no PAN; no REIMAGINED on C)
+                    k = { K {}, K {}, hidden, K {}, hidden };
+            }
             return k;
         };
         // Each oscillator's sound design in its card's well, revealed by the pointer (no
@@ -263,10 +286,10 @@ const ProductInfo& productInfo()
                 return andor::analog::createOscillatorOverlay (host, 1, layer);
             if (layer == 2)
                 return andor::analog::createOscillatorOverlay (host, 2, layer);
-            return nullptr;
+            return andor::analog::createHybridOverlay (host);   // card C: its type and that type's controls
         };
         p.wellOverlayKey = [] (int layer, osp::plugin::InstrumentHost& host) {
-            return layer == 1 ? juce::String ("hybrid") : andor::analog::oscillatorOverlayKey (host, layer == 0 ? 1 : 2);
+            return layer == 1 ? andor::analog::hybridOverlayKey (host) : andor::analog::oscillatorOverlayKey (host, layer == 0 ? 1 : 2);
         };
         // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
         // sample store, card and recall).

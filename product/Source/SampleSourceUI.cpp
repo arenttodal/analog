@@ -57,7 +57,10 @@ namespace
             importKey.onClick = [this] { runKontaktImport (host); };
             removeKey.onClick = [this] {
                 if (auto* engine = engineOf (host))
+                {
                     engine->setSampleSourceDefinition (nullptr, {});
+                    engine->setHybridType (HybridType::sample);
+                }
                 if (onClose != nullptr)
                     onClose();
             };
@@ -106,8 +109,7 @@ namespace
     private:
         void choose (const juce::XmlElement& definition)
         {
-            if (auto* engine = engineOf (host))
-                engine->setSampleSourceDefinition (std::make_unique<juce::XmlElement> (definition), importFolder (host));
+            chooseSound (host, definition);
         }
 
         InstrumentHost& host;
@@ -136,8 +138,9 @@ namespace
             for (const auto* d : record->getChildWithTagNameIterator ("SampleSource"))
                 if (d->getStringAttribute ("name") == wanted)
                 {
-                    shell->removeLayer (andor::shell::ShellProcessor::hybridLayer);   // (a recording on ORGANIC gives way)
+                    // Card C plays it (its INSTRUMENT PATCH); a recording there stays, dormant.
                     engine->setSampleSourceDefinition (std::make_unique<juce::XmlElement> (*d), assets);
+                    engine->setHybridType (HybridType::instrumentPatch);
                     if (shell->parameterValue ("ab.blend") < 0.01f)
                         shell->setParameterValue ("ab.blend", 0.5f);   // (heard at once)
                 }
@@ -198,6 +201,70 @@ namespace
         options.resizable = false;
         reviewWindow = options.launchAsync();
     }
+}
+
+void chooseSound (InstrumentHost& host, const juce::XmlElement& definition)
+{
+    if (auto* engine = engineOf (host))
+    {
+        engine->setSampleSourceDefinition (std::make_unique<juce::XmlElement> (definition), importFolder (host));
+        engine->setHybridType (HybridType::instrumentPatch);
+    }
+}
+
+juce::String instrumentPatchName (InstrumentHost& host)
+{
+    if (auto* engine = engineOf (host))
+        if (const auto definition = engine->sampleSourceDefinition())
+            return definition->getStringAttribute ("name");
+    return "CHOOSE A SOUND";
+}
+
+void showSoundMenu (InstrumentHost& host, juce::Component& target)
+{
+    auto* engine = engineOf (host);
+    if (engine == nullptr)
+        return;
+    juce::PopupMenu menu;
+    std::vector<std::unique_ptr<juce::XmlElement>> sounds;
+    juce::String current;
+    // The sounds of the import the current one came from (its record), or of every import kept.
+    std::vector<juce::File> records;
+    if (const auto definition = engine->sampleSourceDefinition())
+    {
+        current = definition->getStringAttribute ("name");
+        records.push_back (importFolder (host).getChildFile (definition->getStringAttribute ("import")));
+    }
+    else
+        for (const auto& f : importFolder (host).findChildFiles (juce::File::findFiles, false, "*.import.xml"))
+            records.push_back (f);
+    for (const auto& file : records)
+        if (const auto record = juce::XmlDocument::parse (file))
+        {
+            menu.addSectionHeader (record->getStringAttribute ("collection", file.getFileNameWithoutExtension()));
+            for (const auto* d : record->getChildWithTagNameIterator ("SampleSource"))
+            {
+                const auto name = d->getStringAttribute ("name");
+                sounds.push_back (std::make_unique<juce::XmlElement> (*d));
+                menu.addItem (static_cast<int> (sounds.size()), name, true, name == current);
+            }
+        }
+    if (sounds.empty())
+        menu.addItem (-3, "No imported sounds yet", false, false);
+    menu.addSeparator();
+    menu.addItem (-1, juce::String::fromUTF8 ("Import Kontakt patch\xe2\x80\xa6"));
+    menu.addItem (-2, "Remove", engine->sampleSourceDefinition() != nullptr);
+    auto shared = std::make_shared<std::vector<std::unique_ptr<juce::XmlElement>>> (std::move (sounds));
+    auto* h = &host;
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target), [h, shared] (int picked) {
+        if (picked > 0 && picked <= static_cast<int> (shared->size()))
+            chooseSound (*h, *(*shared)[static_cast<std::size_t> (picked - 1)]);
+        else if (picked == -1)
+            runKontaktImport (*h);
+        else if (picked == -2)
+            if (auto* e = engineOf (*h))
+                e->setSampleSourceDefinition (nullptr, {});
+    });
 }
 
 std::unique_ptr<MiniPanel> createSoundPopover (InstrumentHost& host)

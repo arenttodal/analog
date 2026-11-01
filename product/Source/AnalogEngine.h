@@ -35,12 +35,18 @@ public:
     juce::StringArray boundParameters() const override { return params::engineParameterIds(); }
     void prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters) override;
     int latencySamples() const override { return synth.latencySamples(); }
-    /** Layer B is ORGANIC (the shell's hybrid layer): its model reaches every voice. */
+    /** Layer B is the hybrid (the shell's hybrid layer): its recording reaches every voice
+        while the hybrid is a SAMPLE (process() hands it over; another type keeps it dormant). */
     void setSource (int layer, const osp::plugin::LoadedInstrument* source) noexcept override
     {
         if (layer == 1)
-            synth.setOrganic (source != nullptr ? source->model.get() : nullptr);
+            shellRecording = source != nullptr ? source->model.get() : nullptr;
     }
+    void attachParameters (juce::AudioProcessorValueTreeState& parameters) override;
+    /** Card C's type (analog.hybrid.type): only the selected one plays. Message thread. */
+    HybridType hybridType() const noexcept;
+    void setHybridType (HybridType type);
+    bool engineSourceIsPeriodic (int layer) const override { return layer == 1 && hybridType() == HybridType::oscillator; }
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept override;
     int activeNotes() const noexcept override { return synth.activeVoices(); }
     void setShaperPattern (const osp::ShaperPattern& pattern) noexcept override { shaperPattern = pattern; }
@@ -63,6 +69,8 @@ public:
     }
 
     void sourcePublished (int layer, std::shared_ptr<const osp::plugin::LoadedInstrument> source) override;
+    /** OSC 3 (the hybrid as an oscillator) alone, as its card shows it; NOISE's picture. */
+    static std::vector<float> noisePictureOf (const Patch& patch, int points = 256);
     /** "morph": MORPH's state in words (empty: ready) for its popover. */
     juce::String status (const juce::String& topic) const override;
     ~AnalogEngine() override;
@@ -100,6 +108,14 @@ public:
     static std::vector<float> oscillatorPictureOf (Patch patch, int slot, int points = 256);
 
 private:
+    // State version 8: card C's sources as handed to the synth (audio thread): the shell's
+    // recording and the imported zones, each only while its type is selected.
+    const osp::InstrumentModel* shellRecording = nullptr;
+    const osp::InstrumentModel* recordingApplied = nullptr;
+    const SampleSource* zonesApplied = nullptr;
+    juce::AudioProcessorValueTreeState* state = nullptr;
+    std::atomic<float>* hybridTypeValue = nullptr;
+
     int oversamplingFactor;
     Synth synth;
     params::Reader reader;

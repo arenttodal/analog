@@ -202,11 +202,6 @@ const juce::StringArray& engineParameterIds()
         static const juce::StringArray notPlayedYet = [] {
             juce::StringArray n;
             n.add ("layerB.pan");   // (each voice is one mono signal through its filter: ORGANIC takes its place)
-            // State version 8's hybrid types (OSC 3, NOISE): offered once the engine plays them.
-            for (const auto& id : { hybridType, osc3Model, osc3Wave, osc3Octave, osc3Coarse, osc3Fine, osc3Width, lfoWidth3, osc3DcoSaw, osc3DcoPulse,
-                                    osc3DcoSub, osc3DcoPwmSource, osc3DcoPwmDepth, osc3WideWave, osc3WideShape, osc3WideSpread, hybridNoiseColor,
-                                    hybridNoiseTone, hybridNoiseMovement })
-                n.add (id);
             // KEY DNA before state version 6 (ANDOR OSP's editor plays it now; these stay,
             // frozen, for older sessions' migration).
             for (const auto& id : { keyDna, keyDnaAmount, keyDnaIndividuality, keyDnaPosition, keyDnaSize, keyDnaDensity, keyDnaSpread, keyDnaTune })

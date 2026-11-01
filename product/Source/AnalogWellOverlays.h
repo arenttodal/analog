@@ -30,4 +30,16 @@ std::unique_ptr<osp::plugin::WellOverlay> createOscillatorOverlay (osp::plugin::
 /** What the oscillator overlay depends on (its model): the shell remakes it when this changes. */
 juce::String oscillatorOverlayKey (osp::plugin::InstrumentHost& host, int slot);
 
+/**
+    Card C's well: its TYPE dropdown (SAMPLE / OSCILLATOR / NOISE / INSTRUMENT PATCH), always
+    shown at the top right, and the selected type's own controls revealed on hover:
+    OSCILLATOR  OSC 3, as OSC 1 and OSC 2 (its MODEL dropdown beside the type);
+    NOISE       COLOR, TONE, MOVEMENT;
+    INSTRUMENT  SOUND (the imported sounds, import, remove) and the sound's name;
+    SAMPLE      nothing more: ANDOR OSP's own controls (LOOP, GRANULAR, its grains) are the card's.
+    Remade when the type (or OSC 3's model) changes.
+*/
+std::unique_ptr<osp::plugin::WellOverlay> createHybridOverlay (osp::plugin::InstrumentHost& host);
+juce::String hybridOverlayKey (osp::plugin::InstrumentHost& host);
+
 } // namespace andor::analog
