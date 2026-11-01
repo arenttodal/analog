@@ -1291,22 +1291,83 @@ TEST_CASE ("analog: the FILTER popover shows each model's own controls, and fits
         INFO ("popover " << area.toString() << " in " << ui.getLocalBounds().toString());
         CHECK (ui.getLocalBounds().contains (area));
     };
-    // FILTER: the OTA's settings only with the OTA; the Juno variant where it acts.
+    // Its pages (FILTER, VOICE, PAIR): the tab row, moved with the arrow keys as a musician would.
+    auto tabs = [&ui]() -> juce::Component* {
+        juce::Component* found = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (child->getTitle() == "Pages")
+                    found = child;
+                find (*child);
+            }
+        };
+        if (auto* panel = ui.openPopupPanel())
+            find (*panel);
+        return found;
+    };
+    // How many of the page's controls show (its hierarchy: the first page kept short).
+    auto shownControls = [&ui] {
+        int n = 0;
+        auto* panel = ui.openPopupPanel();
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (! child->isVisible())
+                    continue;
+                if (osp::plugin::binding::tagsOf (*child).size() > 0 || dynamic_cast<osp::plugin::MiniKnob*> (child) != nullptr)
+                    ++n;
+                else
+                    walk (*child);
+            }
+        };
+        walk (*panel);
+        return n;
+    };
     ui.openPopup (2);
+    REQUIRE (tabs() != nullptr);
+    // FILTER (the first page): its type, its four knobs, its envelope, its drive; the OTA's
+    // settings only with the OTA. Nothing else.
     fits();
+    CHECK (shown (params::filterModel));
+    CHECK (shown (params::resonance));
+    CHECK (shown (params::filterAttack));
+    CHECK (shown (params::filterDrive));
     CHECK_FALSE (shown (params::otaCharacter));
-    CHECK_FALSE (shown (params::junoVariant));
+    CHECK_FALSE (shown (params::chorusMode));
+    CHECK_FALSE (shown (params::sync));
+    CHECK (shownControls() <= 12);
     setValue (p, params::filterModel, 1.0f);
     ui.refreshNow();
     CHECK (shown (params::otaCharacter));
     CHECK (shown (params::otaSlope));
     CHECK (shown (params::junoVariant));
-    setValue (p, params::otaCharacter, 1.0f);   // JUPITER: no Juno variant
-    ui.refreshNow();
-    CHECK_FALSE (shown (params::junoVariant));
-    CHECK (shown (params::chorusMode));
-    CHECK (shown (params::lfoDelay));
     fits();
+    // VOICE: the amplifier, the voices, LFO 1's depths, the chorus, the character.
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
+    ui.refreshNow();
+    CHECK (shown (params::vcaMode));
+    CHECK (shown (params::polyphony));
+    CHECK (shown (params::lfoDelay));
+    CHECK (shown (params::chorusMode));
+    CHECK (shown (params::analogAmount));
+    CHECK_FALSE (shown (params::resonance));
+    fits();
+    // PAIR: what the two oscillators do together.
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
+    ui.refreshNow();
+    CHECK (shown (params::sync));
+    CHECK (shown (params::ringMix));
+    CHECK (shown (params::polyModEnv));
+    CHECK (shown (params::polyModToCutoff));
+    CHECK (shown (params::noise));
+    CHECK_FALSE (shown (params::vcaMode));
+    fits();
+    // Every control the old single page had is still on one of the three.
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::leftKey));
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::leftKey));
+    ui.refreshNow();
+    CHECK (shown (params::resonance));   // (back on FILTER)
 }
 
 TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscillators, plays it, recalls it", "[analog][organic]")
@@ -2938,8 +2999,23 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
                 shoot ("three-1448-7-eq-" + osp::plugin::InstrumentHost::shownLayerName (layer));
                 ui.engineCard (layer).onEqToggle (layer, false);
             }
-            ui.openPopup (2);   // FILTER: the oscillator pair's settings now there
-            shoot ("three-1448-8-filter-popover");
+            ui.openPopup (2);   // FILTER: its three pages
+            for (int page = 0; page < 3; ++page)
+            {
+                shoot ("three-1448-8-filter-popover-" + juce::String (page + 1));
+                std::function<juce::Component* (juce::Component&)> find = [&] (juce::Component& c) -> juce::Component* {
+                    for (auto* child : c.getChildren())
+                    {
+                        if (child->getTitle() == "Pages")
+                            return child;
+                        if (auto* f = find (*child))
+                            return f;
+                    }
+                    return nullptr;
+                };
+                if (auto* t = find (*ui.openPopupPanel()))
+                    t->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
+            }
             ui.closePopup();
         }
         setValue (p, osc3Model, 0.0f);
