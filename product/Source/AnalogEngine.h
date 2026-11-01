@@ -29,7 +29,9 @@ public:
     explicit AnalogEngine (int oversampling = 4);
 
     Description describe() const override;
-    juce::String generatorName() const override { return "OSCILLATORS"; }
+    juce::String generatorName() const override { return "OSC 1"; }
+    /** Three engines: card B is OSC 2 (the shell's layer C). */
+    juce::String layerGeneratorName (int layer) const override { return layer == 0 ? generatorName() : (layer == 2 ? juce::String ("OSC 2") : juce::String()); }
     juce::StringArray boundParameters() const override { return params::engineParameterIds(); }
     void prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters) override;
     int latencySamples() const override { return synth.latencySamples(); }
@@ -93,6 +95,9 @@ public:
 
     /** One period of the oscillators' mix for a patch (the card's picture). */
     static std::vector<float> pictureOf (const Patch& patch, int points = 256);
+    /** One oscillator alone (slot 1 or 2: its card's picture): at full level, the other silent,
+        OSC 2 on its own period, OSC 1 still synced to OSC 2 when SYNC is on (its synced shape). */
+    static std::vector<float> oscillatorPictureOf (Patch patch, int slot, int points = 256);
 
 private:
     int oversamplingFactor;

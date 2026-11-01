@@ -36,6 +36,8 @@ enum class NoiseColor { white, juno };
 enum class MorphMethod { imprint, fuse, weave };
 enum class MorphCarrier { osc1, osc2, both };
 enum class MorphOutput { morphOnly, layered };
+/** State version 8: what card C (the hybrid slot) plays; only the selected one sounds. */
+enum class HybridType { sample, oscillator, noise, instrumentPatch };
 
 /** A DCO slot's settings (its pulse width is the slot's WIDTH, its tuning and level the slot's). */
 struct DcoSettings
@@ -254,6 +256,33 @@ struct Patch
         DAMPEN's curve over the keys is the synth's (the shell's DAMPEN curves). */
     osp::eq::Settings eqA, eqB;
     osp::dampen::Settings dampenA, dampenB;
+
+    // State version 8: three engines (docs/THREE_ENGINE_ARCHITECTURE.md). Card A is OSC 1,
+    // card B OSC 2 (the shell's layer C), card C the hybrid (the shell's layer B: ORGANIC).
+    double osc1FineCents = 0.0;   ///< OSC 1's own DETUNE (OSC 2 had one: osc2FineCents)
+    /** Each oscillator's card M / S, resolved (a solo anywhere silences the cards without one).
+        Neutral by default: the legacy path, untouched. */
+    bool osc1Heard = true, osc2Heard = true;
+    /** Card B's EQ and DAMPEN (the shell's layerC.*): OSC 2's part (and ring), as card A's
+        is now OSC 1's (and the noise mixer's). */
+    osp::eq::Settings eqC;
+    osp::dampen::Settings dampenC;
+    HybridType hybridType = HybridType::sample;
+    /** OSC 3 (the hybrid as an oscillator): the slots' models and code, no sync or Poly Mod. */
+    OscModel osc3Model = OscModel::classic;
+    Osc2Wave osc3Wave = Osc2Wave::saw;
+    int osc3Octave = 0;
+    double osc3Coarse = 0.0, osc3FineCents = 0.0;
+    double osc3Width = 0.5;
+    double lfoWidth3 = 0.0;       ///< LFO 1 to OSC 3's pulse width (-0.45..0.45)
+    DcoSettings dco3;
+    WideSettings wide3;
+    /** NOISE (the hybrid as a noise source): the voice's own seeded noise, COLOR (white or the
+        Juno's), TONE (a low-pass, 0..1 of 200 Hz..18 kHz), MOVEMENT (a slow seeded drift of its
+        level, 0..1). It does not follow the key. */
+    NoiseColor hybridNoiseColor = NoiseColor::white;
+    double hybridNoiseTone = 1.0;
+    double hybridNoiseMovement = 0.0;
 };
 
 } // namespace andor::analog

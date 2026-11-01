@@ -58,6 +58,16 @@ namespace
         iEqA, iEqALast = iEqA + 18, iEqB, iEqBLast = iEqB + 18,
         iDampenA, iDampenALast = iDampenA + 4, iDampenB, iDampenBLast = iDampenB + 4,
         iKeyDnaCardAmount,
+        // State version 8: three engines. Card B (OSC 2) is the shell's layer C: its M / S, EQ
+        // and DAMPEN; OSC 1's own fine tune; the hybrid's type, OSC 3, NOISE.
+        iOsc2Mute, iOsc2Solo,
+        iEqC, iEqCLast = iEqC + 18,
+        iDampenC, iDampenCLast = iDampenC + 4,
+        iOsc1Fine, iHybridType,
+        iOsc3Model, iOsc3Wave, iOsc3Octave, iOsc3Coarse, iOsc3Fine, iOsc3Width, iLfoWidth3,
+        iOsc3DcoSaw, iOsc3DcoPulse, iOsc3DcoSub, iOsc3DcoPwmSource, iOsc3DcoPwmDepth,
+        iOsc3WideWave, iOsc3WideShape, iOsc3WideSpread,
+        iHybridNoiseColor, iHybridNoiseTone, iHybridNoiseMovement,
         count
     };
 
@@ -116,6 +126,17 @@ namespace
             // KEY DNA (state version 6): ANDOR OSP's own, its editor's settings in the shell's
             // state and its AMOUNT this host parameter.
             l.add (osp::plugin::InstrumentHost::keyDnaAmountId (0));
+            // State version 8.
+            l.add ("layerC.mute");
+            l.add ("layerC.solo");
+            for (const auto& name : osp::plugin::InstrumentHost::eqParameterNames())
+                l.add (osp::plugin::InstrumentHost::eqParameterId (2, name));
+            for (const auto& name : osp::plugin::InstrumentHost::dampenParameterNames())
+                l.add (osp::plugin::InstrumentHost::dampenParameterId (2, name));
+            for (const auto& id : { osc1Fine, hybridType, osc3Model, osc3Wave, osc3Octave, osc3Coarse, osc3Fine, osc3Width, lfoWidth3,
+                                    osc3DcoSaw, osc3DcoPulse, osc3DcoSub, osc3DcoPwmSource, osc3DcoPwmDepth, osc3WideWave, osc3WideShape,
+                                    osc3WideSpread, hybridNoiseColor, hybridNoiseTone, hybridNoiseMovement })
+                l.add (id);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -151,6 +172,17 @@ namespace
     }
 }
 
+const juce::StringArray& version8Ids()
+{
+    static const juce::StringArray list = [] {
+        juce::StringArray l;
+        for (int i = iOsc1Fine; i < count; ++i)
+            l.add (ids()[i]);
+        return l;
+    }();
+    return list;
+}
+
 const juce::StringArray& version4Ids()
 {
     static const juce::StringArray list = [] {
@@ -170,6 +202,11 @@ const juce::StringArray& engineParameterIds()
         static const juce::StringArray notPlayedYet = [] {
             juce::StringArray n;
             n.add ("layerB.pan");   // (each voice is one mono signal through its filter: ORGANIC takes its place)
+            // State version 8's hybrid types (OSC 3, NOISE): offered once the engine plays them.
+            for (const auto& id : { hybridType, osc3Model, osc3Wave, osc3Octave, osc3Coarse, osc3Fine, osc3Width, lfoWidth3, osc3DcoSaw, osc3DcoPulse,
+                                    osc3DcoSub, osc3DcoPwmSource, osc3DcoPwmDepth, osc3WideWave, osc3WideShape, osc3WideSpread, hybridNoiseColor,
+                                    hybridNoiseTone, hybridNoiseMovement })
+                n.add (id);
             // KEY DNA before state version 6 (ANDOR OSP's editor plays it now; these stay,
             // frozen, for older sessions' migration).
             for (const auto& id : { keyDna, keyDnaAmount, keyDnaIndividuality, keyDnaPosition, keyDnaSize, keyDnaDensity, keyDnaSpread, keyDnaTune })
@@ -397,6 +434,51 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent4 (morphDetail, "Morph Detail", m.detail);
     onOff4 (morphLevelMatch, "Morph Level Match", m.levelMatch);
     choice4 (morphOutput, "Morph Output", { "Morph Only", "Layered" }, static_cast<int> (m.output));
+    // State version 8: three engines (appended; the shell's layerC.* exist already).
+    auto v8 = [] (const juce::String& name) { return juce::ParameterID { name, 8 }; };
+    auto percent8 = [&] (const juce::String& name, const char* title, double value) {
+        layout.add (std::make_unique<Float> (v8 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+                                             Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    auto choice8 = [&] (const juce::String& name, const char* title, juce::StringArray items, int value) {
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v8 (name), title, items, value));
+    };
+    auto onOff8 = [&] (const juce::String& name, const char* title, bool value) {
+        layout.add (std::make_unique<juce::AudioParameterBool> (v8 (name), title, value));
+    };
+    auto integer8 = [&] (const juce::String& name, const char* title, int lo, int hi, int value, const char* unit) {
+        layout.add (std::make_unique<juce::AudioParameterInt> (v8 (name), title, lo, hi, value,
+                                                               juce::AudioParameterIntAttributes().withLabel (unit).withStringFromValueFunction ([unit] (int v, int) {
+                                                                   return (v > 0 ? "+" : "") + juce::String (v) + " " + unit;
+                                                               })));
+    };
+    auto bipolar8 = [&] (const juce::String& name, const char* title, float range, double value, const char* unit, int decimals) {
+        layout.add (std::make_unique<Float> (v8 (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
+                                             Attributes().withLabel (unit).withStringFromValueFunction ([unit, decimals] (float v, int) {
+                                                 return signedText (v, unit, decimals);
+                                             })));
+    };
+    bipolar8 (osc1Fine, "Osc 1 Fine", 100.0f, d.osc1FineCents, "ct", 0);
+    choice8 (hybridType, "Hybrid Type", { "Sample", "Oscillator", "Noise", "Instrument Patch" }, static_cast<int> (d.hybridType));
+    choice8 (osc3Model, "Osc 3 Model", models, static_cast<int> (d.osc3Model));
+    choice8 (osc3Wave, "Osc 3 Wave", { "Saw", "Triangle", "Pulse", "Saw+Tri", "Saw+Pulse", "Tri+Pulse", "All" }, static_cast<int> (d.osc3Wave));
+    integer8 (osc3Octave, "Osc 3 Octave", -2, 2, d.osc3Octave, "oct");
+    integer8 (osc3Coarse, "Osc 3 Coarse", -12, 12, static_cast<int> (d.osc3Coarse), "st");
+    bipolar8 (osc3Fine, "Osc 3 Fine", 100.0f, d.osc3FineCents, "ct", 0);
+    layout.add (std::make_unique<Float> (v8 (osc3Width), "Osc 3 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc3Width),
+                                         Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    bipolar8 (lfoWidth3, "LFO to Osc 3 Width", 45.0f, 100.0 * d.lfoWidth3, "%", 0);
+    onOff8 (osc3DcoSaw, "Osc 3 DCO Saw", d.dco3.saw);
+    onOff8 (osc3DcoPulse, "Osc 3 DCO Pulse", d.dco3.pulse);
+    percent8 (osc3DcoSub, "Osc 3 DCO Sub", d.dco3.subLevel);
+    choice8 (osc3DcoPwmSource, "Osc 3 DCO PWM Source", pwmSources, static_cast<int> (d.dco3.pwmSource));
+    percent8 (osc3DcoPwmDepth, "Osc 3 DCO PWM Depth", d.dco3.pwmDepth);
+    choice8 (osc3WideWave, "Osc 3 Wide Wave", wideWaves, static_cast<int> (d.wide3.wave));
+    percent8 (osc3WideShape, "Osc 3 Wide Shape", d.wide3.shape);
+    percent8 (osc3WideSpread, "Osc 3 Super Saw Spread", d.wide3.spread);
+    choice8 (hybridNoiseColor, "Hybrid Noise Color", { "White", "Juno" }, static_cast<int> (d.hybridNoiseColor));
+    percent8 (hybridNoiseTone, "Hybrid Noise Tone", d.hybridNoiseTone);
+    percent8 (hybridNoiseMovement, "Hybrid Noise Movement", d.hybridNoiseMovement);
 }
 
 //==============================================================================
@@ -632,6 +714,29 @@ Patch Reader::readWith (const float* raw) const noexcept
     };
     cardDampen (iDampenA, p.dampenA);
     cardDampen (iDampenB, p.dampenB);
+    // State version 8: card B (OSC 2) is the shell's layer C.
+    p.eqC = cardEq (iEqC);
+    cardDampen (iDampenC, p.dampenC);
+    p.osc1FineCents = v (iOsc1Fine);
+    p.hybridType = static_cast<HybridType> (index (iHybridType, 4));
+    p.osc3Model = static_cast<OscModel> (index (iOsc3Model, 3));
+    p.osc3Wave = static_cast<Osc2Wave> (index (iOsc3Wave, 7));
+    p.osc3Octave = juce::roundToInt (v (iOsc3Octave));
+    p.osc3Coarse = std::round (v (iOsc3Coarse));
+    p.osc3FineCents = v (iOsc3Fine);
+    p.osc3Width = 0.01 * v (iOsc3Width);
+    p.lfoWidth3 = 0.01 * v (iLfoWidth3);
+    p.dco3.saw = on (iOsc3DcoSaw);
+    p.dco3.pulse = on (iOsc3DcoPulse);
+    p.dco3.subLevel = 0.01 * v (iOsc3DcoSub);
+    p.dco3.pwmSource = static_cast<PwmSource> (index (iOsc3DcoPwmSource, 3));
+    p.dco3.pwmDepth = 0.01 * v (iOsc3DcoPwmDepth);
+    p.wide3.wave = static_cast<WideWave> (index (iOsc3WideWave, 5));
+    p.wide3.shape = 0.01 * v (iOsc3WideShape);
+    p.wide3.spread = 0.01 * v (iOsc3WideSpread);
+    p.hybridNoiseColor = static_cast<NoiseColor> (index (iHybridNoiseColor, 2));
+    p.hybridNoiseTone = 0.01 * v (iHybridNoiseTone);
+    p.hybridNoiseMovement = 0.01 * v (iHybridNoiseMovement);
     p.blend = 0.01 * v (iBlend);
     p.tone = 0.01 * v (iTone);
     p.lfoAmount = 0.01 * v (iMotion);
@@ -801,10 +906,16 @@ Patch Reader::readWith (const float* raw) const noexcept
     o.loop = on (iOrganicLoop);
     o.follow = on (iOrganicFollow);
     o.reverse = on (iOrganicReverse);
-    const bool soloA = on (iGeneratorSolo), soloB = on (iOrganicSolo);
-    o.heard = ! on (iOrganicMute) && ! (soloA && ! soloB);
-    if (soloB && ! soloA)
-        p.mute = true;
+    // Each card's M / S (state version 8: A OSC 1, B OSC 2 (layer C), C the hybrid (layer B)):
+    // a solo anywhere leaves only the soloed cards heard, as ANDOR OSP's layers. The noise
+    // mixer goes with OSC 1 (card A's part). p.mute: the whole analog side silent (both
+    // oscillators), the legacy fast path.
+    const bool soloA = on (iGeneratorSolo), soloB = on (iOrganicSolo), soloC = on (iOsc2Solo);
+    const bool anySolo = soloA || soloB || soloC;
+    p.osc1Heard = anySolo ? soloA : ! on (iMute);
+    p.osc2Heard = anySolo ? soloC : ! on (iOsc2Mute);
+    o.heard = anySolo ? soloB : ! on (iOrganicMute);
+    p.mute = ! p.osc1Heard && ! p.osc2Heard;
     o.blend = std::clamp (v (iLayerBlend), 0.0, 1.0);
     auto& m = p.morph;
     m.enabled = on (iMorphEnabled);
@@ -1027,6 +1138,27 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iMorphDetail, 100.0 * mo.detail);
     put (iMorphLevelMatch, mo.levelMatch ? 1.0 : 0.0);
     put (iMorphOutput, static_cast<int> (mo.output));
+    // State version 8.
+    put (iOsc1Fine, p.osc1FineCents);
+    put (iHybridType, static_cast<int> (p.hybridType));
+    put (iOsc3Model, static_cast<int> (p.osc3Model));
+    put (iOsc3Wave, static_cast<int> (p.osc3Wave));
+    put (iOsc3Octave, p.osc3Octave);
+    put (iOsc3Coarse, p.osc3Coarse);
+    put (iOsc3Fine, p.osc3FineCents);
+    put (iOsc3Width, 100.0 * p.osc3Width);
+    put (iLfoWidth3, 100.0 * p.lfoWidth3);
+    put (iOsc3DcoSaw, p.dco3.saw ? 1.0 : 0.0);
+    put (iOsc3DcoPulse, p.dco3.pulse ? 1.0 : 0.0);
+    put (iOsc3DcoSub, 100.0 * p.dco3.subLevel);
+    put (iOsc3DcoPwmSource, static_cast<int> (p.dco3.pwmSource));
+    put (iOsc3DcoPwmDepth, 100.0 * p.dco3.pwmDepth);
+    put (iOsc3WideWave, static_cast<int> (p.wide3.wave));
+    put (iOsc3WideShape, 100.0 * p.wide3.shape);
+    put (iOsc3WideSpread, 100.0 * p.wide3.spread);
+    put (iHybridNoiseColor, static_cast<int> (p.hybridNoiseColor));
+    put (iHybridNoiseTone, 100.0 * p.hybridNoiseTone);
+    put (iHybridNoiseMovement, 100.0 * p.hybridNoiseMovement);
     return m;
 }
 

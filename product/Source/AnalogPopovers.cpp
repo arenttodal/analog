@@ -280,6 +280,28 @@ namespace
         p->knob (lfoCutoff, "CUTOFF");
         p->knob (lfoDelay, "DELAY");
         p->knob (lfoRise, "RISE");
+        p->knob (lfoPitch1, "PITCH 1");
+        p->knob (lfoPitch2, "PITCH 2");
+        // What the two oscillators do together (three engines: each oscillator's own sound is in
+        // its card's well; these were the workbench's PAIR).
+        p->row ("OSCILLATOR PAIR");
+        p->toggle (sync, "SYNC", 1.0f, "Hard sync: oscillator 2 restarts oscillator 1 every cycle (tune oscillator 1 up for the classic sweep)");
+        p->knob (ringMix, "RING");
+        p->knob (blend, "BLEND");
+        p->row ("POLY MOD");
+        p->knob (polyModEnv, "FILT ENV");
+        p->knob (polyModOsc2, "OSC 2");
+        p->toggle (polyModToPitch1, "PITCH 1", 1.2f, "Poly Mod moves oscillator 1's pitch (FM with oscillator 2, sweeps with the envelope)");
+        p->toggle (polyModToWidth1, "WIDTH 1", 1.2f, "Poly Mod moves oscillator 1's pulse width");
+        p->toggle (polyModToCutoff, "FILTER", 1.2f, "Poly Mod moves the filter's cutoff");
+        p->row ("VOICES");
+        p->knob (polyphony, "VOICES");
+        p->toggle (unison, "UNISON", 1.2f, "Every voice on one note, detuned: a thick mono sound");
+        p->knob (unisonDetune, "DETUNE");
+        p->knob (spread, "SPREAD");
+        p->row ("NOISE  (beside the oscillators)");
+        p->knob (noise, "LEVEL");
+        p->segments (noiseColor, { "WHITE", "JUNO" }, 2.0f, "The noise's colour: white, or the Juno's darker hiss");
         p->row ("CHORUS  (after the voices)");
         p->segments (chorusMode, { "OFF", "I", "II", "I+II" }, 3.0f, "A Juno-style bucket-brigade chorus on the whole sound");
         p->toggle (chorusNoise, "HISS", 1.0f, "The chorus' own faint hiss");

@@ -128,6 +128,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
             z.prepare (internalRate);
         v.eqA.prepare (internalRate);
         v.eqB.prepare (internalRate);
+        v.eqC.prepare (internalRate);
         v.morph.prepare (internalRate, oversampling);
     }
     // The mode engines' "recording" on a live voice: only its length, rate and root are read.
@@ -280,7 +281,7 @@ void Synth::setLfoCurve (const osp::mod::Curve& curve) noexcept
 
 void Synth::setDampenCurve (int layer, const osp::mod::Curve& curve) noexcept
 {
-    dampenCurves[static_cast<std::size_t> (std::clamp (layer, 0, 1))] = osp::mod::compileCurve (curve);
+    dampenCurves[static_cast<std::size_t> (std::clamp (layer, 0, 2))] = osp::mod::compileCurve (curve);
 }
 
 void Synth::setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept
@@ -543,8 +544,10 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.highPass.reset();
         v.eqA.reset();
         v.eqB.reset();
+        v.eqC.reset();
         v.dampenA.reset();
         v.dampenB.reset();
+        v.dampenC.reset();
         v.dampenFresh = true;
         v.highPassTail = 0;
         v.osc2Out = 0.0f;
@@ -1096,7 +1099,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     // a crystal; what is left is the divider's and the waveshaper's own small spread).
     const double tolerance1 = p.osc1Model == OscModel::dco ? 0.2 : 1.0, wander1 = p.osc1Model == OscModel::dco ? 0.1 : 1.0;
     const double tolerance2 = p.osc2Model == OscModel::dco ? 0.2 : 1.0, wander2 = p.osc2Model == OscModel::dco ? 0.1 : 1.0;
-    const double note1 = common + 12.0 * p.osc1Octave + p.osc1Coarse + a * (0.10 * tolerance1 * d.pitch1 + 0.03 * wander1 * d.wander) + lfoD * p.lfoPitch1;
+    const double note1 = common + 12.0 * p.osc1Octave + p.osc1Coarse + a * (0.10 * tolerance1 * d.pitch1 + 0.03 * wander1 * d.wander) + lfoD * p.lfoPitch1
+                         + p.osc1FineCents / 100.0;   // (state version 8: OSC 1's own DETUNE; 0 adds nothing)
     const double base2 = p.osc2KeyTrack ? common : 60.0 + v.unisonOffset + performed;
     const double note2 = base2 + 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2 - 0.03 * wander2 * d.wander)
                          + lfoD * p.lfoPitch2 - (p.osc2LowFrequency ? 12.0 * lowFrequencyOctaves : 0.0);
@@ -1117,6 +1121,11 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     if (! p.osc1Enabled)
         v.gain1 = 0.0f;
     if (! p.osc2Enabled)
+        v.gain2 = 0.0f;
+    // State version 8: each oscillator's card M / S (the noise mixer goes with OSC 1's card).
+    if (! p.osc1Heard)
+        v.gain1 = v.gainNoise = 0.0f;
+    if (! p.osc2Heard)
         v.gain2 = 0.0f;
 
     // State version 4: the slots' models (CLASSIC + CLASSIC, no ring, white noise: the
@@ -1327,10 +1336,13 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     const int internalSamples = controlPeriod * oversampling;
     v.eqA.control (p.eqA, internalSamples);
     v.eqB.control (p.eqB, internalSamples);
+    v.eqC.control (p.eqC, internalSamples);
     const double dampenSmoothing = 1.0 - std::exp (-static_cast<double> (controlPeriod) / (0.01 * hostRate));
     v.dampenA.control (p.dampenA, dampenCurves[0], v.note, internalRate, dampenSmoothing, v.dampenFresh);
     v.dampenB.control (p.dampenB, dampenCurves[1], v.note, internalRate, dampenSmoothing, v.dampenFresh);
+    v.dampenC.control (p.dampenC, dampenCurves[2], v.note, internalRate, dampenSmoothing, v.dampenFresh);
     v.dampenFresh = false;
+    v.splitCards = ! legacyCards && (v.eqA.active() || v.dampenA.active() || v.eqC.active() || v.dampenC.active());
 }
 
 void Synth::updateDrift (Voice& v) noexcept
@@ -1572,10 +1584,15 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
 
     const float c1 = o1 * v.gain1, c2 = v.osc2Out * v.gain2;
     float mix = c1 + c2;
+    float partB = c2;   // (state version 8: OSC 2's part, card B's, when the cards split)
     // RING MOD: OSC 1 x OSC 2, crossfaded in (never a loud third voice): the product's RMS of
     // two full-scale saws is a third against a saw's 0.58, hence the 1.7; the slots' levels set it.
     if (v.ringNow > 0.0f)
-        mix += v.ringNow * (1.7f * o1 * v.osc2Out * 0.5f * (v.gain1 + v.gain2) - mix);
+    {
+        const float ringed = 1.7f * o1 * v.osc2Out * 0.5f * (v.gain1 + v.gain2);
+        mix += v.ringNow * (ringed - mix);
+        partB = (1.0f - v.ringNow) * c2 + v.ringNow * ringed;   // (the ring goes with card B)
+    }
     if (v.gainNoise > 0.0f)
     {
         float n = static_cast<float> (v.noise.bipolar());
@@ -1614,8 +1631,10 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
         else
             organic = o;
     }
-    // Each card's DAMPEN and EQ on its own part (skipped while off: nothing touched).
-    mix = cardA (v, mix);
+    // Each card's DAMPEN and EQ on its own part (skipped while off: nothing touched). With
+    // card A's or B's on, each oscillator through its own (OSC 1 and the noise: A; OSC 2 and
+    // the ring: B); else the sum through A exactly as before.
+    mix = v.splitCards ? cardA (v, mix - partB) + cardC (v, partB) : cardA (v, mix);
     if (v.organicOn)
         mix += cardB (v, organic);
     return mix;
@@ -1627,6 +1646,15 @@ float Synth::cardA (Voice& v, float x) noexcept
         x = v.dampenA.process (x);
     if (v.eqA.active())
         x = v.eqA.process (x);
+    return x;
+}
+
+float Synth::cardC (Voice& v, float x) noexcept
+{
+    if (v.dampenC.active())
+        x = v.dampenC.process (x);
+    if (v.eqC.active())
+        x = v.eqC.process (x);
     return x;
 }
 
@@ -1675,6 +1703,14 @@ float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
         v.phase1 = osc::walk (v.phase1, dt1, width1, w1, 1.0, 0.0, v.line1, wrap1);
     const float o1 = v.line1.end (osc::naive (w1, v.phase1, width1));
 
+    if (v.splitCards)
+    {
+        // Each oscillator through its own card (A: OSC 1 and the noise; B: OSC 2).
+        float a = o1 * v.gain1;
+        if (v.gainNoise > 0.0f)
+            a += v.gainNoise * static_cast<float> (v.noise.bipolar());
+        return liveStages (v, (cardA (v, a) + cardC (v, v.osc2Out * v.gain2)) * filterInputGain);
+    }
     float mix = o1 * v.gain1 + v.osc2Out * v.gain2;
     if (v.gainNoise > 0.0f)
         mix += v.gainNoise * static_cast<float> (v.noise.bipolar());

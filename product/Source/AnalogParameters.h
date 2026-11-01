@@ -120,6 +120,29 @@ namespace andor::analog::params
     inline const juce::String chorusNoise = "analog.juno.chorusNoise";
     inline const juce::String osc1Enabled = "analog.osc1.enabled";
     inline const juce::String osc2Enabled = "analog.osc2.enabled";
+    // State version 8: three engines (docs/THREE_ENGINE_ARCHITECTURE.md).
+    inline const juce::String osc1Fine = "analog.osc1.fine";
+    inline const juce::String hybridType = "analog.hybrid.type";
+    inline const juce::String osc3Model = "analog.osc3.model";
+    inline const juce::String osc3Wave = "analog.osc3.wave";
+    inline const juce::String osc3Octave = "analog.osc3.octave";
+    inline const juce::String osc3Coarse = "analog.osc3.coarse";
+    inline const juce::String osc3Fine = "analog.osc3.fine";
+    inline const juce::String osc3Width = "analog.osc3.width";
+    inline const juce::String lfoWidth3 = "analog.lfo.width3";
+    inline const juce::String osc3DcoSaw = "analog.osc3.dco.saw";
+    inline const juce::String osc3DcoPulse = "analog.osc3.dco.pulse";
+    inline const juce::String osc3DcoSub = "analog.osc3.dco.subLevel";
+    inline const juce::String osc3DcoPwmSource = "analog.osc3.dco.pwmSource";
+    inline const juce::String osc3DcoPwmDepth = "analog.osc3.dco.pwmDepth";
+    inline const juce::String osc3WideWave = "analog.osc3.wide.wave";
+    inline const juce::String osc3WideShape = "analog.osc3.wide.shape";
+    inline const juce::String osc3WideSpread = "analog.osc3.wide.spread";
+    inline const juce::String hybridNoiseColor = "analog.hybrid.noise.color";
+    inline const juce::String hybridNoiseTone = "analog.hybrid.noise.tone";
+    inline const juce::String hybridNoiseMovement = "analog.hybrid.noise.movement";
+    /** State version 8's own parameters (appended), for its migration and tests. */
+    const juce::StringArray& version8Ids();
     // ORGANIC is the shell's layer B (ProductInfo::hybridSampleName): its card's own LEVEL,
     // PAN, TUNE, START, LOOP, FOLLOW, REVERSE, M and S (ANDOR OSP's layerB.*, the same
     // meaning) play it; only the root override is the instrument's.
@@ -168,7 +191,7 @@ namespace andor::analog::params
         double keyDnaCardAmount() const noexcept;
 
         // Modulation (real-time safe).
-        static constexpr int maxValues = 256;
+        static constexpr int maxValues = 320;
         using Values = std::array<float, maxValues>;
         /** Every raw value now, in the reader's order. */
         void snapshot (Values& raw) const noexcept;

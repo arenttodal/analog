@@ -98,6 +98,9 @@ public:
     /** A card's DAMPEN curve over the keys (layer 0 the oscillators, 1 ORGANIC: the shell's
         DAMPEN curves). Real-time safe. */
     void setDampenCurve (int layer, const osp::mod::Curve& curve) noexcept;
+    /** Tests only: card A's EQ / DAMPEN on the oscillators' sum, as before state version 8 (to
+        prove a migrated pair, the same curve on both cards, sounds as the old one). */
+    void setLegacyCardsForTest (bool legacy) noexcept { legacyCards = legacy; }
     /** GRANULAR's KEY DNA (each key's own granular identity); recomputed only when it
         changes. Real-time safe. */
     void setKeyDna (const osp::keydna::Settings& settings) noexcept;
@@ -259,7 +262,9 @@ private:
         VoiceHighPass highPass;
         // Each card's EQ and DAMPEN on its own part, before the filter (Patch::eqA ...).
         VoiceEq eqA, eqB;
-        VoiceDampen dampenA, dampenB;
+        VoiceEq eqC;                  ///< state version 8: card B's (OSC 2), the shell's layer C
+        bool splitCards = false;      ///< card A's or B's EQ / DAMPEN on: each oscillator through its own
+        VoiceDampen dampenA, dampenB, dampenC;
         bool dampenFresh = true;      ///< a new note: its damping lands at once
         int highPassTail = 0;         ///< samples the high-pass keeps running after it was switched off
         double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
@@ -359,6 +364,7 @@ private:
     /** A card's DAMPEN and EQ on its own part of the voice (A: the oscillators, B: ORGANIC). */
     float cardA (Voice& v, float x) noexcept;
     float cardB (Voice& v, float x) noexcept;
+    float cardC (Voice& v, float x) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
@@ -416,7 +422,8 @@ private:
 
     // LFO (ANDOR OSP's LFO 1) and transport.
     osp::mod::CurveTable lfoCurve {};
-    std::array<osp::mod::CurveTable, 2> dampenCurves { osp::mod::compileCurve (osp::dampen::defaultCurve()),
+    bool legacyCards = false;
+    std::array<osp::mod::CurveTable, 3> dampenCurves { osp::mod::compileCurve (osp::dampen::defaultCurve()), osp::mod::compileCurve (osp::dampen::defaultCurve()),
                                                        osp::mod::compileCurve (osp::dampen::defaultCurve()) };
     float lfoValue = 0.0f;
     osp::HostTiming timing;

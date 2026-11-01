@@ -473,8 +473,8 @@ void AnalogEngine::setModulationCurve (int index, const osp::mod::Curve& curve) 
 {
     if (index == 0)
         synth.setLfoCurve (curve);   // LFO 1's CUSTOM shape (the synth's one LFO)
-    else if (index == osp::plugin::InstrumentHost::dampenCurveIndex (0) || index == osp::plugin::InstrumentHost::dampenCurveIndex (1))
-        synth.setDampenCurve (index - osp::plugin::InstrumentHost::dampenCurveIndex (0), curve);   // each card's DAMPEN over the keys
+    else if (index >= osp::plugin::InstrumentHost::dampenCurveIndex (0) && index <= osp::plugin::InstrumentHost::dampenCurveIndex (2))
+        synth.setDampenCurve (index - osp::plugin::InstrumentHost::dampenCurveIndex (0), curve);   // each card's DAMPEN over the keys (layer C: OSC 2)
 }
 
 juce::String AnalogEngine::reimaginedModeUnavailable (int, int mode) const
@@ -543,8 +543,33 @@ bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTree
     }
     params::Reader r;
     r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));   // reads only
-    cycle = pictureOf (r.read());
+    // Three engines: each oscillator's card pictures that oscillator alone.
+    cycle = oscillatorPictureOf (r.read(), layer == 2 ? 2 : 1);
     return true;
+}
+
+std::vector<float> AnalogEngine::oscillatorPictureOf (Patch p, int slot, int points)
+{
+    p.blend = 0.5;
+    p.ringMix = 0.0;
+    if (slot == 1)
+    {
+        p.osc1Enabled = true;
+        p.osc1Level = 1.0;
+        p.osc2Enabled = false;
+    }
+    else
+    {
+        p.osc2Enabled = true;
+        p.osc2Level = 1.0;
+        p.osc2LowFrequency = false;
+        p.osc1Enabled = false;
+        p.sync = false;
+        p.osc1Octave = p.osc2Octave;
+        p.osc1Coarse = p.osc2Coarse;
+        p.osc2FineCents = 0.0;
+    }
+    return pictureOf (p, points);
 }
 
 std::vector<float> AnalogEngine::pictureOf (const Patch& p, int points)

@@ -208,3 +208,87 @@ TEST_CASE ("card eq: moving a band while a note plays glides into place, the sam
     const auto justAfter = a.rms (0.25, 0.255);
     CHECK (justAfter > settledRms);
 }
+
+namespace
+{
+    /** Both oscillators sounding (OSC 1 a saw, OSC 2 a pulse a fifth up). */
+    Patch bothOscillators()
+    {
+        auto p = measurementPatch();
+        p.osc2Level = 1.0;
+        p.blend = 0.5;
+        p.osc2Wave = Osc2Wave::pulse;
+        p.osc2Coarse = 7.0;
+        return p;
+    }
+
+    Stereo playLegacy (const Patch& p, std::vector<Event> events)
+    {
+        auto s = makeSynth (p);
+        s->setLegacyCardsForTest (true);
+        return render (*s, 0.5, std::move (events));
+    }
+}
+
+TEST_CASE ("card eq (three engines): card A's EQ shapes OSC 1 alone, card B's (layer C) OSC 2 alone", "[cardeq][threeengines]")
+{
+    const std::vector<Event> note { on (0, 57) };
+    // OSC 1 only: card B's EQ (OSC 2's) touches nothing.
+    auto one = oscillatorsOnly();
+    auto oneB = one;
+    oneB.eqC = lowPass (300.0);
+    CHECK (maxDifference (play (one, nullptr, note), play (oneB, nullptr, note)) < 1.0e-6f);
+    // OSC 2 only: card A's EQ (OSC 1's and the noise mixer's) touches nothing; card B's shapes it.
+    auto two = bothOscillators();
+    two.osc1Enabled = false;
+    auto twoA = two;
+    twoA.eqA = lowPass (300.0);
+    CHECK (maxDifference (play (two, nullptr, note), play (twoA, nullptr, note)) < 1.0e-6f);
+    auto twoB = two;
+    twoB.eqC = lowPass (300.0);
+    CHECK (db (play (twoB, nullptr, note).rms (0.2, 0.45) / play (two, nullptr, note).rms (0.2, 0.45)) < -3.0);
+}
+
+TEST_CASE ("card eq (three engines): a migrated pair, the same EQ and DAMPEN on both cards, sounds as the old pair's", "[cardeq][threeengines][state]")
+{
+    // Before state version 8 card A's EQ and DAMPEN processed the oscillators' sum; the
+    // migration copies them to card B. The curves are linear: EQ (1) + EQ (2) = EQ (1 + 2).
+    const std::vector<Event> notes { on (0, 57), on (2400, 64) };
+    for (const bool ring : { false, true })
+    {
+        INFO ((ring ? "with RING" : "no ring"));
+        auto old = bothOscillators();
+        old.ringMix = ring ? 0.4 : 0.0;
+        old.noiseLevel = 0.2;
+        old.eqA = lowPass (900.0);
+        old.dampenA.enabled = true;
+        old.dampenA.amount = 0.5;
+        auto migrated = old;
+        migrated.eqC = old.eqA;
+        migrated.dampenC = old.dampenA;
+        const auto before = playLegacy (old, notes);
+        const auto after = play (migrated, nullptr, notes);
+        REQUIRE (before.rms (0.1, 0.45) > 1.0e-3);
+        CHECK (maxDifference (before, after) < 1.0e-4f);
+    }
+}
+
+TEST_CASE ("three engines: each oscillator's card M / S silences only its oscillator", "[threeengines]")
+{
+    const std::vector<Event> note { on (0, 57) };
+    const auto both = bothOscillators();
+    auto noOne = both;
+    noOne.osc1Level = 0.0;
+    auto muteOne = both;
+    muteOne.osc1Heard = false;
+    CHECK (maxDifference (play (noOne, nullptr, note), play (muteOne, nullptr, note)) < 1.0e-6f);
+    auto noTwo = both;
+    noTwo.osc2Level = 0.0;
+    auto muteTwo = both;
+    muteTwo.osc2Heard = false;
+    CHECK (maxDifference (play (noTwo, nullptr, note), play (muteTwo, nullptr, note)) < 1.0e-6f);
+    // OSC 1's fine tune moves OSC 1.
+    auto fine = both;
+    fine.osc1FineCents = 30.0;
+    CHECK (maxDifference (play (both, nullptr, note), play (fine, nullptr, note)) > 1.0e-3f);
+}

@@ -5,7 +5,7 @@
 #include "AnalogEngine.h"
 #include "AnalogMaterialsData.h"
 #include "AnalogParameters.h"
-#include "AnalogOscillatorWorkbench.h"
+#include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
 #include "FactoryPatches.h"
 #include "KeyDnaState.h"
@@ -111,6 +111,22 @@ namespace
         host.setParameterValue ("decay", 1000.0f * host.parameterValue (p::filterDecay));
         host.setParameterValue ("sustainLevel", host.parameterValue (p::filterSustain));
         host.setParameterValue ("release", 1000.0f * host.parameterValue (p::filterRelease));
+    }
+
+    /** Version 8: three engines. Card A was the oscillator pair; now OSC 1 alone, and card B
+        (the shell's layer C) is OSC 2. A session or preset from before had one M / S and one EQ
+        and DAMPEN for the pair: they are copied to card B, so both oscillators are muted,
+        soloed, equalised and damped exactly as before (the curves are linear: EQ (1) + EQ (2)
+        = EQ (1 + 2), nothing processed twice). ORGANIC (layer B) is untouched. */
+    void migrateFromVersion7 (osp::plugin::InstrumentHost& host)
+    {
+        using Host = osp::plugin::InstrumentHost;
+        for (const char* name : { "mute", "solo" })
+            host.setParameterValue (Host::layerParameterId (2, name), host.parameterValue (Host::layerParameterId (0, name)));
+        for (const auto& name : Host::eqParameterNames())
+            host.setParameterValue (Host::eqParameterId (2, name), host.parameterValue (Host::eqParameterId (0, name)));
+        for (const auto& name : Host::dampenParameterNames())
+            host.setParameterValue (Host::dampenParameterId (2, name), host.parameterValue (Host::dampenParameterId (0, name)));
     }
 
     /** ANDOR ANALOG's materials: aged copper for ANDOR OSP's coral, layer A's amber trace,
@@ -225,14 +241,39 @@ const ProductInfo& productInfo()
         // heading, OSCILLATORS beside M and S, opens the OSCILLATOR WORKBENCH in the
         // waveform's dark well (the shell's in-card editor; its view is an interface
         // preference, never a parameter).
-        p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE", nullptr };
-        p.generatorWellEditor = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorWorkbench (host); };
+        // Three engines (docs/THREE_ENGINE_ARCHITECTURE.md): A OSC 1 (the shell's layer A), B OSC 2
+        // (its layer C), C the hybrid (its layer B: ORGANIC's IDs, recordings and imports stay
+        // where they are). Each oscillator's card: DETUNE, TUNE, OCT, LEVEL of its own.
+        p.threeEngines.enabled = true;
+        p.threeEngines.order = { 0, 2, 1 };
+        p.cardControls = [] (int layer, osp::plugin::InstrumentHost&) {
+            namespace ap = andor::analog::params;
+            using K = andor::shell::ProductInfo::CardKnob;
+            std::array<K, 5> k {};
+            if (layer == 0)
+                k = { K { ap::osc1Fine, "DETUNE" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" }, K { ap::osc1Level, "LEVEL" }, K {} };
+            else if (layer == 2)   // (REIMAGINED processes the analog pair: card A's, never twice)
+                k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K { {}, {}, true } };
+            return k;
+        };
+        // Each oscillator's sound design in its card's well, revealed by the pointer (no
+        // workbench to open): the selected model's own controls.
+        p.wellOverlay = [] (int layer, osp::plugin::InstrumentHost& host) -> std::unique_ptr<osp::plugin::WellOverlay> {
+            if (layer == 0)
+                return andor::analog::createOscillatorOverlay (host, 1, layer);
+            if (layer == 2)
+                return andor::analog::createOscillatorOverlay (host, 2, layer);
+            return nullptr;
+        };
+        p.wellOverlayKey = [] (int layer, osp::plugin::InstrumentHost& host) {
+            return layer == 1 ? juce::String ("hybrid") : andor::analog::oscillatorOverlayKey (host, layer == 0 ? 1 : 2);
+        };
         // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
         // sample store, card and recall).
-        p.hybridSampleName = "ORGANIC";
+        p.hybridSampleName = "HYBRID";
         // Empty, ORGANIC is a compact ADD SAMPLE dock beside the oscillators' card (about a
         // fifth of the area); a recording opens its own card, the two then sharing equally.
-        p.hybridSampleDock = true;
+        p.hybridSampleDock = false;   // (three engines: the hybrid keeps its full column)
         // The Sample Source importer: a Kontakt patch (its NKI and samples) into native sounds that
         // play in ORGANIC's place; ORGANIC's heading then picks among them.
         p.hybridAction = { "Import Kontakt patch", [] (osp::plugin::InstrumentHost& host) { andor::analog::runKontaktImport (host); } };
@@ -251,7 +292,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 7;
+        p.stateVersion = 8;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -265,6 +306,8 @@ const ProductInfo& productInfo()
                 migrateFromVersion5 (host);
             if (from < 7)
                 migrateFromVersion6 (host);
+            if (from < 8)
+                migrateFromVersion7 (host);
         };
         return p;
     }();

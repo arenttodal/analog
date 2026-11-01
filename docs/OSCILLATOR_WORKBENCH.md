@@ -1,4 +1,9 @@
-# ANDOR ANALOG — Oscillator Workbench
+# ANDOR ANALOG — Oscillator Workbench (retired)
+
+> **Retired on 1 November 2026 by the three-engine interface** (docs/THREE_ENGINE_ARCHITECTURE.md).
+> Each oscillator now has its own card (A OSC 1, B OSC 2). Its sound design is revealed
+> inside its well by the pointer, with no workbench to open. The PAIR page's settings moved
+> to the FILTER popover. This page records what the workbench was.
 
 _30–31 October 2026. Interface only: no DSP, parameter, preset or saved-state change._
 
