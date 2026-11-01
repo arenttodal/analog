@@ -572,7 +572,7 @@ void Reader::moveIndex (Values& raw, int index, double offset) const noexcept
 
 void Reader::moveById (Values& raw, const char* id, double offset) const noexcept
 {
-    // (Four IDs, compared on the audio thread without allocating.)
+    // (A few IDs, compared on the audio thread without allocating.)
     for (int i = 0; i < count && ranges.size() == static_cast<std::size_t> (count); ++i)
         if (ids()[i] == id)
         {

@@ -541,8 +541,8 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
                 setValue (q, osp::plugin::InstrumentHost::modEnvId (e, "length"), 400.0f);
             };
     for (int r = 0; r < osp::mod::maxRoutes; ++r)
-        for (const char* name : { "source", "dest", "depth", "enabled" })
-            setups[osp::plugin::InstrumentHost::modRouteId (r, name)] = route (r, 1);   // LFO 1 -> TONE
+        for (const char* name : { "source", "dest", "depth", "enabled", "destExt" })
+            setups[osp::plugin::InstrumentHost::modRouteId (r, name)] = route (r, 1);   // LFO 1 -> TONE (destExt: -> MIX)
 
     // Each card's EQ and DAMPEN (ANDOR OSP's): a band's settings act while the EQ and that band
     // are on (a shelf or bell with gain); DAMPEN's while it is on (its corner in its own mode).
@@ -633,8 +633,8 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         }
     }
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
-    // and the modulation's: LFO 2, ENV 1 and 2, the 16 routes ("mod.*"; LFO 1's are listed).
-    CHECK (checkedBound == bound.size() - 4 + 7 + (8 + 2 * 7 + 4 * osp::mod::maxRoutes));
+    // and the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
+    CHECK (checkedBound == bound.size() - 4 + 7 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));
     CHECK (checkedUnbound > 100);
 }
 
@@ -690,6 +690,36 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
         CHECK (d > 1.0e-5);
         // ... and it shows on the control: the destination maps back to it.
         CHECK (osp::plugin::modui::destinationFor (id, true) == dest);
+    }
+
+    // ANDOR OSP's second destination list (mod.routeN.destExt): the header's MIX (the A/B mix
+    // between the oscillators and ORGANIC) and card A's KEY DNA AMOUNT (in GRANULAR, KEY DNA on).
+    for (const auto dest : { D::mixPosition, D::keyDnaAmountA })
+    {
+        INFO (osp::mod::destInfo (dest).name);
+        auto patch = context;
+        patch.granular = dest == D::keyDnaAmountA;
+        p.resetSettings();
+        apply (p, patch);
+        if (dest == D::keyDnaAmountA)
+        {
+            osp::keydna::Settings dna;
+            dna.enabled = true;
+            for (const auto param : { osp::keydna::Param::position, osp::keydna::Param::size, osp::keydna::Param::density })
+                dna[param].variation = 0.6;
+            p.setKeyDnaSettings (0, dna, "KEY DNA", false);
+            setValue (p, osp::plugin::InstrumentHost::keyDnaAmountId (0), 20.0f);
+        }
+        const auto reference = renderShell (p, 0.6);
+        // (MIX is the instrument's, not a note's: a global source, LFO 1; per-note MIX is later.)
+        setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "source"), dest == D::mixPosition ? 1.0f : vel);
+        setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "destExt"), static_cast<float> (osp::mod::extendedChoiceOf (dest)));
+        setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "depth"), 50.0f);
+        REQUIRE (p.modulationRoutes().size() == 1);
+        CHECK (p.modulationRoutes().front().state == osp::mod::RouteState::active);
+        const double d = differenceRms (reference, renderShell (p, 0.6));
+        UNSCOPED_INFO (20.0 * std::log10 (std::max (d, 1.0e-12)) << " dB");
+        CHECK (d > 1.0e-5);
     }
 }
 

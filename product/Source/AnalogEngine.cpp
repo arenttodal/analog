@@ -324,7 +324,10 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             if (const auto d = osp::mod::productDest (k); osp::mod::destInfo (d).owner == osp::mod::Owner::global && synth.sharedOffset (d, offset))
                 reader.move (raw, k, offset);
         using D = osp::mod::Dest;
-        for (const auto& [dest, id] : { std::pair<D, const char*> { D::drive, "drive" }, { D::movement, "motion" }, { D::space, "space" }, { D::echo, "echo" } })
+        // ... and the header's MIX (ANDOR OSP's MIX destination): the A/B mix between the
+        // oscillators and ORGANIC (the layer gains ramp towards it: a moving source is click-free).
+        for (const auto& [dest, id] : { std::pair<D, const char*> { D::drive, "drive" }, { D::movement, "motion" }, { D::space, "space" }, { D::echo, "echo" },
+                                        { D::mixPosition, "ab.blend" } })
             if (synth.sharedOffset (dest, offset))
                 reader.moveById (raw, id, offset);
     }

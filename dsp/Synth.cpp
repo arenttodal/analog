@@ -1308,7 +1308,13 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         if (v.modeEngine != nullptr)
             g.position = std::clamp (g.position + v.modeEngine->grainPositionOffset(), 0.0, 1.0);
         if (keyDnaInUse != nullptr && keyDnaInUse->active())
-            osp::keydna::apply (keyDnaInUse->at (v.note), keyDna.amount, g);
+        {
+            // AMOUNT, moved by a route to KEY DNA A AMOUNT (ANDOR OSP's destination).
+            double amount = keyDna.amount;
+            if (v.modulated && modRuntime.compiled.has (osp::mod::Dest::keyDnaAmountA))
+                amount = std::clamp (amount + offsetOf (v, osp::mod::Dest::keyDnaAmountA), 0.0, 1.0);
+            osp::keydna::apply (keyDnaInUse->at (v.note), amount, g);
+        }
         v.granulator.setParams (g);
     }
     else
