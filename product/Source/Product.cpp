@@ -19,7 +19,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-6";
+    constexpr const char* factoryVersion = "analog-factory-7";
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -97,6 +97,20 @@ namespace
         k[Param::tune].variation = percent (p::keyDnaTune);
         host.setKeyDnaSettings (0, k, {}, false);
         host.setParameterValue (osp::plugin::InstrumentHost::keyDnaAmountId (0), host.parameterValue (p::keyDnaAmount));
+    }
+
+    /** Version 7: ENV LINK's one envelope is the AMP envelope (the one on screen), no longer
+        the filter's. A linked session or preset from before played the filter envelope on
+        both: it is copied into AMP, so it sounds as it did. */
+    void migrateFromVersion6 (osp::plugin::InstrumentHost& host)
+    {
+        namespace p = andor::analog::params;
+        if (host.parameterValue (p::envLink) < 0.5f)
+            return;
+        host.setParameterValue ("attack", 1000.0f * host.parameterValue (p::filterAttack));
+        host.setParameterValue ("decay", 1000.0f * host.parameterValue (p::filterDecay));
+        host.setParameterValue ("sustainLevel", host.parameterValue (p::filterSustain));
+        host.setParameterValue ("release", 1000.0f * host.parameterValue (p::filterRelease));
     }
 
     /** ANDOR ANALOG's materials: aged copper for ANDOR OSP's coral, layer A's amber trace,
@@ -228,7 +242,16 @@ const ProductInfo& productInfo()
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();
-        p.stateVersion = 6;
+        // The AMP envelope says when it is not what plays (VCA GATE), and editing it gives the
+        // amplitude back to it.
+        p.ampEnvelopeNote = [] (osp::plugin::InstrumentHost& host) {
+            return host.parameterValue (andor::analog::params::vcaMode) >= 0.5f ? juce::String ("GATE") : juce::String();
+        };
+        p.ampEnvelopeTouched = [] (osp::plugin::InstrumentHost& host) {
+            if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
+                host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
+        };
+        p.stateVersion = 7;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -240,6 +263,8 @@ const ProductInfo& productInfo()
                 migrateFromVersion4 (host);
             if (from < 6)
                 migrateFromVersion5 (host);
+            if (from < 7)
+                migrateFromVersion6 (host);
         };
         return p;
     }();

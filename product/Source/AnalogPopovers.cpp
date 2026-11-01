@@ -269,8 +269,8 @@ namespace
         p->knob (filterSustain, "SUSTAIN");
         p->knob (filterRelease, "RELEASE");
         p->row ("AMPLIFIER");
-        p->segments (vcaMode, { "ENV", "GATE" }, 2.0f, "The amplitude: its envelope (AMP), or a gate that opens and closes with the key");
-        p->toggle (envLink, "ENV LINK", 1.4f, "The amplitude follows the filter envelope's ADSR (one envelope for both, as on a Juno-106)");
+        p->segments (vcaMode, { "ENV", "GATE" }, 2.0f, "The amplitude: its envelope (AMP), or a gate that opens and closes with the key (editing the AMP envelope returns it to ENV)");
+        p->toggle (envLink, "ENV LINK", 1.4f, "One envelope for both, as on a Juno-106: the AMP envelope shapes the filter too (the FILTER ENVELOPE knobs rest)");
         p->row ("FILTER DRIVE");
         p->knob (filterDrive, "DRIVE");
         p->knob (driveBias, "BIAS");

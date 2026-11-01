@@ -1234,15 +1234,17 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 
     // Envelopes: the slot's tolerance on the times (+-20 % at 100 %).
     const double t = 0.2 * a;
-    v.env.setTimes (p.filterAttack * (1.0 + t * d.attack), p.filterDecay * (1.0 + t * d.decay), p.filterSustain, p.filterRelease * (1.0 + t * d.release));
+    const double ampAttack = (v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack) * (1.0 + t * d.attack);
+    const double ampDecay = (v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay) * (1.0 + t * d.decay);
+    const double ampRelease = (v.ampReleaseSeconds >= 0.0 ? v.ampReleaseSeconds : p.ampRelease) * (1.0 + t * d.release);
+    if (p.envLink)   // ENV LINK: one envelope for both, as on a Juno-106: the AMP envelope (the one on screen) shapes the filter too
+        v.env.setTimes (ampAttack, ampDecay, p.ampSustain, ampRelease);
+    else
+        v.env.setTimes (p.filterAttack * (1.0 + t * d.attack), p.filterDecay * (1.0 + t * d.decay), p.filterSustain, p.filterRelease * (1.0 + t * d.release));
     if (p.vcaGate)   // GATE: the amplitude opens and closes with the key (a few ms against clicks)
         v.amp.setTimes (0.002, 0.001, 1.0, 0.006);
-    else if (p.envLink)   // ENV LINK: the amplitude follows the filter envelope's ADSR (one envelope, as on a Juno-106)
-        v.amp.setTimes (p.filterAttack * (1.0 + t * d.attack), p.filterDecay * (1.0 + t * d.decay), p.filterSustain, p.filterRelease * (1.0 + t * d.release));
     else
-        v.amp.setTimes ((v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack) * (1.0 + t * d.attack),
-                        (v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay) * (1.0 + t * d.decay), p.ampSustain,
-                        (v.ampReleaseSeconds >= 0.0 ? v.ampReleaseSeconds : p.ampRelease) * (1.0 + t * d.release));
+        v.amp.setTimes (ampAttack, ampDecay, p.ampSustain, ampRelease);
 
     // Level: velocity (VELOCITY RANGE dB between the hardest and softest note), LEVEL, MUTE.
     // APPLY TO AMP: VEL's curve shapes the velocity the loudness follows (a straight curve,

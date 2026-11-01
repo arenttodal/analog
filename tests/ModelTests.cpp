@@ -470,7 +470,7 @@ TEST_CASE ("modulation: LFO DELAY holds the LFO's depths back, RISE fades them i
     CHECK (std::abs (cents (fLate, fStill)) > 1.0);
 }
 
-TEST_CASE ("modulation: GATE makes the amplitude a gate; ENV LINK makes it follow the filter envelope", "[models][juno][vca]")
+TEST_CASE ("modulation: GATE makes the amplitude a gate; ENV LINK makes the filter follow the AMP envelope", "[models][juno][vca]")
 {
     auto p = measurementPatch();
     p.ampAttack = 0.3;
@@ -489,11 +489,19 @@ TEST_CASE ("modulation: GATE makes the amplitude a gate; ENV LINK makes it follo
     CHECK (releaseTail (r) > 0.01);
     r.vcaGate = true;
     CHECK (releaseTail (r) < 1.0e-4);
-    // ENV LINK: the amplitude takes the filter envelope's slow attack.
+    // ENV LINK: one envelope for both, as on a Juno-106, AMP's (the one on screen): the filter
+    // opens with AMP's fast attack, its own slow attack resting.
     auto l = measurementPatch();
+    l.tone = math::hzToTone (200.0);
+    l.envDepthSemitones = 48.0;
     l.filterAttack = 0.3;
     const auto own = play (l, 0.4);
     l.envLink = true;
     const auto linked = play (l, 0.4);
-    CHECK (linked.rms (0.01, 0.05) < 0.5 * own.rms (0.01, 0.05));
+    CHECK (linked.rms (0.01, 0.05) > 1.5 * own.rms (0.01, 0.05));
+    l.filterAttack = 0.001;
+    CHECK (play (l, 0.4).rms (0.01, 0.05) == Approx (linked.rms (0.01, 0.05)).epsilon (1.0e-9));
+    // ... and AMP's slow attack now shapes both.
+    l.ampAttack = 0.3;
+    CHECK (play (l, 0.4).rms (0.01, 0.05) < 0.5 * linked.rms (0.01, 0.05));
 }

@@ -3009,3 +3009,104 @@ TEST_CASE ("analog: screenshots of the Sample Source importer (ANALOG_SCREENSHOT
     setSampleStore ({});
     osp::plugin::skin::setLook (before);
 }
+
+namespace
+{
+    const andor::analog::FactoryPatch& factoryNamed (const std::string& name)
+    {
+        for (const auto& f : factoryPatches())
+            if (f.name == name)
+                return f;
+        FAIL ("no factory patch " << name);
+        return factoryPatches().front();
+    }
+}
+
+TEST_CASE ("analog: the AMP envelope on screen is what plays in the Juno patches (ENV LINK, VCA GATE)", "[analog][juno][envelope]")
+{
+    const std::vector<Note> held { { 0, 57, 100 }, { 0, 64, 100 }, { 20000, 57, 0 }, { 20000, 64, 0 } };
+    SECTION ("ENV LINK: the AMP envelope shapes amplitude and filter; FILTER ENVELOPE rests")
+    {
+        ShellProcessor p;
+        apply (p, factoryNamed ("Brass Section 106").patch);
+        setValue (p, "space", 0.0f);
+        REQUIRE (p.parameterValue (params::envLink) >= 0.5f);
+        const auto reference = renderShell (p, 0.6, held, false);
+        const double again = differenceRms (reference, renderShell (p, 0.6, held, false));   // (the same settings: the floor)
+        setValue (p, "attack", 900.0f);   // AMP's attack: heard
+        const double ampMoved = differenceRms (reference, renderShell (p, 0.6, held, false));
+        setValue (p, "attack", 90.0f);
+        setValue (p, params::filterAttack, 1.5f);   // the filter's own: resting while linked
+        const double filterMoved = differenceRms (reference, renderShell (p, 0.6, held, false));
+        UNSCOPED_INFO ("again " << again << ", AMP attack " << ampMoved << ", filter attack " << filterMoved);
+        CHECK (ampMoved > 1.0e-3);
+        CHECK (filterMoved <= again * 1.5 + 1.0e-9);
+    }
+    SECTION ("VCA GATE: the AMP picture says GATE; editing the envelope gives the amplitude back to it")
+    {
+        ShellProcessor p;
+        apply (p, factoryNamed ("DCO Bass 106").patch);
+        REQUIRE (p.parameterValue (params::vcaMode) >= 0.5f);
+        const auto& info = andor::shell::productInfo();
+        REQUIRE (info.ampEnvelopeNote != nullptr);
+        CHECK (info.ampEnvelopeNote (p) == "GATE");
+        // A preset or automation setting AMP's values is not the musician editing it.
+        setValue (p, "release", 800.0f);
+        CHECK (p.parameterValue (params::vcaMode) >= 0.5f);
+        const auto gated = renderShell (p, 0.6, held, false);
+        // A knob or handle starts a gesture: the amplitude follows the envelope again.
+        auto* attack = p.parameters.getParameter ("attack");
+        attack->beginChangeGesture();
+        attack->setValueNotifyingHost (attack->convertTo0to1 (400.0f));
+        attack->endChangeGesture();
+        CHECK (p.parameterValue (params::vcaMode) < 0.5f);
+        CHECK (info.ampEnvelopeNote (p).isEmpty());
+        CHECK (differenceRms (gated, renderShell (p, 0.6, held, false)) > 1.0e-3);
+    }
+}
+
+TEST_CASE ("analog: a version-6 session with ENV LINK keeps its sound (its filter envelope becomes AMP's)", "[analog][state][juno]")
+{
+    auto prepare = [] (ShellProcessor& q) {
+        apply (q, factoryNamed ("Brass Section 106").patch);
+        setValue (q, "space", 0.0f);
+        setValue (q, params::filterAttack, 0.2f);
+        setValue (q, params::filterDecay, 0.9f);
+        setValue (q, params::filterSustain, 30.0f);
+        setValue (q, params::filterRelease, 0.5f);
+    };
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        prepare (old);
+        setValue (old, "attack", 5.0f);   // AMP's, unused by version 6 while linked
+        setValue (old, "release", 3000.0f);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 6);
+    juce::MemoryBlock v6;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v6);
+
+    ShellProcessor reopened;
+    reopened.setStateInformation (v6.getData(), static_cast<int> (v6.getSize()));
+    CHECK (reopened.parameterValue ("attack") == Approx (200.0f).margin (0.5f));
+    CHECK (reopened.parameterValue ("decay") == Approx (900.0f).margin (0.5f));
+    CHECK (reopened.parameterValue ("sustainLevel") == Approx (30.0f).margin (0.01f));
+    CHECK (reopened.parameterValue ("release") == Approx (500.0f).margin (0.5f));
+
+    // ... and an unlinked session's AMP is left alone.
+    ShellProcessor plain;
+    apply (plain, factoryPatches()[0].patch);
+    setValue (plain, params::envLink, 0.0f);
+    setValue (plain, "attack", 5.0f);
+    juce::MemoryBlock plainSession;
+    plain.getStateInformation (plainSession);
+    auto plainXml = juce::AudioProcessor::getXmlFromBinary (plainSession.getData(), static_cast<int> (plainSession.getSize()));
+    plainXml->setAttribute ("productVersion", 6);
+    juce::AudioProcessor::copyXmlToBinary (*plainXml, plainSession);
+    ShellProcessor plainReopened;
+    plainReopened.setStateInformation (plainSession.getData(), static_cast<int> (plainSession.getSize()));
+    CHECK (plainReopened.parameterValue ("attack") == Approx (5.0f).margin (0.01f));
+}

@@ -722,8 +722,9 @@ namespace
             p.tone = hz (700.0);
             p.resonance = 0.15;
             p.envDepthSemitones = 34.0;
+            ampEnv (p, 0.09, 0.6, 0.45, 0.3);
             filterEnv (p, 0.09, 0.6, 0.45, 0.3);
-            p.envLink = true;   // one envelope for both, as a 106
+            p.envLink = true;   // one envelope for both, as a 106: AMP's (the one on screen)
             p.chorusMode = 1;
             room (p, 0.25, SpaceType::room, 1.8);
             add ("Brass Section 106", "Brass", p, chord);
