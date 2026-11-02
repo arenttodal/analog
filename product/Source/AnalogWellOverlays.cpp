@@ -387,10 +387,7 @@ namespace
                 if (hybridEmpty (host))
                     addAndMakeVisible (*soundKey);
                 else
-                {
-                    revealed().addAndMakeVisible (*soundKey);
-                    cells = { soundKey.get(), nullptr, nullptr };
-                }
+                    revealed().addAndMakeVisible (*soundKey);   // (a key at the well's foot, as when empty: never a knob cell)
             }
             else if (type == HybridType::sample && hybridEmpty (host))
             {
@@ -412,7 +409,10 @@ namespace
 
         juce::Rectangle<float> revealBand() const override
         {
-            return type == HybridType::sample ? juce::Rectangle<float>() : getLocalBounds().withTrimmedTop (std::max (0, getHeight() - 92)).toFloat();
+            if (type == HybridType::sample)
+                return {};
+            const int band = type == HybridType::instrumentPatch ? 52 : 92;   // (SOUNDS: one key's height)
+            return getLocalBounds().withTrimmedTop (std::max (0, getHeight() - band)).toFloat();
         }
 
         void resized() override
@@ -423,7 +423,7 @@ namespace
                 browse->setBounds (getLocalBounds().withTrimmedTop (32));
             if (importKey != nullptr)
                 importKey->setBounds (getLocalBounds().withSizeKeepingCentre (std::min (getWidth() - 24, 190), 26).withBottomY (getHeight() - 12));
-            if (soundKey != nullptr && soundKey->getParentComponent() == this)
+            if (soundKey != nullptr)
                 soundKey->setBounds (getLocalBounds().withSizeKeepingCentre (std::min (getWidth() - 24, 150), 28).withBottomY (getHeight() - 14));
             const auto b = getLocalBounds().withTrimmedTop (std::max (0, getHeight() - 92)).reduced (8, 4);
             const int cellWidth = b.getWidth() / 3;
