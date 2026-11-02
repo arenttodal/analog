@@ -56,7 +56,7 @@ public:
     float shaperPhase() const noexcept override { return synth.shaperPhase(); }
     void setModulationCurve (int index, const osp::mod::Curve& curve) noexcept override;
     juce::String reimaginedModeUnavailable (int layer, int mode) const override;
-    const osp::InstrumentEngine::GrainSnapshot* grainSnapshot (int layer) const noexcept override { return layer == 0 ? &grains : layer == 1 ? &organicHeads : nullptr; }
+    const osp::InstrumentEngine::GrainSnapshot* grainSnapshot (int layer) const noexcept override { return layer == 0 ? &grains : layer == 1 ? &organicHeads : layer == 2 ? &grains2 : nullptr; }
     void setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept override;
     bool arpModulation (osp::mod::Dest dest, double& offset) const noexcept override { return synth.sharedOffset (dest, offset); }
     void setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& played) noexcept override;
@@ -65,6 +65,8 @@ public:
 
     // KEY DNA: ANDOR OSP's (its editor, its profile), on the oscillators' GRANULAR (card A).
     bool hasKeyDna() const noexcept override { return true; }
+    /** One profile, card A's: its key on card A (card B's grains follow the same profile). */
+    bool hasKeyDnaKey (int layer) const noexcept override { return layer == 0; }
     void setKeyDnaTable (int layer, const osp::keydna::Table* table) noexcept override
     {
         if (layer == 0)
@@ -127,6 +129,7 @@ private:
     osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
     std::vector<float> scratch;
     osp::InstrumentEngine::GrainSnapshot grains;   ///< written by process(), read by the card
+    osp::InstrumentEngine::GrainSnapshot grains2;  ///< card B's (OSC 2's) grains, as `grains`
     osp::InstrumentEngine::GrainSnapshot organicHeads;   ///< ORGANIC's read heads (card B's playheads), as ANDOR OSP's
     void publishGrains() noexcept;
 

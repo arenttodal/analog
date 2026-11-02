@@ -127,6 +127,10 @@ namespace
             host.setParameterValue (Host::eqParameterId (2, name), host.parameterValue (Host::eqParameterId (0, name)));
         for (const auto& name : Host::dampenParameterNames())
             host.setParameterValue (Host::dampenParameterId (2, name), host.parameterValue (Host::dampenParameterId (0, name)));
+        // GRANULAR was the whole voice's: card B (OSC 2) keeps playing as it did, its own
+        // switch and grains copied from card A's.
+        for (const char* name : { "sourceMode", "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
+            host.setParameterValue (Host::layerParameterId (2, name), host.parameterValue (Host::layerParameterId (0, name)));
     }
 
     /** ANDOR ANALOG's materials: aged copper for ANDOR OSP's coral, layer A's amber trace,
@@ -302,7 +306,7 @@ const ProductInfo& productInfo()
         p.hybridAction = { "Import Kontakt patch", [] (osp::plugin::InstrumentHost& host) { andor::analog::runKontaktImport (host); } };
         p.hybridHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSoundPopover (host); };
         // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
-        p.generatorModeName = "Standard";
+        p.generatorModeName = "Regular";
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();

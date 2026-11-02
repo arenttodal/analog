@@ -407,6 +407,8 @@ namespace
         }
 
         int rulerReserve() const override { return 118 + 24; }
+        /** Its TYPE dropdown stays while card C plays Granular (the grains sit along the foot). */
+        bool shownWhileGranular() const override { return true; }
 
         juce::Rectangle<float> revealBand() const override
         {

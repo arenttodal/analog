@@ -210,6 +210,7 @@ namespace
             };
         };
         auto granular = [] (Patch& c) { c.granular = true; };
+        auto granular2 = [] (Patch& c) { c.granular2 = true; };   // (card B's own, state version 8)
         std::map<juce::String, std::function<void (Patch&)>> modes {
             { params::unisonDetune, [] (Patch& c) { c.unison = true; } },
             { "glide", [] (Patch& c) { c.voiceMode = VoiceMode::mono; } },
@@ -242,6 +243,11 @@ namespace
             { "layerA.granular.density", granular },
             { "layerA.granular.tune", granular },
             { "layerA.granular.spread", granular },
+            { "layerC.granular.position", granular2 },
+            { "layerC.granular.size", granular2 },
+            { "layerC.granular.density", granular2 },
+            { "layerC.granular.tune", granular2 },
+            { "layerC.granular.spread", granular2 },
             { "movement.tape.wow", movementMode (osp::MovementMode::tape) },
             { "movement.tape.flutter", movementMode (osp::MovementMode::tape) },
             { "movement.tape.wear", movementMode (osp::MovementMode::tape) },
@@ -855,7 +861,8 @@ TEST_CASE ("analog: a version-5 session's KEY DNA moves into ANDOR OSP's editor 
         apply (q, factoryPatches()[1].patch);
         setValue (q, "space", 0.0f);
         setValue (q, "echo", 0.0f);
-        setValue (q, "layerA.sourceMode", 1.0f);   // GRANULAR
+        setValue (q, "layerA.sourceMode", 1.0f);   // GRANULAR (the whole voice's then: both cards')
+        setValue (q, "layerC.sourceMode", 1.0f);
         setValue (q, "seed", 4242.0f);
     };
     juce::MemoryBlock session;
@@ -3019,6 +3026,22 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
                     t->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
             }
             ui.closePopup();
+            // GRANULAR per card (state version 8): A granular, B regular; then both; the
+            // oscillator overlay gives the well to the grains.
+            setValue (p, "layerA.sourceMode", 1.0f);
+            reveal (0, true);
+            ui.engineCard (0).showGranularControls (true, true);
+            renderShell (p, 1.2, { { 0, 57, 100 }, { 0, 64, 100 } }, false);
+            shoot ("three-1448-9-granular-a-regular-b");
+            setValue (p, "layerC.sourceMode", 1.0f);
+            reveal (2, true);
+            ui.engineCard (2).showGranularControls (true, true);
+            renderShell (p, 1.2, { { 0, 57, 100 }, { 0, 64, 100 } }, false);
+            shoot ("three-1448-9-granular-a-granular-b");
+            setValue (p, "layerA.sourceMode", 0.0f);
+            setValue (p, "layerC.sourceMode", 0.0f);
+            reveal (0, false);
+            reveal (2, false);
         }
         setValue (p, osc3Model, 0.0f);
         setValue (p, osc3WideWave, 0.0f);

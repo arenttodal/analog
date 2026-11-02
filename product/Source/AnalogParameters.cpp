@@ -69,6 +69,8 @@ namespace
         iOsc3WideWave, iOsc3WideShape, iOsc3WideSpread,
         iHybridNoiseColor, iHybridNoiseTone, iHybridNoiseMovement,
         iHybridOctave, iHybridFine, iOsc2Velo, iHybridVelo, iHybridNoiseKeys,
+        // Card B's own REGULAR / GRANULAR and grains (the shell's layer C settings).
+        iSourceMode2, iGrainPosition2, iGrainSize2, iGrainDensity2, iGrainTune2, iGrainSpread2,
         count
     };
 
@@ -139,6 +141,8 @@ namespace
                                     osc3WideSpread, hybridNoiseColor, hybridNoiseTone, hybridNoiseMovement,
                                     hybridOctave, hybridFine, osc2Velo, hybridVelo, hybridNoiseKeys })
                 l.add (id);
+            for (const char* name : { "sourceMode", "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
+                l.add (osp::plugin::InstrumentHost::layerParameterId (2, name));
             return l;
         }();
         jassert (withCards.size() == count);
@@ -863,6 +867,12 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.grains.density = v (iGrainDensity);
     p.grains.tuneSemitones = v (iGrainTune);
     p.grains.spread = 0.01 * v (iGrainSpread);
+    p.granular2 = on (iSourceMode2);
+    p.grains2.position = 0.01 * v (iGrainPosition2);
+    p.grains2.sizeSeconds = 0.001 * v (iGrainSize2);
+    p.grains2.density = v (iGrainDensity2);
+    p.grains2.tuneSemitones = v (iGrainTune2);
+    p.grains2.spread = 0.01 * v (iGrainSpread2);
     auto& lfo = p.lfo;
     lfo.shape = static_cast<osp::mod::LfoShape> (index (iLfoShape, osp::mod::lfoShapeCount));
     lfo.rateHz = v (iLfoRate);
@@ -1092,6 +1102,12 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iGrainDensity, p.grains.density);
     put (iGrainTune, p.grains.tuneSemitones);
     put (iGrainSpread, 100.0 * p.grains.spread);
+    put (iSourceMode2, p.granular2 ? 1.0 : 0.0);
+    put (iGrainPosition2, 100.0 * p.grains2.position);
+    put (iGrainSize2, 1000.0 * p.grains2.sizeSeconds);
+    put (iGrainDensity2, p.grains2.density);
+    put (iGrainTune2, p.grains2.tuneSemitones);
+    put (iGrainSpread2, 100.0 * p.grains2.spread);
     put (iLfoShape, static_cast<int> (p.lfo.shape));
     put (iLfoRate, p.lfo.rateHz);
     put (iLfoSync, p.lfo.sync ? 1.0 : 0.0);

@@ -226,10 +226,13 @@ struct Patch
     double outputDb = 0.0;        ///< the master volume
     std::uint32_t seed = 1;
 
-    // The source: the oscillators as they are (ONE SHOT) or grains taken live from each
-    // voice's own recent sound (GRANULAR: POS how far back, SIZE, DENS, TUNE, SPREAD).
+    // Card A's source: OSC 1 (and the noise) as it is (REGULAR) or grains taken live from
+    // each voice's own recent OSC 1 sound (GRANULAR: POS how far back, SIZE, DENS, TUNE, SPREAD).
     bool granular = false;
     osp::GranularParams grains;
+    // Card B's, independently (state version 8): OSC 2 (and the ring) or its grains.
+    bool granular2 = false;
+    osp::GranularParams grains2;
 
     // REIMAGINED: ANDOR OSP's modes on the live sound (KALEIDOSCOPE, TAPE FRAME, TOYBOX,
     // MIRAGE; MOSAIC needs a recording's harmonic analysis and leaves the sound unchanged).

@@ -198,15 +198,20 @@ public:
 
     /** The variation each voice slot carries at ANALOG 100 % (cents of OSC 1 pitch). */
     double slotPitchOffsetCents (int slot) const noexcept;
-    /** The grains playing now in every sounding voice, while GRANULAR is on (the card's
-        picture); returns how many were written (at most `max`). Audio thread. */
-    int collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept;
+    /** The grains playing now in every sounding voice, while that card's GRANULAR is on (the
+        card's picture; `card` 0: A, OSC 1; 1: B, OSC 2); returns how many were written (at
+        most `max`). Audio thread. */
+    int collectGrains (int card, LiveGranulator::GrainDot* out, int max) const noexcept;
     /** ORGANIC's read heads (card B's playheads, as ANDOR OSP's One Shot voices): one per voice
         playing the recording, where it reads (0..1 of the recording shown) and how loud the
         note is (its amplitude envelope, 0..1). Returns how many. Any thread that renders. */
     int collectPlayheads (float* where, float* level, int max) const noexcept;
-    /** A voice's grains now (tests). */
-    int grainCount (int slot) const noexcept { return voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))].granulator.grainCount(); }
+    /** A voice's grains now (tests; `card` 0: A, 1: B). */
+    int grainCount (int slot, int card = 0) const noexcept
+    {
+        const auto& v = voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))];
+        return (card == 1 ? v.granulator2 : v.granulator).grainCount();
+    }
     /** How long each voice's recording is (seconds), and the longest a mode engine runs per call. */
     static constexpr double recordingSeconds = 1.5;
     static constexpr int modeInterval = 32;
@@ -311,9 +316,15 @@ private:
         float makeUp = 1.0f;   ///< resonance and DRIVE make-up gain after the filter
         float otaMakeUp = 1.0f;   ///< the same after the OTA (DRIVE and TRIM only)
 
-        // The live sound: its recording, the grains read from it, KALEIDOSCOPE's parts.
-        LiveRecording recording;
+        // The live sound: its recording, the grains read from it, KALEIDOSCOPE's parts. Card A
+        // (OSC 1, the noise) and card B (OSC 2, the ring) each record and granulate their own
+        // part (state version 8: GRANULAR per card); card C's part never passes through grains.
+        LiveRecording recording;      ///< card A's part
         LiveGranulator granulator;
+        LiveRecording recording2;     ///< card B's part
+        LiveGranulator granulator2;
+        float partB = 0.0f, partC = 0.0f;   ///< this sample's card B and card C parts (at the filter's input level)
+        float cloud2 = 0.0f, grainMix2 = 0.0f;   ///< card B's (as cloud and grainMix)
         bool grainsPlay = false;      ///< GRANULAR: the grains are the voice's source
         float cloud = 0.0f;           ///< KALEIDOSCOPE's remapped grains under the oscillators (ONE SHOT)
         double grainStep = 1.0;       ///< the grains' read speed (REIMAGINED's wow)

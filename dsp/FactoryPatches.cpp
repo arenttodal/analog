@@ -488,6 +488,8 @@ namespace
             ampEnv (p, 0.6, 1.5, 0.9, 2.2);
             p.granular = true;
             p.grains = { 0.45, 0.28, 22.0, 0.0, 0.6 };
+            p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
+            p.grains2 = p.grains;
             p.reimagined = 0.45;
             p.lfoAmount = 0.35;
             p.lfo.rateHz = 0.3;
@@ -524,6 +526,8 @@ namespace
             ampEnv (p, 0.004, 1.6, 0.5, 0.8);
             p.granular = true;
             p.grains = { 0.2, 0.18, 18.0, 0.0, 0.15 };
+            p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
+            p.grains2 = p.grains;
             p.reimagined = 0.6;
             p.reimaginedSettings.mode = osp::ReimaginedMode::tapeFrame;
             p.reimaginedSettings.tapeFrame = { 0.5, 0.4, osp::TapeFrameLength::classic };
@@ -650,6 +654,8 @@ namespace
             ampEnv (p, 0.9, 1.5, 0.9, 3.0);
             p.granular = true;
             p.grains = { 0.85, 0.4, 12.0, 12.0, 0.3 };
+            p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
+            p.grains2 = p.grains;
             p.reimagined = 0.3;
             p.levelDb = -4.0;
             room (p, 0.55, SpaceType::hall, 6.0);

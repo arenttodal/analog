@@ -495,15 +495,20 @@ void AnalogEngine::publishGrains() noexcept
 {
     using Snapshot = osp::InstrumentEngine::GrainSnapshot;
     std::array<LiveGranulator::GrainDot, Snapshot::capacity> dots;
-    const int n = synth.collectGrains (dots.data(), Snapshot::capacity);
-    for (int i = 0; i < n; ++i)
+    // Each oscillator card's own grains (A: OSC 1, B: OSC 2; state version 8).
+    for (int card = 0; card < 2; ++card)
     {
-        const auto k = static_cast<std::size_t> (i);
-        grains.position[k].store (dots[k].position, std::memory_order_relaxed);
-        grains.level[k].store (dots[k].level, std::memory_order_relaxed);
-        grains.lane[k].store (dots[k].lane, std::memory_order_relaxed);
+        auto& snapshot = card == 0 ? grains : grains2;
+        const int n = synth.collectGrains (card, dots.data(), Snapshot::capacity);
+        for (int i = 0; i < n; ++i)
+        {
+            const auto k = static_cast<std::size_t> (i);
+            snapshot.position[k].store (dots[k].position, std::memory_order_relaxed);
+            snapshot.level[k].store (dots[k].level, std::memory_order_relaxed);
+            snapshot.lane[k].store (dots[k].lane, std::memory_order_relaxed);
+        }
+        snapshot.count.store (n, std::memory_order_release);
     }
-    grains.count.store (n, std::memory_order_release);
 
     // Card B (ORGANIC): one read head per voice playing the recording.
     std::array<float, Snapshot::playheadCapacity> where {}, level {};

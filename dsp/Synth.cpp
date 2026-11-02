@@ -119,6 +119,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.env.setSampleRate (internalRate);
         v.recording.prepare (recordLength);
         v.granulator.prepare (internalRate);
+        v.recording2.prepare (recordLength);
+        v.granulator2.prepare (internalRate);
         v.tapeFrame.prepare (internalRate);
         v.toybox.prepare (internalRate);
         v.mirage.prepare (internalRate);
@@ -199,9 +201,13 @@ void Synth::reset() noexcept
         v.outGain = 0.0f;
         v.recording.restart();
         v.granulator.stop();
+        v.recording2.restart();
+        v.granulator2.stop();
         v.modeEngine = nullptr;
         v.modeFactor = 1.0;
         v.grainMix = current.granular ? 1.0f : 0.0f;
+        v.grainMix2 = current.granular2 ? 1.0f : 0.0f;
+        v.partB = v.partC = 0.0f;
         v.driftNow = v.driftFrom = v.driftTo = {};
         v.mod = {};
         v.modulated = false;
@@ -323,14 +329,14 @@ const osp::mod::VoiceState* Synth::newestModulation() const noexcept
     return newest != nullptr ? &newest->mod : nullptr;
 }
 
-int Synth::collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept
+int Synth::collectGrains (int card, LiveGranulator::GrainDot* out, int max) const noexcept
 {
-    if (! current.granular)
+    if (! (card == 1 ? current.granular2 : current.granular))
         return 0;
     int n = 0;
     for (const auto& v : voices)
         if (v.active && n < max)
-            n += v.granulator.collect (v.recording, out + n, max - n);
+            n += card == 1 ? v.granulator2.collect (v.recording2, out + n, max - n) : v.granulator.collect (v.recording, out + n, max - n);
     return n;
 }
 
@@ -565,6 +571,12 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.recording.restart();
         v.grainMix = current.granular ? 1.0f : 0.0f;
         v.granulator.start (current.granular ? current.grains : cloudGrains(), v.seed);
+        // Card B's grains: the same seed, so the two cards' grains fall together when their
+        // settings match (as one granulator on both parts did before state version 8).
+        v.recording2.restart();
+        v.grainMix2 = current.granular2 ? 1.0f : 0.0f;
+        v.granulator2.start (current.granular2 ? current.grains2 : cloudGrains(), v.seed);
+        v.partB = v.partC = 0.0f;
         v.driftRng.reseed (osp::Prng::deriveSeed (v.seed, 0x6472696674ull, 0));
         v.driftNow = v.driftFrom = v.driftTo = {};
         v.driftCountdown = 0;
@@ -1109,7 +1121,10 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
                          + p.osc1FineCents / 100.0;   // (state version 8: OSC 1's own DETUNE; 0 adds nothing)
     const double base2 = p.osc2KeyTrack ? common : 60.0 + v.unisonOffset + performed;
     const double note2 = base2 + 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2 - 0.03 * wander2 * d.wander)
-                         + lfoD * p.lfoPitch2 - (p.osc2LowFrequency ? 12.0 * lowFrequencyOctaves : 0.0);
+                         + lfoD * p.lfoPitch2 - (p.osc2LowFrequency ? 12.0 * lowFrequencyOctaves : 0.0)
+                         // (the mode's read speed moves OSC 2 while card B's own source is the
+                         // oscillator; exactly 0 while both cards' sources match)
+                         + (v.modeEngine != nullptr ? 12.0 * std::log2 (std::max (1.0e-3, v.modeFactor)) * static_cast<double> (v.grainMix - v.grainMix2) : 0.0);
     v.dt1 = std::clamp (math::noteToHz (note1) / internalRate, 1.0e-9, 0.45);
     v.dt2 = std::clamp (math::noteToHz (note2) / internalRate, 1.0e-9, 0.45);
     v.width1 = static_cast<float> (std::clamp (p.osc1Width + 0.04 * a * d.width1 + lfoD * p.lfoWidth1, 0.02, 0.98));
@@ -1358,23 +1373,31 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.cloud = (1.0f - v.grainMix) * shape.granular;
     v.granulator.setRemap (shape.granular);
     v.grainStep = v.modeEngine != nullptr ? v.modeFactor : 1.0;
-    if (p.granular)
+    // Card B's source, independently (state version 8): its own glide, KALEIDOSCOPE's cloud
+    // under OSC 2 while it plays REGULAR.
+    v.grainMix2 += 0.05f * ((p.granular2 ? 1.0f : 0.0f) - v.grainMix2);
+    v.cloud2 = (1.0f - v.grainMix2) * shape.granular;
+    v.granulator2.setRemap (shape.granular);
+    // Each card's grains, moved by the REIMAGINED mode's travel and KEY DNA (one table: each
+    // key's granular identity, on both cards' grains).
+    double dnaAmount = -1.0;
+    if (keyDnaInUse != nullptr && keyDnaInUse->active() && (p.granular || p.granular2))
     {
-        auto g = p.grains;
+        // AMOUNT, moved by a route to KEY DNA A AMOUNT (ANDOR OSP's destination).
+        dnaAmount = keyDna.amount;
+        if (v.modulated && modRuntime.compiled.has (osp::mod::Dest::keyDnaAmountA))
+            dnaAmount = std::clamp (dnaAmount + offsetOf (v, osp::mod::Dest::keyDnaAmountA), 0.0, 1.0);
+    }
+    const auto grainsOf = [&] (osp::GranularParams g)
+    {
         if (v.modeEngine != nullptr)
             g.position = std::clamp (g.position + v.modeEngine->grainPositionOffset(), 0.0, 1.0);
-        if (keyDnaInUse != nullptr && keyDnaInUse->active())
-        {
-            // AMOUNT, moved by a route to KEY DNA A AMOUNT (ANDOR OSP's destination).
-            double amount = keyDna.amount;
-            if (v.modulated && modRuntime.compiled.has (osp::mod::Dest::keyDnaAmountA))
-                amount = std::clamp (amount + offsetOf (v, osp::mod::Dest::keyDnaAmountA), 0.0, 1.0);
-            osp::keydna::apply (keyDnaInUse->at (v.note), amount, g);
-        }
-        v.granulator.setParams (g);
-    }
-    else
-        v.granulator.setParams (cloudGrains());
+        if (dnaAmount >= 0.0)
+            osp::keydna::apply (keyDnaInUse->at (v.note), dnaAmount, g);
+        return g;
+    };
+    v.granulator.setParams (p.granular ? grainsOf (p.grains) : cloudGrains());
+    v.granulator2.setParams (p.granular2 ? grainsOf (p.grains2) : cloudGrains());
 
     // Each card's EQ and DAMPEN (ANDOR OSP's), on its own part of the voice before the filter.
     // DAMPEN's damping glides about 10 ms, as OSP's voice; a new note's lands at once.
@@ -1681,9 +1704,22 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
     // Each card's DAMPEN and EQ on its own part (skipped while off: nothing touched). With
     // card A's or B's on, each oscillator through its own (OSC 1 and the noise: A; OSC 2 and
     // the ring: B); else the sum through A exactly as before.
-    mix = v.splitCards ? cardA (v, mix - partB) + cardC (v, partB) : cardA (v, mix);
+    if (v.splitCards)
+    {
+        const float raw = partB;
+        partB = cardC (v, raw);
+        mix = cardA (v, mix - raw) + partB;
+    }
+    else
+        mix = cardA (v, mix);   // (both cards' EQ and DAMPEN off: the sum, exactly as before)
+    v.partB = partB * filterInputGain;
+    v.partC = 0.0f;
     if (v.organicOn)
-        mix += cardB (v, organic);
+    {
+        const float c = cardB (v, organic);
+        mix += c;
+        v.partC = c * filterInputGain;
+    }
     return mix;
 }
 
@@ -1781,23 +1817,44 @@ float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
         float a = o1 * v.gain1;
         if (v.gainNoise > 0.0f)
             a += v.gainNoise * static_cast<float> (v.noise.bipolar());
-        return liveStages (v, (cardA (v, a) + cardC (v, v.osc2Out * v.gain2)) * filterInputGain);
+        const float b = cardC (v, v.osc2Out * v.gain2);
+        v.partB = b * filterInputGain;
+        v.partC = 0.0f;
+        return liveStages (v, (cardA (v, a) + b) * filterInputGain);
     }
     float mix = o1 * v.gain1 + v.osc2Out * v.gain2;
     if (v.gainNoise > 0.0f)
         mix += v.gainNoise * static_cast<float> (v.noise.bipolar());
+    v.partB = v.osc2Out * v.gain2 * filterInputGain;
+    v.partC = 0.0f;
     return liveStages (v, cardA (v, mix) * filterInputGain);
 }
 
 float Synth::liveStages (Voice& v, float x) noexcept
 {
 
-    // The voice's own recording, and what GRANULAR and KALEIDOSCOPE take from it.
-    v.recording.write (x);
-    if (v.grainMix > 1.0e-4f || v.cloud > 1.0e-4f)
+    // Each card's own recording (A: OSC 1 and the noise; B: OSC 2 and the ring), and what
+    // its GRANULAR and KALEIDOSCOPE take from it; card C's part passes by. With no grains
+    // playing on either card, x is untouched.
+    const float b = v.partB, a = x - b - v.partC;
+    v.recording.write (a);
+    v.recording2.write (b);
+    const bool grainsA = v.grainMix > 1.0e-4f || v.cloud > 1.0e-4f;
+    const bool grainsB = v.grainMix2 > 1.0e-4f || v.cloud2 > 1.0e-4f;
+    if (grainsA || grainsB)
     {
-        const float grains = v.granulator.render (v.recording, v.grainStep);
-        x = x * (1.0f - v.grainMix) * (1.0f - 0.5f * v.cloud) + grains * (v.grainMix + v.cloud);
+        float outA = a, outB = b;
+        if (grainsA)
+        {
+            const float grains = v.granulator.render (v.recording, v.grainStep);
+            outA = a * (1.0f - v.grainMix) * (1.0f - 0.5f * v.cloud) + grains * (v.grainMix + v.cloud);
+        }
+        if (grainsB)
+        {
+            const float grains = v.granulator2.render (v.recording2, v.grainStep);
+            outB = b * (1.0f - v.grainMix2) * (1.0f - 0.5f * v.cloud2) + grains * (v.grainMix2 + v.cloud2);
+        }
+        x = outA + outB + v.partC;
     }
     if (v.doubling > 0.0f)
     {
@@ -1809,9 +1866,9 @@ float Synth::liveStages (Voice& v, float x) noexcept
         {
             const double at = static_cast<double> (v.recording.now()) - delay;
             const auto i = static_cast<std::int64_t> (std::floor (at));
-            const float* t = v.recording.taps (i - 1);
+            const auto t = osp::simd::Float4::load (v.recording.taps (i - 1)) + osp::simd::Float4::load (v.recording2.taps (i - 1));   // (cards A and B)
             const auto wts = osp::hermiteWeights (static_cast<float> (at - static_cast<double> (i)));
-            const float doubled = (wts * osp::simd::Float4::load (t)).sum();
+            const float doubled = (wts * t).sum();
             x = (x + v.doubling * doubled) / (1.0f + 0.5f * v.doubling);
         }
     }

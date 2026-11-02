@@ -18,7 +18,7 @@ stored, automated and played. Later phases only implement it._
   - card A shows DETUNE (`analog.osc2.fine`), TUNE (`layerA.tune`), PAN (`layerA.pan`), LEVEL (`layerA.level`), REIMAGINED;
   - M/S are `layerA.mute` / `layerA.solo`;
   - card A's EQ and DAMPEN (`layerA.eq.*`, `layerA.dampen.*`) process OSC 1 + OSC 2 + noise + ring, summed in each voice before the filter (`Synth::cardA`).
-  - `layerA.sourceMode`, `layerA.granular.*`, REIMAGINED and KEY DNA (layer 0) process the same sum.
+  - REIMAGINED and KEY DNA (layer 0) process the same sum; GRANULAR is each oscillator card's own (see Limits).
 - **Layer B is ORGANIC:**
   - `layerB.level / tune / start / loop / follow / reverse / mute / solo`, `layerB.eq.*`, `layerB.dampen.*` (`Synth::cardB`);
   - `analog.organic.root`; the `SampleSource` definition (imports) in the session.
@@ -184,7 +184,14 @@ The workbench (and its pages) is retired. Its controls move:
 ### Limits
 
 - **Mono voices:** no per-source PAN on A or B (or C).
-- **Pair processes:** REIMAGINED, GRANULAR and KEY DNA process the analog pair (card A's). Card B has none of its own.
+- **Pair processes:** REIMAGINED and KEY DNA process the analog pair (card A's).
+- **GRANULAR is per card (2 Nov 2026):** card A (OSC 1, the noise) and card B (OSC 2, the ring) each have REGULAR / GRANULAR and their own grains (`layerA.*`, `layerC.sourceMode` / `layerC.granular.*`).
+  - Each voice keeps one recording per card, and card C's part never passes through grains.
+  - KEY DNA's one profile (card A's key) shapes both cards' grains.
+  - While a card plays GRANULAR its oscillator overlay is hidden: the grain controls take the well, and the oscillator is set in REGULAR.
+  - A version 7 state copies card A's GRANULAR and grains to card B (the voice played as one before).
+  - The two cards' grains share the voice's seed, so with matching settings they fall together.
+  - Factory GRANULAR sounds' renders differ from before only by rounding (RMS contours within 0.1 %).
 - **OSC 3:** has no LFO PITCH and no cross-modulation routes yet.
 - **Imported patches:** not morphable (not validated).
 - **Validation:** screenshots reviewed on Linux; no DAW session, pluginval or listening test yet. The importer's A1.5 musical validation stays open.

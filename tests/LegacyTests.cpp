@@ -72,6 +72,8 @@ namespace
             p.granular = true;
             p.grains.position = 0.4;
             p.grains.spread = 0.6;
+            p.granular2 = true;   // (state version 8: both cards, as the v7 migration sets them)
+            p.grains2 = p.grains;
         });
         edge ("kaleidoscope", [] (Patch& p) {
             p.reimagined = 0.7;
