@@ -3032,6 +3032,20 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
                     t->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
             }
             ui.closePopup();
+            // SPACE: the rooms, then ABYSS (GRAVITY below 0: the swell; FROZEN: held).
+            ui.openPopup (4);
+            shoot ("three-1448-10-space-rooms");
+            setValue (p, "space.engine", 1.0f);
+            setValue (p, "space.abyss.gravity", -60.0f);
+            setValue (p, "space.abyss.resonance", 30.0f);
+            shoot ("three-1448-10-space-abyss");
+            setValue (p, "space.abyss.freeze", 1.0f);
+            setValue (p, "space.abyss.gravity", 40.0f);
+            shoot ("three-1448-10-space-abyss-frozen");
+            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.resonance", "space.abyss.freeze" })
+                if (auto* q = p.parameters.getParameter (id))
+                    q->setValueNotifyingHost (q->getDefaultValue());
+            ui.closePopup();
             // GRANULAR per card (state version 8): A granular, B regular; then both; the
             // oscillator overlay gives the well to the grains.
             setValue (p, "layerA.sourceMode", 1.0f);
