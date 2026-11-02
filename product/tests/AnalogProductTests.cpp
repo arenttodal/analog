@@ -212,10 +212,24 @@ namespace
         auto granular = [] (Patch& c) { c.granular = true; };
         auto granular2 = [] (Patch& c) { c.granular2 = true; };   // (card B's own, state version 8)
         auto abyss = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::abyss; };   // (ABYSS's own: heard on ABYSS)
+        auto vintage = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::vintage; };
+        auto bloom = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::bloom; };
+        auto bloomFree = [] (Patch& c) {   // (free TIME is heard when SYNC is off)
+            c.effects.spaceEngine = osp::SpaceEngine::bloom;
+            c.effects.bloomSync = false;
+        };
         std::map<juce::String, std::function<void (Patch&)>> modes {
             { "space.abyss.gravity", abyss },
             { "space.abyss.freeze", abyss },
             { "space.abyss.resonance", abyss },
+            { "space.vintage.variant", vintage },
+            { "space.vintage.era", vintage },
+            { "space.vintage.diffusion", vintage },
+            { "space.bloom.variant", bloom },
+            { "space.bloom.sync", bloom },
+            { "space.bloom.division", bloom },
+            { "space.bloom.time", bloomFree },
+            { "space.bloom.diffusion", bloom },
             { params::unisonDetune, [] (Patch& c) { c.unison = true; } },
             { "glide", [] (Patch& c) { c.voiceMode = VoiceMode::mono; } },
             { "mod.lfo1.division", [] (Patch& c) { c.lfo.sync = true; } },
@@ -3042,7 +3056,17 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
             setValue (p, "space.abyss.freeze", 1.0f);
             setValue (p, "space.abyss.gravity", 40.0f);
             shoot ("three-1448-10-space-abyss-frozen");
-            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.resonance", "space.abyss.freeze" })
+            setValue (p, "space.engine", 2.0f);   // VINTAGE
+            setValue (p, "space.vintage.variant", 1.0f);
+            shoot ("three-1448-10-space-vintage-plate");
+            setValue (p, "space.engine", 3.0f);   // BLOOM, synced, then a WASH
+            setValue (p, "space.bloom.diffusion", 25.0f);
+            shoot ("three-1448-10-space-bloom");
+            setValue (p, "space.bloom.variant", 3.0f);
+            setValue (p, "space.bloom.diffusion", 85.0f);
+            shoot ("three-1448-10-space-bloom-wash");
+            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.resonance", "space.abyss.freeze", "space.vintage.variant",
+                                    "space.bloom.variant", "space.bloom.diffusion" })
                 if (auto* q = p.parameters.getParameter (id))
                     q->setValueNotifyingHost (q->getDefaultValue());
             ui.closePopup();

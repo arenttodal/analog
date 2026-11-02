@@ -73,6 +73,8 @@ namespace
         iSourceMode2, iGrainPosition2, iGrainSize2, iGrainDensity2, iGrainTune2, iGrainSpread2,
         // SPACE's ABYSS engine (ANDOR OSP's space.engine and space.abyss.*).
         iSpaceEngine, iAbyssGravity, iAbyssFreeze, iAbyssResonance,
+        // ... VINTAGE's and BLOOM's (space.vintage.*, space.bloom.*).
+        iVintageVariant, iVintageEra, iVintageDiffusion, iBloomVariant, iBloomSync, iBloomDivision, iBloomTime, iBloomDiffusion,
         count
     };
 
@@ -145,7 +147,9 @@ namespace
                 l.add (id);
             for (const char* name : { "sourceMode", "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
                 l.add (osp::plugin::InstrumentHost::layerParameterId (2, name));
-            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.freeze", "space.abyss.resonance" })
+            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.freeze", "space.abyss.resonance",
+                                    "space.vintage.variant", "space.vintage.era", "space.vintage.diffusion", "space.bloom.variant",
+                                    "space.bloom.sync", "space.bloom.division", "space.bloom.time", "space.bloom.diffusion" })
                 l.add (id);
             return l;
         }();
@@ -829,10 +833,18 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.spaceWidth = 0.01 * v (iSpaceWidth);
     s.spaceLowCutHz = v (iSpaceLowCut);
     s.spaceHighCutHz = v (iSpaceHighCut);
-    s.spaceEngine = static_cast<osp::SpaceEngine> (index (iSpaceEngine, 2));
+    s.spaceEngine = static_cast<osp::SpaceEngine> (index (iSpaceEngine, 4));
     s.abyssGravity = 0.01 * v (iAbyssGravity);
     s.abyssFreeze = on (iAbyssFreeze);
     s.abyssResonance = 0.01 * v (iAbyssResonance);
+    s.vintageVariant = static_cast<osp::VintageVariant> (index (iVintageVariant, 4));
+    s.vintageEra = static_cast<osp::VintageEra> (index (iVintageEra, 2));
+    s.vintageDiffusion = 0.01 * v (iVintageDiffusion);
+    s.bloomVariant = static_cast<osp::BloomVariant> (index (iBloomVariant, 4));
+    s.bloomSync = on (iBloomSync);
+    s.bloomDivision = index (iBloomDivision, osp::shaping::echoDivisionCount);
+    s.bloomTimeMs = v (iBloomTime);
+    s.bloomDiffusion = 0.01 * v (iBloomDiffusion);
     s.echoType = static_cast<osp::EchoType> (index (iEchoType, 2));
     s.echoSync = on (iEchoSync);
     s.echoDivision = index (iEchoDivision, osp::shaping::echoDivisionCount);
@@ -1067,6 +1079,14 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iAbyssGravity, 100.0 * s.abyssGravity);
     put (iAbyssFreeze, s.abyssFreeze ? 1.0 : 0.0);
     put (iAbyssResonance, 100.0 * s.abyssResonance);
+    put (iVintageVariant, static_cast<int> (s.vintageVariant));
+    put (iVintageEra, static_cast<int> (s.vintageEra));
+    put (iVintageDiffusion, 100.0 * s.vintageDiffusion);
+    put (iBloomVariant, static_cast<int> (s.bloomVariant));
+    put (iBloomSync, s.bloomSync ? 1.0 : 0.0);
+    put (iBloomDivision, s.bloomDivision);
+    put (iBloomTime, s.bloomTimeMs);
+    put (iBloomDiffusion, 100.0 * s.bloomDiffusion);
     put (iEchoType, static_cast<int> (s.echoType));
     put (iEchoSync, s.echoSync ? 1.0 : 0.0);
     put (iEchoDivision, s.echoDivision);
