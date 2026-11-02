@@ -259,23 +259,23 @@ const ProductInfo& productInfo()
             namespace ap = andor::analog::params;
             using K = andor::shell::ProductInfo::CardKnob;
             std::array<K, 5> k {};
+            // Every card the same first four (DETUNE, TUNE, OCT, LEVEL), its fifth its own.
             if (layer == 0)
                 k = { K { ap::osc1Fine, "DETUNE" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" }, K { ap::osc1Level, "LEVEL" }, K {} };
             else if (layer == 2)   // (REIMAGINED processes the analog pair: card A's, never twice)
-                k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K { {}, {}, true } };
+                k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K { ap::osc2Velo, "VELO" } };
             else
             {
-                // Card C by its type: a recording's or an imported patch's own knobs (ANDOR OSP's);
-                // OSC 3's tuning; NOISE only its LEVEL (its colour and tone are in its well).
+                // Card C by its type.
                 using andor::analog::HybridType;
                 const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (ap::hybridType)), 0, 3));
-                const K hidden { {}, {}, true };
+                const K level { "layerB.level", "LEVEL" };
                 if (type == HybridType::oscillator)
-                    k = { K { ap::osc3Fine, "DETUNE" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, K { "layerB.level", "LEVEL" }, hidden };
+                    k = { K { ap::osc3Fine, "DETUNE" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, level, K { ap::hybridVelo, "VELO" } };
                 else if (type == HybridType::noise)
-                    k = { hidden, hidden, hidden, K { "layerB.level", "LEVEL" }, hidden };
-                else   // (a recording or a patch: START, TUNE, LEVEL; each voice is mono, no PAN; no REIMAGINED on C)
-                    k = { K {}, K {}, hidden, K {}, hidden };
+                    k = { K { ap::hybridNoiseTone, "TONE" }, K { ap::hybridNoiseMovement, "MOVEMENT" }, K { ap::hybridNoiseKeys, "KEYS" }, level, K { ap::hybridVelo, "VELO" } };
+                else   // a recording or a patch: its pitch (the notes it is played with), START
+                    k = { K { ap::hybridFine, "DETUNE" }, K { "layerB.tune", "TUNE" }, K { ap::hybridOctave, "OCT" }, level, K { "layerB.start", "START" } };
             }
             return k;
         };

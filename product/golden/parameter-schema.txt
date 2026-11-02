@@ -119,3 +119,8 @@ analog.osc3.wide.spread v8 float "Osc 3 Super Saw Spread" label="%" range=0.0000
 analog.hybrid.noise.color v8 choice "Hybrid Noise Color" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=White|White|Juno [White|Juno]
 analog.hybrid.noise.tone v8 float "Hybrid Noise Tone" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.hybrid.noise.movement v8 float "Hybrid Noise Movement" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.octave v8 int "Hybrid Octave" label="oct" range=-3.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=-3 oct|0 oct|+3 oct
+analog.hybrid.fine v8 float "Hybrid Fine" label="ct" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 ct|0 ct|+100 ct
+analog.osc2.velo v8 float "Osc 2 Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.velo v8 float "Hybrid Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.noise.keys v8 float "Hybrid Noise Keys" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %

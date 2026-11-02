@@ -68,6 +68,7 @@ namespace
         iOsc3DcoSaw, iOsc3DcoPulse, iOsc3DcoSub, iOsc3DcoPwmSource, iOsc3DcoPwmDepth,
         iOsc3WideWave, iOsc3WideShape, iOsc3WideSpread,
         iHybridNoiseColor, iHybridNoiseTone, iHybridNoiseMovement,
+        iHybridOctave, iHybridFine, iOsc2Velo, iHybridVelo, iHybridNoiseKeys,
         count
     };
 
@@ -135,7 +136,8 @@ namespace
                 l.add (osp::plugin::InstrumentHost::dampenParameterId (2, name));
             for (const auto& id : { osc1Fine, hybridType, osc3Model, osc3Wave, osc3Octave, osc3Coarse, osc3Fine, osc3Width, lfoWidth3,
                                     osc3DcoSaw, osc3DcoPulse, osc3DcoSub, osc3DcoPwmSource, osc3DcoPwmDepth, osc3WideWave, osc3WideShape,
-                                    osc3WideSpread, hybridNoiseColor, hybridNoiseTone, hybridNoiseMovement })
+                                    osc3WideSpread, hybridNoiseColor, hybridNoiseTone, hybridNoiseMovement,
+                                    hybridOctave, hybridFine, osc2Velo, hybridVelo, hybridNoiseKeys })
                 l.add (id);
             return l;
         }();
@@ -474,6 +476,11 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     choice8 (hybridNoiseColor, "Hybrid Noise Color", { "White", "Juno" }, static_cast<int> (d.hybridNoiseColor));
     percent8 (hybridNoiseTone, "Hybrid Noise Tone", d.hybridNoiseTone);
     percent8 (hybridNoiseMovement, "Hybrid Noise Movement", d.hybridNoiseMovement);
+    integer8 (hybridOctave, "Hybrid Octave", -3, 3, d.hybridOctave, "oct");
+    bipolar8 (hybridFine, "Hybrid Fine", 100.0f, d.hybridFineCents, "ct", 0);
+    percent8 (osc2Velo, "Osc 2 Velocity", d.osc2Velo);
+    percent8 (hybridVelo, "Hybrid Velocity", d.hybridVelo);
+    percent8 (hybridNoiseKeys, "Hybrid Noise Keys", d.hybridNoiseKeys);
 }
 
 //==============================================================================
@@ -732,6 +739,11 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.hybridNoiseColor = static_cast<NoiseColor> (index (iHybridNoiseColor, 2));
     p.hybridNoiseTone = 0.01 * v (iHybridNoiseTone);
     p.hybridNoiseMovement = 0.01 * v (iHybridNoiseMovement);
+    p.hybridOctave = juce::roundToInt (v (iHybridOctave));
+    p.hybridFineCents = v (iHybridFine);
+    p.osc2Velo = 0.01 * v (iOsc2Velo);
+    p.hybridVelo = 0.01 * v (iHybridVelo);
+    p.hybridNoiseKeys = 0.01 * v (iHybridNoiseKeys);
     p.blend = 0.01 * v (iBlend);
     p.tone = 0.01 * v (iTone);
     p.lfoAmount = 0.01 * v (iMotion);
@@ -1154,6 +1166,11 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iHybridNoiseColor, static_cast<int> (p.hybridNoiseColor));
     put (iHybridNoiseTone, 100.0 * p.hybridNoiseTone);
     put (iHybridNoiseMovement, 100.0 * p.hybridNoiseMovement);
+    put (iHybridOctave, p.hybridOctave);
+    put (iHybridFine, p.hybridFineCents);
+    put (iOsc2Velo, 100.0 * p.osc2Velo);
+    put (iHybridVelo, 100.0 * p.hybridVelo);
+    put (iHybridNoiseKeys, 100.0 * p.hybridNoiseKeys);
     return m;
 }
 

@@ -2,6 +2,7 @@
 
 #include "AnalogParameters.h"
 #include "SampleSourceUI.h"
+#include "ShellProcessor.h"
 #include "Binding.h"
 #include "Design.h"
 #include "OspLookAndFeel.h"
@@ -66,6 +67,69 @@ namespace
     {
         return juce::roundToInt (host.parameterValue (params::hybridType)) == static_cast<int> (HybridType::instrumentPatch) ? juce::String ("Instrument") : juce::String();
     }
+
+    /** An action key on the well (SOUNDS, IMPORT): graphite, cream text, the accent outline on
+        hover or focus, as the well's other keys. */
+    class WellAction final : public juce::Button
+    {
+    public:
+        WellAction (const juce::String& name, juce::Colour accentColour) : juce::Button (name), accent (accentColour)
+        {
+            setTitle (name);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            setWantsKeyboardFocus (true);
+        }
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            const float radius = std::min (6.0f, 0.24f * r.getHeight());
+            g.setColour (cellFill.withAlpha (over || down ? 1.0f : 0.92f));
+            g.fillRoundedRectangle (r, radius);
+            g.setColour (hasKeyboardFocus (false) || over ? accent : cellEdge);
+            g.drawRoundedRectangle (r.reduced (0.5f), radius, 1.0f);
+            g.setColour (cream.withAlpha (over ? 1.0f : 0.85f));
+            g.setFont (type::popupLabel (juce::jlimit (10.0f, 12.0f, 0.42f * r.getHeight())));
+            g.drawText (getButtonText(), r.reduced (6.0f, 0.0f), juce::Justification::centred, false);
+        }
+
+    private:
+        juce::Colour accent;
+    };
+
+    /** Whether card C shows a stand-in (empty: no recording, no sound chosen). */
+    bool hybridEmpty (InstrumentHost& host)
+    {
+        InstrumentHost::GeneratedSource s;
+        return host.generatedSource (1, s) && s.placeholder.isNotEmpty();
+    }
+
+    /** A transparent area over an empty card C's well: a click browses for a recording. */
+    class BrowseArea final : public juce::Component, public juce::SettableTooltipClient
+    {
+    public:
+        explicit BrowseArea (InstrumentHost& h) : host (h)
+        {
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            setTooltip ("Choose a recording for card C (or drop one here)");
+            setTitle ("Add sample");
+        }
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (! getLocalBounds().contains (e.getPosition()))
+                return;
+            chooser = std::make_unique<juce::FileChooser> ("Add a sample to card C", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+            auto* h = &host;
+            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [h] (const juce::FileChooser& fc) {
+                if (fc.getResult().existsAsFile())
+                    if (auto* shell = dynamic_cast<andor::shell::ShellProcessor*> (h))
+                        shell->loadFile (fc.getResult(), andor::shell::ShellProcessor::hybridLayer);
+            });
+        }
+
+    private:
+        InstrumentHost& host;
+        std::unique_ptr<juce::FileChooser> chooser;
+    };
 
     struct SlotIds
     {
@@ -311,20 +375,35 @@ namespace
             addAndMakeVisible (*typeSelector);
             if (type == HybridType::noise)
             {
-                cells = { selector (params::hybridNoiseColor, "COLOR", "The noise: WHITE, or the Juno's darker hiss"),
-                          knob (params::hybridNoiseTone, "TONE", "Its brightness: a low-pass from 200 Hz to 18 kHz"),
-                          knob (params::hybridNoiseMovement, "MOVEMENT", "A slow drift of its level, each voice its own (seeded: every render the same)") };
+                // (TONE, MOVEMENT and KEYS are the card's own knobs, under the well.)
+                cells = { selector (params::hybridNoiseColor, "COLOR", "The noise: WHITE, or the Juno's darker hiss"), nullptr, nullptr };
             }
             else if (type == HybridType::instrumentPatch)
             {
-                soundKey = std::make_unique<juce::TextButton> ("SOUNDS");
+                soundKey = std::make_unique<WellAction> ("SOUNDS", accent);
                 soundKey->setTooltip ("The imported sounds: pick one for card C, import a Kontakt patch, or remove it (OSC 1, OSC 2 and the effects stay)");
                 soundKey->onClick = [this] { showSoundMenu (host, *soundKey); };
-                soundKey->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2b3031));
-                soundKey->setColour (juce::TextButton::textColourOffId, juce::Colour (0xffeee8dd));
-                revealed().addAndMakeVisible (*soundKey);
-                cells = { soundKey.get(), nullptr, nullptr };
+                // Empty (no sound chosen yet): the sounds always there, not only on hover.
+                if (hybridEmpty (host))
+                    addAndMakeVisible (*soundKey);
+                else
+                {
+                    revealed().addAndMakeVisible (*soundKey);
+                    cells = { soundKey.get(), nullptr, nullptr };
+                }
             }
+            else if (type == HybridType::sample && hybridEmpty (host))
+            {
+                // Empty: the whole well is the invitation (click to browse, or drop a file on the
+                // card); a quiet second way in at its foot.
+                browse = std::make_unique<BrowseArea> (host);
+                addAndMakeVisible (*browse);
+                importKey = std::make_unique<WellAction> ("IMPORT KONTAKT PATCH", accent);
+                importKey->setTooltip ("Turn a Kontakt instrument (its NKI and samples) into sounds for card C");
+                importKey->onClick = [this] { runKontaktImport (host); };
+                addAndMakeVisible (*importKey);
+            }
+            typeSelector->toFront (false);
         }
 
         int rulerReserve() const override { return 118 + 24; }
@@ -338,6 +417,12 @@ namespace
         {
             WellOverlay::resized();
             typeSelector->setBounds (getWidth() - 12 - 118, 6, 118, 22);
+            if (browse != nullptr)
+                browse->setBounds (getLocalBounds().withTrimmedTop (32));
+            if (importKey != nullptr)
+                importKey->setBounds (getLocalBounds().withSizeKeepingCentre (std::min (getWidth() - 24, 190), 26).withBottomY (getHeight() - 12));
+            if (soundKey != nullptr && soundKey->getParentComponent() == this)
+                soundKey->setBounds (getLocalBounds().withSizeKeepingCentre (std::min (getWidth() - 24, 150), 28).withBottomY (getHeight() - 14));
             const auto b = getLocalBounds().withTrimmedTop (std::max (0, getHeight() - 92)).reduced (8, 4);
             const int cellWidth = b.getWidth() / 3;
             for (std::size_t i = 0; i < cells.size(); ++i)
@@ -385,7 +470,8 @@ namespace
         const HybridType type;
         const juce::Colour accent;
         std::unique_ptr<ValueSelector> typeSelector;
-        std::unique_ptr<juce::TextButton> soundKey;
+        std::unique_ptr<WellAction> soundKey, importKey;
+        std::unique_ptr<BrowseArea> browse;
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::array<juce::Component*, 3> cells {};
     };
@@ -401,7 +487,8 @@ std::unique_ptr<WellOverlay> createHybridOverlay (InstrumentHost& host)
 juce::String hybridOverlayKey (InstrumentHost& host)
 {
     const int type = juce::roundToInt (host.parameterValue (params::hybridType));
-    return "hybrid/" + juce::String (type) + (type == static_cast<int> (HybridType::oscillator) ? "/" + juce::String (modelOf (host, 3)) : juce::String());
+    return "hybrid/" + juce::String (type) + (type == static_cast<int> (HybridType::oscillator) ? "/" + juce::String (modelOf (host, 3)) : juce::String())
+           + (hybridEmpty (host) ? "/empty" : "");
 }
 
 std::unique_ptr<WellOverlay> createOscillatorOverlay (InstrumentHost& host, int slot, int layer)

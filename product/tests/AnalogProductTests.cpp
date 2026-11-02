@@ -308,6 +308,10 @@ namespace
         modes[params::osc3WideSpread] = osc3 (OscModel::wide, [] (Patch& c) { c.wide3.wave = WideWave::superSaw; });
         for (const auto& id : { params::hybridNoiseColor, params::hybridNoiseTone, params::hybridNoiseMovement })
             modes[id] = [] (Patch& c) { c.hybridType = HybridType::noise; };
+        modes[params::hybridNoiseKeys] = [] (Patch& c) {
+            c.hybridType = HybridType::noise;
+            c.hybridNoiseTone = 0.4;   // (KEYS moves the tone: heard below full brightness)
+        };
         modes[params::otaCharacter] = [] (Patch& c) {
             c.filterModel = FilterModel::ota;
             c.resonance = 0.6;
@@ -351,9 +355,9 @@ TEST_CASE ("analog: the parameters' defaults are the INIT patch", "[analog][para
     params::Reader reader;
     reader.attach (p.parameters);
     auto init = params::valuesOf (Patch()), read = params::valuesOf (reader.read());
-    // The one exception: the A/B mix is ANDOR OSP's parameter, its default all A (one layer:
-    // not heard). The INIT patch's 0.5 is where the shell puts it when a recording joins.
-    CHECK (read.at ("ab.blend") == 0.0f);
+    // The A/B mix is ANDOR OSP's parameter (its default all A); three engines put it in the
+    // middle at once (every card heard), the INIT patch's 0.5.
+    CHECK (read.at ("ab.blend") == 0.5f);
     CHECK (init.at ("ab.blend") == 0.5f);
     init.erase ("ab.blend");
     read.erase ("ab.blend");
@@ -514,9 +518,10 @@ TEST_CASE ("analog: cards A and B show OSC 1 and OSC 2, each its own picture fol
     setValue (p, params::osc2Wave, 2.0f);   // OSC 2 pulse: card B's moves
     REQUIRE (p.generatedSource (2, b2));
     CHECK (b.cycle != b2.cycle);
-    // The empty hybrid is no generator: its card waits for a recording.
+    // The empty hybrid: a stand-in (its card full, its picture faint, ADD SAMPLE).
     osp::plugin::InstrumentHost::GeneratedSource c;
-    CHECK_FALSE (p.generatedSource (1, c));
+    REQUIRE (p.generatedSource (1, c));
+    CHECK (c.placeholder.startsWith ("ADD SAMPLE"));
 }
 
 TEST_CASE ("analog: GRANULAR's grains are shown on the card where they read, on POS's scale", "[analog][editor][granular]")
@@ -1380,7 +1385,7 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     editor->setSize (1448, 1086);
     ui.refreshNow();
-    CHECK (ui.visibleCardCount() == 2);   // OSC 1 and OSC 2 (the hybrid empty: its ADD SAMPLE card)
+    CHECK (ui.visibleCardCount() == 3);   // OSC 1, OSC 2 and the hybrid (empty: its stand-in)
     CHECK (ui.isInterestedInFileDrag ({ file.getFullPathName() }));
     const auto synth = renderShell (p, 0.6);
 
@@ -1444,7 +1449,7 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
     p.pollLoads();
     renderShell (p, 0.05);   // (the hand-over happens in a block)
     ui.refreshNow();
-    CHECK (ui.visibleCardCount() == 2);
+    CHECK (ui.visibleCardCount() == 3);   // (card C's stand-in)
     CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
 }
 
@@ -1803,67 +1808,61 @@ TEST_CASE ("analog: screenshots of KEY DNA, the cards' EQ and ORGANIC's playhead
     osp::plugin::skin::setLook (before);
 }
 
-TEST_CASE ("analog: three equal cards, A OSC 1, B OSC 2, C the hybrid; empty, C is its ADD SAMPLE card; loading never moves them", "[analog][editor][organic][dock]")
+TEST_CASE ("analog: three equal cards, A OSC 1, B OSC 2, C the hybrid; empty, C is a full card with a stand-in; loading never moves them", "[analog][editor][organic][dock]")
 {
     ShellProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     editor->setSize (1448, 1086);
     ui.refreshNow();
-    auto& dock = ui.recordingDock();
     auto& osc1 = ui.engineCard (0);
     auto& osc2 = ui.engineCard (2);   // (card B: the shell's layer C)
-    // A new instance: A, B and C side by side at equal widths, C the empty hybrid's invitation.
-    REQUIRE (dock.isVisible());
-    CHECK (ui.visibleCardCount() == 2);
-    CHECK (osc1.getRight() < osc2.getX());
-    CHECK (osc2.getRight() < dock.getX());
-    CHECK (std::abs (osc1.getWidth() - osc2.getWidth()) <= 1);
-    CHECK (std::abs (osc1.getWidth() - dock.getWidth()) <= 1);
-    CHECK (dock.getY() == osc1.getY());
-    CHECK (dock.getHeight() == osc1.getHeight());
-    const auto columns = std::array<juce::Rectangle<int>, 3> { osc1.getBounds(), osc2.getBounds(), dock.getBounds() };
-    // The dock never changes a sound: the oscillators play as they did, at full level.
-    const auto values = [&p] {
-        std::vector<float> v;
-        for (auto* param : p.getParameters())
-            v.push_back (param->getValue());
-        return v;
+    auto& c = ui.engineCard (1);      // (card C: the shell's layer B)
+    auto standIn = [&p] {
+        osp::plugin::InstrumentHost::GeneratedSource s;
+        return p.generatedSource (1, s) && s.placeholder.isNotEmpty();
     };
-    const auto before = values();
-    // A file dragged over the instrument lights the dock.
-    ui.fileDragEnter ({ "/tmp/a.wav" }, 10, 10);
-    CHECK (dock.isHighlighted());
-    ui.fileDragExit ({ "/tmp/a.wav" });
-    CHECK_FALSE (dock.isHighlighted());
-    REQUIRE (dock.onBrowse != nullptr);
-    CHECK (values() == before);
+    // A new instance: A, B and C side by side at equal widths, all three full cards; C empty
+    // shows its stand-in (ADD SAMPLE) with its knobs and keys, never the compact dock.
+    CHECK_FALSE (ui.recordingDock().isVisible());
+    REQUIRE (ui.visibleCardCount() == 3);
+    CHECK (standIn());
+    CHECK (c.hasControl ("layerB.level"));
+    CHECK (c.hasControl (params::hybridOctave));
+    CHECK (osc1.getRight() < osc2.getX());
+    CHECK (osc2.getRight() < c.getX());
+    CHECK (std::abs (osc1.getWidth() - osc2.getWidth()) <= 1);
+    CHECK (std::abs (osc1.getWidth() - c.getWidth()) <= 1);
+    CHECK (c.getY() == osc1.getY());
+    CHECK (c.getHeight() == osc1.getHeight());
+    // The MIX starts in the middle: every card is heard.
+    CHECK (p.parameterValue ("ab.blend") == Approx (0.5f));
+    const auto columns = std::array<juce::Rectangle<int>, 3> { osc1.getBounds(), osc2.getBounds(), c.getBounds() };
 
-    // A recording: card C takes the column the invitation had; A and B never move.
+    // A recording: card C plays it in the same column; A and B never move.
     Scratch scratch;
     loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 1.5));
     ui.refreshNow();
-    CHECK_FALSE (dock.isVisible());
+    CHECK_FALSE (standIn());
     REQUIRE (ui.visibleCardCount() == 3);
-    CHECK (ui.engineCard (1).getBounds() == columns[2]);
+    CHECK (c.getBounds() == columns[2]);
     CHECK (osc1.getBounds() == columns[0]);
     CHECK (osc2.getBounds() == columns[1]);
-    // Removed: the invitation comes back in the same column; the oscillators' settings are unchanged.
+    // Removed: the stand-in again, in the same column.
     p.removeLayer (ShellProcessor::hybridLayer);
     ui.refreshNow();
-    CHECK (dock.isVisible());
-    CHECK (dock.getBounds() == columns[2]);
-    CHECK (ui.visibleCardCount() == 2);
-    // A file that cannot be read: the dock says so and offers another try; nothing else moves.
+    CHECK (standIn());
+    CHECK (c.getBounds() == columns[2]);
+    CHECK (ui.visibleCardCount() == 3);
+    // A file that cannot be read: said so; card C stays its stand-in.
     const auto broken = scratch.dir.getChildFile ("broken.wav");
     broken.replaceWithText ("not audio");
     p.loadFile (broken, ShellProcessor::hybridLayer);
     REQUIRE (p.waitForLoads (60000));
     p.pollLoads();
     ui.refreshNow();
-    CHECK (dock.isVisible());
-    CHECK (dock.problemText().isNotEmpty());
-    // A session with a recording opens with both cards; one without, with the dock.
+    CHECK (p.statusMessage().isNotEmpty());
+    // A session with a recording opens with it on card C.
     loadOrganic (p, writeRecording (scratch.dir, "organic2.wav", 57, 1.5));
     juce::MemoryBlock withRecording;
     p.getStateInformation (withRecording);
@@ -1873,11 +1872,9 @@ TEST_CASE ("analog: three equal cards, A OSC 1, B OSC 2, C the hybrid; empty, C 
         q.setStateInformation (withRecording.getData(), static_cast<int> (withRecording.getSize()));
         REQUIRE (q.waitForLoads (60000));
         q.pollLoads();
-        std::unique_ptr<juce::AudioProcessorEditor> e (q.createEditor());
-        auto& u = dynamic_cast<andor::shell::ShellEditor&> (*e);
-        u.refreshNow();
-        CHECK_FALSE (u.recordingDock().isVisible());
-        CHECK (u.visibleCardCount() == 3);
+        osp::plugin::InstrumentHost::GeneratedSource s;
+        CHECK_FALSE ((q.generatedSource (1, s) && s.placeholder.isNotEmpty()));
+        CHECK (q.currentInstrument (1) != nullptr);
     }
 }
 
@@ -1953,6 +1950,7 @@ namespace
             }
     }
 }
+
 
 TEST_CASE ("analog: Bukkehorn 4.5's Voxx imports complete and plays its recordings at their keys", "[analog][bukkehorn]")
 {
@@ -2367,7 +2365,7 @@ TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are pick
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     ui.refreshNow();
-    REQUIRE (ui.recordingDock().isVisible());   // (empty: the dock)
+    REQUIRE (ui.visibleCardCount() == 3);   // (empty: card C's stand-in)
 
     auto open = [&] (int index) {
         osp::plugin::InstrumentHost::PresetEntry entry;
@@ -2379,7 +2377,6 @@ TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are pick
     };
     // An imported sound: ORGANIC's card shows it (its name, its picture), the dock gives way.
     open (0);
-    CHECK_FALSE (ui.recordingDock().isVisible());
     CHECK (ui.visibleCardCount() == 3);
     osp::plugin::InstrumentHost::GeneratedSource shown;
     REQUIRE (p.generatedSource (1, shown));
@@ -2434,7 +2431,8 @@ TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are pick
     p.removeLayer (ShellProcessor::hybridLayer);   // (the card's Remove: what it shows)
     ui.refreshNow();
     CHECK (engine.hybridType() == andor::analog::HybridType::sample);
-    CHECK (ui.recordingDock().isVisible());   // (nothing: the empty card again)
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.placeholder.startsWith ("ADD SAMPLE"));   // (nothing: the stand-in again)
 
     // A recording dropped onto card C plays (C becomes a SAMPLE); the imported sound stays,
     // dormant, and plays again when C is an INSTRUMENT PATCH. Nothing is lost on the way.
@@ -2456,7 +2454,8 @@ TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are pick
     p.removeLayer (ShellProcessor::hybridLayer);
     ui.refreshNow();
     CHECK (engine.sampleSourceDefinition() != nullptr);   // (still kept for its type)
-    CHECK (ui.recordingDock().isVisible());
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.placeholder.startsWith ("ADD SAMPLE"));
     editor.reset();
     setSampleStore ({});
 }
@@ -2814,8 +2813,11 @@ TEST_CASE ("analog: card C is a SAMPLE, OSC 3, NOISE or an INSTRUMENT PATCH; onl
             CHECK (OverlayFixture::shown (*o, hybridType));   // (its type, always)
             o->setRevealedForTest (true);
             OverlayFixture::checkLayout (*o, 1);
-            CHECK (OverlayFixture::shown (*o, hybridNoiseTone) == (type == HybridType::noise));
-            CHECK (OverlayFixture::shown (*o, hybridNoiseMovement) == (type == HybridType::noise));
+            CHECK (OverlayFixture::shown (*o, hybridNoiseColor) == (type == HybridType::noise));
+            CHECK (card.hasControl (hybridNoiseTone) == (type == HybridType::noise));
+            CHECK (card.hasControl (hybridNoiseKeys) == (type == HybridType::noise));
+            CHECK (card.hasControl (hybridVelo) == (type == HybridType::noise || type == HybridType::oscillator));
+            CHECK (card.hasControl (hybridOctave) == (type == HybridType::sample || type == HybridType::instrumentPatch));
             CHECK (OverlayFixture::shown (*o, osc3Model) == (type == HybridType::oscillator));
             CHECK (OverlayFixture::shown (*o, osc3Wave) == (type == HybridType::oscillator));
         }

@@ -293,6 +293,7 @@ void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin
 {
     if (layer != 1)
         return;
+    recordingPublished.store (source != nullptr);
     if (source != nullptr)
         setHybridType (HybridType::sample);   // (a recording dropped on card C plays: an imported source stays, dormant)
     if (analyser == nullptr)
@@ -539,7 +540,7 @@ juce::String AnalogEngine::engineSourceName (int layer) const
     {
         case HybridType::oscillator: return "OSC 3";
         case HybridType::noise: return "NOISE";
-        case HybridType::sample: return {};   // (the shell's recording, or the empty card)
+        case HybridType::sample: return recordingPublished.load() ? juce::String() : juce::String ("HYBRID");   // (empty: its stand-in)
         case HybridType::instrumentPatch: break;
     }
     const std::lock_guard<std::mutex> lock (sourceMutex);
@@ -548,6 +549,21 @@ juce::String AnalogEngine::engineSourceName (int layer) const
     const auto collection = sourceDefinition->getStringAttribute ("collection");
     const auto name = sourceDefinition->getStringAttribute ("name");
     return collection.isNotEmpty() ? collection + juce::String::fromUTF8 (" \xc2\xb7 ") + name : name;
+}
+
+juce::String AnalogEngine::engineSourcePlaceholder (int layer) const
+{
+    if (layer != 1)
+        return {};
+    if (hybridType() == HybridType::sample && ! recordingPublished.load())
+        return "ADD SAMPLE\nDROP OR BROWSE";
+    if (hybridType() == HybridType::instrumentPatch)
+    {
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        if (sourceDefinition == nullptr)
+            return "CHOOSE A SOUND\nSOUNDS, OR IMPORT A KONTAKT PATCH";
+    }
+    return {};
 }
 
 void AnalogEngine::removeEngineSource (int layer)
@@ -561,6 +577,18 @@ void AnalogEngine::removeEngineSource (int layer)
 
 bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
 {
+    if (layer == 1 && engineSourcePlaceholder (1).isNotEmpty())
+    {
+        // A stand-in: a recording's outline in general (swells, a long tail), drawn faint.
+        cycle.resize (256);
+        for (std::size_t i = 0; i < cycle.size(); ++i)
+        {
+            const double t = static_cast<double> (i) / 255.0;
+            const double envelope = std::sin (math::pi * std::pow (t, 0.6)) * (0.55 + 0.45 * std::sin (7.0 * t + 1.0));
+            cycle[i] = static_cast<float> ((i % 2 == 0 ? 1.0 : -1.0) * envelope * (0.7 + 0.3 * std::sin (37.0 * t)));
+        }
+        return true;
+    }
     if (layer == 1 && hybridType() != HybridType::instrumentPatch)
     {
         // OSC 3 alone (OSC 2's picture with OSC 3's settings), or NOISE's.

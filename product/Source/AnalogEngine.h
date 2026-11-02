@@ -47,6 +47,9 @@ public:
     HybridType hybridType() const noexcept;
     void setHybridType (HybridType type);
     bool engineSourceIsPeriodic (int layer) const override { return layer == 1 && hybridType() == HybridType::oscillator; }
+    /** Card C empty (a SAMPLE without a recording, an INSTRUMENT PATCH without a sound): a full
+        card with a faint stand-in picture and what to do. */
+    juce::String engineSourcePlaceholder (int layer) const override;
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept override;
     int activeNotes() const noexcept override { return synth.activeVoices(); }
     void setShaperPattern (const osp::ShaperPattern& pattern) noexcept override { shaperPattern = pattern; }
@@ -108,6 +111,8 @@ public:
     static std::vector<float> oscillatorPictureOf (Patch patch, int slot, int points = 256);
 
 private:
+    std::atomic<bool> recordingPublished { false };   ///< the shell has a recording on card C (message thread)
+
     // State version 8: card C's sources as handed to the synth (audio thread): the shell's
     // recording and the imported zones, each only while its type is selected.
     const osp::InstrumentModel* shellRecording = nullptr;

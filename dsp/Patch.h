@@ -283,6 +283,15 @@ struct Patch
     NoiseColor hybridNoiseColor = NoiseColor::white;
     double hybridNoiseTone = 1.0;
     double hybridNoiseMovement = 0.0;
+    /** Card C's own pitch for a SAMPLE or INSTRUMENT PATCH (the notes it is played with move:
+        OCT octaves, DETUNE cents; its TUNE is the shell's layerB.tune). */
+    int hybridOctave = 0;
+    double hybridFineCents = 0.0;
+    /** VELO: how much a card's level follows velocity (0: not at all, the level as set; 1: soft
+        notes leave it silent, the hardest at its level). OSC 2's (card B) and card C's. */
+    double osc2Velo = 0.0, hybridVelo = 0.0;
+    /** NOISE's KEYS: how far its TONE follows the key (0: fixed; 1: an octave per octave from C4). */
+    double hybridNoiseKeys = 0.0;
 };
 
 } // namespace andor::analog

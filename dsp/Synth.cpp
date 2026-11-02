@@ -1128,6 +1128,9 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.gain1 = 0.0f;
     if (! p.osc2Enabled)
         v.gain2 = 0.0f;
+    // State version 8: card B's VELO (its level follows velocity; 0: as set).
+    if (p.osc2Velo > 0.0)
+        v.gain2 *= static_cast<float> (1.0 - p.osc2Velo + p.osc2Velo * static_cast<double> (v.velocity * v.velocity));
     // State version 8: each oscillator's card M / S (the noise mixer goes with OSC 1's card).
     if (! p.osc1Heard)
         v.gain1 = v.gainNoise = 0.0f;
@@ -1141,15 +1144,19 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.ringNow = 0.0f;
     // ORGANIC: the note's pitch with its own TUNE (not the oscillators' card's) against the
     // recording's root (or the override).
+    // (State version 8: card C's own OCT and DETUNE move the notes it is played with.)
+    const double hybridPitch = 12.0 * p.hybridOctave + p.hybridFineCents / 100.0;
     if (v.organic.playing())
-        v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones, static_cast<double> (p.organic.rootOverride));
+        v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch, static_cast<double> (p.organic.rootOverride));
     v.organicGain = p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
+    if (p.hybridVelo > 0.0)   // card C's VELO
+        v.organicGain *= static_cast<float> (1.0 - p.hybridVelo + p.hybridVelo * static_cast<double> (v.velocity * v.velocity));
     bool zonesOn = false;
     for (int i = 0; i < v.zoneCount; ++i)
     {
         auto& zone = v.zones[static_cast<std::size_t> (i)];
         if (zone.playing())
-            v.zoneSteps[static_cast<std::size_t> (i)] = zone.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones);
+            v.zoneSteps[static_cast<std::size_t> (i)] = zone.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch);
         zonesOn = zonesOn || ! zone.finished();
     }
     // State version 8: the hybrid as OSC 3 or NOISE (only the selected type plays: the engine
@@ -1174,8 +1181,9 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     else if (p.hybridType == HybridType::noise)
     {
         // TONE: a one-pole low-pass, 200 Hz .. 18 kHz; MOVEMENT: a slow seeded drift of its level.
-        const double toneHz = 200.0 * std::pow (90.0, std::clamp (p.hybridNoiseTone, 0.0, 1.0));
-        v.hybridToneCoef = p.hybridNoiseTone >= 0.999 ? 1.0f : static_cast<float> (1.0 - std::exp (-2.0 * math::pi * toneHz / internalRate));
+        const double keyed = std::exp2 (std::clamp (p.hybridNoiseKeys, 0.0, 1.0) * (common - 60.0) / 12.0);   // KEYS: the tone follows the key
+        const double toneHz = std::min (0.45 * internalRate, 200.0 * std::pow (90.0, std::clamp (p.hybridNoiseTone, 0.0, 1.0)) * keyed);
+        v.hybridToneCoef = p.hybridNoiseTone >= 0.999 && p.hybridNoiseKeys <= 0.0 ? 1.0f : static_cast<float> (1.0 - std::exp (-2.0 * math::pi * toneHz / internalRate));
         if (--v.hybridMoveCountdown <= 0)
         {
             v.hybridMoveCountdown = 24;

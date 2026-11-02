@@ -141,6 +141,11 @@ namespace andor::analog::params
     inline const juce::String hybridNoiseColor = "analog.hybrid.noise.color";
     inline const juce::String hybridNoiseTone = "analog.hybrid.noise.tone";
     inline const juce::String hybridNoiseMovement = "analog.hybrid.noise.movement";
+    inline const juce::String hybridOctave = "analog.hybrid.octave";
+    inline const juce::String hybridFine = "analog.hybrid.fine";
+    inline const juce::String osc2Velo = "analog.osc2.velo";
+    inline const juce::String hybridVelo = "analog.hybrid.velo";
+    inline const juce::String hybridNoiseKeys = "analog.hybrid.noise.keys";
     /** State version 8's own parameters (appended), for its migration and tests. */
     const juce::StringArray& version8Ids();
     // ORGANIC is the shell's layer B (ProductInfo::hybridSampleName): its card's own LEVEL,
