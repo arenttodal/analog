@@ -1083,6 +1083,15 @@ void Synth::applyVoiceModulation (Voice& v) noexcept
         p.grains.density = std::clamp (current.grains.density * std::exp2 (offsetOf (v, D::grainDensityA)), 4.0, 40.0);
     if (compiled.has (D::grainSizeA))
         p.grains.sizeSeconds = std::clamp (current.grains.sizeSeconds * std::exp2 (offsetOf (v, D::grainSizeA)), 0.02, 0.4);
+    // Card B's grains (state version 8): ANDOR OSP's layer C destinations (card B is layer C).
+    if (compiled.has (D::grainPositionC))
+        p.grains2.position = std::clamp (current.grains2.position + offsetOf (v, D::grainPositionC), 0.0, 1.0);
+    if (compiled.has (D::grainSpreadC))
+        p.grains2.spread = std::clamp (current.grains2.spread + offsetOf (v, D::grainSpreadC), 0.0, 1.0);
+    if (compiled.has (D::grainDensityC))
+        p.grains2.density = std::clamp (current.grains2.density * std::exp2 (offsetOf (v, D::grainDensityC)), 4.0, 40.0);
+    if (compiled.has (D::grainSizeC))
+        p.grains2.sizeSeconds = std::clamp (current.grains2.sizeSeconds * std::exp2 (offsetOf (v, D::grainSizeC)), 0.02, 0.4);
     if (compiled.has (D::ampSustain))
         p.ampSustain = std::clamp (current.ampSustain + offsetOf (v, D::ampSustain), 0.0, 1.0);
 }

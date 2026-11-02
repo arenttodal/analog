@@ -211,7 +211,11 @@ namespace
         };
         auto granular = [] (Patch& c) { c.granular = true; };
         auto granular2 = [] (Patch& c) { c.granular2 = true; };   // (card B's own, state version 8)
+        auto abyss = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::abyss; };   // (ABYSS's own: heard on ABYSS)
         std::map<juce::String, std::function<void (Patch&)>> modes {
+            { "space.abyss.gravity", abyss },
+            { "space.abyss.freeze", abyss },
+            { "space.abyss.resonance", abyss },
             { params::unisonDetune, [] (Patch& c) { c.unison = true; } },
             { "glide", [] (Patch& c) { c.voiceMode = VoiceMode::mono; } },
             { "mod.lfo1.division", [] (Patch& c) { c.lfo.sync = true; } },
@@ -714,6 +718,8 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
              { D::levelA, "layerA.level" }, { D::panA, "layerA.pan" }, { D::fineTuneA, "layerA.tune" }, { D::reimaginedA, "reimagined" },
              { D::grainPositionA, "layerA.granular.position" }, { D::grainDensityA, "layerA.granular.density" },
              { D::grainSizeA, "layerA.granular.size" }, { D::grainSpreadA, "layerA.granular.spread" },
+             { D::grainPositionC, "layerC.granular.position" }, { D::grainDensityC, "layerC.granular.density" },   // (card B's grains)
+             { D::grainSizeC, "layerC.granular.size" }, { D::grainSpreadC, "layerC.granular.spread" },
              { D::ampAttack, "attack" }, { D::ampDecay, "decay" }, { D::ampSustain, "sustainLevel" }, { D::ampRelease, "release" } })
         dests.emplace_back (d, juce::String (id));
 
@@ -3053,4 +3059,51 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
     editor.reset();
     setSampleStore ({});
     osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: a modulation source dragged onto a Granular card reaches its grain controls (cards A and B)", "[analog][editor][modulation][granular]")
+{
+    // The pointer's own hover never reaches a card while a source is dragged: resting on a
+    // Granular card's display brings its POS SIZE DENS TUNE SPREAD up, as in ANDOR OSP.
+    using D = osp::mod::Dest;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    setValue (p, "layerA.sourceMode", 1.0f);
+    setValue (p, "layerC.sourceMode", 1.0f);
+    ui.refreshNow();
+    auto& content = ui.contentForTest();
+    const int lfo1 = osp::mod::slot::lfo1;
+    for (const auto& [layer, dest] : { std::pair<int, D> { 0, D::grainPositionA }, { 2, D::grainPositionC } })
+    {
+        INFO ("layer " << layer);
+        auto& card = ui.engineCard (layer);
+        REQUIRE (card.isGranular());
+        CHECK_FALSE (card.granularControlsShown());
+        const auto display = content.getLocalArea (&card, card.display().getBounds()).toFloat();
+        ui.dragModulationForTest (lfo1, display.getCentre());
+        juce::Thread::sleep (420);   // (a rest, not a pass across it)
+        ui.dragModulationForTest (lfo1, display.getCentre());
+        CHECK (card.granularControlsShown());
+        juce::Slider* pos = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && s->getProperties()["paramId"].toString() == osp::plugin::InstrumentHost::layerParameterId (layer, "granular.position"))
+                    pos = s;
+                find (*child);
+            }
+        };
+        find (card);
+        REQUIRE (pos != nullptr);
+        CHECK (pos->isVisible());
+        const auto at = content.getLocalArea (pos, pos->getLocalBounds()).toFloat().getCentre();
+        ui.dragModulationForTest (lfo1, at);
+        ui.dropModulationForTest (lfo1, at);
+        bool routed = false;
+        for (const auto& r : p.modulationRoutes())
+            routed = routed || (r.route.dest == dest && r.route.source == osp::mod::Source::lfo1);
+        CHECK (routed);
+    }
 }

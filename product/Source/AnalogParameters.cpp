@@ -71,6 +71,8 @@ namespace
         iHybridOctave, iHybridFine, iOsc2Velo, iHybridVelo, iHybridNoiseKeys,
         // Card B's own REGULAR / GRANULAR and grains (the shell's layer C settings).
         iSourceMode2, iGrainPosition2, iGrainSize2, iGrainDensity2, iGrainTune2, iGrainSpread2,
+        // SPACE's ABYSS engine (ANDOR OSP's space.engine and space.abyss.*).
+        iSpaceEngine, iAbyssGravity, iAbyssFreeze, iAbyssResonance,
         count
     };
 
@@ -143,6 +145,8 @@ namespace
                 l.add (id);
             for (const char* name : { "sourceMode", "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
                 l.add (osp::plugin::InstrumentHost::layerParameterId (2, name));
+            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.freeze", "space.abyss.resonance" })
+                l.add (id);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -526,6 +530,7 @@ namespace
             case iAnalog: p.analogAmount = 0.01 * v; break;
             case iFilterDrive: p.filterDrive = 0.01 * v; break;
             case iGrainTune: p.grains.tuneSemitones = v; break;
+            case iGrainTune2: p.grains2.tuneSemitones = v; break;
             case iOsc1DcoSub: p.dco1.subLevel = 0.01 * v; break;
             case iOsc2DcoSub: p.dco2.subLevel = 0.01 * v; break;
             case iOsc1DcoPwmDepth: p.dco1.pwmDepth = 0.01 * v; break;
@@ -596,6 +601,9 @@ namespace
             { iRingMix, "RING MOD", O::voice },
             { iMorphPosition, "MORPH", O::voice }, { iMorphTexture, "MORPH TEXTURE", O::voice }, { iMorphAttack, "MORPH ATTACK", O::voice },
             { iMorphFormants, "MORPH FORMANTS", O::voice }, { iMorphDetail, "MORPH DETAIL", O::voice },
+            // State version 8 (appended): card B's own grains (its POS, SIZE, DENS and SPREAD are
+            // ANDOR OSP's layer C destinations).
+            { iGrainTune2, "GRAIN TUNE B", O::voice },
         };
         return list;
     }
@@ -821,6 +829,10 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.spaceWidth = 0.01 * v (iSpaceWidth);
     s.spaceLowCutHz = v (iSpaceLowCut);
     s.spaceHighCutHz = v (iSpaceHighCut);
+    s.spaceEngine = static_cast<osp::SpaceEngine> (index (iSpaceEngine, 2));
+    s.abyssGravity = 0.01 * v (iAbyssGravity);
+    s.abyssFreeze = on (iAbyssFreeze);
+    s.abyssResonance = 0.01 * v (iAbyssResonance);
     s.echoType = static_cast<osp::EchoType> (index (iEchoType, 2));
     s.echoSync = on (iEchoSync);
     s.echoDivision = index (iEchoDivision, osp::shaping::echoDivisionCount);
@@ -1051,6 +1063,10 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iSpaceWidth, 100.0 * s.spaceWidth);
     put (iSpaceLowCut, s.spaceLowCutHz);
     put (iSpaceHighCut, s.spaceHighCutHz);
+    put (iSpaceEngine, static_cast<int> (s.spaceEngine));
+    put (iAbyssGravity, 100.0 * s.abyssGravity);
+    put (iAbyssFreeze, s.abyssFreeze ? 1.0 : 0.0);
+    put (iAbyssResonance, 100.0 * s.abyssResonance);
     put (iEchoType, static_cast<int> (s.echoType));
     put (iEchoSync, s.echoSync ? 1.0 : 0.0);
     put (iEchoDivision, s.echoDivision);
