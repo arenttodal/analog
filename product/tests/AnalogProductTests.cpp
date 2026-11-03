@@ -222,6 +222,7 @@ namespace
             { "space.abyss.gravity", abyss },
             { "space.abyss.freeze", abyss },
             { "space.abyss.resonance", abyss },
+            { "space.abyss.variant", abyss },
             { "space.vintage.variant", vintage },
             { "space.vintage.era", vintage },
             { "space.vintage.diffusion", vintage },
@@ -3053,6 +3054,12 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
             setValue (p, "space.abyss.gravity", -60.0f);
             setValue (p, "space.abyss.resonance", 30.0f);
             shoot ("three-1448-10-space-abyss");
+            setValue (p, "space.abyss.variant", 2.0f);   // INVERSE: the swell at GRAVITY 0
+            setValue (p, "space.abyss.gravity", 0.0f);
+            shoot ("three-1448-10-space-abyss-inverse");
+            setValue (p, "space.abyss.variant", 3.0f);   // ENDLESS
+            shoot ("three-1448-10-space-abyss-endless");
+            setValue (p, "space.abyss.variant", 1.0f);   // DARK, frozen, heavy
             setValue (p, "space.abyss.freeze", 1.0f);
             setValue (p, "space.abyss.gravity", 40.0f);
             shoot ("three-1448-10-space-abyss-frozen");
@@ -3065,7 +3072,7 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
             setValue (p, "space.bloom.variant", 3.0f);
             setValue (p, "space.bloom.diffusion", 85.0f);
             shoot ("three-1448-10-space-bloom-wash");
-            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.resonance", "space.abyss.freeze", "space.vintage.variant",
+            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.resonance", "space.abyss.freeze", "space.abyss.variant", "space.vintage.variant",
                                     "space.bloom.variant", "space.bloom.diffusion" })
                 if (auto* q = p.parameters.getParameter (id))
                     q->setValueNotifyingHost (q->getDefaultValue());

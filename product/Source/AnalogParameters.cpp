@@ -75,6 +75,7 @@ namespace
         iSpaceEngine, iAbyssGravity, iAbyssFreeze, iAbyssResonance,
         // ... VINTAGE's and BLOOM's (space.vintage.*, space.bloom.*).
         iVintageVariant, iVintageEra, iVintageDiffusion, iBloomVariant, iBloomSync, iBloomDivision, iBloomTime, iBloomDiffusion,
+        iAbyssVariant,
         count
     };
 
@@ -149,7 +150,8 @@ namespace
                 l.add (osp::plugin::InstrumentHost::layerParameterId (2, name));
             for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.freeze", "space.abyss.resonance",
                                     "space.vintage.variant", "space.vintage.era", "space.vintage.diffusion", "space.bloom.variant",
-                                    "space.bloom.sync", "space.bloom.division", "space.bloom.time", "space.bloom.diffusion" })
+                                    "space.bloom.sync", "space.bloom.division", "space.bloom.time", "space.bloom.diffusion",
+                                    "space.abyss.variant" })
                 l.add (id);
             return l;
         }();
@@ -845,6 +847,7 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.bloomDivision = index (iBloomDivision, osp::shaping::echoDivisionCount);
     s.bloomTimeMs = v (iBloomTime);
     s.bloomDiffusion = 0.01 * v (iBloomDiffusion);
+    s.abyssVariant = static_cast<osp::AbyssVariant> (index (iAbyssVariant, 4));
     s.echoType = static_cast<osp::EchoType> (index (iEchoType, 2));
     s.echoSync = on (iEchoSync);
     s.echoDivision = index (iEchoDivision, osp::shaping::echoDivisionCount);
@@ -1087,6 +1090,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iBloomDivision, s.bloomDivision);
     put (iBloomTime, s.bloomTimeMs);
     put (iBloomDiffusion, 100.0 * s.bloomDiffusion);
+    put (iAbyssVariant, static_cast<int> (s.abyssVariant));
     put (iEchoType, static_cast<int> (s.echoType));
     put (iEchoSync, s.echoSync ? 1.0 : 0.0);
     put (iEchoDivision, s.echoDivision);
