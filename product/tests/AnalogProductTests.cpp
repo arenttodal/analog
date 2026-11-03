@@ -231,6 +231,8 @@ namespace
             { "space.bloom.division", bloom },
             { "space.bloom.time", bloomFree },
             { "space.bloom.diffusion", bloom },
+            { "echo.ascend.interval", [] (Patch& c) { c.effects.echoType = osp::EchoType::ascend; } },
+            { "echo.ascend.motion", [] (Patch& c) { c.effects.echoType = osp::EchoType::ascend; } },
             { params::unisonDetune, [] (Patch& c) { c.unison = true; } },
             { "glide", [] (Patch& c) { c.voiceMode = VoiceMode::mono; } },
             { "mod.lfo1.division", [] (Patch& c) { c.lfo.sync = true; } },
@@ -3074,6 +3076,18 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
             shoot ("three-1448-10-space-bloom-wash");
             for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.resonance", "space.abyss.freeze", "space.abyss.variant", "space.vintage.variant",
                                     "space.bloom.variant", "space.bloom.diffusion" })
+                if (auto* q = p.parameters.getParameter (id))
+                    q->setValueNotifyingHost (q->getDefaultValue());
+            ui.closePopup();
+            // ECHO: ASCEND (its second row: INTERVAL, MOTION; the repeats' pitches in the picture).
+            setValue (p, "echo.type", 2.0f);
+            setValue (p, "echo.feedback", 60.0f);
+            ui.openPopup (5);
+            shoot ("three-1448-11-echo-ascend");
+            setValue (p, "echo.ascend.interval", 1.0f);   // +7, STEADY
+            setValue (p, "echo.ascend.motion", 1.0f);
+            shoot ("three-1448-11-echo-ascend-steady-fifth");
+            for (const char* id : { "echo.type", "echo.feedback", "echo.ascend.interval", "echo.ascend.motion" })
                 if (auto* q = p.parameters.getParameter (id))
                     q->setValueNotifyingHost (q->getDefaultValue());
             ui.closePopup();

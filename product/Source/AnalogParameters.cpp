@@ -76,6 +76,8 @@ namespace
         // ... VINTAGE's and BLOOM's (space.vintage.*, space.bloom.*).
         iVintageVariant, iVintageEra, iVintageDiffusion, iBloomVariant, iBloomSync, iBloomDivision, iBloomTime, iBloomDiffusion,
         iAbyssVariant,
+        // ECHO's ASCEND (echo.ascend.*).
+        iEchoInterval, iEchoMotion,
         count
     };
 
@@ -151,7 +153,7 @@ namespace
             for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.freeze", "space.abyss.resonance",
                                     "space.vintage.variant", "space.vintage.era", "space.vintage.diffusion", "space.bloom.variant",
                                     "space.bloom.sync", "space.bloom.division", "space.bloom.time", "space.bloom.diffusion",
-                                    "space.abyss.variant" })
+                                    "space.abyss.variant", "echo.ascend.interval", "echo.ascend.motion" })
                 l.add (id);
             return l;
         }();
@@ -848,7 +850,9 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.bloomTimeMs = v (iBloomTime);
     s.bloomDiffusion = 0.01 * v (iBloomDiffusion);
     s.abyssVariant = static_cast<osp::AbyssVariant> (index (iAbyssVariant, 4));
-    s.echoType = static_cast<osp::EchoType> (index (iEchoType, 2));
+    s.echoType = static_cast<osp::EchoType> (index (iEchoType, 3));
+    s.echoInterval = static_cast<osp::AscendInterval> (index (iEchoInterval, 4));
+    s.echoMotion = static_cast<osp::AscendMotion> (index (iEchoMotion, 3));
     s.echoSync = on (iEchoSync);
     s.echoDivision = index (iEchoDivision, osp::shaping::echoDivisionCount);
     s.echoTimeMs = v (iEchoTime);
@@ -1092,6 +1096,8 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iBloomDiffusion, 100.0 * s.bloomDiffusion);
     put (iAbyssVariant, static_cast<int> (s.abyssVariant));
     put (iEchoType, static_cast<int> (s.echoType));
+    put (iEchoInterval, static_cast<int> (s.echoInterval));
+    put (iEchoMotion, static_cast<int> (s.echoMotion));
     put (iEchoSync, s.echoSync ? 1.0 : 0.0);
     put (iEchoDivision, s.echoDivision);
     put (iEchoTime, s.echoTimeMs);
