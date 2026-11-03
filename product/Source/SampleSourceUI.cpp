@@ -176,8 +176,8 @@ namespace
                 }
                 void run() override
                 {
-                    setStatusMessage ("Copying the recordings and writing the presets");
-                    made = import::generatePatches (host, manifest, folder, assets, presetFolder);
+                    setStatusMessage ("Copying the recordings");
+                    made = import::generatePatches (host, manifest, folder, assets);   // (its sounds: under card C's SOUNDS, never presets)
                 }
                 void threadComplete (bool) override
                 {
@@ -190,7 +190,7 @@ namespace
                 int startGroup;
                 import::GeneratedPatches made;
             };
-            (new Job (host, manifest, folder, shell->sampleStoreFolder().getChildFile ("Imported"), shell->presetFolder(), startGroup))->launchThread();
+            (new Job (host, manifest, folder, shell->sampleStoreFolder().getChildFile ("Imported"), {}, startGroup))->launchThread();
         };
         juce::DialogWindow::LaunchOptions options;
         options.content.setOwned (review.release());

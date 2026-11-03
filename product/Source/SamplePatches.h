@@ -8,8 +8,13 @@ namespace andor::analog::import
 {
 
 /**
-    Native ANDOR ANALOG presets from an imported Kontakt patch (the Sample Source importer,
-    milestone A1.2), written into `<presetFolder>/<patch name>/`:
+    An imported Kontakt patch's sounds (the Sample Source importer, milestone A1.2): the
+    recordings copied into `assetFolder` and the import's record beside them, every sound's
+    definition, which card C's INSTRUMENT PATCH offers under SOUNDS. That is where the sounds
+    are played from: the import writes no presets.
+
+    Only when `presetFolder` is given (tests, a later "export as presets") are they also
+    written as native presets into `<presetFolder>/<patch name>/`:
 
     - one per playable group ("A8 Voxx": lane and slot, then the group's name; Kontakt repeats
       names across lanes): the group alone, the oscillators off;
@@ -32,7 +37,16 @@ struct GeneratedPatches
 };
 
 GeneratedPatches generatePatches (osp::plugin::InstrumentHost& host, const juce::var& manifest, const juce::File& sampleFolder, const juce::File& assetFolder,
-                                  const juce::File& presetFolder);
+                                  const juce::File& presetFolder = {});
+
+/**
+    The presets earlier imports wrote (before the sounds were reached only through card C's
+    SOUNDS), moved to the system's trash (deleted where it has none): in a folder named after
+    an import's collection, playing a sound of that same import, and named as the importer
+    named them (a sound's name, "Saved Lanes", "Hybrid - ..."). Anything else, a preset saved
+    by the user among them included, stays. Returns how many were moved. Message thread.
+*/
+int retireGeneratedPresets (const juce::File& presetFolder, const juce::File& assetFolder);
 
 /** The patch an imported source plays in: ORGANIC alone (or with the oscillators, `hybrid`),
     the Kontakt instrument's shared envelope, filter and send where ANDOR ANALOG has them. */

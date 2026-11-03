@@ -3152,3 +3152,42 @@ TEST_CASE ("analog: a modulation source dragged onto a Granular card reaches its
         CHECK (routed);
     }
 }
+
+TEST_CASE ("analog: an imported Kontakt patch writes no presets; earlier imports' presets leave the list, the user's stay", "[analog][samplesource][presets]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    ShellProcessor p;
+    const auto store = scratch.dir.getChildFile ("Store").getChildFile ("Imported");
+    const auto presets = scratch.dir.getChildFile ("Presets");
+
+    // Today's import: the sounds in the record (card C's SOUNDS), no preset anywhere.
+    const auto made = andor::analog::import::generatePatches (p, manifest, samples, store);
+    CHECK (made.files.isEmpty());
+    const auto record = andor::analog::import::readRecord (store, made.record.getFileName());
+    REQUIRE (record != nullptr);
+    juce::StringArray sounds;
+    for (const auto* d : record->getChildWithTagNameIterator ("SampleSource"))
+        sounds.add (d->getStringAttribute ("name"));
+    CHECK (sounds == juce::StringArray { "A1 Horn", "B1 Texture", "Saved Lanes" });
+
+    // An earlier import's presets (as it wrote them), a preset the user saved among them and
+    // one elsewhere: the import's leave, the user's stay.
+    const auto earlier = andor::analog::import::generatePatches (p, manifest, samples, store, presets);
+    REQUIRE (earlier.files.size() == 4);
+    const auto ext = andor::shell::productInfo().presetExtension;
+    const auto mineBeside = presets.getChildFile ("Test Horn").getChildFile ("My Horn Pad" + ext);
+    const auto mineElsewhere = presets.getChildFile ("Mine" + ext);
+    REQUIRE (earlier.files[0].copyFileTo (mineBeside));
+    REQUIRE (earlier.files[0].copyFileTo (mineElsewhere));
+    CHECK (andor::analog::import::retireGeneratedPresets (presets, store) == 4);
+    for (const auto& f : earlier.files)
+        CHECK_FALSE (f.existsAsFile());
+    CHECK (mineBeside.existsAsFile());
+    CHECK (mineElsewhere.existsAsFile());
+    CHECK (andor::analog::import::retireGeneratedPresets (presets, store) == 0);   // (nothing left to move)
+    // ... and the import's sounds still play from the record.
+    CHECK (andor::analog::import::readRecord (store, made.record.getFileName()) != nullptr);
+}

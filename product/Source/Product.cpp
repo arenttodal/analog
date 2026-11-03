@@ -9,7 +9,9 @@
 #include "AnalogPopovers.h"
 #include "FactoryPatches.h"
 #include "KeyDnaState.h"
+#include "SamplePatches.h"
 #include "SampleSourceUI.h"
+#include "ShellProcessor.h"
 #include "ShellProduct.h"
 
 namespace andor::shell
@@ -195,6 +197,10 @@ namespace
 
     void installFactoryPresets (osp::plugin::InstrumentHost& host, const juce::File& folder)
     {
+        // Imported Kontakt patches are reached through card C's SOUNDS only: the presets an
+        // earlier import wrote leave the preset list (to the trash).
+        if (auto* shell = dynamic_cast<ShellProcessor*> (&host))
+            andor::analog::import::retireGeneratedPresets (folder.getParentDirectory(), shell->sampleStoreFolder().getChildFile ("Imported"));
         const auto marker = folder.getChildFile (".version");
         if (marker.loadFileAsString().trim() == factoryVersion)
             return;

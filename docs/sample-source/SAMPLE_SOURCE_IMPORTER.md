@@ -24,9 +24,11 @@ The evidence behind every mapping is in
    saved: four lanes layered. Choose the sound to start with.
 4. **Import.** In the background, with a progress window:
    - the recordings are copied into ANDOR Analog's own store (named by their content);
-   - a preset is written per sound into `Presets/Bukkehorn 4.5/` (they appear in the preset
-     list);
-   - the chosen sound starts playing in ORGANIC's place.
+   - the import's record keeps every sound (card C's SOUNDS lists them: INSTRUMENT PATCH);
+     no presets are written, so the preset list stays the user's and the factory's
+     (since 3 Nov 2026; the presets earlier imports wrote leave the list at startup, to the
+     system's trash, and presets the user saved stay);
+   - the chosen sound starts playing in card C.
 5. **Pick another sound.** ORGANIC's heading (`Bukkehorn 4.5 · A8 Voxx`) opens the import's
    sounds. A click plays another sound; the patch's other settings stay.
 6. **Blend.** The header's A/B mix blends the sound with the oscillators. The oscillators may
@@ -77,7 +79,7 @@ The evidence behind every mapping is in
   `tools/kontakt/nki_inspect.py` on all 333 zones.
 - `SampleImport`: manifest + folder → definition (recordings copied into the store) →
   `SampleSource`; relink.
-- `SamplePatches`: the presets and the import's record (its sounds, for ORGANIC's popover).
+- `SamplePatches`: the import's record (its sounds, for card C's SOUNDS); presets only on request (tests); retiring earlier imports' presets.
 - `AnalogEngine`: the definition is saved and restored with the state, loaded on its own thread,
   and handed to the audio thread through ANDOR OSP's `ModelExchange`. Card B gets its name and
   outline; a recording dropped onto ORGANIC replaces the import.

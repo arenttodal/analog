@@ -73,8 +73,10 @@ GeneratedPatches generatePatches (osp::plugin::InstrumentHost& host, const juce:
     // "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5": the folder takes the last part.
     const auto patchName = juce::File::createLegalFileName (program.fromLastOccurrenceOf (" - ", false, false).trim().isNotEmpty()
                                                                 ? program.fromLastOccurrenceOf (" - ", false, false).trim() : program);
-    const auto folder = presetFolder.getChildFile (patchName);
-    folder.createDirectory();
+    const bool writePresets = presetFolder != juce::File();
+    const auto folder = writePresets ? presetFolder.getChildFile (patchName) : juce::File();
+    if (writePresets)
+        folder.createDirectory();
     const auto extension = andor::shell::productInfo().presetExtension;
     const auto recordName = patchName + ".import.xml";
     juce::XmlElement record ("Import");
@@ -100,6 +102,8 @@ GeneratedPatches generatePatches (osp::plugin::InstrumentHost& host, const juce:
         }
         if (! hybrid)
             record.addChildElement (new juce::XmlElement (*definition.xml));
+        if (! writePresets)
+            return;
         const auto state = presetState (host, makePatch (hybrid), *definition.xml);
         const auto file = folder.getChildFile (juce::File::createLegalFileName (name) + extension);
         if (state->writeTo (file))
@@ -123,6 +127,45 @@ GeneratedPatches generatePatches (osp::plugin::InstrumentHost& host, const juce:
         record.writeTo (out.record);
     }
     return out;
+}
+
+int retireGeneratedPresets (const juce::File& presetFolder, const juce::File& assetFolder)
+{
+    if (! presetFolder.isDirectory() || ! assetFolder.isDirectory())
+        return 0;
+    const auto extension = andor::shell::productInfo().presetExtension;
+    int moved = 0;
+    for (const auto& recordFile : assetFolder.findChildFiles (juce::File::findFiles, false, "*.import.xml"))
+    {
+        const auto record = juce::XmlDocument::parse (recordFile);
+        if (record == nullptr || ! record->hasTagName ("Import"))
+            continue;
+        const auto collection = record->getStringAttribute ("collection");
+        if (collection.isEmpty() || collection != juce::File::createLegalFileName (collection))
+            continue;
+        const auto folder = presetFolder.getChildFile (collection);
+        if (! folder.isDirectory())
+            continue;
+        juce::StringArray generated { "Saved Lanes" };
+        for (const auto* d : record->getChildWithTagNameIterator ("SampleSource"))
+            generated.add (juce::File::createLegalFileName (d->getStringAttribute ("name")));
+        for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, "*" + extension))
+        {
+            const auto name = f.getFileNameWithoutExtension();
+            if (! generated.contains (name) && ! name.startsWith ("Hybrid - "))
+                continue;
+            const auto xml = juce::XmlDocument::parse (f);
+            const auto* source = xml != nullptr ? xml->getChildByName ("SampleSource") : nullptr;
+            if (source == nullptr || source->getStringAttribute ("import") != recordFile.getFileName())
+                continue;
+            if (f.moveToTrash() || f.deleteFile())
+                ++moved;
+        }
+        // The folder the import made, emptied: gone too (one with anything left in it stays).
+        if (folder.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty())
+            folder.deleteFile();
+    }
+    return moved;
 }
 
 std::unique_ptr<juce::XmlElement> readRecord (const juce::File& assetFolder, const juce::String& recordName)
