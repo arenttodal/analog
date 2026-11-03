@@ -4,7 +4,6 @@
 #include "TestUtil.h"
 
 #include "FactoryPatches.h"
-#include "morph/MorphAnalyzer.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -238,7 +237,7 @@ TEST_CASE ("realtime: ORGANIC (notes, loops, a recording replaced while it plays
     CHECK (allocations.load() == 0);
 }
 
-TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position moving) never allocates", "[realtime][morph]")
+TEST_CASE ("realtime: MORPH (live: IMPRINT, FUSE, WEAVE, every carrier and card C type, the position moving) never allocates", "[realtime][morph]")
 {
     osp::AudioData audio;
     audio.sampleRate = 48000.0;
@@ -251,7 +250,6 @@ TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position m
     audio.channels = { x };
     auto model = std::make_shared<osp::InstrumentModel>();
     model->original.source = std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
-    const auto profile = andor::analog::morph::analyse (x.data(), static_cast<std::int64_t> (x.size()), 48000.0);
     Synth synth;
     synth.prepare (48000.0, 512, 4);
     Patch p;
@@ -259,7 +257,6 @@ TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position m
     synth.setPatch (p);
     synth.reset();
     synth.setOrganic (model.get());
-    synth.setMorphProfile (&profile, model.get());
     std::vector<float> left (512), right (512);
     counting = true;
     for (int block = 0; block < 180; ++block)
@@ -270,6 +267,7 @@ TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position m
         p.morph.position = (block % 30) / 29.0;
         p.morph.formants = (block % 11) - 5.0;
         p.morph.detail = (block % 13) / 12.0;
+        p.hybridType = static_cast<HybridType> (block / 60 % 3);   // the recording, OSC 3, NOISE
         synth.setPatch (p);
         const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (40 + block % 36), 100 };
         const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (40 + (block + 30) % 36), 0 };

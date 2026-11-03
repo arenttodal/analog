@@ -1,12 +1,11 @@
-// MORPH in the synth: the ORGANIC recording turned into the analog carrier by IMPRINT, FUSE
-// and WEAVE. The ends are exact (0: the recording, 1: the carrier). The middle is a fusion, not
-// a crossfade: it carries the recording's spectral envelope on the carrier's harmonics, and the
-// three methods differ. Moves are click-free, every carrier pairing works, and an unavailable
-// morph leaves the sources as they are. Deterministic, at a stated CPU cost.
+// MORPH in the synth (state version 9: heard live): the oscillators (the carrier) and card C
+// fused by IMPRINT, FUSE and WEAVE. The ends are exact (0: the carrier, 1: card C). The middle
+// is a fusion, not a crossfade, and the three methods differ. It works on whatever card C
+// plays (a recording, OSC 3, NOISE). Moves are click-free, every carrier pairing works, and a
+// silent card C leaves the oscillators as they are. Deterministic, at a stated CPU cost.
 
 #include "TestUtil.h"
 #include "fixtures/MorphFixtures.h"
-#include "morph/MorphAnalyzer.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -21,10 +20,9 @@ namespace
     struct Recording
     {
         std::shared_ptr<osp::InstrumentModel> model;
-        morph::MorphProfile profile;
     };
 
-    /** The bowed-string stand-in (original, synthesized) at A3, its model and its profile. */
+    /** The bowed-string stand-in (original, synthesized) at A3, its model. */
     const Recording& bowed()
     {
         static const Recording r = [] {
@@ -36,7 +34,6 @@ namespace
             audio.channels = { mono };
             x.model = std::make_shared<osp::InstrumentModel>();
             x.model->original.source = std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
-            x.profile = morph::analyse (mono.data(), static_cast<std::int64_t> (mono.size()), rate);
             return x;
         }();
         return r;
@@ -55,12 +52,12 @@ namespace
         return p;
     }
 
-    Stereo play (const Patch& p, bool profile = true, double seconds = 1.2, std::vector<Event> events = { on (0, 57, 100) }, int block = 256)
+    /** The patch played with the stand-in on card C (`recording` false: card C silent). */
+    Stereo play (const Patch& p, bool recording = true, double seconds = 1.2, std::vector<Event> events = { on (0, 57, 100) }, int block = 256)
     {
         auto s = makeSynth (p);
-        s->setOrganic (bowed().model.get());
-        if (profile)
-            s->setMorphProfile (&bowed().profile, bowed().model.get());
+        if (recording)
+            s->setOrganic (bowed().model.get());
         return render (*s, seconds, std::move (events), block);
     }
 
@@ -188,13 +185,29 @@ namespace
     }
 }
 
-TEST_CASE ("morph: the analysis finds the stand-in's pitch, so MORPH is available", "[morph]")
+TEST_CASE ("morph: half way and FUSE by default; it acts on whatever card C plays (a recording, OSC 3, NOISE)", "[morph]")
 {
-    CHECK (bowed().profile.kind == morph::MorphProfile::Kind::pitched);
-    CHECK (std::abs (bowed().profile.rootMidi - 57.0) < 0.1);
+    CHECK (Patch().morph.position == 0.5);
+    CHECK (Patch().morph.method == MorphMethod::fuse);
+    // Each of card C's own sounds, against the same sound with MORPH off: the morph changes it.
+    for (const auto type : { HybridType::oscillator, HybridType::noise })
+    {
+        auto p = morphPatch (MorphMethod::fuse, 0.5);
+        p.hybridType = type;
+        p.osc3Wave = Osc2Wave::pulse;
+        p.osc3Octave = 1;
+        p.organic.levelDb = 0.0;
+        auto off = p;
+        off.morph.enabled = false;
+        const auto a = play (p, false), b = play (off, false);
+        INFO ("card C type " << static_cast<int> (type));
+        CHECK (a.finite());
+        CHECK (a.rms (0.3, 1.1) > 0.01);
+        CHECK (relativeDifference (a, b, 0.3, 1.1) > 0.2);
+    }
 }
 
-TEST_CASE ("morph: at 0 % the output is the recording, at 100 % the carrier (every method, both outputs' ends)", "[morph][endpoints]")
+TEST_CASE ("morph: at 0 % the output is the carrier, at 100 % the recording (every method, both outputs' ends)", "[morph][endpoints]")
 {
     // The references: the recording alone (oscillators off) and the carrier alone (no recording).
     auto organicOnly = measurementPatch();
@@ -208,23 +221,23 @@ TEST_CASE ("morph: at 0 % the output is the recording, at 100 % the carrier (eve
     for (const auto method : { MorphMethod::imprint, MorphMethod::fuse, MorphMethod::weave })
     {
         INFO ("method " << static_cast<int> (method));
-        // 0 %: MORPH ONLY plays the recording (the carrier pair replaced by the morph).
-        const auto zero = play (morphPatch (method, 0.0));
-        CHECK (relativeDifference (zero, recording, 0.05, 1.1) < 1.0e-5);
-        // 100 %: the carrier, as the oscillators play it without any recording.
+        // 100 %: MORPH ONLY plays the recording (the carrier pair replaced by the morph).
         const auto one = play (morphPatch (method, 1.0));
-        CHECK (relativeDifference (one, carrier, 0.05, 1.1) < 3.0e-4);   // (-70 dB: the model path's rounding against CLASSIC's own)
+        CHECK (relativeDifference (one, recording, 0.05, 1.1) < 1.0e-5);
+        // 0 %: the carrier, as the oscillators play it without any recording.
+        const auto zero = play (morphPatch (method, 0.0));
+        CHECK (relativeDifference (zero, carrier, 0.05, 1.1) < 3.0e-4);   // (-70 dB: the model path's rounding against CLASSIC's own)
         CHECK (zero.finite());
         CHECK (one.finite());
     }
 }
 
-TEST_CASE ("morph: the middle is a fusion: the recording's envelope on the carrier's harmonics, not a crossfade", "[morph][fusion]")
+TEST_CASE ("morph: the middle is a fusion of the recording and the carrier, not a crossfade", "[morph][fusion]")
 {
     auto organicOnly = measurementPatch();
     organicOnly.osc1Enabled = organicOnly.osc2Enabled = false;
     const auto recording = play (organicOnly);
-    const auto carrier = play (morphPatch (MorphMethod::imprint, 1.0));
+    const auto carrier = play (morphPatch (MorphMethod::imprint, 0.0));
     // An equal-power crossfade of the two, the thing a morph must not be.
     Stereo crossfade = recording;
     for (std::size_t i = 0; i < crossfade.left.size(); ++i)
@@ -268,7 +281,6 @@ TEST_CASE ("morph: moving the position, the method or the carrier while a note p
         INFO ("method " << static_cast<int> (method));
         auto s = makeSynth (morphPatch (method, 0.0));
         s->setOrganic (bowed().model.get());
-        s->setMorphProfile (&bowed().profile, bowed().model.get());
         const std::uint8_t note[3] { 0x90, 57, 100 };
         s->handleMidi (note, 3);
         Stereo out;
@@ -289,7 +301,7 @@ TEST_CASE ("morph: moving the position, the method or the carrier while a note p
             worst = std::max (worst, std::abs (out.left[i + 1] - out.left[i]));
         // The largest sample-to-sample step stays that of the sounds themselves (the pulse's
         // edges, the recording's): no jump on top.
-        const auto ends = play (morphPatch (method, 1.0), true, 2.0);
+        const auto ends = play (morphPatch (method, 0.0), true, 2.0);
         float own = 0.0f;
         for (std::size_t i = 2400; i + 1 < ends.left.size(); ++i)
             own = std::max (own, std::abs (ends.left[i + 1] - ends.left[i]));
@@ -297,7 +309,7 @@ TEST_CASE ("morph: moving the position, the method or the carrier while a note p
     }
 }
 
-TEST_CASE ("morph: every carrier pairing and output, chords, held notes and the unavailable case", "[morph][pairs]")
+TEST_CASE ("morph: every carrier pairing and output, chords, held notes and a silent card C", "[morph][pairs]")
 {
     const std::vector<Event> chord { on (0, 45, 100), on (0, 52, 90), on (0, 57, 90), on (0, 60, 80), on (0, 64, 80), on (0, 67, 70), on (0, 69, 70),
                                      on (0, 72, 60) };
@@ -320,8 +332,7 @@ TEST_CASE ("morph: every carrier pairing and output, chords, held notes and the 
     auto layered = morphPatch (MorphMethod::fuse, 0.5);
     layered.morph.output = MorphOutput::layered;
     CHECK (play (layered).rms (0.3, 1.1) > play (morphPatch (MorphMethod::fuse, 0.5)).rms (0.3, 1.1));
-    // Unavailable (no profile for this recording): the sources as they are, never a morph
-    // that is not there.
+    // Card C silent (nothing loaded): the oscillators as they are, never a morph with nothing.
     auto dry = morphPatch (MorphMethod::fuse, 0.5);
     dry.morph.enabled = false;
     CHECK (relativeDifference (play (morphPatch (MorphMethod::fuse, 0.5), false), play (dry, false), 0.05, 1.1) < 1.0e-6);
@@ -338,7 +349,6 @@ TEST_CASE ("morph: CPU of each method at 8 and 16 voices (reported, not asserted
             p.polyphony = 16;
             auto s = makeSynth (p);
             s->setOrganic (bowed().model.get());
-            s->setMorphProfile (&bowed().profile, bowed().model.get());
             for (int v = 0; v < voices; ++v)
             {
                 const std::uint8_t note[3] { 0x90, static_cast<std::uint8_t> (45 + 2 * v), 100 };
@@ -350,5 +360,21 @@ TEST_CASE ("morph: CPU of each method at 8 and 16 voices (reported, not asserted
                 s->render (l.data(), r.data(), 512);
             const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
             WARN ("MORPH method " << static_cast<int> (method) << ", " << voices << " voices: " << 100.0 * seconds / 2.0 << " % of one core");
+            if (method == MorphMethod::imprint)
+            {
+                // The same with MORPH off: the voices' own cost (the recording, the pair, the filter).
+                p.morph.enabled = false;
+                auto dry = makeSynth (p);
+                dry->setOrganic (bowed().model.get());
+                for (int v = 0; v < voices; ++v)
+                {
+                    const std::uint8_t note[3] { 0x90, static_cast<std::uint8_t> (45 + 2 * v), 100 };
+                    dry->handleMidi (note, 3);
+                }
+                const auto d0 = std::chrono::steady_clock::now();
+                for (int b = 0; b < 48000 * 2 / 512; ++b)
+                    dry->render (l.data(), r.data(), 512);
+                WARN ("MORPH off, " << voices << " voices: " << 100.0 * std::chrono::duration<double> (std::chrono::steady_clock::now() - d0).count() / 2.0 << " % of one core");
+            }
         }
 }

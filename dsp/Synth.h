@@ -11,7 +11,7 @@
 #include "ZonePlayer.h"
 #include "VoiceEq.h"
 #include "OtaFilter.h"
-#include "morph/MorphVoice.h"
+#include "morph/LiveMorph.h"
 #include "LiveGranulator.h"
 #include "Patch.h"
 #include "PolyBlep.h"
@@ -182,19 +182,6 @@ public:
         return n;
     }
     const osp::InstrumentModel* organicModel() const noexcept { return organicSource; }
-    /** MORPH's analysis of ORGANIC's recording (built off the audio thread), for `model`: it
-        applies while that model is the one playing. Null: none (MORPH unavailable: the
-        sources play as they are). Audio thread; the profile must outlive its use here. */
-    void setMorphProfile (const morph::MorphProfile* profile, const osp::InstrumentModel* model) noexcept
-    {
-        morphProfile = profile;
-        morphModel = model;
-    }
-    /** MORPH can play now: a pitched profile for the recording that plays. */
-    bool morphAvailable() const noexcept
-    {
-        return morphProfile != nullptr && morphModel == organicSource && organicSource != nullptr && morphProfile->kind == morph::MorphProfile::Kind::pitched;
-    }
 
     /** Renders `numSamples` into left/right (overwritten); any length (in pieces of the prepared maximum). */
     void render (float* left, float* right, int numSamples) noexcept;
@@ -308,8 +295,8 @@ private:
         bool layerGainsFresh = true;
         bool releaseWhenPlayedOut = false;   ///< FOLLOW off: the key was released; the recording plays out first
         // MORPH: the recording turned into the carrier (when its profile is ready).
-        morph::MorphVoice morph;
-        morph::CarrierSpectrum carrierSpectrum {};
+        morph::LiveMorph morph;       ///< MORPH: the oscillators and card C heard live, made one
+        double morphSourceHz = 220.0; ///< the fundamental card C plays for this note
         bool morphOn = false;
         int morphCountdown = 0;       ///< MORPH's control runs every fourth control period
         float lfoFade = 1.0f;
@@ -518,9 +505,8 @@ private:
     const SampleSource* sampleSource = nullptr;
     /** ORGANIC's part is sounding in a voice (its recording or an imported source's zones). */
     static bool organicPlaying (const Voice& v) noexcept;
-    const morph::MorphProfile* morphProfile = nullptr;
     float lastNoise = 0.0f;   ///< this sample's noise in the voice's mix (MORPH takes the pair without it)
-    const osp::InstrumentModel* morphModel = nullptr;
+    std::unique_ptr<morph::LiveMorph::Shared> morphShared;   ///< MORPH's transforms and windows (every voice's)
     JunoChorus chorus;            ///< state version 4: the chorus after the voices (off: bit-exact bypass)
     osp::PostProcessor effects;
     float dcL = 0.0f, dcR = 0.0f, dcStateL = 0.0f, dcStateR = 0.0f, dcCoef = 0.0f;

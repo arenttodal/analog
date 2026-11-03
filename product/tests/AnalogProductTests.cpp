@@ -356,6 +356,8 @@ namespace
             modes[id] = [id] (Patch& c) {
                 c.morph.enabled = true;
                 c.morph.position = id == params::morphTexture || id == params::morphAttack ? 0.3 : 0.5;
+                if (id == params::morphDetail)
+                    c.tone = 1.0;   // (DETAIL's upper partials heard through an open filter)
             };
 
         // KEY DNA is GRANULAR's, and its AMOUNT acts while it is on (the test switches it on).
@@ -1091,7 +1093,8 @@ TEST_CASE ("analog: a version-3 session opens with every version-4 setting neutr
     {
         INFO (id);
         auto* parameter = p.parameters.getParameter (id);
-        CHECK (parameter->getValue() == Approx (parameter->getDefaultValue()).margin (1.0e-6));
+        // (MORPH, on in a new instrument since version 9, stays off in a session from before it.)
+        CHECK (parameter->getValue() == Approx (id == params::morphEnabled ? 0.0f : parameter->getDefaultValue()).margin (1.0e-6));
     }
     const auto after = renderShell (p, 0.5, phrase, false);
     for (int c = 0; c < 2; ++c)
@@ -1121,6 +1124,36 @@ TEST_CASE ("analog: a version-4 session rests at the A/B mix's centre, where ORG
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
     CHECK (q.parameterValue ("ab.blend") == Approx (0.0f));
+}
+
+TEST_CASE ("analog: a version-8 session keeps its MORPH: its position turned round, on or off as saved", "[analog][state][morph]")
+{
+    // Version 9 hears card C live, runs the position the other way (0 % the oscillators) and
+    // is on in a new instrument. A session from before keeps what it had.
+    for (const bool on : { false, true })
+    {
+        juce::MemoryBlock session;
+        {
+            ShellProcessor old;
+            setValue (old, params::morphEnabled, on ? 1.0f : 0.0f);
+            setValue (old, params::morphPosition, 30.0f);   // (version 8: 30 % of the way to the carrier)
+            old.getStateInformation (session);
+        }
+        auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (xml != nullptr);
+        xml->setAttribute ("productVersion", 8);
+        juce::MemoryBlock v8;
+        juce::AudioProcessor::copyXmlToBinary (*xml, v8);
+        ShellProcessor p;
+        p.setStateInformation (v8.getData(), static_cast<int> (v8.getSize()));
+        INFO ((on ? "on" : "off"));
+        CHECK ((p.parameterValue (params::morphEnabled) >= 0.5f) == on);
+        CHECK (p.parameterValue (params::morphPosition) == Approx (70.0f));
+        // A version-9 session keeps its position as saved.
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        CHECK (q.parameterValue (params::morphPosition) == Approx (30.0f));
+    }
 }
 
 namespace
@@ -1418,10 +1451,12 @@ TEST_CASE ("analog: the FILTER popover shows each model's own controls, and fits
 
 TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscillators, plays it, recalls it", "[analog][organic]")
 {
+    // (The layers as they are: MORPH, on in a new instrument, is MORPH's test.)
     Scratch scratch;
     const auto file = writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5);
     ShellProcessor p;
     setValue (p, "space", 0.0f);
+    setValue (p, params::morphEnabled, 0.0f);
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     editor->setSize (1448, 1086);
@@ -1494,13 +1529,14 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
     CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
 }
 
-TEST_CASE ("analog: MORPH is the first macro; it tells whether it can morph, and turns the recording into the oscillators", "[analog][organic][morph]")
+TEST_CASE ("analog: MORPH is the first macro, on and half way in a new instrument; it fuses the oscillators with card C", "[analog][organic][morph]")
 {
     Scratch scratch;
     ShellProcessor p;
     setValue (p, "space", 0.0f);
-    // Nothing loaded: unavailable, said so; MORPH on changes nothing a musician hears as a morph
-    // (the oscillators play).
+    CHECK (p.parameterValue (params::morphEnabled) >= 0.5f);
+    CHECK (p.parameterValue (params::morphPosition) == Approx (50.0f));
+    // Card C silent: said so; MORPH on changes nothing (the oscillators play as they are).
     CHECK (p.engineStatus ("morph").isNotEmpty());
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
@@ -1515,10 +1551,10 @@ TEST_CASE ("analog: MORPH is the first macro; it tells whether it can morph, and
 
     loadOrganic (p, writeRecording (scratch.dir, "stand-in A3.wav", 57, 2.5));
     CHECK (p.engineStatus ("morph").isEmpty());   // ready
-    // The ends: 0 % the recording (the oscillators replaced by it), 100 % the oscillators.
-    setValue (p, params::morphPosition, 100.0f);
-    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-3 * std::max (1.0e-6, rmsOf (synth)) + 1.0e-6);
+    // The ends: 0 % the oscillators, 100 % the recording (the oscillators replaced by it).
     setValue (p, params::morphPosition, 0.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-3 * std::max (1.0e-6, rmsOf (synth)) + 1.0e-6);
+    setValue (p, params::morphPosition, 100.0f);
     const auto recordingEnd = renderShell (p, 0.8);
     setValue (p, params::morphEnabled, 0.0f);
     setValue (p, params::osc1Enabled, 0.0f);
@@ -2946,7 +2982,7 @@ TEST_CASE ("analog: a session from before three engines that held an imported so
     setSampleStore ({});
 }
 
-TEST_CASE ("analog: MIX sets the analog pair against whatever card C plays; MORPH only on C's recording as a SAMPLE", "[analog][hybrid][morph]")
+TEST_CASE ("analog: MIX sets the analog pair against whatever card C plays; MORPH fuses them, whatever C plays", "[analog][hybrid][morph]")
 {
     using namespace params;
     using andor::analog::HybridType;
@@ -2970,17 +3006,20 @@ TEST_CASE ("analog: MIX sets the analog pair against whatever card C plays; MORP
         const auto both = renderShell (p, 0.5, note, false);
         CHECK (differenceRms (both, pairOnly) > 1.0e-3);
         CHECK (differenceRms (both, cOnly) > 1.0e-3);
-        // MORPH says it cannot act: C plays no recording.
-        CHECK (p.engineStatus ("morph").isNotEmpty());
+        // MORPH (on, half way, as a new instrument has it) hears card C live: it is ready, and
+        // at the mix's centre the two are fused, not layered.
+        CHECK (p.engineStatus ("morph").isEmpty());
+        p.setParameterValue (params::morphEnabled, 0.0f);
+        const auto layered = renderShell (p, 0.5, note, false);
+        p.setParameterValue (params::morphEnabled, 1.0f);
+        CHECK (differenceRms (both, layered) > 1.0e-3);
     }
+    // Card C as an empty SAMPLE: MORPH says it has nothing to fuse; with a recording, ready.
     engine.setHybridType (HybridType::sample);
-    // With a recording as C's SAMPLE, MORPH analyses it; C as NOISE, the dormant recording is not morphed.
+    CHECK (p.engineStatus ("morph").isNotEmpty());
     Scratch scratch;
     loadOrganic (p, writeRecording (scratch.dir, "morph.wav", 57, 2.5));
-    engine.setHybridType (HybridType::noise);
-    CHECK (p.engineStatus ("morph").contains ("NOISE"));
-    engine.setHybridType (HybridType::sample);
-    CHECK_FALSE (p.engineStatus ("morph").contains ("NOISE"));
+    CHECK (p.engineStatus ("morph").isEmpty());
 }
 
 TEST_CASE ("analog: screenshots of the three engines in their combinations, every width (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-three]")

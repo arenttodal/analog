@@ -5,7 +5,6 @@
 #include "Synth.h"
 
 #include "model/ModelExchange.h"
-#include "morph/MorphAnalyzer.h"
 
 #include <atomic>
 #include <memory>
@@ -150,21 +149,6 @@ private:
     float lastScreenPitch = 0.0f, lastScreenMod = 0.0f;
     bool prepared = false;
 
-    /**
-        MORPH's analysis of ORGANIC's recording, on its own thread (never the audio thread):
-        a profile per recording, cached by content (so a reload or a relink is instant), handed
-        to the audio thread through `pending` and freed only once that thread has moved past it.
-    */
-    struct ProfileBox
-    {
-        const osp::InstrumentModel* model = nullptr;   ///< the recording it describes (identity)
-        std::shared_ptr<const osp::plugin::LoadedInstrument> source;   ///< kept alive with it
-        morph::MorphProfile profile;
-    };
-    class Analyser;
-    std::unique_ptr<Analyser> analyser;
-    std::atomic<const ProfileBox*> pending { nullptr }, inUse { nullptr };
-    friend class Analyser;
 
     struct LoadedSource
     {

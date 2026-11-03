@@ -120,6 +120,18 @@ namespace
         and DAMPEN for the pair: they are copied to card B, so both oscillators are muted,
         soloed, equalised and damped exactly as before (the curves are linear: EQ (1) + EQ (2)
         = EQ (1 + 2), nothing processed twice). ORGANIC (layer B) is untouched. */
+    /** Version 9: MORPH hears card C live, is on by default at 50 %, and its position runs the
+        other way (0 % the oscillators, 100 % card C). A session or preset from before keeps
+        its MORPH exactly: its position is turned round (0 % the recording before is 100 %
+        now), and one from before MORPH existed (version 3 and older) keeps it off. */
+    void migrateFromVersion8 (osp::plugin::InstrumentHost& host, int from)
+    {
+        namespace p = andor::analog::params;
+        host.setParameterValue (p::morphPosition, 100.0f - host.parameterValue (p::morphPosition));
+        if (from < 4)
+            host.setParameterValue (p::morphEnabled, 0.0f);
+    }
+
     void migrateFromVersion7 (osp::plugin::InstrumentHost& host)
     {
         using Host = osp::plugin::InstrumentHost;
@@ -326,7 +338,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 8;
+        p.stateVersion = 9;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -342,6 +354,8 @@ const ProductInfo& productInfo()
                 migrateFromVersion6 (host);
             if (from < 8)
                 migrateFromVersion7 (host);
+            if (from < 9)
+                migrateFromVersion8 (host, from);
         };
         return p;
     }();

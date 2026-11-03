@@ -79,6 +79,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     oversampling = oversamplingFactor >= 4 ? 4 : (oversamplingFactor >= 2 ? 2 : 1);
     internalRate = hostRate * oversampling;
     maxBlock = std::max (1, maximumBlockSize);
+    if (morphShared == nullptr)
+        morphShared = std::make_unique<morph::LiveMorph::Shared>();
 
     const auto internalBlock = static_cast<std::size_t> (maxBlock * oversampling);
     mixL.assign (internalBlock, 0.0f);
@@ -131,7 +133,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.eqA.prepare (internalRate);
         v.eqB.prepare (internalRate);
         v.eqC.prepare (internalRate);
-        v.morph.prepare (internalRate, oversampling);
+        v.morph.prepare (internalRate, oversampling, morphShared.get());
     }
     // The mode engines' "recording" on a live voice: only its length, rate and root are read.
     auto standIn = [] (double rate, double seconds) {
@@ -642,7 +644,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
             v.organic.start (organicSource, current.organic.start, current.organic.reverse);
         else
             v.organic.stop();
-        v.morph.start (morphAvailable() ? morphProfile : nullptr, v.seed);
+        v.morph.start (v.seed);
         v.morphCountdown = 0;
         v.layerGainsFresh = true;
     }
@@ -1178,6 +1180,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     // recording's root (or the override).
     // (State version 8: card C's own OCT and DETUNE move the notes it is played with.)
     const double hybridPitch = 12.0 * p.hybridOctave + p.hybridFineCents / 100.0;
+    v.morphSourceHz = math::noteToHz (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch);
     if (v.organic.playing())
         v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch, static_cast<double> (p.organic.rootOverride));
     v.organicGain = (v.cards & 4) != 0 && p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
@@ -1226,8 +1229,9 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.organicOn = ! v.organic.finished() || zonesOn || generating;
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
                     && ! v.organicOn;
-    // MORPH: with a profile for the recording this note plays (else the sources as they are).
-    v.morphOn = p.morph.enabled && v.morph.active() && v.organicOn && morphAvailable() && v.organic.playingModel() == organicSource;
+    // MORPH: whenever this note sounds both the oscillators and card C (whatever C plays:
+    // the recording, OSC 3, NOISE, an instrument patch's zones), it hears them and fuses them.
+    v.morphOn = p.morph.enabled && v.organicOn && (v.cards & 3) != 0 && (v.cards & 4) != 0;
     if (! v.classicPair)
     {
         planSlot (v, 1, p, v.dt1);
@@ -1240,19 +1244,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         };
         if (v.morphOn && --v.morphCountdown <= 0)
         {
-            v.morphCountdown = 4;   // (every 32 host samples: its gains and partials glide between)
-            // The carrier's spectrum (its slots' waves at their levels) and fundamental.
-            v.carrierSpectrum.fill (0.0f);
-            const auto add = [&v] (const osc::SlotPlan& plan, float width, float g) {
-                morph::addCarrierSpectrum (v.carrierSpectrum, plan.waves.saw, plan.waves.pulse, plan.waves.triangle, plan.squareWidth ? 0.5f : width,
-                                           g * plan.waves.gain);
-            };
-            const auto carrier = p.morph.carrier;
-            if (carrier != MorphCarrier::osc2)
-                add (v.plan1, v.width1, std::max (v.gain1, carrier == MorphCarrier::osc1 ? 1.0f : 0.0f));
-            if (carrier != MorphCarrier::osc1)
-                add (v.plan2, v.width2, std::max (v.gain2, carrier == MorphCarrier::osc2 ? 1.0f : 0.0f));
-            morph::MorphVoice::Control c;
+            v.morphCountdown = 4;   // (every 32 host samples: its partials and gains glide between)
+            morph::LiveMorph::Control c;
             c.position = p.morph.position;
             c.method = p.morph.method;
             c.texture = p.morph.texture;
@@ -1260,9 +1253,9 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
             c.formants = p.morph.formants;
             c.detail = p.morph.detail;
             c.levelMatch = p.morph.levelMatch;
-            c.profileSeconds = v.organic.seconds();
-            c.fundamentalHz = (carrier == MorphCarrier::osc2 ? v.dt2 : v.dt1) * internalRate;
-            c.carrier = &v.carrierSpectrum;
+            c.carrierHz = (p.morph.carrier == MorphCarrier::osc2 ? v.dt2 : v.dt1) * internalRate;
+            // Card C's fundamental: OSC 3's own; else the note as C plays it (its OCT / DETUNE).
+            c.sourceHz = v.hybridGen == HybridType::oscillator ? v.dt3 * internalRate : v.morphSourceHz;
             v.morph.control (c);
         }
         pwm (p.dco1, v.pwm1, v.pwmEnv1);
@@ -1373,6 +1366,14 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     {
         v.layerGainsFresh = true;   // (a recording loaded mid-note starts from its targets)
         v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+    }
+    // MORPH needs both sides: a silent carrier (muted, at its lowest, the A/B mix all C) or a
+    // silent card C leaves the other exactly as it plays.
+    if (v.morphOn)
+    {
+        const float carrierGain = p.morph.carrier == MorphCarrier::osc1 ? v.gain1 : (p.morph.carrier == MorphCarrier::osc2 ? v.gain2 : v.gain1 + v.gain2);
+        if (carrierGain <= 0.0f || v.organicGain <= 0.0f)
+            v.morphOn = false;
     }
 
     // The source: ONE SHOT <-> GRANULAR glides (about 8 ms); the grains' settings, moved by
@@ -1713,7 +1714,7 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
             const auto carrier = p.morph.carrier;
             const float pair = mix - (v.gainNoise > 0.0f ? lastNoise : 0.0f);
             const float c = carrier == MorphCarrier::osc1 ? c1 : (carrier == MorphCarrier::osc2 ? c2 : pair);
-            const float y = v.morph.process (o, c);
+            const float y = v.morph.process (c, o);
             if (p.morph.output == MorphOutput::morphOnly)
                 organic = y - c;
             else

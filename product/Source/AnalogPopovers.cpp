@@ -433,11 +433,11 @@ namespace
         p->row ({});
         p->captionFrom ([host] {
             const auto status = host->engineStatus ("morph");
-            return status.isEmpty() ? juce::String ("READY: ORGANIC'S RECORDING INTO THE OSCILLATORS") : status.toUpperCase();
+            return status.isEmpty() ? juce::String ("LIVE: THE OSCILLATORS AND CARD C, FUSED") : status.toUpperCase();
         });
-        p->toggle (morphEnabled, "ON", 0.8f, "MORPH: the recording and the carrier become one sound (at 0 % the recording, at 100 % the carrier)");
+        p->toggle (morphEnabled, "ON", 0.8f, "MORPH: the oscillators and card C become one sound (at 0 % the oscillators, at 100 % card C, between them a fusion)");
         p->segments (morphMethod, { "IMPRINT", "FUSE", "WEAVE" }, 3.0f,
-                     "IMPRINT: the recording's envelope on the carrier. FUSE: their partials blended. WEAVE: their partials interleaved");
+                     "IMPRINT: card C's envelope on the oscillators. FUSE: their partials and pitch blended. WEAVE: their partials interleaved");
         p->segments (morphCarrier, { "OSC 1", "OSC 2", "BOTH" }, 2.4f, "The analog side: oscillator 1, oscillator 2, or the pair as levelled");
         p->row ({});
         p->knob (morphPosition, "MORPH");
@@ -446,8 +446,8 @@ namespace
         p->knob (morphFormants, "FORMANTS");
         p->knob (morphDetail, "DETAIL");
         p->row ("OUTPUT");
-        p->segments (morphOutput, { "MORPH ONLY", "LAYERED" }, 2.6f, "MORPH ONLY: the morph replaces the recording and the carrier. LAYERED: it joins them");
-        p->toggle (morphLevelMatch, "LEVEL MATCH", 1.4f, "Holds the loudness steady between the recording's and the carrier's");
+        p->segments (morphOutput, { "MORPH ONLY", "LAYERED" }, 2.6f, "MORPH ONLY: the morph replaces the oscillators and card C. LAYERED: it joins them");
+        p->toggle (morphLevelMatch, "LEVEL MATCH", 1.4f, "Holds the loudness steady between the oscillators' and card C's");
         p->knob (organicRoot, "ROOT");
         return p;
     }

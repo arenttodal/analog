@@ -74,8 +74,8 @@ package was rendered (20 tracks)._
 | FILTER/MORPH popovers and the workbench: each model's own controls only; fit the window | ✅ done and tested / ⚠️ reviewed as screenshots | `analog: the FILTER popover ...`; `analog: the workbench shows each model's own controls ...` |
 | 10 version-4 factory sounds (44 in all), factory set 4 | ✅ done and tested / ⚠️ voiced without listening | headroom, distinctness, trip through parameters |
 | ORGANIC: one recording on the shell's layer B (OSP loader, store, card, recall/relocation), played per voice through the filter; LOOP (OSP continuation), REVERSE, FOLLOW, root override, swap without a click | ✅ done and tested | `[organic]`; `analog: ORGANIC takes a recording ...` |
-| MORPH: analysis on its own thread (cached), IMPRINT / FUSE / WEAVE, exact ends, click-free moves, MORPH ONLY / LAYERED, unavailable state; the first macro | ✅ done and tested / ⚠️ only on a synthesized stand-in, not real recordings | `[morph]`, `analog: MORPH is the first macro ...` |
-| CPU (16 voices, 48 kHz, 4x, one core) | ✅ measured | CLASSIC 24.8 %, DCO 28.1 %, SUPER SAW pair 34.1 %, OTA 36.3 %, ORGANIC + MORPH 44–47 % |
+| MORPH (state version 9: heard live): the oscillators (OSC 1, OSC 2 or the pair) and whatever card C plays (a recording, OSC 3, NOISE, an instrument patch) fused as they play. Both are analysed together every quarter window (a 21 .. 85 ms window sized to the note so its harmonics stand apart: harmonics at each side's own pitch, the rest as eight octave bands of residual). FUSE morphs partials and pitch in dB, WEAVE interleaves them, IMPRINT gives the oscillators card C's broad envelope. Exact ends (0 % the oscillators, 100 % card C), a fusion in the middle; a note starts on the sources as played (ATTACK) and glides in; a silent side leaves the other as it is. On at 50 % (FUSE) in a new instrument; a session or preset from before keeps its MORPH, its position turned round (migration 8 → 9). The analysis thread and the recording's profile are gone | ✅ done and tested / ⚠️ not yet judged by ear | `[live]` (ends exact; a saw's 1/h and a square's odd harmonics measured; the even ones fade in dB, not mixed; the pitch between; noise brought by NOISE; silence and NaN safe; the attack; LEVEL MATCH; a sweep without clicks; deterministic), `[morph]` (every card C type, ends, fusion not crossfade, three methods differ, click-free moves, every carrier pairing, chords, a silent C), `[realtime][morph]`, `analog: MORPH is the first macro ...`, `analog: a version-8 session keeps its MORPH ...` |
+| CPU (16 voices, 48 kHz, 4x, one core) | ✅ measured | CLASSIC 24.8 %, DCO 28.1 %, SUPER SAW pair 34.1 %, OTA 36.3 %, ORGANIC 40 %, ORGANIC + MORPH (live) 52–55 % (`[morph][cpu]`) |
 | pluginval, DAWs | ❌ not done | docs/RELEASE.md |
 | Listening tests and preset voicing by ear | ❌ not done | docs/AUDIBLE_QA.md checklist |
 | Host parameter list trimmed to the used ones | ❌ not implemented (shell-wide limitation) | release blocker |
@@ -98,7 +98,7 @@ package was rendered (20 tracks)._
 - ORGANIC is the shell's layer B. Its card is ANDOR OSP's own sample card, with LEVEL, TUNE,
   START, LOOP, FOLLOW, REVERSE, M and S. PAN stays disabled: each voice is one mono signal
   through its filter.
-- MORPH needs a pitched recording. Otherwise its popover says why and the sources play as they
+- MORPH needs card C to sound (a recording, OSC 3, NOISE or an instrument patch). Otherwise its popover says so and the oscillators play as they
   are.
 - The oscillator pair is one card. There is no third "OSC 2" card: see the decisions below.
 

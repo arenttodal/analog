@@ -77,9 +77,9 @@ struct OrganicSettings
 /** MORPH: the recording turned into the chosen analog carrier. */
 struct MorphSettings
 {
-    bool enabled = false;
-    double position = 0.0;        ///< 0 the recording .. 1 the carrier
-    MorphMethod method = MorphMethod::imprint;
+    bool enabled = false;         ///< (the instrument's parameter defaults to on: state version 9)
+    double position = 0.5;        ///< state version 9: 0 the oscillators (A+B) .. 1 card C (before: the reverse)
+    MorphMethod method = MorphMethod::fuse;
     MorphCarrier carrier = MorphCarrier::both;
     double texture = 0.5;         ///< 0..1: the recording's noise / bow residue
     double attack = 0.5;          ///< 0..1: the recording's attack kept
