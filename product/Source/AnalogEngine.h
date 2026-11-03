@@ -60,6 +60,10 @@ public:
     void setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept override;
     bool arpModulation (osp::mod::Dest dest, double& offset) const noexcept override { return synth.sharedOffset (dest, offset); }
     void setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& played) noexcept override;
+    /** The per-card arpeggiator's lanes: shown A is OSC 1, B OSC 2, C the hybrid (the synth's bits). */
+    void setCardRouting (bool on) noexcept override { synth.setCardRouting (on); }
+    /** Tests: the synth as it plays (its voices' views). */
+    const Synth& synthForTest() const noexcept { return synth; }
     osp::InstrumentEngine::ModView modulationView() const noexcept override;
     bool sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const override;
 

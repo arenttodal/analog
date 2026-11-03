@@ -511,6 +511,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         effects.noteStarted();
     v.channel = channel;
     v.note = note;
+    v.cards = cardsFor (channel);
     v.velocity = std::clamp (velocity, 0.0f, 1.0f);
     v.order = ++noteCounter;
     v.seed = osp::Prng::deriveSeed (current.seed, v.order, static_cast<std::uint64_t> (note));
@@ -622,7 +623,9 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         for (auto& z : v.zones)
             z.stop();
         v.zoneCount = 0;
-        if (sampleSource != nullptr)
+        if ((v.cards & 4) == 0)
+            v.organic.stop();   // card C is not this note's: no recording, no zones
+        else if (sampleSource != nullptr)
         {
             v.organic.stop();
             std::array<int, SampleSource::maxLayers> picked {};
@@ -1160,6 +1163,11 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.gain1 = v.gainNoise = 0.0f;
     if (! p.osc2Heard)
         v.gain2 = 0.0f;
+    // The arpeggiator's card lanes: only the cards this note was given.
+    if ((v.cards & 1) == 0)
+        v.gain1 = v.gainNoise = 0.0f;
+    if ((v.cards & 2) == 0)
+        v.gain2 = 0.0f;
 
     // State version 4: the slots' models (CLASSIC + CLASSIC, no ring, white noise: the
     // original path, untouched), DCO PWM, RING MOD glided.
@@ -1172,7 +1180,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     const double hybridPitch = 12.0 * p.hybridOctave + p.hybridFineCents / 100.0;
     if (v.organic.playing())
         v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch, static_cast<double> (p.organic.rootOverride));
-    v.organicGain = p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
+    v.organicGain = (v.cards & 4) != 0 && p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
     if (p.hybridVelo > 0.0)   // card C's VELO
         v.organicGain *= static_cast<float> (1.0 - p.hybridVelo + p.hybridVelo * static_cast<double> (v.velocity * v.velocity));
     bool zonesOn = false;
@@ -1185,7 +1193,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     }
     // State version 8: the hybrid as OSC 3 or NOISE (only the selected type plays: the engine
     // hands the synth no recording or zones then).
-    const bool generating = p.hybridType == HybridType::oscillator || p.hybridType == HybridType::noise;
+    const bool generating = (v.cards & 4) != 0 && (p.hybridType == HybridType::oscillator || p.hybridType == HybridType::noise);
     v.hybridGen = generating ? p.hybridType : HybridType::sample;
     if (p.hybridType == HybridType::oscillator)
     {
@@ -1621,9 +1629,13 @@ void Synth::planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept
 float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& polyMod) noexcept
 {
     // As the CLASSIC pair below, slot by slot: OSC 2 first (Poly Mod's source, sync's master).
+    // A note of the arpeggiator's card C lane alone: the pair is not computed (silent, still).
+    const bool pair = (v.cards & 3) != 0;
     double wrap2 = -1.0;
     const float width2 = std::clamp (v.width2 + v.pwm2 + v.pwmEnv2 * envValue, 0.02f, 0.98f);
-    if (v.plan2.model == OscModel::classic)
+    if (! pair)
+        v.osc2Out = 0.0f;
+    else if (v.plan2.model == OscModel::classic)
     {
         v.phase2 = osc::walk (v.phase2, v.dt2, width2, v.plan2.waves, 1.0, 0.0, v.line2, wrap2);
         v.osc2Out = v.line2.end (osc::naive (v.plan2.waves, v.phase2, width2));
@@ -1642,8 +1654,8 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
 
     double wrap1 = -1.0;
     const double syncAt = p.sync && wrap2 >= 0.0 ? wrap2 : -1.0;
-    float o1;
-    if (v.plan1.model == OscModel::classic)
+    float o1 = 0.0f;
+    if (pair && v.plan1.model == OscModel::classic)
     {
         const auto& w1 = v.plan1.waves;
         if (syncAt >= 0.0)
@@ -1656,7 +1668,7 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
             v.phase1 = osc::walk (v.phase1, dt1, width1, w1, 1.0, 0.0, v.line1, wrap1);
         o1 = v.line1.end (osc::naive (w1, v.phase1, width1));
     }
-    else
+    else if (pair)
         o1 = osc::renderModel (v.phase1, v.line1, v.extra1, v.plan1, dt1, width1, syncAt, wrap1);
 
     const float c1 = o1 * v.gain1, c2 = v.osc2Out * v.gain2;
@@ -2110,7 +2122,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
 Synth::VoiceView Synth::voiceView (int slot) const noexcept
 {
     const auto& v = voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))];
-    return { v.active, v.held || v.sustained, v.note, v.amp.value() };
+    return { v.active, v.held || v.sustained, v.note, v.amp.value(), v.cards };
 }
 
 } // namespace andor::analog

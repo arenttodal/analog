@@ -131,6 +131,24 @@ public:
     /** The newest sounding voice's modulation (the panel's meters), or null. */
     const osp::mod::VoiceState* newestModulation() const noexcept;
 
+    /** The arpeggiator's card lanes (the shell's per-card arpeggiator): while on, a note's MIDI
+        channel names the cards it sounds on, as 1 + a mask (bit 0 card A: OSC 1 and the
+        noise; bit 1 card B: OSC 2; bit 2 card C: the hybrid), so held notes can sustain on
+        some cards while an arpeggio plays others. Off (the default) every note sounds on
+        every card, whatever its channel. A card a voice does not sound is not computed where
+        it can be skipped (the oscillator pair, or the hybrid). */
+    void setCardRouting (bool on) noexcept { cardRouting = on; }
+    bool cardRoutingOn() const noexcept { return cardRouting; }
+    static constexpr std::uint8_t allCards = 7;
+    /** The cards a note on this channel sounds on (allCards unless routing is on). */
+    std::uint8_t cardsFor (int channel) const noexcept
+    {
+        if (! cardRouting)
+            return allCards;
+        const int mask = (channel - 1) & 7;
+        return static_cast<std::uint8_t> (mask == 0 ? allCards : mask);
+    }
+
     // Events, applied at the current position (between render calls).
     void noteOn (int channel, int note, float velocity) noexcept;
     void noteOff (int channel, int note) noexcept;
@@ -193,6 +211,7 @@ public:
         bool active = false, held = false;
         int note = -1;
         float amp = 0.0f;
+        std::uint8_t cards = 7;   ///< the cards it sounds on (setCardRouting)
     };
     VoiceView voiceView (int slot) const noexcept;
 
@@ -237,6 +256,7 @@ private:
         bool held = false;        ///< its key is down
         bool sustained = false;   ///< released while the pedal holds it
         int channel = 0, note = -1;
+        std::uint8_t cards = 7;   ///< the cards this note sounds on (setCardRouting)
         std::uint64_t order = 0;  ///< note-on sequence (oldest first)
         std::uint64_t seed = 1;   ///< the note's own seed (grains, REIMAGINED, DRIFT)
         float velocity = 1.0f;
@@ -443,6 +463,7 @@ private:
     bool voiceRoutes = false;   ///< a route reaches something a voice reads
     std::uint64_t patchGeneration = 1;   ///< a new one: the voices' patches are copied from `current` again
     bool playedKeysOnly = false;
+    bool cardRouting = false;
     const ControlModulator* modulator = nullptr;
 
     // LFO (ANDOR OSP's LFO 1) and transport.

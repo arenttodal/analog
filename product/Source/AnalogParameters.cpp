@@ -235,6 +235,7 @@ const juce::StringArray& engineParameterIds()
         l.add ("midi.modWheel");
         // ANDOR OSP's arpeggiator: the shell plays it in front of the synth.
         l.add ("arp.*");
+        l.add ("analog.arp.*");   // the per-card arpeggiator (the shell's, in ANALOG's namespace)
         // ANDOR OSP's modulation: LFO 2, ENV 1 and 2, VEL and NOTE, the 16 routes.
         l.add ("mod.*");
         return l;

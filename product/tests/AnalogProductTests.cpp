@@ -5,6 +5,7 @@
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "ArpSection.h"
 #include "Binding.h"
 #include "CeramicSkin.h"
 #include "FactoryPatches.h"
@@ -597,10 +598,19 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             setValue (q, osp::plugin::InstrumentHost::modRouteId (slot, "depth"), 50.0f);
         };
     };
-    for (const char* id : { "arp.pattern", "arp.rate", "arp.gate", "arp.octaves", "arp.swing", "arp.velocity" })
+    for (const char* id : { "arp.pattern", "arp.rate", "arp.gate", "arp.octaves", "arp.swing", "arp.velocity", "analog.arp.link", "analog.arp.cardA", "analog.arp.cardB", "analog.arp.cardC" })
         setups[id] = [] (ShellProcessor& q) {
             setValue (q, "arp.enabled", 1.0f);
             setValue (q, "arp.rate", 3.0f);
+        };
+    // The per-card arpeggiator's own settings act on their card while unlinked.
+    for (const char* id : { "analog.arp.cardB.pattern", "analog.arp.cardB.rate", "analog.arp.cardB.octaves", "analog.arp.cardC.pattern", "analog.arp.cardC.rate", "analog.arp.cardC.octaves" })
+        setups[id] = [] (ShellProcessor& q) {
+            setValue (q, "arp.enabled", 1.0f);
+            setValue (q, "analog.arp.link", 0.0f);
+            setValue (q, "arp.rate", 3.0f);
+            setValue (q, "analog.arp.cardB.rate", 3.0f);
+            setValue (q, "analog.arp.cardC.rate", 3.0f);
         };
     for (const char* name : { "shape", "rate", "sync", "division", "phase", "polarity", "mode", "scope" })
         setups[osp::plugin::InstrumentHost::modLfoId (1, name)] = [route, name] (ShellProcessor& q) {
@@ -712,8 +722,9 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         }
     }
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
-    // and the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
-    CHECK (checkedBound == bound.size() - 4 + 7 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));
+    // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), and
+    // the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
+    CHECK (checkedBound == bound.size() - 5 + 7 + 10 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 5: "analog.arp.*" is a pattern too)
     CHECK (checkedUnbound > 100);
 }
 
@@ -1725,6 +1736,41 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     renderShell (p, 0.8, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
     ui.setArpExpanded (true);
     shoot ("analog-arp");
+    {
+        // The per-card arpeggiator: C alone plays the arpeggio (A and B hold the chord); then
+        // unlinked, B's own pattern (DOWN) and RATE in the editor.
+        std::function<osp::plugin::ArpInlinePanel* (juce::Component&)> find = [&] (juce::Component& c) -> osp::plugin::ArpInlinePanel* {
+            if (auto* panel = dynamic_cast<osp::plugin::ArpInlinePanel*> (&c))
+                return panel;
+            for (auto* child : c.getChildren())
+                if (auto* f = find (*child))
+                    return f;
+            return nullptr;
+        };
+        auto* panel = find (ui);
+        REQUIRE (panel != nullptr);
+        CHECK (panel->showsCards());
+        setValue (p, "analog.arp.cardA", 0.0f);
+        setValue (p, "analog.arp.cardB", 0.0f);
+        renderShell (p, 0.8, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
+        panel->refresh();
+        shoot ("analog-arp-card-c");
+        setValue (p, "analog.arp.cardA", 1.0f);
+        setValue (p, "analog.arp.cardB", 1.0f);
+        setValue (p, "analog.arp.cardC", 0.0f);   // (C holds the chord)
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "analog.arp.cardB.pattern", 1.0f);
+        setValue (p, "analog.arp.cardB.rate", 2.0f);
+        panel->setEditCard (1);
+        CHECK (panel->editedCard() == 1);
+        renderShell (p, 0.8, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
+        panel->refresh();
+        shoot ("analog-arp-unlinked-b");
+        panel->setEditCard (0);
+        for (const char* id : { "analog.arp.cardA", "analog.arp.cardB", "analog.arp.cardC", "analog.arp.link", "analog.arp.cardB.pattern", "analog.arp.cardB.rate" })
+            if (auto* q = p.parameters.getParameter (id))
+                q->setValueNotifyingHost (q->getDefaultValue());
+    }
     ui.setArpExpanded (false);
     setValue (p, "arp.enabled", 0.0f);
     // A sound with character on the card: Sync Bite's picture, keys held.
@@ -3204,4 +3250,190 @@ TEST_CASE ("analog: an imported Kontakt patch writes no presets; earlier imports
     CHECK (andor::analog::import::retireGeneratedPresets (presets, store) == 0);   // (nothing left to move)
     // ... and the import's sounds still play from the record.
     CHECK (andor::analog::import::readRecord (store, made.record.getFileName()) != nullptr);
+}
+
+namespace
+{
+    /** What the voices start, block by block: a voice's note beginning (held), with its cards. */
+    struct LaneOnset
+    {
+        double seconds;
+        int note;
+        std::uint8_t cards;
+    };
+
+    struct LanePlay
+    {
+        std::vector<LaneOnset> onsets;
+        int minHeldOn = 99, maxHeldOn = 0;   ///< held voices on `holdCards` while the keys are down (after 0.3 s)
+        int heldAtEnd = 0, activeAtEnd = 0;
+        int allCardVoices = 0;               ///< onsets on every card (the one arpeggiator's)
+    };
+
+    /** Holds C E G from the start until `release` seconds, renders `seconds`; `each` runs
+        before every block (its start in seconds). */
+    LanePlay playLanes (ShellProcessor& p, double seconds, double release, std::uint8_t holdCards,
+                        const std::function<void (double)>& each = {})
+    {
+        p.prepareToPlay (rate, block);
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        const auto& synth = engine.synthForTest();
+        LanePlay result;
+        std::array<Synth::VoiceView, Synth::maxVoices> before {};
+        juce::AudioBuffer<float> buffer (2, block);
+        const int total = static_cast<int> (seconds * rate), releaseAt = static_cast<int> (release * rate);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            const double t = pos / rate;
+            if (each)
+                each (t);
+            juce::MidiBuffer midi;
+            for (int note : { 60, 64, 67 })
+            {
+                if (pos == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, static_cast<juce::uint8> (100)), 0);
+                if (releaseAt >= pos && releaseAt < pos + block)
+                    midi.addEvent (juce::MidiMessage::noteOff (1, note), releaseAt - pos);
+            }
+            p.processBlock (buffer, midi);
+            int heldOn = 0;
+            for (int s = 0; s < Synth::maxVoices; ++s)
+            {
+                const auto v = synth.voiceView (s);
+                const auto& b = before[static_cast<std::size_t> (s)];
+                if (v.active && v.held && (! b.active || ! b.held || b.note != v.note || b.cards != v.cards))
+                {
+                    result.onsets.push_back ({ t, v.note, v.cards });
+                    if (v.cards == Synth::allCards)
+                        ++result.allCardVoices;
+                }
+                if (v.active && v.held && v.cards == holdCards)
+                    ++heldOn;
+                before[static_cast<std::size_t> (s)] = v;
+            }
+            if (t > 0.3 && pos + block < releaseAt)
+            {
+                result.minHeldOn = std::min (result.minHeldOn, heldOn);
+                result.maxHeldOn = std::max (result.maxHeldOn, heldOn);
+            }
+        }
+        for (int s = 0; s < Synth::maxVoices; ++s)
+        {
+            const auto v = synth.voiceView (s);
+            result.heldAtEnd += v.held ? 1 : 0;
+            result.activeAtEnd += v.active ? 1 : 0;
+        }
+        return result;
+    }
+
+    std::vector<int> firstNotes (const LanePlay& play, std::uint8_t cards, int count)
+    {
+        std::vector<int> notes;
+        for (const auto& o : play.onsets)
+            if (o.cards == cards && static_cast<int> (notes.size()) < count)
+                notes.push_back (o.note);
+        return notes;
+    }
+}
+
+TEST_CASE ("analog: the arpeggiator on card C alone, while cards A and B hold the chord", "[analog][arp][cardarp]")
+{
+    ShellProcessor p;
+    REQUIRE (p.cardArpeggiator());
+    setValue (p, "arp.enabled", 1.0f);
+    setValue (p, "analog.arp.cardA", 0.0f);
+    setValue (p, "analog.arp.cardB", 0.0f);
+    const auto play = playLanes (p, 4.0, 2.0, 3);   // (A and B: bits 0 and 1)
+    INFO ("held on A+B: " << play.minHeldOn << " .. " << play.maxHeldOn);
+    // The chord sustains on A and B, all the way through.
+    CHECK (play.minHeldOn == 3);
+    CHECK (play.maxHeldOn == 3);
+    // C plays the arpeggio (UP, 1/8 at 120: about eight steps in two seconds), C E G in turn.
+    const auto c = firstNotes (play, 4, 6);
+    REQUIRE (c.size() >= 6);
+    CHECK (c == std::vector<int> { 60, 64, 67, 60, 64, 67 });
+    CHECK (play.allCardVoices == 0);
+    // Released: nothing held, everything fades.
+    CHECK (play.heldAtEnd == 0);
+    CHECK (play.activeAtEnd == 0);
+}
+
+TEST_CASE ("analog: unlinked, each card plays its own pattern; LINK with every card is the one arpeggiator", "[analog][arp][cardarp]")
+{
+    {
+        ShellProcessor p;
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "arp.pattern", 0.0f);         // A: UP
+        setValue (p, "analog.arp.cardB.pattern", 1.0f);   // B: DOWN
+        setValue (p, "analog.arp.cardC", 0.0f);           // C holds
+        const auto play = playLanes (p, 3.0, 2.0, 4);
+        CHECK (firstNotes (play, 1, 4) == std::vector<int> { 60, 64, 67, 60 });
+        CHECK (firstNotes (play, 2, 4) == std::vector<int> { 67, 64, 60, 67 });
+        CHECK (play.minHeldOn == 3);   // the chord on C
+        CHECK (play.allCardVoices == 0);
+        CHECK (play.heldAtEnd == 0);
+    }
+    {
+        // B on its own RATE: twice A's steps in the same time.
+        ShellProcessor p;
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "analog.arp.cardC", 0.0f);
+        setValue (p, "analog.arp.cardB.rate", 2.0f);   // 1/16 against A's 1/8
+        const auto play = playLanes (p, 2.2, 2.0, 4);
+        int a = 0, b = 0;
+        for (const auto& o : play.onsets)
+        {
+            a += o.cards == 1 ? 1 : 0;
+            b += o.cards == 2 ? 1 : 0;
+        }
+        INFO ("A " << a << " B " << b);
+        CHECK (b >= 2 * a - 2);
+        CHECK (b <= 2 * a + 2);
+    }
+    {
+        // LINK with every card (the default): the one arpeggiator, every card in each note.
+        ShellProcessor p;
+        setValue (p, "arp.enabled", 1.0f);
+        const auto play = playLanes (p, 2.0, 1.5, 7);
+        CHECK (firstNotes (play, 7, 4) == std::vector<int> { 60, 64, 67, 60 });
+        CHECK (static_cast<int> (play.onsets.size()) == play.allCardVoices);
+        CHECK (! dynamic_cast<AnalogEngine&> (p.productEngine()).synthForTest().cardRoutingOn());
+    }
+}
+
+TEST_CASE ("analog: changing the arpeggiator's cards and LINK mid-chord leaves no note hanging", "[analog][arp][cardarp]")
+{
+    ShellProcessor p;
+    setValue (p, "arp.enabled", 1.0f);
+    setValue (p, "analog.arp.cardB.pattern", 1.0f);
+    // A change every quarter second while the chord is held, then the keys come up.
+    const std::vector<std::pair<const char*, float>> changes { { "analog.arp.cardC", 0.0f }, { "analog.arp.link", 0.0f }, { "analog.arp.cardA", 0.0f },
+                                                                { "analog.arp.link", 1.0f }, { "analog.arp.cardB", 0.0f }, { "arp.enabled", 0.0f },
+                                                                { "arp.enabled", 1.0f }, { "analog.arp.cardA", 1.0f }, { "analog.arp.cardB", 1.0f },
+                                                                { "analog.arp.cardC", 1.0f }, { "analog.arp.link", 0.0f } };
+    std::size_t next = 0;
+    int heldAlong = 99;
+    auto& synth = dynamic_cast<AnalogEngine&> (p.productEngine()).synthForTest();
+    const auto play = playLanes (p, 6.0, 3.2, 0, [&] (double t) {
+        if (next < changes.size() && t >= 0.25 * static_cast<double> (next + 1))
+        {
+            setValue (p, changes[next].first, changes[next].second);
+            ++next;
+        }
+        if (t > 0.2 && t < 3.1)
+        {
+            // Something always sounds the held chord's notes (on whichever cards).
+            int held = 0;
+            for (int s = 0; s < Synth::maxVoices; ++s)
+                held += synth.voiceView (s).held ? 1 : 0;
+            if (t > 0.2 + 0.25 * static_cast<double> (next) + 0.05)   // (a step past the last change)
+                heldAlong = std::min (heldAlong, held);
+        }
+    });
+    CHECK (next == changes.size());
+    CHECK (heldAlong >= 1);
+    CHECK (play.heldAtEnd == 0);
+    CHECK (play.activeAtEnd == 0);
 }
