@@ -4087,3 +4087,81 @@ TEST_CASE ("analog: screenshots of the ECHO and SPACE racks at every width, ARP 
             ui.closePopup();
         }
 }
+
+//==============================================================================
+// Phase 4: card C's LINK, REVERSE, LOOP and FOLLOW as a compact row of icon keys in its well.
+
+TEST_CASE ("analog: card C's modifiers sit in its well, only those that apply, bound as before", "[analog][rack][wellmods]")
+{
+    using andor::analog::HybridType;
+    Scratch scratch;
+    ShellProcessor p;
+    loadOrganic (p, writeRecording (scratch.dir, "vowel.wav", 57, 2.0));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    setValue (p, params::hybridType, static_cast<float> (HybridType::sample));
+    ui.refreshNow();
+    auto& card = ui.engineCard (ShellProcessor::hybridLayer);
+    const auto well = card.display().getBounds();
+    const char* ids[] { "layerB.link", "layerB.reverse", "layerB.loop", "layerB.follow" };
+
+    // A SAMPLE: all four, small, at the well's top-left (no keys under the knobs any more).
+    int right = well.getX();
+    for (int i = 0; i < 4; ++i)
+    {
+        auto* key = card.modifierKey (i);
+        REQUIRE (key != nullptr);
+        INFO (ids[i]);
+        CHECK (key->isVisible());
+        CHECK (key->isInWell());
+        CHECK (well.contains (key->getBounds()));
+        CHECK (key->getY() < well.getY() + 40);
+        CHECK (key->getHeight() <= 26);
+        CHECK (key->getX() >= right);
+        right = key->getRight();
+        CHECK (osp::plugin::binding::tagsOf (*key).contains (ids[i]));   // the same parameter
+    }
+    CHECK (right < well.getCentreX());   // (the source's type stays at the top-right)
+
+    // A click and the keyboard toggle the same parameter as before, one gesture each.
+    auto* reverse = card.modifierKey (1);
+    const float was = p.parameterValue ("layerB.reverse");
+    reverse->toggle();
+    CHECK (p.parameterValue ("layerB.reverse") != was);
+    CHECK (reverse->getWantsKeyboardFocus());
+    CHECK (reverse->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK (p.parameterValue ("layerB.reverse") == was);
+
+    // An INSTRUMENT PATCH's zones do not play backwards: no REVERSE.
+    setValue (p, params::hybridType, static_cast<float> (HybridType::instrumentPatch));
+    ui.refreshNow();
+    CHECK (card.modifierKey (0)->isVisible());
+    CHECK_FALSE (card.modifierKey (1)->isVisible());
+    CHECK (card.modifierKey (2)->isVisible());
+    CHECK (card.modifierKey (3)->isVisible());
+    CHECK (card.modifierKey (2)->getX() < card.modifierKey (0)->getRight() + 40);   // (the row closes up)
+
+    // OSC 3 and NOISE: none.
+    for (const auto type : { HybridType::oscillator, HybridType::noise })
+    {
+        setValue (p, params::hybridType, static_cast<float> (type));
+        ui.refreshNow();
+        for (int i = 0; i < 4; ++i)
+            CHECK_FALSE (card.modifierKey (i)->isVisible());
+    }
+
+    // The EQ takes the well: the keys give way, and come back.
+    setValue (p, params::hybridType, static_cast<float> (HybridType::sample));
+    ui.refreshNow();
+    card.setEqOpen (true);
+    CHECK_FALSE (card.modifierKey (0)->isVisible());
+    card.setEqOpen (false);
+    ui.refreshNow();
+    CHECK (card.modifierKey (0)->isVisible());
+
+    // Cards A and B (the oscillators) show none, as before.
+    for (int i = 0; i < 4; ++i)
+        if (auto* key = ui.engineCard (0).modifierKey (i))
+            CHECK_FALSE (key->isVisible());
+}

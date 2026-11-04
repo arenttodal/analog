@@ -297,6 +297,16 @@ const ProductInfo& productInfo()
             const int type = juce::roundToInt (host.parameterValue (andor::analog::params::hybridType));
             return type == static_cast<int> (andor::analog::HybridType::sample) || type == static_cast<int> (andor::analog::HybridType::instrumentPatch);
         };
+        // ... as a compact row of icon keys at the top-left of card C's dark well (its foot free,
+        // as cards A and B), only the ones that act on what card C plays: a SAMPLE all four; an
+        // INSTRUMENT PATCH's zones LINK, LOOP and FOLLOW (they do not play backwards).
+        p.cardModifiersInWell = true;
+        p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
+            if (layer != 1)
+                return 0xf;
+            const int type = juce::roundToInt (host.parameterValue (andor::analog::params::hybridType));
+            return type == static_cast<int> (andor::analog::HybridType::instrumentPatch) ? (1 | 4 | 8) : 0xf;
+        };
         p.cardControls = [] (int layer, osp::plugin::InstrumentHost& host) {
             namespace ap = andor::analog::params;
             using K = andor::shell::ProductInfo::CardKnob;
