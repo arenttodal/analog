@@ -3532,3 +3532,177 @@ TEST_CASE ("analog: changing the arpeggiator's cards and LINK mid-chord leaves n
     CHECK (play.heldAtEnd == 0);
     CHECK (play.activeAtEnd == 0);
 }
+//==============================================================================
+// The effects rack (ANDOR OSP's shared rack host, opt-in): MOVEMENT expanded beside its macro.
+
+namespace
+{
+    std::map<juce::String, float> allParameterValues (ShellProcessor& p)
+    {
+        std::map<juce::String, float> values;
+        for (auto* param : p.getParameters())
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+                values[ranged->getParameterID()] = ranged->getValue();
+        return values;
+    }
+
+    int macroIndexOf (ShellProcessor& p, const juce::String& id)
+    {
+        for (int i = 0; i < osp::plugin::frame::macroCount; ++i)
+            if (p.macroSpecs()[static_cast<std::size_t> (i)].parameterId == id)
+                return i;
+        return -1;
+    }
+}
+
+TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view: nothing sounds different", "[analog][rack]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+
+    // A key beside MOVEMENT only (ECHO and SPACE come later).
+    REQUIRE (ui.rackKey (Kind::movement) != nullptr);
+    CHECK (ui.rackKey (Kind::echo) == nullptr);
+    CHECK (ui.rackKey (Kind::space) == nullptr);
+    CHECK_FALSE (ui.effectsRack().isVisible());
+    const auto before = allParameterValues (p);
+    const int heightBefore = editor->getHeight();
+    const float instrumentBefore = ui.instrumentHeight();
+
+    // The key: the rack opens between the macros and the arpeggiator; the window grows by it.
+    ui.rackKey (Kind::movement)->onClick();
+    ui.refreshNow();
+    REQUIRE (ui.effectsRack().isShown (Kind::movement));
+    CHECK (ui.rackKey (Kind::movement)->isExpanded());
+    CHECK (ui.effectsRack().isVisible());
+    const float rackHeight = ui.effectsRack().height();
+    CHECK (rackHeight > 200.0f);
+    CHECK (ui.instrumentHeight() == Approx (instrumentBefore + rackHeight + osp::plugin::design::layout::rackGap));
+    CHECK (editor->getHeight() > heightBefore);
+    CHECK (editor->getWidth() == 1448);
+    CHECK (ui.effectsRack().getY() >= 900);
+    CHECK (p.rackExpanded() == 1);
+
+    // MOVEMENT's controls in the open, its knobs bound to the same parameters as the popover.
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "AMOUNT SPEED PITCH TONE");
+    setValue (p, "movement.mode", 4.0f);   // SHAPER (as automation would)
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "DEPTH SMOOTH");
+    setValue (p, "movement.mode", 1.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "AMOUNT WOW FLUTTER WEAR");
+    setValue (p, "movement.mode", 0.0f);
+    ui.refreshNow();
+
+    // The MOVEMENT name still opens its popover, with the rack open.
+    const int movement = macroIndexOf (p, "motion");
+    REQUIRE (movement >= 0);
+    ui.openPopup (movement);
+    CHECK (ui.openPopupPanel() != nullptr);
+    CHECK (ui.effectsRack().isShown (Kind::movement));
+
+    // The arpeggiator's editor opens under the rack (both shown, the keyboard under both).
+    ui.setArpExpanded (true);
+    ui.refreshNow();
+    CHECK (ui.instrumentHeight() == Approx (instrumentBefore + rackHeight + osp::plugin::design::layout::rackGap + osp::plugin::design::layout::arpShift));
+    ui.setArpExpanded (false);
+
+    // Collapsing restores the window; no parameter moved at any point.
+    ui.rackKey (Kind::movement)->onClick();
+    ui.refreshNow();
+    CHECK_FALSE (ui.effectsRack().isShown (Kind::movement));
+    CHECK_FALSE (ui.effectsRack().isVisible());
+    CHECK (ui.instrumentHeight() == Approx (instrumentBefore));
+    CHECK (editor->getHeight() == heightBefore);
+    CHECK (allParameterValues (p) == before);
+}
+
+TEST_CASE ("analog: the rack's state is a view setting the session recalls", "[analog][rack]")
+{
+    using osp::plugin::rack::Kind;
+    juce::MemoryBlock session;
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        ui.setRackExpanded (Kind::movement, true);
+        p.getStateInformation (session);
+    }
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.rackExpanded() == 1);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (q.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    CHECK (ui.effectsRack().isShown (Kind::movement));
+    CHECK (ui.rackKey (Kind::movement)->isExpanded());
+    // A session recalled into an open editor closes it again.
+    juce::MemoryBlock closed;
+    {
+        ShellProcessor r;
+        r.getStateInformation (closed);
+    }
+    q.setStateInformation (closed.getData(), static_cast<int> (closed.getSize()));
+    ui.refreshNow();
+    CHECK_FALSE (ui.effectsRack().isShown (Kind::movement));
+}
+
+TEST_CASE ("analog: screenshots of the MOVEMENT rack at every width, ARP open and closed (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-rack]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    for (const int width : { 1448, 869, 1810 })
+    {
+        const auto w = juce::String (width);
+        for (const bool arp : { false, true })
+        {
+            const auto a = juce::String (arp ? "-arp" : "");
+            ui.setRackExpanded (Kind::movement, false);
+            ui.setArpExpanded (arp);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            shoot ("rack-" + w + a + "-0-collapsed");
+            ui.setRackExpanded (Kind::movement, true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            setValue (p, "movement.mode", 0.0f);
+            shoot ("rack-" + w + a + "-1-drift");
+            if (width != 1448)
+                continue;
+            setValue (p, "movement.mode", 1.0f);
+            shoot ("rack-" + w + a + "-2-tape");
+            setValue (p, "movement.mode", 2.0f);
+            shoot ("rack-" + w + a + "-3-chorus");
+            setValue (p, "movement.mode", 3.0f);
+            shoot ("rack-" + w + a + "-4-pulse");
+            setValue (p, "movement.mode", 4.0f);
+            shoot ("rack-" + w + a + "-5-shaper");
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), true);
+            shoot ("rack-" + w + a + "-6-shaper-wide");
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), false);
+            ui.openPopup (macroIndexOf (p, "motion"));
+            shoot ("rack-" + w + a + "-7-shaper-popover");
+            ui.closePopup();
+        }
+    }
+}

@@ -269,6 +269,7 @@ const ProductInfo& productInfo()
         p.threeEngines.enabled = true;
         p.threeEngines.order = { 0, 2, 1 };
         p.cardArpeggiator = true;   // each card arpeggiated or holding the keys, its own pattern unlinked
+        p.rackModules = { osp::plugin::rack::Kind::movement };   // the effects rack: MOVEMENT expanded beside its macro
         p.mixEndLabels = { "A+B", "C" };   // (the header MIX: the analog pair against card C)
         // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
         // a SAMPLE or INSTRUMENT PATCH only.
