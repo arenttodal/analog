@@ -3154,7 +3154,7 @@ TEST_CASE ("analog: screenshots of the three engines in their combinations, ever
     for (const int width : { 1448, 869, 1810 })
     {
         const auto w = juce::String (width);
-        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
         p.removeLayer (ShellProcessor::hybridLayer);
         engine.setSampleSourceDefinition (nullptr, {});
         engine.setHybridType (HybridType::sample);
@@ -3595,8 +3595,11 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     ShellProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
-    editor->setSize (1448, 1086);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
     ui.refreshNow();
+    // The cards keep nothing under their knobs (their modifiers in the well): the instrument
+    // is shorter by their trim.
+    CHECK (ui.instrumentHeight() == Approx (1086.0f - osp::plugin::EngineCard::footTrim));
 
     // A key beside MOVEMENT, ECHO and SPACE.
     REQUIRE (ui.rackKey (Kind::movement) != nullptr);
@@ -3618,7 +3621,8 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     CHECK (ui.instrumentHeight() == Approx (instrumentBefore + rackHeight + osp::plugin::design::layout::rackGap));
     CHECK (editor->getHeight() > heightBefore);
     CHECK (editor->getWidth() == 1448);
-    CHECK (ui.effectsRack().getY() >= 900);
+    CHECK (ui.effectsRack().getY() >= 900 - static_cast<int> (osp::plugin::EngineCard::footTrim));
+    CHECK (ui.effectsRack().getHeight() <= 216);   // never taller than the macro panel
     CHECK (p.rackExpanded() == 1);
 
     // MOVEMENT's controls in the open, its knobs bound to the same parameters as the popover.
