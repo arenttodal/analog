@@ -3601,20 +3601,20 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     // is shorter by their trim.
     CHECK (ui.instrumentHeight() == Approx (1086.0f - osp::plugin::EngineCard::footTrim));
 
-    // A key beside MOVEMENT, ECHO and SPACE.
-    REQUIRE (ui.rackKey (Kind::movement) != nullptr);
-    CHECK (ui.rackKey (Kind::echo) != nullptr);
-    CHECK (ui.rackKey (Kind::space) != nullptr);
+    // MOVEMENT, ECHO and SPACE open racks (from their names: no key on the row).
+    REQUIRE (ui.hasRack (Kind::movement));
+    CHECK (ui.hasRack (Kind::echo));
+    CHECK (ui.hasRack (Kind::space));
     CHECK_FALSE (ui.effectsRack().isVisible());
     const auto before = allParameterValues (p);
     const int heightBefore = editor->getHeight();
     const float instrumentBefore = ui.instrumentHeight();
 
-    // The key: the rack opens between the macros and the arpeggiator; the window grows by it.
-    ui.rackKey (Kind::movement)->onClick();
+    // A double-click on the name: the rack opens between the macros and the arpeggiator.
+    ui.toggleRackFromLabel (Kind::movement);
     ui.refreshNow();
     REQUIRE (ui.effectsRack().isShown (Kind::movement));
-    CHECK (ui.rackKey (Kind::movement)->isExpanded());
+    CHECK (ui.macroLabel (ui.rackMacro (Kind::movement))->isRackOpen());
     CHECK (ui.effectsRack().isVisible());
     const float rackHeight = ui.effectsRack().height();
     CHECK (rackHeight > 200.0f);
@@ -3652,7 +3652,7 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     ui.setArpExpanded (false);
 
     // Collapsing restores the window; no parameter moved at any point.
-    ui.rackKey (Kind::movement)->onClick();
+    ui.toggleRackFromLabel (Kind::movement);
     ui.refreshNow();
     CHECK_FALSE (ui.effectsRack().isShown (Kind::movement));
     CHECK_FALSE (ui.effectsRack().isVisible());
@@ -3678,7 +3678,7 @@ TEST_CASE ("analog: the rack's state is a view setting the session recalls", "[a
     std::unique_ptr<juce::AudioProcessorEditor> editor (q.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     CHECK (ui.effectsRack().isShown (Kind::movement));
-    CHECK (ui.rackKey (Kind::movement)->isExpanded());
+    CHECK (ui.macroLabel (ui.rackMacro (Kind::movement))->isRackOpen());
     // A session recalled into an open editor closes it again.
     juce::MemoryBlock closed;
     {
@@ -3939,12 +3939,12 @@ TEST_CASE ("analog: ECHO and SPACE expand into the rack, one module at a time, e
     const float plain = ui.instrumentHeight();
 
     // One at a time: ECHO's key closes MOVEMENT's module, SPACE's closes ECHO's.
-    ui.rackKey (Kind::movement)->onClick();
-    ui.rackKey (Kind::echo)->onClick();
+    ui.toggleRackFromLabel (Kind::movement);
+    ui.toggleRackFromLabel (Kind::echo);
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::echo });
-    CHECK_FALSE (ui.rackKey (Kind::movement)->isExpanded());
-    CHECK (ui.rackKey (Kind::echo)->isExpanded());
+    CHECK_FALSE (ui.macroLabel (ui.rackMacro (Kind::movement))->isRackOpen());
+    CHECK (ui.macroLabel (ui.rackMacro (Kind::echo))->isRackOpen());
     CHECK (p.rackExpanded() == 2);
     auto* echo = ui.effectsRack().module (Kind::echo);
     REQUIRE (echo != nullptr);
@@ -3954,7 +3954,7 @@ TEST_CASE ("analog: ECHO and SPACE expand into the rack, one module at a time, e
     CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE CLOCK INTERVAL MOTION TIMING STEREO");
     setValue (p, "echo.type", 0.0f);
 
-    ui.rackKey (Kind::space)->onClick();
+    ui.toggleRackFromLabel (Kind::space);
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::space });
     auto* space = ui.effectsRack().module (Kind::space);
@@ -3980,7 +3980,7 @@ TEST_CASE ("analog: ECHO and SPACE expand into the rack, one module at a time, e
         CHECK (ui.openPopupPanel() != nullptr);
         ui.closePopup();
     }
-    ui.rackKey (Kind::space)->onClick();
+    ui.toggleRackFromLabel (Kind::space);
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds().empty());
     CHECK (ui.instrumentHeight() == Approx (plain));
@@ -4379,4 +4379,189 @@ TEST_CASE ("analog: screenshots of MOVEMENT, ECHO and SPACE in the unified rack 
             shoot (name + "-8-space-abyss");
             setValue (p, "space.engine", 0.0f);
         }
+}
+
+//==============================================================================
+// No mark on the macro row: a click on an effect's name opens its popover, a double-click its
+// rack (the popover never flashing first), a right-click offers both, Enter opens the rack.
+
+namespace
+{
+    juce::MouseEvent labelEvent (juce::Component& c, juce::ModifierKeys mods, int clicks)
+    {
+        auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        const auto at = c.getLocalBounds().getCentre().toFloat();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, at, now, clicks, false);
+    }
+    void clickLabel (osp::plugin::MacroLabel& l)
+    {
+        const auto e = labelEvent (l, juce::ModifierKeys::leftButtonModifier, 1);
+        l.mouseDown (e);
+        l.mouseUp (e);
+    }
+    void doubleClickLabel (osp::plugin::MacroLabel& l)
+    {
+        clickLabel (l);
+        const auto second = labelEvent (l, juce::ModifierKeys::leftButtonModifier, 2);
+        l.mouseDown (second);
+        l.mouseDoubleClick (second);
+        l.mouseUp (second);
+    }
+}
+
+TEST_CASE ("analog: an effect's name - click for settings, double-click for its rack, right-click for both, Enter", "[analog][rack][rackclicks]")
+{
+    // The label itself: a click waits for a possible double-click, which cancels it.
+    {
+        osp::plugin::MacroLabel label ("ECHO", true);
+        label.setBounds (0, 0, 150, 22);
+        int clicks = 0, racks = 0, menus = 0;
+        label.onClick = [&] { ++clicks; };
+        label.setRackActions ([&] { ++racks; }, [&] { ++menus; });
+        CHECK (label.getTooltip() == juce::String::fromUTF8 ("Click for settings \xc2\xb7 Double-click for rack"));
+        CHECK (label.getWantsKeyboardFocus());
+        CHECK_FALSE (label.getMouseClickGrabsKeyboardFocus());
+
+        clickLabel (label);
+        CHECK (clicks == 0);   // not yet: a second click may follow
+        CHECK (label.isClickPending());
+        label.flushPendingClick();   // (the double-click interval has passed)
+        CHECK (clicks == 1);
+        CHECK (racks == 0);
+
+        doubleClickLabel (label);
+        CHECK (racks == 1);
+        CHECK_FALSE (label.isClickPending());
+        label.flushPendingClick();
+        CHECK (clicks == 1);   // the popover never opened on the way
+
+        const auto right = labelEvent (label, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier), 1);
+        label.mouseDown (right);
+        label.mouseUp (right);
+        CHECK (menus == 1);
+        CHECK_FALSE (label.isClickPending());
+        CHECK (clicks == 1);
+
+        CHECK (label.keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+        CHECK (racks == 2);
+        CHECK (label.keyPressed (juce::KeyPress (juce::KeyPress::F10Key, juce::ModifierKeys::shiftModifier, 0)));
+        CHECK (menus == 2);
+    }
+    // A name without a rack: a click acts at once, as before (no latency added).
+    {
+        osp::plugin::MacroLabel label ("DRIVE", true);
+        label.setBounds (0, 0, 150, 22);
+        int clicks = 0;
+        label.onClick = [&] { ++clicks; };
+        clickLabel (label);
+        CHECK (clicks == 1);
+        CHECK_FALSE (label.isClickPending());
+        CHECK_FALSE (label.getWantsKeyboardFocus());
+    }
+
+    // In the instrument.
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    auto& movement = *ui.macroLabel (ui.rackMacro (Kind::movement));
+    auto& echo = *ui.macroLabel (ui.rackMacro (Kind::echo));
+    CHECK (ui.rackMacro (Kind::movement) == macroIndexOf (p, "motion"));
+    CHECK (ui.macroLabel (macroIndexOf (p, "drive"))->getTooltip().isEmpty() == ui.macroLabel (macroIndexOf (p, "drive"))->getTooltip().isEmpty());   // (DRIVE: no rack)
+
+    // Click: the popover (after the interval), no rack.
+    clickLabel (movement);
+    CHECK (ui.openPopupPanel() == nullptr);
+    movement.flushPendingClick();
+    CHECK (ui.openPopupIndex() == macroIndexOf (p, "motion"));
+    CHECK (ui.effectsRack().shownKinds().empty());
+
+    // Double-click with the popover open: the popover closes, the rack opens.
+    doubleClickLabel (movement);
+    ui.refreshNow();
+    CHECK (ui.openPopupPanel() == nullptr);
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::movement });
+    CHECK (movement.isRackOpen());
+    // Another name: straight to its rack.
+    doubleClickLabel (echo);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::echo });
+    CHECK_FALSE (movement.isRackOpen());
+    CHECK (echo.isRackOpen());
+    // The same name again: closed.
+    doubleClickLabel (echo);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds().empty());
+    CHECK_FALSE (echo.isRackOpen());
+
+    // Enter (with the keyboard's focus on the name).
+    CHECK (movement.keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+    ui.refreshNow();
+    CHECK (ui.effectsRack().isShown (Kind::movement));
+
+    // The context menu: Quick Settings, Close Rack (Open Rack when closed); each acts.
+    auto items = [] (const juce::PopupMenu& menu) {
+        std::vector<std::pair<juce::String, std::function<void()>>> list;
+        for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+            list.push_back ({ it.getItem().text, it.getItem().action });
+        return list;
+    };
+    auto menu = items (ui.rackLabelMenu (ui.rackMacro (Kind::movement), Kind::movement));
+    REQUIRE (menu.size() == 2);
+    CHECK (menu[0].first == "Quick Settings");
+    CHECK (menu[1].first == "Close Rack");
+    menu[0].second();
+    CHECK (ui.openPopupIndex() == macroIndexOf (p, "motion"));
+    CHECK (ui.effectsRack().isShown (Kind::movement));   // (both: the popover over the open rack)
+    menu[1].second();
+    ui.refreshNow();
+    CHECK_FALSE (ui.effectsRack().isShown (Kind::movement));
+    CHECK (ui.openPopupPanel() == nullptr);
+    menu = items (ui.rackLabelMenu (ui.rackMacro (Kind::space), Kind::space));
+    CHECK (menu[1].first == "Open Rack");
+    menu[1].second();
+    ui.refreshNow();
+    CHECK (ui.effectsRack().isShown (Kind::space));
+
+    // Recalled with the session: the rack and its name's underline.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    std::unique_ptr<juce::AudioProcessorEditor> second (q.createEditorIfNeeded());
+    auto& ui2 = dynamic_cast<andor::shell::ShellEditor&> (*second);
+    CHECK (ui2.effectsRack().isShown (Kind::space));
+    CHECK (ui2.macroLabel (ui2.rackMacro (Kind::space))->isRackOpen());
+}
+
+TEST_CASE ("analog: screenshots of the macro row - every rack closed, each open (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-macrorow]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    shoot ("macrorow-0-closed");
+    for (const auto& [kind, label] : { std::pair { Kind::movement, "1-movement" }, std::pair { Kind::echo, "2-echo" }, std::pair { Kind::space, "3-space" } })
+    {
+        ui.toggleRackFromLabel (kind);
+        shoot ("macrorow-" + juce::String (label));
+        ui.toggleRackFromLabel (kind);
+    }
 }
