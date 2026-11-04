@@ -134,3 +134,4 @@ analog.hybrid.fine v8 float "Hybrid Fine" label="ct" range=-100.0000..100.0000/0
 analog.osc2.velo v8 float "Osc 2 Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.hybrid.velo v8 float "Hybrid Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.hybrid.noise.keys v8 float "Hybrid Noise Keys" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.lfo.wheel v10 bool "LFO Mod Wheel" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On

@@ -384,6 +384,7 @@ namespace
         p->row ("LFO 1  (its shape and rate: the modulation panel)");
         p->onPage (1, page);
         p->knob (motion, "AMOUNT");
+        p->toggle (lfoWheel, "WHEEL", 1.2f, "The mod wheel brings in the rest of these depths (the classic link). Off: the wheel moves only what you route it to");
         p->knob (lfoCutoff, "CUTOFF");
         p->knob (lfoPitch1, "PITCH 1");
         p->knob (lfoPitch2, "PITCH 2");

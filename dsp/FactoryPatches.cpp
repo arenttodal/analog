@@ -44,12 +44,14 @@ namespace
     }
 
     /** Every factory sound starts from INIT with the first version's LFO (TRIANGLE at 4 Hz:
-        what the mod wheel brings in), so each sounds as it did. */
+        what WHEEL brings in), so each sounds as it did. MORPH is on (half way, FUSE), as in a
+        new instrument: it acts as soon as card C sounds. */
     Patch base()
     {
         Patch p;
         p.lfo.shape = osp::mod::LfoShape::triangle;
         p.lfo.rateHz = 4.0;
+        p.morph.enabled = true;
         return p;
     }
 

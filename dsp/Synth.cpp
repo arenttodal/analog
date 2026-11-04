@@ -650,7 +650,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     }
     applyVoiceModulation (v);
     updateVoiceControl (v, current.lfo.scope == osp::mod::Scope::poly ? static_cast<float> (v.lfo.value) : lfoValue,
-                        static_cast<float> (std::clamp (current.lfoAmount + wheel * (1.0 - current.lfoAmount), 0.0, 1.0)));
+                        static_cast<float> (std::clamp (current.lfoAmount + (current.wheelToLfo ? wheel : 0.0f) * (1.0 - current.lfoAmount), 0.0, 1.0)));
     v.outGain = wasActive ? v.outGain : v.outGainTarget;
     if (current.phaseMode == PhaseMode::reset)
     {
@@ -1105,7 +1105,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 {
     const auto& p = patchOf (v);
     if (v.modulated)   // (LFO AMOUNT may be among the moved controls)
-        depth = static_cast<float> (std::clamp (p.lfoAmount + wheel * (1.0 - p.lfoAmount), 0.0, 1.0));
+        depth = static_cast<float> (std::clamp (p.lfoAmount + (p.wheelToLfo ? wheel : 0.0f) * (1.0 - p.lfoAmount), 0.0, 1.0));
     const auto& d = drift[static_cast<std::size_t> (v.slot)];
     const auto a = static_cast<float> (std::clamp (p.analogAmount, 0.0, 1.0));
     // LFO DELAY / RISE (state version 4): each note's LFO depths wait, then fade in. Off (both
@@ -1544,7 +1544,7 @@ void Synth::controlUpdate() noexcept
     if (p.effects.movementMode == osp::MovementMode::drift && p.motion > 0.0)
         sharedDriftCents = 0.3 * p.motion * osp::shaping::driftPitchCents (p.effects.driftPitch)
                            * osp::shaping::sharedWander (p.seed, static_cast<double> (clock) / hostRate, osp::shaping::driftSpeedHz (p.effects.driftSpeed));
-    const auto depth = static_cast<float> (std::clamp (p.lfoAmount + wheel * (1.0 - p.lfoAmount), 0.0, 1.0));
+    const auto depth = static_cast<float> (std::clamp (p.lfoAmount + (p.wheelToLfo ? wheel : 0.0f) * (1.0 - p.lfoAmount), 0.0, 1.0));
 
     // Glide: the time to cover ~95 % of the interval.
     const double glideCoef = p.glideSeconds > 0.0 ? 1.0 - std::exp (-seconds * 3.0 / p.glideSeconds) : 1.0;

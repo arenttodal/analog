@@ -193,7 +193,10 @@ struct Patch
     // LFO (global, as on the original instrument): ANDOR OSP's LFO 1 (shape, rate or sync,
     // phase, polarity, free / retrigger / one shot; CUSTOM is its drawn curve, Synth::setLfoCurve).
     osp::mod::LfoSettings lfo;
-    double lfoAmount = 0.0;         ///< 0..1: how much of the depths below is applied (the mod wheel adds the rest)
+    double lfoAmount = 0.0;         ///< 0..1: how much of the depths below is applied (WHEEL: the mod wheel adds the rest)
+    /** State version 10: the mod wheel brings in the rest of the depths below (the classic
+        wheel-to-LFO link). Off by default: the wheel moves only what it is routed to. */
+    bool wheelToLfo = false;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45

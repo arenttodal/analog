@@ -162,6 +162,8 @@ namespace andor::analog::params
     inline const juce::String morphDetail = "analog.morph.detail";
     inline const juce::String morphLevelMatch = "analog.morph.levelMatch";
     inline const juce::String morphOutput = "analog.morph.output";
+    /** State version 10: the mod wheel brings in LFO 1's depths (off: it moves only its routes). */
+    inline const juce::String lfoWheel = "analog.lfo.wheel";
     /** Every parameter state version 4 added (the V3 -> V4 migration sets them to their defaults). */
     const juce::StringArray& version4Ids();
 

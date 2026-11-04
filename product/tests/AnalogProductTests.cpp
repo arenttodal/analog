@@ -64,6 +64,9 @@ namespace
     const std::vector<Note> phrase { { 0, 57, 90 }, { 0, 64, 90 }, { 0, 69, 90 }, { 9000, 72, 90 }, { 14000, 57, 0 }, { 14000, 64, 0 },
                                      { 15000, 74, 90 }, { 16000, 72, 0 }, { 20000, 69, 0 }, { 24000, 74, 0 } };
 
+    /** The mod wheel renderShell moves to at its start (CC 1, 0..127; below 0: untouched). */
+    int renderModWheel = -1;
+
     juce::AudioBuffer<float> renderShell (ShellProcessor& p, double seconds, const std::vector<Note>& notes = phrase, bool bend = true)
     {
         p.prepareToPlay (rate, block);
@@ -79,6 +82,8 @@ namespace
                                    n.sample - pos);
             if (bend && pos <= 6000 && 6000 < pos + block)
                 midi.addEvent (juce::MidiMessage::pitchWheel (1, 12000), 6000 - pos);
+            if (renderModWheel >= 0 && pos == 0)
+                midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, renderModWheel), 0);
             p.processBlock (buffer, midi);
             const int n = std::min (block, total - pos);
             for (int ch = 0; ch < 2; ++ch)
@@ -689,6 +694,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         auto patch = context;
         if (const auto mode = modes.find (id); mode != modes.end())
             mode->second (patch);
+        renderModWheel = id == params::lfoWheel ? 127 : -1;   // (WHEEL acts with the wheel up)
         p.resetSettings();
         apply (p, patch);
         if (keyDnaOn.contains (id))
@@ -723,6 +729,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             ++checkedUnbound;
         }
     }
+    renderModWheel = -1;
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
     // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), and
     // the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
@@ -1124,6 +1131,52 @@ TEST_CASE ("analog: a version-4 session rests at the A/B mix's centre, where ORG
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
     CHECK (q.parameterValue ("ab.blend") == Approx (0.0f));
+}
+
+TEST_CASE ("analog: taking the MORPH knob in hand switches MORPH on; the factory presets have it on", "[analog][morph]")
+{
+    ShellProcessor p;
+    setValue (p, params::morphEnabled, 0.0f);   // (a preset or session with MORPH off)
+    auto* position = p.parameters.getParameter (params::morphPosition);
+    REQUIRE (position != nullptr);
+    position->beginChangeGesture();
+    position->setValueNotifyingHost (0.7f);
+    position->endChangeGesture();
+    CHECK (p.parameterValue (params::morphEnabled) >= 0.5f);
+    // Automation (no gesture) leaves the switch as it is.
+    setValue (p, params::morphEnabled, 0.0f);
+    position->setValueNotifyingHost (0.3f);
+    CHECK (p.parameterValue (params::morphEnabled) < 0.5f);
+    for (const auto& f : andor::analog::factoryPatches())
+    {
+        INFO (f.name);
+        CHECK (f.patch.morph.enabled);
+        CHECK_FALSE (f.patch.wheelToLfo);
+    }
+}
+
+TEST_CASE ("analog: the mod wheel moves nothing in a new instrument; a session from before keeps its wheel on LFO 1", "[analog][state][wheel]")
+{
+    {
+        ShellProcessor p;
+        CHECK (p.parameterValue (params::lfoWheel) < 0.5f);
+    }
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 9);
+    juce::MemoryBlock v9;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v9);
+    ShellProcessor p;
+    p.setStateInformation (v9.getData(), static_cast<int> (v9.getSize()));
+    CHECK (p.parameterValue (params::lfoWheel) >= 0.5f);   // (version 9 always linked the wheel to LFO 1)
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.parameterValue (params::lfoWheel) < 0.5f);
 }
 
 TEST_CASE ("analog: a version-8 session keeps its MORPH: its position turned round, on or off as saved", "[analog][state][morph]")

@@ -47,10 +47,13 @@ namespace
         for (int i = 0; i < legacyFactoryCount; ++i)
         {
             const auto& f = factoryPatches()[static_cast<std::size_t> (i)];
-            list.push_back ({ "factory/" + f.name, f.patch, keyDnaOf (f), phrase() });
+            auto patch = f.patch;
+            patch.wheelToLfo = true;   // (a version-3 sound: the wheel always brought in LFO 1, as the version-10 migration keeps it)
+            list.push_back ({ "factory/" + f.name, patch, keyDnaOf (f), phrase() });
         }
         auto edge = [&list] (const std::string& name, auto&& change) {
             Patch p;
+            p.wheelToLfo = true;   // (as above)
             change (p);
             list.push_back ({ "edge/" + name, p, {}, phrase() });
         };

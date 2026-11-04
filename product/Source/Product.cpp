@@ -21,7 +21,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-7";
+    constexpr const char* factoryVersion = "analog-factory-8";   // (8: MORPH on, the wheel unlinked)
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -247,7 +247,7 @@ const ProductInfo& productInfo()
         // ANDOR OSP). DRIVE, MOVEMENT, SPACE and ECHO are ANDOR OSP's own (parameters,
         // popovers and sound); FILTER is the instrument's. The first is not assigned yet: it
         // shows ANDOR OSP's LIFE knob, which the engine does not read, so it is disabled.
-        p.macros = { { { andor::analog::params::morphPosition, "MORPH", "Morph: ORGANIC's recording into the oscillators (IMPRINT, FUSE, WEAVE)" },
+        p.macros = { { { andor::analog::params::morphPosition, "MORPH", "Morph: the oscillators (0 %) and card C (100 %) fused into one sound between them" },
                        { "drive", "DRIVE", "Drive: saturation of the whole sound (tube, tape or crunch)" },
                        { andor::analog::params::tone, "FILTER", "Filter: the four-pole filter's cutoff (resonance, envelope, filter drive, LFO amount behind it)" },
                        { "motion", "MOVEMENT", "Movement: drift, tape, chorus, pulse or a rhythmic shaper" },
@@ -338,7 +338,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 9;
+        p.stateVersion = 10;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -356,6 +356,8 @@ const ProductInfo& productInfo()
                 migrateFromVersion7 (host);
             if (from < 9)
                 migrateFromVersion8 (host, from);
+            if (from < 10)
+                host.setParameterValue (andor::analog::params::lfoWheel, 1.0f);   // (version 10: the wheel's link to LFO 1 is a switch, off when new; before, always on)
         };
         return p;
     }();

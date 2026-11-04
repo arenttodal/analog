@@ -78,6 +78,8 @@ namespace
         iAbyssVariant,
         // ECHO's ASCEND (echo.ascend.*).
         iEchoInterval, iEchoMotion,
+        // State version 10: the mod wheel's link to LFO 1's depths.
+        iLfoWheel,
         count
     };
 
@@ -155,6 +157,7 @@ namespace
                                     "space.bloom.sync", "space.bloom.division", "space.bloom.time", "space.bloom.diffusion",
                                     "space.abyss.variant", "echo.ascend.interval", "echo.ascend.motion" })
                 l.add (id);
+            l.add (lfoWheel);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -500,6 +503,8 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent8 (osc2Velo, "Osc 2 Velocity", d.osc2Velo);
     percent8 (hybridVelo, "Hybrid Velocity", d.hybridVelo);
     percent8 (hybridNoiseKeys, "Hybrid Noise Keys", d.hybridNoiseKeys);
+    // State version 10: the mod wheel to LFO 1's depths, off in a new instrument.
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { lfoWheel, 10 }, "LFO Mod Wheel", d.wheelToLfo));
 }
 
 //==============================================================================
@@ -856,6 +861,7 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.echoType = static_cast<osp::EchoType> (index (iEchoType, 3));
     s.echoInterval = static_cast<osp::AscendInterval> (index (iEchoInterval, 4));
     s.echoMotion = static_cast<osp::AscendMotion> (index (iEchoMotion, 3));
+    p.wheelToLfo = on (iLfoWheel);
     s.echoSync = on (iEchoSync);
     s.echoDivision = index (iEchoDivision, osp::shaping::echoDivisionCount);
     s.echoTimeMs = v (iEchoTime);
@@ -1101,6 +1107,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iEchoType, static_cast<int> (s.echoType));
     put (iEchoInterval, static_cast<int> (s.echoInterval));
     put (iEchoMotion, static_cast<int> (s.echoMotion));
+    put (iLfoWheel, p.wheelToLfo ? 1.0 : 0.0);
     put (iEchoSync, s.echoSync ? 1.0 : 0.0);
     put (iEchoDivision, s.echoDivision);
     put (iEchoTime, s.echoTimeMs);

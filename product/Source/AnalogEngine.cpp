@@ -20,6 +20,13 @@ void AnalogEngine::attachParameters (juce::AudioProcessorValueTreeState& paramet
 {
     state = &parameters;
     hybridTypeValue = parameters.getRawParameterValue (params::hybridType);
+    if (morphPositionParam == nullptr)
+    {
+        morphTouch.enabled = parameters.getParameter (params::morphEnabled);
+        morphPositionParam = parameters.getParameter (params::morphPosition);
+        if (morphPositionParam != nullptr)
+            morphPositionParam->addListener (&morphTouch);
+    }
 }
 
 HybridType AnalogEngine::hybridType() const noexcept
@@ -57,6 +64,8 @@ AnalogEngine::AnalogEngine (int oversampling) : oversamplingFactor (oversampling
 AnalogEngine::~AnalogEngine()
 {
     sourceLoader.removeAllJobs (true, 30000);
+    if (morphPositionParam != nullptr)
+        morphPositionParam->removeListener (&morphTouch);   // (the parameters outlive the engine: the shell's member order)
 }
 
 //==============================================================================
