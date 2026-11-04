@@ -1604,7 +1604,9 @@ TEST_CASE ("analog: MORPH is the first macro, on and half way in a new instrumen
 
     loadOrganic (p, writeRecording (scratch.dir, "stand-in A3.wav", 57, 2.5));
     CHECK (p.engineStatus ("morph").isEmpty());   // ready
-    // The ends: 0 % the oscillators, 100 % the recording (the oscillators replaced by it).
+    // The ends: 0 % the oscillators, 100 % the recording (the oscillators replaced by it);
+    // with LEVEL MATCH off, each exactly as it plays.
+    setValue (p, params::morphLevelMatch, 0.0f);
     setValue (p, params::morphPosition, 0.0f);
     CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-3 * std::max (1.0e-6, rmsOf (synth)) + 1.0e-6);
     setValue (p, params::morphPosition, 100.0f);
@@ -1616,6 +1618,7 @@ TEST_CASE ("analog: MORPH is the first macro, on and half way in a new instrumen
     setValue (p, params::osc1Enabled, 100.0f);
     setValue (p, params::osc2Enabled, 100.0f);
     setValue (p, params::morphEnabled, 1.0f);
+    setValue (p, params::morphLevelMatch, 1.0f);
     // The middle: each method its own sound.
     std::vector<juce::AudioBuffer<float>> methods;
     setValue (p, params::morphPosition, 50.0f);

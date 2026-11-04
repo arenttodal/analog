@@ -33,10 +33,12 @@ namespace andor::analog::morph
         own partials with their smooth envelope (2/3 octave) traded for card C's (IMPRINT: a
         vocoder-like imprint at the carrier's pitch, complete from 50 %);
       - the residual bands' noise, interpolated in dB (TEXTURE scales it).
-    FORMANTS shifts card C's envelope. LEVEL MATCH holds the result at the loudness the two
-    sources have between them.
+    FORMANTS shifts card C's envelope. LEVEL MATCH (on by default) brings both sources to the
+    louder one's loudness first (a quiet card C is raised to the oscillators'), so the knob
+    changes the sound and not the volume; off, each side plays as it is.
 
-    The ends are the sources themselves, sample for sample: with b = sqrt (4 p (1 - p)),
+    The ends are the sources themselves (sample for sample with LEVEL MATCH off; with it, at
+    the common loudness): with b = sqrt (4 p (1 - p)),
         out = (1 - p)(1 - b) x + b M + p (1 - b) y,
     so at 0 % the carrier, at 100 % card C, and at 50 % the morph M alone (a fusion, never a
     crossfade). A note begins on the sources as played (ATTACK sets how long, at least one
@@ -150,6 +152,7 @@ private:
     osp::Prng noise { 1 };
     float coreNow = 0.0f, corePrev = 0.0f, coreOut = 0.0f;
     float coreLevel = 0.0f, matchGain = 1.0f, matchTarget = 1.0f, smoothing = 0.01f;
+    float levelX = 1.0f, levelY = 1.0f, levelXTarget = 1.0f, levelYTarget = 1.0f, levelCoef = 1.0e-4f;   ///< LEVEL MATCH: each side to the louder one
     int renormCountdown = 0;
 
     // The endpoint law's weights (smoothed per sample), and the attack's warm-up 0 .. 1.

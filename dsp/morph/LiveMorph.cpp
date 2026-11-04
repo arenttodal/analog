@@ -96,6 +96,7 @@ void LiveMorph::prepare (double internalRate, int oversampling, const Shared* sh
     ringY.assign (static_cast<std::size_t> (size), 0.0f);
     ringMask = size - 1;
     smoothing = static_cast<float> (1.0 - std::exp (-1.0 / (0.008 * hostRate)));   // ~8 ms (between analyses)
+    levelCoef = static_cast<float> (1.0 - std::exp (-1.0 / (0.06 * rate)));          // ~60 ms (LEVEL MATCH's gains)
     for (int b = 0; b < noiseBands; ++b)
     {
         const auto i = static_cast<std::size_t> (b);
@@ -138,6 +139,7 @@ void LiveMorph::start (std::uint64_t seed) noexcept
     noiseTarget.fill (0.0f);
     coreNow = corePrev = coreOut = 0.0f;
     matchGain = matchTarget = 1.0f;
+    levelX = levelY = levelXTarget = levelYTarget = 1.0f;
     warm = 0.0f;
     renormCountdown = 0;
     fresh = true;
@@ -171,6 +173,12 @@ void LiveMorph::control (const Control& c) noexcept
     tX = (1.0f - p) * (1.0f - bw);
     tCore = bw;
     tY = p * (1.0f - bw);
+    if (const float norm = std::sqrt (tX * tX + tCore * tCore + tY * tY); norm > 1.0e-6f)
+    {
+        tX /= norm;   // (equal power, as process() keeps them)
+        tCore /= norm;
+        tY /= norm;
+    }
     if (fresh)
     {
         wX = tX;
@@ -301,15 +309,26 @@ void LiveMorph::updateTargets() noexcept
         noiseTarget[i] = r / noiseNorm[i];
         noisePower += static_cast<double> (r) * r;
     }
-    // LEVEL MATCH: the loudness the two have between them (in dB), against what the
-    // partials and the noise add up to.
+    // LEVEL MATCH: both sides are brought to the louder one's loudness (a quieter card C is
+    // raised to the oscillators', or the reverse), so the knob changes the sound, not the
+    // volume; the morph is held at that loudness. Off: each side as it plays, the morph at the
+    // loudness between them (in dB).
     matchTarget = 1.0f;
+    levelXTarget = levelYTarget = 1.0f;
+    const float louder = std::max (xLevelDb, yLevelDb);
+    if (settings.levelMatch && louder > silentDb)
+    {
+        if (xHeard)
+            levelXTarget = std::clamp (dbToGain (louder - xLevelDb), 1.0f, 16.0f);
+        if (yHeard)
+            levelYTarget = std::clamp (dbToGain (louder - yLevelDb), 1.0f, 16.0f);
+    }
     if (settings.levelMatch)
     {
-        const float target = dbToGain ((1.0f - p) * std::max (xLevelDb, floorDb) + p * std::max (yLevelDb, floorDb));
+        const float target = dbToGain (louder > silentDb ? louder : (1.0f - p) * std::max (xLevelDb, floorDb) + p * std::max (yLevelDb, floorDb));
         const double predicted = std::sqrt (partialPower + noisePower);
         if (predicted > 1.0e-7 && target > 0.0f)
-            matchTarget = std::clamp (static_cast<float> (target / predicted), 0.25f, 4.0f);
+            matchTarget = std::clamp (static_cast<float> (target / predicted), 0.1f, 10.0f);
     }
 }
 
@@ -515,15 +534,26 @@ float LiveMorph::process (float carrier, float source) noexcept
         tX = (1.0f - p) * (1.0f - bw);
         tCore = bw;
         tY = p * (1.0f - bw);
+        // Equal power (the three are not in phase: the morph's partials are its own): the
+        // loudness holds across the knob; the ends (one weight 1) are untouched.
+        const float norm = std::sqrt (tX * tX + tCore * tCore + tY * tY);
+        if (norm > 1.0e-6f)
+        {
+            tX /= norm;
+            tCore /= norm;
+            tY /= norm;
+        }
     }
     const float k = 0.0015f;
     glide (wX, tX, k);
     glide (wCore, tCore, k);
     glide (wY, tY, k);
     glide (matchGain, matchTarget, k);
+    levelX += levelCoef * (levelXTarget - levelX);
+    levelY += levelCoef * (levelYTarget - levelY);
     const float core = corePrev + frac * (coreNow - corePrev);
     coreOut = wCore * matchGain * core;
-    return wX * carrier + coreOut + wY * source;
+    return wX * levelX * carrier + coreOut + wY * levelY * source;
 }
 
 } // namespace andor::analog::morph

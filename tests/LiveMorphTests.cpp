@@ -142,6 +142,7 @@ TEST_CASE ("live morph: at 0 % the carrier, at 100 % card C, sample for sample (
             m.prepare (internal, 4, &shared());
             m.start (3);
             auto c = control (p, 220.0, 330.0, static_cast<MorphMethod> (method));
+            c.levelMatch = false;   // (exact: the sources as they play; LEVEL MATCH brings them to one loudness)
             const auto x = saw (220.0), y = square (330.0);
             double worst = 0.0;
             for (int n = 0; n < static_cast<int> (0.5 * internal); ++n)
@@ -239,6 +240,7 @@ TEST_CASE ("live morph: a note begins on the sources as played, then glides into
     m.start (9);
     auto c = control (0.5, 220.0, 220.0);
     c.attack = 0.5;   // 75 ms on top of the window
+    c.levelMatch = false;   // the sources as they are (with it, each is brought to the louder one)
     const auto x = saw (220.0), y = square (220.0);
     double worstEarly = 0.0;
     for (int n = 0; n < static_cast<int> (0.3 * internal); ++n)
@@ -247,9 +249,9 @@ TEST_CASE ("live morph: a note begins on the sources as played, then glides into
             m.control (c);
         const float v = m.process (x (n), y (n));
         if (n < static_cast<int> (0.02 * internal))
-            worstEarly = std::max (worstEarly, static_cast<double> (std::abs (v - 0.5f * (x (n) + y (n)))));
+            worstEarly = std::max (worstEarly, static_cast<double> (std::abs (v - 0.70710678f * (x (n) + y (n)))));
     }
-    CHECK (worstEarly < 1.0e-6);   // the first 20 ms: exactly the sources, half and half
+    CHECK (worstEarly < 1.0e-5);   // the first 20 ms: exactly the sources, half and half at equal power
     CHECK (m.coreReady());
 }
 
@@ -258,8 +260,17 @@ TEST_CASE ("live morph: LEVEL MATCH holds the loudness between the two; moving t
     {
         morph::LiveMorph m;
         const auto out = run (m, saw (220.0, 0.5f), square (220.0, 0.25f), control (0.5, 220.0, 220.0), 1.0);
-        // The saw at 0.5 (-9.5 dB RMS) and the square at 0.25 (-12 dB RMS): about -10.8 dB between.
-        CHECK (rmsDb (out) == Approx (-10.8).margin (2.5));
+        // The saw at 0.5 (-9.5 dB RMS) and the square at 0.25 (-12 dB RMS): the morph at the
+        // louder one's loudness.
+        CHECK (rmsDb (out) == Approx (-9.5).margin (2.0));
+    }
+    {
+        // A quiet card C (-24 dB under the carrier): LEVEL MATCH raises it, so the knob's ends
+        // are as loud as each other (off, the sweep would fade by 24 dB).
+        morph::LiveMorph a, b;
+        const auto atCarrier = run (a, saw (220.0, 0.5f), square (220.0, 0.03f), control (0.0, 220.0, 220.0), 1.0);
+        const auto atSource = run (b, saw (220.0, 0.5f), square (220.0, 0.03f), control (1.0, 220.0, 220.0), 1.0);
+        CHECK (rmsDb (atSource) == Approx (rmsDb (atCarrier)).margin (1.5));
     }
     {
         // Sines, the position swept 0 .. 1 over a second: no step larger than the sources' own.

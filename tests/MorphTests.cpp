@@ -221,11 +221,17 @@ TEST_CASE ("morph: at 0 % the output is the carrier, at 100 % the recording (eve
     for (const auto method : { MorphMethod::imprint, MorphMethod::fuse, MorphMethod::weave })
     {
         INFO ("method " << static_cast<int> (method));
-        // 100 %: MORPH ONLY plays the recording (the carrier pair replaced by the morph).
-        const auto one = play (morphPatch (method, 1.0));
+        // 100 %: MORPH ONLY plays the recording (the carrier pair replaced by the morph); with
+        // LEVEL MATCH off, exactly as it plays.
+        auto ends = [method] (double position) {
+            auto p = morphPatch (method, position);
+            p.morph.levelMatch = false;
+            return p;
+        };
+        const auto one = play (ends (1.0));
         CHECK (relativeDifference (one, recording, 0.05, 1.1) < 1.0e-5);
         // 0 %: the carrier, as the oscillators play it without any recording.
-        const auto zero = play (morphPatch (method, 0.0));
+        const auto zero = play (ends (0.0));
         CHECK (relativeDifference (zero, carrier, 0.05, 1.1) < 3.0e-4);   // (-70 dB: the model path's rounding against CLASSIC's own)
         CHECK (zero.finite());
         CHECK (one.finite());
