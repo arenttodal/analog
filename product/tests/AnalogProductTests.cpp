@@ -3631,7 +3631,7 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY SPEED PITCH TONE");
     setValue (p, "movement.mode", 4.0f);   // SHAPER (as automation would)
     ui.refreshNow();
-    CHECK (osp::plugin::rackMovementCaptions (*module) == "DEPTH SMOOTH PHASE");
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "PATTERN RATE TARGET DEPTH SMOOTH PHASE");
     setValue (p, "movement.mode", 1.0f);
     ui.refreshNow();
     CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY WOW FLUTTER WEAR");
@@ -3871,7 +3871,7 @@ TEST_CASE ("analog: the MOVEMENT rack shows each lane, its ON and its INTENSITY"
     setValue (p, params::movementBPrefix + "mode", 3.0f);
     setValue (p, params::movementLaneId (1, "sync"), 1.0f);
     ui.refreshNow();
-    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY SHAPE STEREO PHASE");   // PULSE synced: CYCLE as a key
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY TIMING CYCLE SHAPE STEREO PHASE");   // PULSE synced: CYCLE as a key
 }
 
 TEST_CASE ("analog: screenshots of MOVEMENT's two lanes in the rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-lanes]")
@@ -3948,10 +3948,10 @@ TEST_CASE ("analog: ECHO and SPACE expand into the rack, one module at a time, e
     CHECK (p.rackExpanded() == 2);
     auto* echo = ui.effectsRack().module (Kind::echo);
     REQUIRE (echo != nullptr);
-    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE");
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE TIMING STEREO");
     setValue (p, "echo.type", 2.0f);   // ASCEND (as automation would)
     ui.refreshNow();
-    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE CLOCK INTERVAL MOTION");
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE CLOCK INTERVAL MOTION TIMING STEREO");
     setValue (p, "echo.type", 0.0f);
 
     ui.rackKey (Kind::space)->onClick();
@@ -4168,4 +4168,215 @@ TEST_CASE ("analog: card C's modifiers sit in its well, only those that apply, b
     for (int i = 0; i < 4; ++i)
         if (auto* key = ui.engineCard (0).modifierKey (i))
             CHECK_FALSE (key->isVisible());
+}
+
+//==============================================================================
+// The unified rack: MOVEMENT, ECHO and SPACE share SPACE's structure and the same preset rules.
+
+TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, the controls row, the picture", "[analog][rack][unified]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    std::map<Kind, std::array<juce::Rectangle<int>, 4>> slots;
+    std::map<Kind, float> heights;
+    for (const auto kind : { Kind::movement, Kind::echo, Kind::space })
+    {
+        ui.setRackExpanded (kind, true);
+        ui.refreshNow();
+        auto* module = ui.effectsRack().module (kind);
+        REQUIRE (module != nullptr);
+        for (int s = 2; s <= 5; ++s)
+            slots[kind][static_cast<std::size_t> (s - 2)] = osp::plugin::rackSlot (*module, s);
+        heights[kind] = ui.effectsRack().height();
+    }
+    for (const auto kind : { Kind::echo, Kind::space })
+    {
+        INFO (osp::plugin::rack::name (kind));
+        CHECK (slots[kind][0] == slots[Kind::movement][0]);                   // MODE: same place and size
+        CHECK (slots[kind][1] == slots[Kind::movement][1]);                   // PRESET
+        CHECK (slots[kind][2].getY() == slots[Kind::movement][2].getY());     // the controls row
+        CHECK (slots[kind][2].getHeight() == slots[Kind::movement][2].getHeight());
+        CHECK (slots[kind][2].getWidth() == slots[Kind::movement][2].getWidth());   // one cell size
+        CHECK (slots[kind][3] == slots[Kind::movement][3]);                   // the picture
+        CHECK (heights[kind] == heights[Kind::movement]);
+    }
+    CHECK (heights[Kind::space] <= 216.0f);   // never taller than the macro panel
+    CHECK (slots[Kind::space][1].getX() > slots[Kind::space][0].getRight());   // PRESET right of MODE
+    CHECK (slots[Kind::space][1].getWidth() > 2 * slots[Kind::space][0].getWidth());   // ... and larger
+
+    // SHAPER's precision editor (its magnifier): the one module that may be taller.
+    ui.setRackExpanded (Kind::movement, true);
+    setValue (p, "movement.mode", 4.0f);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    CHECK (osp::plugin::rackMovementCaptions (*movement) == "PATTERN RATE TARGET DEPTH SMOOTH PHASE");
+    osp::plugin::setRackMovementWide (*movement, true);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().height() > 216.0f);
+    CHECK (osp::plugin::rackSlot (*movement, 5).getWidth() > 2 * slots[Kind::movement][3].getWidth());
+    osp::plugin::setRackMovementWide (*movement, false);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().height() == Approx (heights[Kind::movement]));
+}
+
+TEST_CASE ("analog: rack presets - by mode, the arrows, NAME * once edited, CUSTOM, your own, nothing else touched", "[analog][rack][unified][rackpresets]")
+{
+    using osp::plugin::rack::Kind;
+    using namespace params;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+
+    // ECHO: the instrument's own settings are a preset of TAPE's; the list is TAPE's.
+    ui.setRackExpanded (Kind::echo, true);
+    ui.refreshNow();
+    auto* echo = ui.effectsRack().module (Kind::echo);
+    REQUIRE (echo != nullptr);
+    CHECK (osp::plugin::rackPresetText (*echo) == "Dotted Eighth");
+    CHECK (osp::plugin::rackPresetNames (*echo).joinIntoString ("|") == "Dotted Eighth|Slapback|Worn Loop|Dub Wash");
+    setValue (p, osp::plugin::InstrumentHost::layerParameterId (0, "level"), 70.0f);
+    setValue (p, "space.decay", 4.2f);
+    const auto before = allParameterValues (p);
+    REQUIRE (osp::plugin::rackPresetChoose (*echo, "Worn Loop"));
+    CHECK (osp::plugin::rackPresetText (*echo) == "Worn Loop");
+    CHECK (p.parameterValue ("echo.feedback") == Approx (68.0f).margin (0.1f));
+    for (const auto& [id, v] : allParameterValues (p))
+        if (v != before.at (id))
+        {
+            INFO (id);
+            CHECK (id.startsWith ("echo."));   // ECHO's own settings only
+        }
+    // Edited: NAME *; the arrows step through TAPE's presets only.
+    setValue (p, "echo.feedback", 20.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*echo) == "Worn Loop *");
+    osp::plugin::rackPresetStep (*echo, 1);
+    CHECK (osp::plugin::rackPresetText (*echo) == "Dub Wash");
+    osp::plugin::rackPresetStep (*echo, 1);
+    CHECK (osp::plugin::rackPresetText (*echo) == "Dotted Eighth");
+    CHECK (p.parameterValue ("echo.type") == Approx (0.0f));
+    // Another mode: its own presets; settings no preset has are CUSTOM.
+    setValue (p, "echo.type", 1.0f);
+    setValue (p, "echo.feedback", 33.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetNames (*echo).contains ("Bucket Eighths"));
+    CHECK_FALSE (osp::plugin::rackPresetNames (*echo).contains ("Worn Loop"));
+    CHECK (osp::plugin::rackPresetText (*echo) == "CUSTOM");
+    // Your own: saved, listed in its mode, recalled.
+    REQUIRE (osp::plugin::rackPresetSave (*echo, "My BBD"));
+    CHECK (osp::plugin::rackPresetText (*echo) == "My BBD");
+    CHECK (osp::plugin::rackPresetNames (*echo).contains ("My BBD"));
+    REQUIRE (osp::plugin::rackPresetChoose (*echo, "Bucket Slap"));
+    REQUIRE (osp::plugin::rackPresetChoose (*echo, "My BBD"));
+    CHECK (p.parameterValue ("echo.feedback") == Approx (33.0f).margin (0.1f));
+
+    // SPACE: its presets as before (spacepresets), by engine.
+    ui.setRackExpanded (Kind::space, true);
+    ui.refreshNow();
+    auto* space = ui.effectsRack().module (Kind::space);
+    REQUIRE (space != nullptr);
+    CHECK (osp::plugin::rackPresetNames (*space).size() > 10);
+    const auto first = osp::plugin::rackPresetNames (*space)[0];
+    REQUIRE (osp::plugin::rackPresetChoose (*space, first));
+    CHECK (osp::plugin::rackPresetText (*space) == first);
+    setValue (p, "space.damping", 77.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*space) == first + " *");
+
+    // MOVEMENT: each lane its own mode and preset; lane A's never lane B's.
+    ui.setRackExpanded (Kind::movement, true);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    REQUIRE (movement != nullptr);
+    CHECK (osp::plugin::rackPresetText (*movement) == "Gentle Drift");
+    setValue (p, "movement.mode", 2.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*movement) == "Ensemble");
+    const auto laneB = allParameterValues (p);
+    REQUIRE (osp::plugin::rackPresetChoose (*movement, "Slow Sweep"));
+    CHECK (p.parameterValue ("movement.chorus.rate") == Approx (20.0f).margin (0.1f));
+    for (const auto& [id, v] : allParameterValues (p))
+        if (id.startsWith (movementBPrefix))
+        {
+            INFO (id);
+            CHECK (v == laneB.at (id));
+        }
+    osp::plugin::showRackMovementLane (*movement, 1);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*movement) == "Gentle Drift");   // lane B: its own
+    REQUIRE (osp::plugin::rackPresetSave (*movement, "B wander"));
+    osp::plugin::showRackMovementLane (*movement, 0);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*movement) == "Slow Sweep");     // lane A: still its own
+    // Each mode keeps its settings when the mode changes back.
+    setValue (p, "movement.mode", 1.0f);
+    setValue (p, "movement.mode", 2.0f);
+    CHECK (p.parameterValue ("movement.chorus.rate") == Approx (20.0f).margin (0.1f));
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: screenshots of MOVEMENT, ECHO and SPACE in the unified rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-unified]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    setValue (p, "space", 40.0f);
+    setValue (p, "echo", 50.0f);
+    for (const int width : { 1448, 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            const auto name = "unified-" + juce::String (width) + (arp ? "-arp" : "");
+            ui.setArpExpanded (arp);
+            for (const auto& [kind, label] : { std::pair { Kind::movement, "1-movement" }, std::pair { Kind::echo, "2-echo" }, std::pair { Kind::space, "3-space" } })
+            {
+                ui.setRackExpanded (kind, true);
+                editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+                shoot (name + "-" + label);
+            }
+            if (width != 1448 || arp)
+                continue;
+            ui.setRackExpanded (Kind::movement, true);
+            for (const auto& [mode, label] : { std::pair { 0.0f, "drift" }, std::pair { 1.0f, "tape" }, std::pair { 2.0f, "chorus" }, std::pair { 3.0f, "pulse" },
+                                               std::pair { 4.0f, "shaper" } })
+            {
+                setValue (p, "movement.mode", mode);
+                shoot (name + "-4-movement-" + label);
+            }
+            setValue (p, params::movementLaneId (0, "sync"), 1.0f);
+            setValue (p, "movement.mode", 3.0f);
+            shoot (name + "-5-movement-pulse-sync");
+            setValue (p, "movement.mode", 4.0f);
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            shoot (name + "-6-shaper-precision-editor");
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), false);
+            ui.setRackExpanded (Kind::echo, true);
+            setValue (p, "echo.type", 2.0f);
+            shoot (name + "-7-echo-ascend");
+            ui.setRackExpanded (Kind::space, true);
+            setValue (p, "space.engine", 1.0f);
+            shoot (name + "-8-space-abyss");
+            setValue (p, "space.engine", 0.0f);
+        }
 }
