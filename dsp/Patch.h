@@ -197,6 +197,20 @@ struct Patch
     /** State version 10: the mod wheel brings in the rest of the depths below (the classic
         wheel-to-LFO link). Off by default: the wheel moves only what it is routed to. */
     bool wheelToLfo = false;
+
+    /** State version 11: MOVEMENT's lanes (the effects rack). Lane A is MOVEMENT itself (the
+        movement settings in `effects`, the MOVEMENT macro); lane B a second, independent
+        MOVEMENT with its own settings, in series after A, off by default. The macro scales
+        both: each lane plays at MOVEMENT x its LEVEL. Each lane's SYNC (PULSE on the tempo)
+        and PHASE are its Shaping's pulseSync, pulseDivision and movementPhase. */
+    struct MovementLane
+    {
+        bool on = true;
+        double level = 1.0;   ///< 0..1
+    };
+    MovementLane movementA;
+    MovementLane movementBLane { false, 1.0 };
+    osp::Shaping movementB;   ///< lane B's settings (its movement fields; its SHAPER CUSTOM steps from the shell)
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45

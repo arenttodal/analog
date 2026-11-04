@@ -270,6 +270,23 @@ const ProductInfo& productInfo()
         p.threeEngines.order = { 0, 2, 1 };
         p.cardArpeggiator = true;   // each card arpeggiated or holding the keys, its own pattern unlinked
         p.rackModules = { osp::plugin::rack::Kind::movement };   // the effects rack: MOVEMENT expanded beside its macro
+        // MOVEMENT's two lanes (state version 11): A is MOVEMENT itself, B a second one.
+        {
+            using namespace andor::analog::params;
+            osp::plugin::InstrumentHost::MovementLane a, b;
+            a.prefix = "movement.";
+            b.prefix = movementBPrefix;
+            for (auto* lane : { &a, &b })
+            {
+                const int index = lane == &a ? 0 : 1;
+                lane->onId = movementLaneId (index, "on");
+                lane->levelId = movementLaneId (index, "level");
+                lane->syncId = movementLaneId (index, "sync");
+                lane->pulseDivisionId = movementLaneId (index, "pulse.division");
+                lane->phaseId = movementLaneId (index, "phase");
+            }
+            p.movementLanes = { a, b };
+        }
         p.mixEndLabels = { "A+B", "C" };   // (the header MIX: the analog pair against card C)
         // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
         // a SAMPLE or INSTRUMENT PATCH only.
@@ -339,7 +356,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 10;
+        p.stateVersion = 11;
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -359,6 +376,20 @@ const ProductInfo& productInfo()
                 migrateFromVersion8 (host, from);
             if (from < 10)
                 host.setParameterValue (andor::analog::params::lfoWheel, 1.0f);   // (version 10: the wheel's link to LFO 1 is a switch, off when new; before, always on)
+            if (from < 11)
+            {
+                // Version 11: MOVEMENT's lanes - lane A on at 100 %, lane B off: as before.
+                using namespace andor::analog::params;
+                juce::StringArray lanes;
+                for (const int lane : { 0, 1 })
+                    for (const char* name : { "on", "level", "sync", "pulse.division", "phase" })
+                        lanes.add (movementLaneId (lane, name));
+                for (const auto& name : movementSettingNames())
+                    lanes.add (movementBPrefix + name);
+                for (const auto& id : lanes)
+                    if (auto* parameter = host.apvts().getParameter (id))
+                        parameter->setValueNotifyingHost (parameter->getDefaultValue());
+            }
         };
         return p;
     }();

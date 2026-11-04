@@ -111,6 +111,8 @@ public:
     void setKeyDnaAmount (double amount) noexcept { keyDna.amount = std::clamp (amount, 0.0, 1.0); }
     /** MOVEMENT SHAPER's playhead (0..1), for its picture. */
     float shaperPhase() const noexcept { return effects.shaperPhase(); }
+    /** A MOVEMENT lane's SHAPER playhead (0 A, 1 B), -1 when idle. */
+    float shaperPhase (int lane) const noexcept { return effects.shaperPhase (lane); }
 
     /** The modulation (ANDOR OSP's: LFO 1 and 2, ENV 1 and 2, VEL, NOTE, the wheel, CC 1-4
         and pressure through 16 routes) and the controllers CC 1-4 follow. LFO 1 is the
@@ -199,6 +201,7 @@ public:
         int note = -1;
         float amp = 0.0f;
         std::uint8_t cards = 7;   ///< the cards it sounds on (setCardRouting)
+        double driftCents = 0.0;  ///< MOVEMENT DRIFT's wander of its pitch now (both lanes)
     };
     VoiceView voiceView (int slot) const noexcept;
 
@@ -360,6 +363,14 @@ private:
         std::array<double, 4> driftFrom {}, driftTo {}, driftNow {};
         int driftCountdown = 0, driftSegment = 1;
         osp::Prng driftRng { 1 };
+        // MOVEMENT lane B's own DRIFT wander, and the two combined (what the voice plays).
+        struct LaneDrift
+        {
+            std::array<double, 4> from {}, to {}, now {};
+            int countdown = 0, segment = 1;
+            osp::Prng rng { 1 };
+        } driftB;
+        std::array<double, 4> driftDepthA {}, driftDepthB {}, driftOut {};
 
         // A voice taken for a new note fades out first (3 ms), then starts the new one.
         int fade = 0;
@@ -380,6 +391,9 @@ private:
     double offsetOf (const Voice& v, osp::mod::Dest d) const noexcept { return v.mod.offset (modRuntime, d); }
     void rebuildModulation() noexcept;
     void updateDrift (Voice& v) noexcept;
+    void combineDrift (Voice& v) noexcept;
+    void glideDrift (std::array<double, 4>& from, std::array<double, 4>& to, std::array<double, 4>& now, int& countdown, int& segment, osp::Prng& rng,
+                     const std::array<double, 4>& depth, double rateHz) noexcept;
     void startModeEngine (Voice& v) noexcept;
     osp::ReimaginedControl modeControl (const Voice& v) const noexcept;
     /** Renders `count` oversampled samples of a voice, adding them (panned) to left/right. */

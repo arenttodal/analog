@@ -69,6 +69,7 @@ if(OSP_BUILD_TESTS)
         tests/OrganicTests.cpp
         tests/MorphTests.cpp
         tests/LiveMorphTests.cpp
+        tests/MovementLaneTests.cpp
         tests/CardEqTests.cpp
         tests/SampleSourceTests.cpp
         tools/Wav.cpp)

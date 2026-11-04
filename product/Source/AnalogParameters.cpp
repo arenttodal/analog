@@ -80,9 +80,28 @@ namespace
         iEchoInterval, iEchoMotion,
         // State version 10: the mod wheel's link to LFO 1's depths.
         iLfoWheel,
+        // State version 11: MOVEMENT's lanes (A's own five, then B's five and its settings).
+        iMoveAOn, iMoveALevel, iMoveASync, iMoveADivision, iMoveAPhase,
+        iMoveBOn, iMoveBLevel, iMoveBSync, iMoveBDivision, iMoveBPhase,
+        iMoveBMode, iMoveBDriftSpeed, iMoveBDriftPitch, iMoveBDriftTone, iMoveBTapeWow, iMoveBTapeFlutter, iMoveBTapeWear,
+        iMoveBChorusRate, iMoveBChorusWidth, iMoveBChorusStereo, iMoveBPulseRate, iMoveBPulseShape, iMoveBPulseStereo,
+        iMoveBShaperPattern, iMoveBShaperRate, iMoveBShaperTarget, iMoveBShaperSmooth, iMoveBShaperCustom,
         count
     };
 
+    const juce::StringArray& ids();
+}
+
+const juce::StringArray& movementSettingNames()
+{
+    static const juce::StringArray names { "mode", "drift.speed", "drift.pitch", "drift.tone", "tape.wow", "tape.flutter", "tape.wear",
+                                           "chorus.rate", "chorus.width", "chorus.stereo", "pulse.rate", "pulse.shape", "pulse.stereo",
+                                           "shaper.pattern", "shaper.rate", "shaper.target", "shaper.smooth", "shaper.custom" };
+    return names;
+}
+
+namespace
+{
     const juce::StringArray& ids()
     {
         static const juce::StringArray list {
@@ -158,6 +177,11 @@ namespace
                                     "space.abyss.variant", "echo.ascend.interval", "echo.ascend.motion" })
                 l.add (id);
             l.add (lfoWheel);
+            for (const int lane : { 0, 1 })
+                for (const char* name : { "on", "level", "sync", "pulse.division", "phase" })
+                    l.add (movementLaneId (lane, name));
+            for (const auto& name : movementSettingNames())
+                l.add (movementBPrefix + name);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -505,6 +529,56 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent8 (hybridNoiseKeys, "Hybrid Noise Keys", d.hybridNoiseKeys);
     // State version 10: the mod wheel to LFO 1's depths, off in a new instrument.
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { lfoWheel, 10 }, "LFO Mod Wheel", d.wheelToLfo));
+
+    // State version 11: MOVEMENT's lanes. Lane A on at 100 % and lane B off: every session
+    // from before plays exactly as it did.
+    auto v11 = [] (const juce::String& name) { return juce::ParameterID { name, 11 }; };
+    auto percent11 = [&] (const juce::String& name, const juce::String& title, double value) {
+        layout.add (std::make_unique<Float> (v11 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+                                             Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    juce::StringArray cycles;
+    for (int i = 0; i < osp::shaping::pulseDivisionCount; ++i)
+        cycles.add (osp::shaping::pulseDivisionName (i));
+    for (const int lane : { 0, 1 })
+    {
+        const auto& lanePatch = lane == 0 ? d.movementA : d.movementBLane;
+        const auto& laneShaping = lane == 0 ? d.effects : d.movementB;
+        const juce::String name = lane == 0 ? "Movement A " : "Movement B ";
+        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (movementLaneId (lane, "on")), name + "On", lanePatch.on));
+        percent11 (movementLaneId (lane, "level"), name + "Intensity", lanePatch.level);
+        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (movementLaneId (lane, "sync")), name + "Pulse Sync", laneShaping.pulseSync));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (movementLaneId (lane, "pulse.division")), name + "Pulse Cycle", cycles, laneShaping.pulseDivision));
+        percent11 (movementLaneId (lane, "phase"), name + "Phase", laneShaping.movementPhase);
+    }
+    {
+        const auto& b = d.movementB;
+        auto id = [] (const char* n) { return movementBPrefix + n; };
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("mode")), "Movement B Mode", juce::StringArray { "Drift", "Tape", "Chorus", "Pulse", "Shaper" },
+                                                                  static_cast<int> (b.movementMode)));
+        percent11 (id ("drift.speed"), "Movement B Drift Speed", b.driftSpeed);
+        percent11 (id ("drift.pitch"), "Movement B Drift Pitch", b.driftPitch);
+        percent11 (id ("drift.tone"), "Movement B Drift Tone", b.driftTone);
+        percent11 (id ("tape.wow"), "Movement B Tape Wow", b.tapeWow);
+        percent11 (id ("tape.flutter"), "Movement B Tape Flutter", b.tapeFlutter);
+        percent11 (id ("tape.wear"), "Movement B Tape Wear", b.tapeWear);
+        percent11 (id ("chorus.rate"), "Movement B Chorus Rate", b.chorusRate);
+        percent11 (id ("chorus.width"), "Movement B Chorus Width", b.chorusWidth);
+        percent11 (id ("chorus.stereo"), "Movement B Chorus Stereo", b.chorusStereo);
+        percent11 (id ("pulse.rate"), "Movement B Pulse Rate", b.pulseRate);
+        percent11 (id ("pulse.shape"), "Movement B Pulse Shape", b.pulseShape);
+        percent11 (id ("pulse.stereo"), "Movement B Pulse Stereo", b.pulseStereo);
+        juce::StringArray patterns;
+        for (int i = 0; i < osp::RhythmicShaper::patternCount; ++i)
+            patterns.add (osp::RhythmicShaper::patternName (i));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.pattern")), "Movement B Shaper Pattern", patterns, b.shaper.pattern));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.rate")), "Movement B Shaper Rate",
+                                                                  juce::StringArray { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" }, static_cast<int> (b.shaper.rate)));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.target")), "Movement B Shaper Target", juce::StringArray { "Vol", "Filter", "Both" },
+                                                                  static_cast<int> (b.shaper.target)));
+        percent11 (id ("shaper.smooth"), "Movement B Shaper Smooth", b.shaper.smooth);
+        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (id ("shaper.custom")), "Movement B Shaper Custom", b.shaper.custom));
+    }
 }
 
 //==============================================================================
@@ -894,6 +968,36 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.shaper.target = static_cast<osp::ShaperTarget> (index (iShaperTarget, 3));
     s.shaper.smooth = 0.01 * v (iShaperSmooth);
     s.shaper.custom = on (iShaperCustom);
+    // State version 11: the lanes.
+    p.movementA = { on (iMoveAOn), 0.01 * v (iMoveALevel) };
+    s.pulseSync = on (iMoveASync);
+    s.pulseDivision = index (iMoveADivision, osp::shaping::pulseDivisionCount);
+    s.movementPhase = 0.01 * v (iMoveAPhase);
+    p.movementBLane = { on (iMoveBOn), 0.01 * v (iMoveBLevel) };
+    {
+        auto& b = p.movementB;
+        b.pulseSync = on (iMoveBSync);
+        b.pulseDivision = index (iMoveBDivision, osp::shaping::pulseDivisionCount);
+        b.movementPhase = 0.01 * v (iMoveBPhase);
+        b.movementMode = static_cast<osp::MovementMode> (index (iMoveBMode, 5));
+        b.driftSpeed = 0.01 * v (iMoveBDriftSpeed);
+        b.driftPitch = 0.01 * v (iMoveBDriftPitch);
+        b.driftTone = 0.01 * v (iMoveBDriftTone);
+        b.tapeWow = 0.01 * v (iMoveBTapeWow);
+        b.tapeFlutter = 0.01 * v (iMoveBTapeFlutter);
+        b.tapeWear = 0.01 * v (iMoveBTapeWear);
+        b.chorusRate = 0.01 * v (iMoveBChorusRate);
+        b.chorusWidth = 0.01 * v (iMoveBChorusWidth);
+        b.chorusStereo = 0.01 * v (iMoveBChorusStereo);
+        b.pulseRate = 0.01 * v (iMoveBPulseRate);
+        b.pulseShape = 0.01 * v (iMoveBPulseShape);
+        b.pulseStereo = 0.01 * v (iMoveBPulseStereo);
+        b.shaper.pattern = index (iMoveBShaperPattern, osp::RhythmicShaper::patternCount);
+        b.shaper.rate = static_cast<osp::ShaperRate> (index (iMoveBShaperRate, 6));
+        b.shaper.target = static_cast<osp::ShaperTarget> (index (iMoveBShaperTarget, 3));
+        b.shaper.smooth = 0.01 * v (iMoveBShaperSmooth);
+        b.shaper.custom = on (iMoveBShaperCustom);
+    }
     p.reimagined = 0.01 * v (iReimagined);
     auto& r = p.reimaginedSettings;
     r.mode = osp::reimagined::modeFromIndex (index (iReimaginedMode, osp::reimaginedModeCount));
@@ -1108,6 +1212,37 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iEchoInterval, static_cast<int> (s.echoInterval));
     put (iEchoMotion, static_cast<int> (s.echoMotion));
     put (iLfoWheel, p.wheelToLfo ? 1.0 : 0.0);
+    put (iMoveAOn, p.movementA.on ? 1.0 : 0.0);
+    put (iMoveALevel, 100.0 * p.movementA.level);
+    put (iMoveASync, s.pulseSync ? 1.0 : 0.0);
+    put (iMoveADivision, s.pulseDivision);
+    put (iMoveAPhase, 100.0 * s.movementPhase);
+    {
+        const auto& b = p.movementB;
+        put (iMoveBOn, p.movementBLane.on ? 1.0 : 0.0);
+        put (iMoveBLevel, 100.0 * p.movementBLane.level);
+        put (iMoveBSync, b.pulseSync ? 1.0 : 0.0);
+        put (iMoveBDivision, b.pulseDivision);
+        put (iMoveBPhase, 100.0 * b.movementPhase);
+        put (iMoveBMode, static_cast<int> (b.movementMode));
+        put (iMoveBDriftSpeed, 100.0 * b.driftSpeed);
+        put (iMoveBDriftPitch, 100.0 * b.driftPitch);
+        put (iMoveBDriftTone, 100.0 * b.driftTone);
+        put (iMoveBTapeWow, 100.0 * b.tapeWow);
+        put (iMoveBTapeFlutter, 100.0 * b.tapeFlutter);
+        put (iMoveBTapeWear, 100.0 * b.tapeWear);
+        put (iMoveBChorusRate, 100.0 * b.chorusRate);
+        put (iMoveBChorusWidth, 100.0 * b.chorusWidth);
+        put (iMoveBChorusStereo, 100.0 * b.chorusStereo);
+        put (iMoveBPulseRate, 100.0 * b.pulseRate);
+        put (iMoveBPulseShape, 100.0 * b.pulseShape);
+        put (iMoveBPulseStereo, 100.0 * b.pulseStereo);
+        put (iMoveBShaperPattern, b.shaper.pattern);
+        put (iMoveBShaperRate, static_cast<int> (b.shaper.rate));
+        put (iMoveBShaperTarget, static_cast<int> (b.shaper.target));
+        put (iMoveBShaperSmooth, 100.0 * b.shaper.smooth);
+        put (iMoveBShaperCustom, b.shaper.custom ? 1.0 : 0.0);
+    }
     put (iEchoSync, s.echoSync ? 1.0 : 0.0);
     put (iEchoDivision, s.echoDivision);
     put (iEchoTime, s.echoTimeMs);

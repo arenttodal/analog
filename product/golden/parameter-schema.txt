@@ -135,3 +135,31 @@ analog.osc2.velo v8 float "Osc 2 Velocity" label="%" range=0.0000..100.0000/0.10
 analog.hybrid.velo v8 float "Hybrid Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.hybrid.noise.keys v8 float "Hybrid Noise Keys" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.lfo.wheel v10 bool "LFO Mod Wheel" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.a.on v11 bool "Movement A On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.movement.a.level v11 float "Movement A Intensity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.a.sync v11 bool "Movement A Pulse Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.a.pulse.division v11 choice "Movement A Pulse Cycle" label="" range=0.0000..8.0000/1.0000 skew=1.00000 default=4.0000 steps=9 texts=1/16|1/4|4 bars [1/16|1/8T|1/8|1/4T|1/4|1/2|1 bar|2 bars|4 bars]
+analog.movement.a.phase v11 float "Movement A Phase" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.on v11 bool "Movement B On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.b.level v11 float "Movement B Intensity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.sync v11 bool "Movement B Pulse Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.b.pulse.division v11 choice "Movement B Pulse Cycle" label="" range=0.0000..8.0000/1.0000 skew=1.00000 default=4.0000 steps=9 texts=1/16|1/4|4 bars [1/16|1/8T|1/8|1/4T|1/4|1/2|1 bar|2 bars|4 bars]
+analog.movement.b.phase v11 float "Movement B Phase" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.mode v11 choice "Movement B Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Drift|Chorus|Shaper [Drift|Tape|Chorus|Pulse|Shaper]
+analog.movement.b.drift.speed v11 float "Movement B Drift Speed" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=70.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.drift.pitch v11 float "Movement B Drift Pitch" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=25.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.drift.tone v11 float "Movement B Drift Tone" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=40.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.tape.wow v11 float "Movement B Tape Wow" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.tape.flutter v11 float "Movement B Tape Flutter" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.tape.wear v11 float "Movement B Tape Wear" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.chorus.rate v11 float "Movement B Chorus Rate" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=45.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.chorus.width v11 float "Movement B Chorus Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.chorus.stereo v11 float "Movement B Chorus Stereo" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.pulse.rate v11 float "Movement B Pulse Rate" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=55.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.pulse.shape v11 float "Movement B Pulse Shape" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.pulse.stereo v11 float "Movement B Pulse Stereo" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.shaper.pattern v11 choice "Movement B Shaper Pattern" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=3.0000 steps=12 texts=PULSE|EUCLID 5|MACHINE [PULSE|OFFBEAT|BREATH|THREE|FIVE|EUCLID 3|EUCLID 5|CASCADE|RISE|BROKEN|SCATTER|MACHINE]
+analog.movement.b.shaper.rate v11 choice "Movement B Shaper Rate" label="" range=0.0000..5.0000/1.0000 skew=1.00000 default=3.0000 steps=6 texts=1/4|1/8T|1/32 [1/4|1/8|1/8T|1/16|1/16T|1/32]
+analog.movement.b.shaper.target v11 choice "Movement B Shaper Target" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Vol|Filter|Both [Vol|Filter|Both]
+analog.movement.b.shaper.smooth v11 float "Movement B Shaper Smooth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.shaper.custom v11 bool "Movement B Shaper Custom" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On

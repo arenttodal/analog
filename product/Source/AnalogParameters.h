@@ -164,6 +164,17 @@ namespace andor::analog::params
     inline const juce::String morphOutput = "analog.morph.output";
     /** State version 10: the mod wheel brings in LFO 1's depths (off: it moves only its routes). */
     inline const juce::String lfoWheel = "analog.lfo.wheel";
+    /** State version 11: MOVEMENT's lanes. Lane A is MOVEMENT itself ("movement.*") with its
+        own ON, LEVEL, SYNC, CYCLE and PHASE here; lane B has all of MOVEMENT's settings under
+        its prefix ("analog.movement.b." + "mode", "drift.speed", ... "shaper.custom") and the
+        same five. */
+    inline const juce::String movementAPrefix = "analog.movement.a.";
+    inline const juce::String movementBPrefix = "analog.movement.b.";
+    /** A lane's own (0 A, 1 B): "on", "level", "sync", "pulse.division", "phase"; for lane B
+        also every MOVEMENT setting's name. */
+    inline juce::String movementLaneId (int lane, const char* name) { return (lane == 0 ? movementAPrefix : movementBPrefix) + name; }
+    /** MOVEMENT's settings' names (each lane has them all: lane A as "movement." + name). */
+    const juce::StringArray& movementSettingNames();
     /** Every parameter state version 4 added (the V3 -> V4 migration sets them to their defaults). */
     const juce::StringArray& version4Ids();
 
@@ -198,7 +209,7 @@ namespace andor::analog::params
         double keyDnaCardAmount() const noexcept;
 
         // Modulation (real-time safe).
-        static constexpr int maxValues = 320;
+        static constexpr int maxValues = 384;
         using Values = std::array<float, maxValues>;
         /** Every raw value now, in the reader's order. */
         void snapshot (Values& raw) const noexcept;

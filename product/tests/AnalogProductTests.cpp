@@ -290,6 +290,39 @@ namespace
             { "movement.shaper.smooth", movementMode (osp::MovementMode::shaper) },
             { "movement.shaper.custom", movementMode (osp::MovementMode::shaper) },
         };
+        // State version 11: MOVEMENT's lanes. Lane A's SYNC and CYCLE act on a PULSE, its PHASE
+        // on a SHAPER; lane B's settings act with lane B on, in their mode.
+        {
+            using namespace params;
+            auto laneA = [] (osp::MovementMode m, bool sync) { return [m, sync] (Patch& c) { c.effects.movementMode = m; c.effects.pulseSync = sync; }; };
+            modes[movementLaneId (0, "sync")] = laneA (osp::MovementMode::pulse, false);
+            modes[movementLaneId (0, "pulse.division")] = laneA (osp::MovementMode::pulse, true);
+            modes[movementLaneId (0, "phase")] = laneA (osp::MovementMode::shaper, false);
+            auto laneB = [] (osp::MovementMode m, bool sync) {
+                return [m, sync] (Patch& c) {
+                    c.movementBLane.on = true;
+                    c.movementB.movementMode = m;
+                    c.movementB.pulseSync = sync;
+                };
+            };
+            for (const char* name : { "level", "mode", "drift.speed", "drift.pitch", "drift.tone" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::drift, false);
+            modes[movementBPrefix + "mode"] = laneB (osp::MovementMode::tape, false);   // (from TAPE to another)
+            for (const char* name : { "tape.wow", "tape.flutter", "tape.wear" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::tape, false);
+            for (const char* name : { "chorus.rate", "chorus.width", "chorus.stereo" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::chorus, false);
+            for (const char* name : { "pulse.rate", "pulse.shape", "pulse.stereo", "sync" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::pulse, false);
+            modes[movementBPrefix + "pulse.division"] = laneB (osp::MovementMode::pulse, true);
+            for (const char* name : { "phase", "shaper.pattern", "shaper.rate", "shaper.target", "shaper.smooth" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::shaper, false);
+            // CUSTOM plays lane B's own steps (THREE's, by default) instead of another pattern.
+            modes[movementBPrefix + "shaper.custom"] = [laneB] (Patch& c) {
+                laneB (osp::MovementMode::shaper, false) (c);
+                c.movementB.shaper.pattern = 7;
+            };
+        }
         // State version 4: each model's settings act in that model; PWM depth with a source
         // (and the source with a depth); SUPER SAW's spread on SUPER SAW; the OTA's voicing and
         // slope on the OTA; the Juno variant through the high-pass; the chorus' hiss with it on.
@@ -3532,6 +3565,7 @@ TEST_CASE ("analog: changing the arpeggiator's cards and LINK mid-chord leaves n
     CHECK (play.heldAtEnd == 0);
     CHECK (play.activeAtEnd == 0);
 }
+
 //==============================================================================
 // The effects rack (ANDOR OSP's shared rack host, opt-in): MOVEMENT expanded beside its macro.
 
@@ -3590,13 +3624,13 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     // MOVEMENT's controls in the open, its knobs bound to the same parameters as the popover.
     auto* module = ui.effectsRack().module (Kind::movement);
     REQUIRE (module != nullptr);
-    CHECK (osp::plugin::rackMovementCaptions (*module) == "AMOUNT SPEED PITCH TONE");
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY SPEED PITCH TONE");
     setValue (p, "movement.mode", 4.0f);   // SHAPER (as automation would)
     ui.refreshNow();
-    CHECK (osp::plugin::rackMovementCaptions (*module) == "DEPTH SMOOTH");
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "DEPTH SMOOTH PHASE");
     setValue (p, "movement.mode", 1.0f);
     ui.refreshNow();
-    CHECK (osp::plugin::rackMovementCaptions (*module) == "AMOUNT WOW FLUTTER WEAR");
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY WOW FLUTTER WEAR");
     setValue (p, "movement.mode", 0.0f);
     ui.refreshNow();
 
@@ -3705,4 +3739,184 @@ TEST_CASE ("analog: screenshots of the MOVEMENT rack at every width, ARP open an
             ui.closePopup();
         }
     }
+}
+
+//==============================================================================
+// MOVEMENT's two lanes (state version 11) in the product: parameters, presets, copy / swap,
+// the second lane's SHAPER pattern with the session, and sessions from before lanes.
+
+TEST_CASE ("analog: MOVEMENT lane B is off and lane A on at 100 % in a new instrument and in an older session", "[analog][rack][lanes]")
+{
+    using namespace params;
+    ShellProcessor p;
+    CHECK (p.movementLaneCount() == 2);
+    CHECK (p.parameterValue (movementLaneId (0, "on")) >= 0.5f);
+    CHECK (p.parameterValue (movementLaneId (0, "level")) == Approx (100.0f));
+    CHECK (p.parameterValue (movementLaneId (1, "on")) < 0.5f);
+    // A session from version 10 (no lanes): the same, whatever the instrument had before.
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 10);
+    juce::MemoryBlock v10;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v10);
+    ShellProcessor q;
+    setValue (q, movementLaneId (1, "on"), 1.0f);
+    setValue (q, movementLaneId (0, "level"), 30.0f);
+    q.setStateInformation (v10.getData(), static_cast<int> (v10.getSize()));
+    CHECK (q.parameterValue (movementLaneId (1, "on")) < 0.5f);
+    CHECK (q.parameterValue (movementLaneId (0, "level")) == Approx (100.0f));
+}
+
+TEST_CASE ("analog: a MOVEMENT preset saves one lane and loads into one lane, touching nothing else", "[analog][rack][lanes][presets]")
+{
+    using namespace params;
+    Scratch scratch;
+    ShellProcessor p;
+    // Lane A: a SHAPER with a CUSTOM pattern, synced, moved.
+    setValue (p, "movement.mode", 4.0f);
+    setValue (p, "movement.shaper.rate", 1.0f);
+    setValue (p, "movement.shaper.custom", 1.0f);
+    setValue (p, movementLaneId (0, "phase"), 25.0f);
+    setValue (p, movementLaneId (0, "level"), 70.0f);
+    auto pattern = osp::RhythmicShaper::patternSteps (2);
+    pattern[3] = { 0.2f, 0.9f, osp::StepShape::up };
+    p.setLaneShaperPattern (0, pattern, false);
+    const auto file = scratch.dir.getChildFile ("Gated" + juce::String (".andormovement"));
+    REQUIRE (osp::plugin::writeMovementPreset (p, 0, file));
+
+    // Into lane B of another instrument: lane B becomes it (and plays); nothing else moves.
+    ShellProcessor q;
+    setValue (q, osc2Level, 33.0f);
+    setValue (q, "space", 41.0f);
+    const auto before = allParameterValues (q);
+    REQUIRE (osp::plugin::readMovementPreset (q, 1, file));
+    const auto after = allParameterValues (q);
+    for (const auto& [id, value] : after)
+        if (value != before.at (id))
+        {
+            INFO (id);
+            CHECK (id.startsWith (movementBPrefix));
+        }
+    CHECK (q.parameterValue (movementBPrefix + "mode") == Approx (4.0f));
+    CHECK (q.parameterValue (movementBPrefix + "shaper.rate") == Approx (1.0f));
+    CHECK (q.parameterValue (movementLaneId (1, "phase")) == Approx (25.0f).margin (0.1f));
+    CHECK (q.parameterValue (movementLaneId (1, "level")) == Approx (70.0f).margin (0.1f));
+    CHECK (q.parameterValue (movementLaneId (1, "on")) >= 0.5f);
+    CHECK (q.laneShaperPattern (1) == pattern);
+    CHECK (q.laneShaperPattern (0) == osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern));   // lane A untouched
+    // Not a MOVEMENT preset: nothing happens.
+    const auto other = scratch.dir.getChildFile ("not.andormovement");
+    other.replaceWithText ("{\"kind\":\"something else\"}");
+    CHECK_FALSE (osp::plugin::readMovementPreset (q, 0, other));
+}
+
+TEST_CASE ("analog: MOVEMENT's lanes copy and swap (settings and SHAPER pattern), and lane B's pattern comes back with the session", "[analog][rack][lanes]")
+{
+    using namespace params;
+    ShellProcessor p;
+    setValue (p, "movement.mode", 2.0f);
+    setValue (p, "movement.chorus.rate", 80.0f);
+    setValue (p, movementBPrefix + "mode", 3.0f);
+    setValue (p, movementLaneId (1, "on"), 1.0f);
+    auto patternB = osp::RhythmicShaper::patternSteps (7);
+    patternB[0] = { 0.1f, 0.4f, osp::StepShape::dip };
+    p.setLaneShaperPattern (1, patternB, false);
+
+    osp::plugin::swapMovementLanes (p);
+    CHECK (p.parameterValue ("movement.mode") == Approx (3.0f));
+    CHECK (p.parameterValue (movementBPrefix + "mode") == Approx (2.0f));
+    CHECK (p.parameterValue (movementBPrefix + "chorus.rate") == Approx (80.0f).margin (0.1f));
+    CHECK (p.laneShaperPattern (0) == patternB);
+    osp::plugin::swapMovementLanes (p);
+    CHECK (p.parameterValue ("movement.mode") == Approx (2.0f));
+
+    osp::plugin::copyMovementLane (p, 0, 1);
+    CHECK (p.parameterValue (movementBPrefix + "mode") == Approx (2.0f));
+    CHECK (p.parameterValue (movementBPrefix + "chorus.rate") == Approx (80.0f).margin (0.1f));
+    CHECK (p.laneShaperPattern (1) == p.laneShaperPattern (0));
+
+    // Lane B's pattern with the session.
+    p.setLaneShaperPattern (1, patternB, false);
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.laneShaperPattern (1) == patternB);
+    CHECK (q.parameterValue (movementLaneId (1, "on")) >= 0.5f);
+}
+
+TEST_CASE ("analog: the MOVEMENT rack shows each lane, its ON and its INTENSITY", "[analog][rack][lanes]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setRackExpanded (Kind::movement, true);
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    CHECK (osp::plugin::rackMovementLane (*module) == 0);
+    osp::plugin::showRackMovementLane (*module, 1);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementLane (*module) == 1);
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY SPEED PITCH TONE");   // lane B's DRIFT
+    setValue (p, params::movementBPrefix + "mode", 3.0f);
+    setValue (p, params::movementLaneId (1, "sync"), 1.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY SHAPE STEREO PHASE");   // PULSE synced: CYCLE as a key
+}
+
+TEST_CASE ("analog: screenshots of MOVEMENT's two lanes in the rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-lanes]")
+{
+    using osp::plugin::rack::Kind;
+    using namespace params;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    setValue (p, "movement.mode", 2.0f);
+    setValue (p, movementBPrefix + "mode", 3.0f);
+    setValue (p, movementLaneId (1, "on"), 1.0f);
+    setValue (p, movementLaneId (1, "sync"), 1.0f);
+    setValue (p, movementLaneId (1, "level"), 70.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    for (const int width : { 1448, 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            ui.setArpExpanded (arp);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            auto* module = ui.effectsRack().module (Kind::movement);
+            const auto name = "lanes-" + juce::String (width) + (arp ? "-arp" : "");
+            osp::plugin::showRackMovementLane (*module, 0);
+            shoot (name + "-1-lane-a-chorus");
+            osp::plugin::showRackMovementLane (*module, 1);
+            shoot (name + "-2-lane-b-pulse-sync");
+            if (width == 1448 && ! arp)
+            {
+                setValue (p, movementBPrefix + "mode", 4.0f);
+                shoot (name + "-3-lane-b-shaper");
+                setValue (p, movementLaneId (1, "on"), 0.0f);
+                shoot (name + "-4-lane-b-off");
+                setValue (p, movementLaneId (1, "on"), 1.0f);
+                setValue (p, movementBPrefix + "mode", 3.0f);
+            }
+        }
 }

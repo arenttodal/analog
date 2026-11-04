@@ -210,7 +210,8 @@ void Synth::reset() noexcept
         v.grainMix = current.granular ? 1.0f : 0.0f;
         v.grainMix2 = current.granular2 ? 1.0f : 0.0f;
         v.partB = v.partC = 0.0f;
-        v.driftNow = v.driftFrom = v.driftTo = {};
+        v.driftNow = v.driftFrom = v.driftTo = v.driftOut = {};
+        v.driftB.now = v.driftB.from = v.driftB.to = {};
         v.mod = {};
         v.modulated = false;
         v.panMod = 0.0f;
@@ -231,6 +232,7 @@ void Synth::reset() noexcept
     macros.space = current.space;
     macros.echo = current.echo;
     effects.setShaping (current.effects);
+    effects.setMovementLanes (current.movementA.on, current.movementA.level, current.movementBLane.on, current.movementBLane.level, current.movementB);
     effects.setMacros (macros);
     effects.reset();
     chorus.reset();
@@ -274,6 +276,7 @@ void Synth::setPatch (const Patch& patch) noexcept
     macros.space = std::clamp (current.space, 0.0, 1.0);
     macros.echo = std::clamp (current.echo, 0.0, 1.0);
     effects.setShaping (current.effects);
+    effects.setMovementLanes (current.movementA.on, current.movementA.level, current.movementBLane.on, current.movementBLane.level, current.movementB);
     effects.setMacros (macros);
     const auto& rs = current.reimaginedSettings;
     kaleidoscopeStage.setAmount (rs.mode == osp::ReimaginedMode::kaleidoscope ? current.reimagined : 0.0);
@@ -584,10 +587,17 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.driftNow = v.driftFrom = v.driftTo = {};
         v.driftCountdown = 0;
         v.driftSegment = 1;
+        v.driftB.rng.reseed (osp::Prng::deriveSeed (v.seed, 0x6472696674ull, 1));   // (lane B's own)
+        v.driftB.now = v.driftB.from = v.driftB.to = {};
+        v.driftB.countdown = 0;
+        v.driftB.segment = 1;
         updateDrift (v);
         // It begins part-way through a wander, not at its centre (as ANDOR OSP's voices).
         v.driftFrom = v.driftNow = v.driftTo;
         v.driftCountdown = 0;
+        v.driftB.from = v.driftB.now = v.driftB.to;
+        v.driftB.countdown = 0;
+        combineDrift (v);
         v.notePitch = note;
         startModeEngine (v);
     }
@@ -1123,7 +1133,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     const double performed = p.tuneSemitones + p.fineTuneCents / 100.0 + bend * p.bendRangeSemitones;
     // MOVEMENT DRIFT (the voice's own wander and the shared one); REIMAGINED's read speed
     // (wow, self-modulation) moves the oscillators themselves while they are the source.
-    const double drifted = (v.driftNow[0] + sharedDriftCents) / 100.0
+    const double drifted = (v.driftOut[0] + sharedDriftCents) / 100.0
                            + (v.modeEngine != nullptr ? 12.0 * std::log2 (std::max (1.0e-3, v.modeFactor)) * (1.0 - v.grainMix) : 0.0);
     const double common = v.pitch + v.unisonOffset + performed + drifted;
     v.notePitch = common;
@@ -1272,7 +1282,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     if (v.modulated && (p.tone < current.tone || p.tone > current.tone))
         toneMoved = static_cast<float> (math::hzToNote (math::toneToHz (p.tone)) - math::hzToNote (math::toneToHz (current.tone)));
     v.cutoffNote = toneNote + toneMoved + static_cast<float> (p.keyTrack * (v.pitch - 60.0)) + a * (1.0f * d.cutoff + 0.2f * d.wander)
-                   + lfoD * static_cast<float> (p.lfoCutoff) + static_cast<float> (12.0 * v.driftNow[1]);
+                   + lfoD * static_cast<float> (p.lfoCutoff) + static_cast<float> (12.0 * v.driftOut[1]);
     const double velocityScale = 1.0 - p.velocityToFilter + p.velocityToFilter * v.velocity;
     v.envDepth = static_cast<float> (p.envDepthSemitones * velocityScale);
     const float resonanceNow = std::clamp (resonanceSmoothed + moved (p.resonance, current.resonance), 0.0f, 1.0f);
@@ -1305,7 +1315,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         else if (v.highPassTail > 0)
             v.highPass.setMode (variant, flat);
     }
-    equalPower (v.pan + static_cast<float> (v.driftNow[3]) + v.panMod, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
+    equalPower (v.pan + static_cast<float> (v.driftOut[3]) + v.panMod, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
     const float driveMoved = moved (p.filterDrive, current.filterDrive);
     v.driveGain = driveMoved != 0.0f ? std::exp2 (4.0f * std::clamp (driveSmoothed + driveMoved, 0.0f, 1.0f)) : driveGain;
     v.makeUp = (1.0f + 0.35f * v.k) / std::sqrt (v.driveGain) * math::dbToGain (p.driveTrimDb);
@@ -1360,12 +1370,12 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.gain2 *= v.oscLayerGain;
         v.gainNoise *= v.oscLayerGain;
         v.organicGain *= v.organicLayerGain;
-        v.outGainTarget = velocityGain * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+        v.outGainTarget = velocityGain * voiceGain * math::dbToGain (static_cast<float> (v.driftOut[2]));
     }
     else
     {
         v.layerGainsFresh = true;   // (a recording loaded mid-note starts from its targets)
-        v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+        v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftOut[2]));
     }
     // MORPH needs both sides: a silent carrier (muted, at its lowest, the A/B mix all C) or a
     // silent card C leaves the other exactly as it plays.
@@ -1434,10 +1444,11 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 void Synth::updateDrift (Voice& v) noexcept
 {
     // ANDOR OSP's per-voice DRIFT (InstrumentEngine's shape, InstrumentVoice's wander), with
-    // KALEIDOSCOPE's own instability: depths in cents, octaves of tone, dB and place.
+    // KALEIDOSCOPE's own instability: depths in cents, octaves of tone, dB and place. MOVEMENT
+    // lane A at the macro x its LEVEL (100 % and on: exactly as before lanes).
     const auto& sh = current.effects;
-    const bool driftMode = sh.movementMode == osp::MovementMode::drift;
-    const double m = driftMode ? std::pow (std::clamp (current.motion, 0.0, 1.0), 0.75) : 0.0;
+    const bool driftMode = sh.movementMode == osp::MovementMode::drift && current.movementA.on;
+    const double m = driftMode ? std::pow (std::clamp (current.motion * current.movementA.level, 0.0, 1.0), 0.75) : 0.0;
     const auto& rs = current.reimaginedSettings;
     const double r = rs.mode == osp::ReimaginedMode::kaleidoscope ? std::clamp (current.reimagined, 0.0, 1.0) : 0.0;
     const double rr = 0.5 * r * r;
@@ -1447,29 +1458,63 @@ void Synth::updateDrift (Voice& v) noexcept
         1.5 * m + 1.0 * rr,
         0.3 * m + 0.2 * rr * static_cast<double> (osp::kaleidoscope::width (rs.kaleidoscope.spread)),
     };
+    const double rateHz = driftMode ? osp::shaping::driftSpeedHz (sh.driftSpeed) : 0.15;
+    glideDrift (v.driftFrom, v.driftTo, v.driftNow, v.driftCountdown, v.driftSegment, v.driftRng, depth, rateHz);
+
+    // Lane B's DRIFT: its own wander (its own speed and randomness), not the same one louder.
+    const auto& b = current.movementB;
+    const bool driftB = current.movementBLane.on && b.movementMode == osp::MovementMode::drift;
+    const double mb = driftB ? std::pow (std::clamp (current.motion * current.movementBLane.level, 0.0, 1.0), 0.75) : 0.0;
+    const std::array<double, 4> depthB { mb * osp::shaping::driftPitchCents (b.driftPitch), mb * osp::shaping::driftToneOctaves (b.driftTone), 1.5 * mb, 0.3 * mb };
+    auto& d = v.driftB;
+    glideDrift (d.from, d.to, d.now, d.countdown, d.segment, d.rng, depthB, osp::shaping::driftSpeedHz (b.driftSpeed));
+
+    v.driftDepthA = depth;
+    v.driftDepthB = depthB;
+    combineDrift (v);
+}
+
+void Synth::combineDrift (Voice& v) noexcept
+{
+    // Two independent wanders add in power, not amplitude: together they never swing further
+    // than sqrt (a^2 + b^2) of their depths (one lane alone: exactly its own).
+    for (std::size_t i = 0; i < v.driftOut.size(); ++i)
+    {
+        const double a = v.driftDepthA[i], b = v.driftDepthB[i];
+        if (b <= 0.0)
+            v.driftOut[i] = v.driftNow[i];
+        else if (a <= 0.0)
+            v.driftOut[i] = v.driftB.now[i];
+        else
+            v.driftOut[i] = (v.driftNow[i] + v.driftB.now[i]) * std::sqrt (a * a + b * b) / (a + b);
+    }
+}
+
+void Synth::glideDrift (std::array<double, 4>& from, std::array<double, 4>& to, std::array<double, 4>& now, int& countdown, int& segment, osp::Prng& rng,
+                        const std::array<double, 4>& depth, double rateHz) noexcept
+{
     if (depth[0] <= 0.0 && depth[1] <= 0.0 && depth[2] <= 0.0 && depth[3] <= 0.0)
     {
-        v.driftNow = v.driftFrom = v.driftTo = {};
-        v.driftCountdown = 0;
+        now = from = to = {};
+        countdown = 0;
         return;
     }
-    if (--v.driftCountdown <= 0)
+    if (--countdown <= 0)
     {
         // A new glide from wherever the drift is now to fresh random values.
-        v.driftFrom = v.driftNow;
+        from = now;
         for (std::size_t i = 0; i < depth.size(); ++i)
         {
-            const double magnitude = v.driftRng.uniform (0.35, 1.0);
-            v.driftTo[i] = depth[i] * (v.driftRng.nextDouble() < 0.5 ? -magnitude : magnitude);
+            const double magnitude = rng.uniform (0.35, 1.0);
+            to[i] = depth[i] * (rng.nextDouble() < 0.5 ? -magnitude : magnitude);
         }
-        const double rateHz = driftMode ? osp::shaping::driftSpeedHz (sh.driftSpeed) : 0.15;
-        const double seconds = v.driftRng.uniform (0.6, 1.4) / std::max (0.01, rateHz);
-        v.driftCountdown = v.driftSegment = std::max (1, static_cast<int> (seconds * hostRate / controlPeriod));
+        const double seconds = rng.uniform (0.6, 1.4) / std::max (0.01, rateHz);
+        countdown = segment = std::max (1, static_cast<int> (seconds * hostRate / controlPeriod));
     }
-    const double f = 1.0 - static_cast<double> (v.driftCountdown) / static_cast<double> (v.driftSegment);
+    const double f = 1.0 - static_cast<double> (countdown) / static_cast<double> (segment);
     const double glide = f * f * (3.0 - 2.0 * f);
     for (std::size_t i = 0; i < depth.size(); ++i)
-        v.driftNow[i] = v.driftFrom[i] + (v.driftTo[i] - v.driftFrom[i]) * glide;
+        now[i] = from[i] + (to[i] - from[i]) * glide;
 }
 
 osp::ReimaginedControl Synth::modeControl (const Voice& v) const noexcept
@@ -1541,9 +1586,23 @@ void Synth::controlUpdate() noexcept
 
     // MOVEMENT DRIFT's shared part: the whole instrument wanders a little together.
     sharedDriftCents = 0.0;
-    if (p.effects.movementMode == osp::MovementMode::drift && p.motion > 0.0)
-        sharedDriftCents = 0.3 * p.motion * osp::shaping::driftPitchCents (p.effects.driftPitch)
-                           * osp::shaping::sharedWander (p.seed, static_cast<double> (clock) / hostRate, osp::shaping::driftSpeedHz (p.effects.driftSpeed));
+    {
+        // Lane A's (at its LEVEL; 100 % and on: as before lanes) and lane B's own, in power.
+        const double motionA = p.movementA.on ? p.motion * p.movementA.level : 0.0;
+        const double motionB = p.movementBLane.on ? p.motion * p.movementBLane.level : 0.0;
+        const bool a = p.effects.movementMode == osp::MovementMode::drift && motionA > 0.0;
+        const bool b = p.movementB.movementMode == osp::MovementMode::drift && motionB > 0.0;
+        const double t = static_cast<double> (clock) / hostRate;
+        const double depthA = a ? 0.3 * motionA * osp::shaping::driftPitchCents (p.effects.driftPitch) : 0.0;
+        const double depthB = b ? 0.3 * motionB * osp::shaping::driftPitchCents (p.movementB.driftPitch) : 0.0;
+        if (a)
+            sharedDriftCents = depthA * osp::shaping::sharedWander (p.seed, t, osp::shaping::driftSpeedHz (p.effects.driftSpeed));
+        if (b)
+        {
+            const double wanderB = depthB * osp::shaping::sharedWander (p.seed + 0x5bd1e995ull, t, osp::shaping::driftSpeedHz (p.movementB.driftSpeed));
+            sharedDriftCents = a ? (sharedDriftCents + wanderB) * std::sqrt (depthA * depthA + depthB * depthB) / (depthA + depthB) : wanderB;
+        }
+    }
     const auto depth = static_cast<float> (std::clamp (p.lfoAmount + (p.wheelToLfo ? wheel : 0.0f) * (1.0 - p.lfoAmount), 0.0, 1.0));
 
     // Glide: the time to cover ~95 % of the interval.
@@ -2123,7 +2182,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
 Synth::VoiceView Synth::voiceView (int slot) const noexcept
 {
     const auto& v = voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))];
-    return { v.active, v.held || v.sustained, v.note, v.amp.value(), v.cards };
+    return { v.active, v.held || v.sustained, v.note, v.amp.value(), v.cards, v.driftOut[0] };
 }
 
 } // namespace andor::analog

@@ -52,6 +52,7 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     reader.snapshot (raw);
     auto patch = reader.read (raw);
     patch.effects.shaper.customSteps = shaperPattern;
+    patch.movementB.shaper.customSteps = shaperPatternB;
     synth.setPatch (patch);
     synth.setKeyDnaAmount (reader.keyDnaCardAmount());
     synth.reset();
@@ -251,6 +252,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     }
     auto patch = reader.read (raw);
     patch.effects.shaper.customSteps = shaperPattern;   // MOVEMENT SHAPER's CUSTOM (the shell's)
+    patch.movementB.shaper.customSteps = shaperPatternB;   // (lane B's)
     synth.setPatch (patch);
     synth.setKeyDnaAmount (reader.keyDnaCardAmount());  // (the profile is the shell's: setKeyDnaTable)
     osp::HostTiming timing;

@@ -52,7 +52,13 @@ public:
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept override;
     int activeNotes() const noexcept override { return synth.activeVoices(); }
     void setShaperPattern (const osp::ShaperPattern& pattern) noexcept override { shaperPattern = pattern; }
+    void setLaneShaperPattern (int lane, const osp::ShaperPattern& pattern) noexcept override
+    {
+        if (lane == 1)
+            shaperPatternB = pattern;
+    }
     float shaperPhase() const noexcept override { return synth.shaperPhase(); }
+    float laneShaperPhase (int lane) const noexcept override { return synth.shaperPhase (lane); }
     void setModulationCurve (int index, const osp::mod::Curve& curve) noexcept override;
     juce::String reimaginedModeUnavailable (int layer, int mode) const override;
     const osp::InstrumentEngine::GrainSnapshot* grainSnapshot (int layer) const noexcept override { return layer == 0 ? &grains : layer == 1 ? &organicHeads : layer == 2 ? &grains2 : nullptr; }
@@ -143,6 +149,7 @@ private:
     Synth synth;
     params::Reader reader;
     osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
+    osp::ShaperPattern shaperPatternB = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);  ///< MOVEMENT lane B's (audio thread)
     std::vector<float> scratch;
     osp::InstrumentEngine::GrainSnapshot grains;   ///< written by process(), read by the card
     osp::InstrumentEngine::GrainSnapshot grains2;  ///< card B's (OSC 2's) grains, as `grains`
