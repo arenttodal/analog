@@ -269,7 +269,8 @@ const ProductInfo& productInfo()
         p.threeEngines.enabled = true;
         p.threeEngines.order = { 0, 2, 1 };
         p.cardArpeggiator = true;   // each card arpeggiated or holding the keys, its own pattern unlinked
-        p.rackModules = { osp::plugin::rack::Kind::movement };   // the effects rack: MOVEMENT expanded beside its macro
+        // The effects rack: MOVEMENT, ECHO and SPACE each expanded beside its macro (one at a time).
+        p.rackModules = { osp::plugin::rack::Kind::movement, osp::plugin::rack::Kind::echo, osp::plugin::rack::Kind::space };
         // MOVEMENT's two lanes (state version 11): A is MOVEMENT itself, B a second one.
         {
             using namespace andor::analog::params;

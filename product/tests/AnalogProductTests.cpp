@@ -3598,10 +3598,10 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     editor->setSize (1448, 1086);
     ui.refreshNow();
 
-    // A key beside MOVEMENT only (ECHO and SPACE come later).
+    // A key beside MOVEMENT, ECHO and SPACE.
     REQUIRE (ui.rackKey (Kind::movement) != nullptr);
-    CHECK (ui.rackKey (Kind::echo) == nullptr);
-    CHECK (ui.rackKey (Kind::space) == nullptr);
+    CHECK (ui.rackKey (Kind::echo) != nullptr);
+    CHECK (ui.rackKey (Kind::space) != nullptr);
     CHECK_FALSE (ui.effectsRack().isVisible());
     const auto before = allParameterValues (p);
     const int heightBefore = editor->getHeight();
@@ -3918,5 +3918,172 @@ TEST_CASE ("analog: screenshots of MOVEMENT's two lanes in the rack (ANALOG_SCRE
                 setValue (p, movementLaneId (1, "on"), 1.0f);
                 setValue (p, movementBPrefix + "mode", 3.0f);
             }
+        }
+}
+
+//==============================================================================
+// Effects rack, phase 3: ECHO and SPACE on the same host (one module at a time).
+
+TEST_CASE ("analog: ECHO and SPACE expand into the rack, one module at a time, every control bound", "[analog][rack][rack-fx]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    const auto before = allParameterValues (p);
+    const float plain = ui.instrumentHeight();
+
+    // One at a time: ECHO's key closes MOVEMENT's module, SPACE's closes ECHO's.
+    ui.rackKey (Kind::movement)->onClick();
+    ui.rackKey (Kind::echo)->onClick();
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::echo });
+    CHECK_FALSE (ui.rackKey (Kind::movement)->isExpanded());
+    CHECK (ui.rackKey (Kind::echo)->isExpanded());
+    CHECK (p.rackExpanded() == 2);
+    auto* echo = ui.effectsRack().module (Kind::echo);
+    REQUIRE (echo != nullptr);
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE");
+    setValue (p, "echo.type", 2.0f);   // ASCEND (as automation would)
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE CLOCK INTERVAL MOTION");
+    setValue (p, "echo.type", 0.0f);
+
+    ui.rackKey (Kind::space)->onClick();
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::space });
+    auto* space = ui.effectsRack().module (Kind::space);
+    REQUIRE (space != nullptr);
+    CHECK (osp::plugin::rackMovementCaptions (*space) == "PRE-DELAY SIZE DECAY DAMP MOD WIDTH LOW CUT HIGH CUT");
+    for (const auto& [engine, captions] : { std::pair { 1.0f, "PRE-DELAY SIZE DECAY DAMP GRAVITY RESONANCE MOD WIDTH FREEZE" },
+                                            std::pair { 2.0f, "PRE-DELAY SIZE DECAY DAMP DIFFUSION MOD WIDTH ERA" },
+                                            std::pair { 3.0f, "TIME DIFFUSION DECAY DAMP SYNC SIZE MOD WIDTH" } })
+    {
+        setValue (p, "space.engine", engine);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackMovementCaptions (*space) == juce::String (captions));
+    }
+    setValue (p, "space.engine", 0.0f);
+    ui.refreshNow();
+    // SPACE's module is taller (two rows of knobs): the window follows.
+    CHECK (ui.instrumentHeight() == Approx (plain + ui.effectsRack().height() + osp::plugin::design::layout::rackGap));
+
+    // The SPACE and ECHO names still open their popovers.
+    for (const char* id : { "space", "echo" })
+    {
+        ui.openPopup (macroIndexOf (p, id));
+        CHECK (ui.openPopupPanel() != nullptr);
+        ui.closePopup();
+    }
+    ui.rackKey (Kind::space)->onClick();
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds().empty());
+    CHECK (ui.instrumentHeight() == Approx (plain));
+    setValue (p, "echo.type", before.at ("echo.type") > 0.5f ? 1.0f : 0.0f);
+    setValue (p, "space.engine", 0.0f);
+    for (const auto& [id, value] : allParameterValues (p))
+    {
+        INFO (id);
+        CHECK (value == Approx (before.at (id)).margin (1.0e-6));
+    }
+}
+
+TEST_CASE ("analog: expanding or collapsing ECHO and SPACE never touches their tails (a view only)", "[analog][rack][rack-fx]")
+{
+    using osp::plugin::rack::Kind;
+    auto renderWith = [] (bool toggleRack) {
+        ShellProcessor p;
+        setValue (p, "space", 60.0f);
+        setValue (p, "echo", 60.0f);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        p.prepareToPlay (48000.0, 256);
+        juce::AudioBuffer<float> buffer (2, 256);
+        std::vector<float> out;
+        for (int block = 0; block < 48000 * 3 / 256; ++block)
+        {
+            juce::MidiBuffer midi;
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 57, static_cast<juce::uint8> (100)), 0);
+            if (block == 40)
+                midi.addEvent (juce::MidiMessage::noteOff (1, 57), 0);
+            if (toggleRack && block >= 60 && block % 30 == 0)
+            {
+                // In the tails: SPACE, ECHO and MOVEMENT open and close in turn.
+                const Kind kinds[] { Kind::space, Kind::echo, Kind::movement };
+                const auto kind = kinds[(block / 30) % 3];
+                ui.setRackExpanded (kind, ! ui.effectsRack().isShown (kind));
+                ui.refreshNow();
+            }
+            buffer.clear();
+            p.processBlock (buffer, midi);
+            out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + 256);
+        }
+        return out;
+    };
+    const auto plain = renderWith (false), toggled = renderWith (true);
+    REQUIRE (plain.size() == toggled.size());
+    CHECK (plain == toggled);
+    // (And the tails ring: SPACE and ECHO well after the note.)
+    double tail = 0.0;
+    for (std::size_t i = 48000 * 2; i < plain.size(); ++i)
+        tail = std::max (tail, static_cast<double> (std::abs (plain[i])));
+    CHECK (tail > 1.0e-4);
+}
+
+TEST_CASE ("analog: screenshots of the ECHO and SPACE racks at every width, ARP open and closed (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-rack-fx]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "space", 40.0f);
+    setValue (p, "echo", 50.0f);
+    for (const int width : { 1448, 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            const auto name = "rackfx-" + juce::String (width) + (arp ? "-arp" : "");
+            ui.setArpExpanded (arp);
+            ui.setRackExpanded (Kind::echo, true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            setValue (p, "echo.type", 0.0f);
+            shoot (name + "-1-echo-tape");
+            ui.setRackExpanded (Kind::space, true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            setValue (p, "space.engine", 0.0f);
+            shoot (name + "-2-space-rooms");
+            if (width != 1448 || arp)
+                continue;
+            ui.setRackExpanded (Kind::echo, true);
+            setValue (p, "echo.type", 2.0f);
+            setValue (p, "echo.sync", 1.0f);
+            shoot (name + "-3-echo-ascend-sync");
+            setValue (p, "echo.type", 1.0f);
+            shoot (name + "-4-echo-bbd");
+            ui.setRackExpanded (Kind::space, true);
+            for (const auto& [engine, label] : { std::pair { 1.0f, "abyss" }, std::pair { 2.0f, "vintage" }, std::pair { 3.0f, "bloom" } })
+            {
+                setValue (p, "space.engine", engine);
+                shoot (name + "-5-space-" + label);
+            }
+            setValue (p, "space.engine", 0.0f);
+            ui.openPopup (macroIndexOf (p, "space"));
+            shoot (name + "-6-space-popover-over-rack");
+            ui.closePopup();
         }
 }
