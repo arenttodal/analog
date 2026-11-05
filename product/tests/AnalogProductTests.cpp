@@ -30,6 +30,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <map>
+#include <optional>
 
 using andor::shell::ShellProcessor;
 using namespace andor::analog;
@@ -4320,6 +4321,77 @@ TEST_CASE ("analog: rack presets - by mode, the arrows, NAME * once edited, CUST
     osp::plugin::setRackPresetFolderForTest ({});
 }
 
+TEST_CASE ("analog: every rack's first control sits at one X, in every mode; the grid never moves", "[analog][rack][unified]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    std::optional<juce::Rectangle<int>> reference;
+    auto check = [&] (Kind kind, const char* id, int choices)
+    {
+        ui.setRackExpanded (kind, true);
+        for (int m = 0; m < choices; ++m)
+        {
+            setValue (p, id, static_cast<float> (m));
+            ui.refreshNow();
+            auto* module = ui.effectsRack().module (kind);
+            REQUIRE (module != nullptr);
+            const auto cell = osp::plugin::rackSlot (*module, 4);
+            INFO (osp::plugin::rack::name (kind) << " mode " << m);
+            if (! reference)
+                reference = cell;
+            CHECK (cell.getX() == reference->getX());           // left-aligned on one grid
+            CHECK (cell.getY() == reference->getY());
+            CHECK (cell.getWidth() == reference->getWidth());   // one pitch
+        }
+    };
+    check (Kind::space, "space.engine", 5);
+    check (Kind::movement, "movement.mode", 5);
+    check (Kind::echo, "echo.type", 3);
+}
+
+TEST_CASE ("analog: a rack preset's name, and its *, follow the settings through collapse, automation and the session", "[analog][rack][unified][rackpresets]")
+{
+    using osp::plugin::rack::Kind;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    juce::MemoryBlock session;
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        ui.setRackExpanded (Kind::echo, true);
+        ui.refreshNow();
+        REQUIRE (osp::plugin::rackPresetChoose (*ui.effectsRack().module (Kind::echo), "Worn Loop"));
+        // A change from the host (automation, undo) is a change: NAME *; back to the preset's value, NAME.
+        const float feedback = p.parameterValue ("echo.feedback");
+        setValue (p, "echo.feedback", 20.0f);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop *");
+        setValue (p, "echo.feedback", feedback);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop");
+        setValue (p, "echo.feedback", 20.0f);
+        // Collapsed and opened again (another module between): still the edited preset.
+        ui.setRackExpanded (Kind::space, true);
+        ui.setRackExpanded (Kind::echo, true);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop *");
+        p.getStateInformation (session);
+    }
+    // A new editor on the restored session: the same name and *.
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (q.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setRackExpanded (Kind::echo, true);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop *");
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
 TEST_CASE ("analog: screenshots of MOVEMENT, ECHO and SPACE in the unified rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-unified]")
 {
     using osp::plugin::rack::Kind;
@@ -4564,4 +4636,72 @@ TEST_CASE ("analog: screenshots of the macro row - every rack closed, each open 
         shoot ("macrorow-" + juce::String (label));
         ui.toggleRackFromLabel (kind);
     }
+}
+
+TEST_CASE ("analog: screenshots of every rack module in every mode, before / after a polish (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-polish]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    setValue (p, "space", 40.0f);
+    setValue (p, "echo", 50.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    const char* modes[] { "drift", "tape", "chorus", "pulse", "shaper" };
+    for (int m = 0; m < 5; ++m)
+    {
+        setValue (p, "movement.mode", static_cast<float> (m));
+        if (m == 3)
+            setValue (p, params::movementLaneId (0, "sync"), 1.0f);
+        shoot (juce::String ("polish-movement-") + modes[m]);
+    }
+    ui.setRackExpanded (Kind::echo, true);
+    const char* echoes[] { "tape", "bbd", "ascend" };
+    for (int m = 0; m < 3; ++m)
+    {
+        setValue (p, "echo.type", static_cast<float> (m));
+        shoot (juce::String ("polish-echo-") + echoes[m]);
+    }
+    setValue (p, "echo.type", 0.0f);
+    ui.setRackExpanded (Kind::space, true);
+    setValue (p, "space.engine", 0.0f);
+    setValue (p, "space.type", 1.0f);
+    shoot ("polish-space-hall");
+    setValue (p, "space.type", 2.0f);
+    shoot ("polish-space-plate");
+    for (const auto& [engine, label] : { std::pair { 1.0f, "abyss" }, std::pair { 2.0f, "vintage" }, std::pair { 3.0f, "bloom" } })
+    {
+        setValue (p, "space.engine", engine);
+        shoot (juce::String ("polish-space-") + label);
+    }
+    setValue (p, "space.engine", 0.0f);
+    setValue (p, "space.type", 1.0f);
+    for (const int w : { 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            width = w;
+            ui.setArpExpanded (arp);
+            for (const auto& [kind, label] : { std::pair { Kind::movement, "movement" }, std::pair { Kind::echo, "echo" }, std::pair { Kind::space, "space" } })
+            {
+                ui.setRackExpanded (kind, true);
+                shoot ("polish-" + juce::String (w) + (arp ? "-arp-" : "-") + label);
+            }
+        }
 }
