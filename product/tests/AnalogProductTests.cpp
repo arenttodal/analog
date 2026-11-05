@@ -21,6 +21,7 @@
 
 #include "audio/utility/TestSignals.h"
 #include "core/PitchMath.h"
+#include "engine/RhythmicShaper.h"
 #include "io/AudioFileIO.h"
 
 #include <catch2/catch_approx.hpp>
@@ -4389,6 +4390,36 @@ TEST_CASE ("analog: a rack preset's name, and its *, follow the settings through
     ui.setRackExpanded (Kind::echo, true);
     ui.refreshNow();
     CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop *");
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: SHAPER's rack presets are every pattern the popover offers, each loading its pattern", "[analog][rack][unified][rackpresets]")
+{
+    using osp::plugin::rack::Kind;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setRackExpanded (Kind::movement, true);
+    setValue (p, "movement.mode", 4.0f);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    REQUIRE (movement != nullptr);
+    const auto names = osp::plugin::rackPresetNames (*movement);
+    CHECK (names.size() == osp::RhythmicShaper::patternCount);
+    CHECK (names[0] == "Three");   // the instrument's own first
+    for (int i = 0; i < osp::RhythmicShaper::patternCount; ++i)
+    {
+        const auto upper = juce::String (osp::RhythmicShaper::patternName (i));
+        const auto name = upper.toLowerCase().substring (0, 1).toUpperCase() + upper.toLowerCase().substring (1);
+        INFO (name);
+        REQUIRE (names.contains (name));
+        REQUIRE (osp::plugin::rackPresetChoose (*movement, name));
+        CHECK (p.parameterValue ("movement.shaper.pattern") == Approx (static_cast<float> (i)));
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*movement) == name);
+    }
     osp::plugin::setRackPresetFolderForTest ({});
 }
 
