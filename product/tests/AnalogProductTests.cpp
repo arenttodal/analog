@@ -4669,6 +4669,131 @@ TEST_CASE ("analog: screenshots of the macro row - every rack closed, each open 
     }
 }
 
+TEST_CASE ("analog: MOVEMENT's header is the title and A / B; each lane's ON in its settings; copy / swap from A / B's menu", "[analog][rack][lanes]")
+{
+    using osp::plugin::rack::Kind;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setRackExpanded (Kind::movement, true);
+    ui.refreshNow();
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    const auto onA = params::movementLaneId (0, "on"), onB = params::movementLaneId (1, "on");
+
+    // The title row: only the lane selector (no ON, no LANES, no COPY / SWAP keys).
+    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Lane A|Lane B");
+
+    // Choosing a lane shows it and never switches either lane on or off.
+    const float a0 = p.parameterValue (onA), b0 = p.parameterValue (onB);
+    osp::plugin::showRackMovementLane (*module, 1);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementLane (*module) == 1);
+    CHECK (p.parameterValue (onA) == a0);
+    CHECK (p.parameterValue (onB) == b0);
+    osp::plugin::showRackMovementLane (*module, 0);
+    ui.refreshNow();
+    CHECK (p.parameterValue (onA) == a0);
+    CHECK (p.parameterValue (onB) == b0);
+
+    // The shown lane's ON: at the controls row's end, under PRESET's right end, never on a cell.
+    for (int mode = 0; mode < 5; ++mode)
+    {
+        setValue (p, "movement.mode", static_cast<float> (mode));
+        ui.refreshNow();
+        const auto on = osp::plugin::rackMovementLaneSwitch (*module);
+        const auto preset = osp::plugin::rackSlot (*module, 3), cell = osp::plugin::rackSlot (*module, 4);
+        INFO ("mode " << mode);
+        REQUIRE (! on.isEmpty());
+        CHECK (on.getRight() == preset.getRight());
+        CHECK (on.getY() > preset.getBottom());
+        CHECK (on.getY() < cell.getY() + 20);   // on the captions' line
+        CHECK (on.getX() > cell.getX() + 6 * cell.getWidth());   // right of the widest row (six cells)
+    }
+    // It switches the shown lane only.
+    osp::plugin::showRackMovementLane (*module, 1);
+    ui.refreshNow();
+    osp::plugin::clickRackMovementLaneSwitch (*module);
+    CHECK (p.parameterValue (onB) != b0);
+    CHECK (p.parameterValue (onA) == a0);
+    osp::plugin::clickRackMovementLaneSwitch (*module);
+    CHECK (p.parameterValue (onB) == b0);
+
+    // Copy and swap: from the A / B selector's menu, and the same in the presets' menu.
+    const auto actions = osp::plugin::rackMovementLaneActions (*module);
+    CHECK (actions.size() == 3);
+    CHECK (actions[2] == "Swap lanes A and B");
+    CHECK (osp::plugin::rackMovementPresetMenuExtras (*module) == actions);
+    setValue (p, juce::String ("movement.mode"), 2.0f);
+    setValue (p, params::movementBPrefix + "mode", 0.0f);
+    osp::plugin::runRackMovementLaneAction (*module, 0);   // copy A > B
+    CHECK (p.parameterValue (params::movementBPrefix + "mode") == Approx (2.0f));
+    setValue (p, params::movementBPrefix + "mode", 3.0f);
+    osp::plugin::runRackMovementLaneAction (*module, 2);   // swap
+    CHECK (p.parameterValue (juce::String ("movement.mode")) == Approx (3.0f));
+    CHECK (p.parameterValue (params::movementBPrefix + "mode") == Approx (2.0f));
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: screenshots of MOVEMENT's header - A / B, each lane on or off, next to ECHO and SPACE (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-header]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    shoot ("header-a-shown-b-off");
+    setValue (p, params::movementLaneId (1, "on"), 1.0f);
+    setValue (p, params::movementBPrefix + "mode", 2.0f);
+    osp::plugin::showRackMovementLane (*module, 1);
+    shoot ("header-b-shown-both-on");
+    setValue (p, params::movementLaneId (0, "on"), 0.0f);
+    shoot ("header-b-shown-a-off");
+    setValue (p, params::movementLaneId (0, "on"), 1.0f);
+    setValue (p, params::movementLaneId (1, "on"), 0.0f);
+    shoot ("header-b-shown-b-off");
+    setValue (p, params::movementBPrefix + "mode", 4.0f);
+    osp::plugin::setRackMovementWide (*module, true);
+    shoot ("header-shaper-wide");
+    osp::plugin::setRackMovementWide (*module, false);
+    osp::plugin::showRackMovementLane (*module, 0);
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        ui.setArpExpanded (true);
+        shoot ("header-" + juce::String (w) + "-arp");
+        ui.setArpExpanded (false);
+        shoot ("header-" + juce::String (w));
+    }
+    width = 1448;
+    ui.setRackExpanded (Kind::echo, true);
+    shoot ("header-echo");
+    ui.setRackExpanded (Kind::space, true);
+    shoot ("header-space");
+}
+
 TEST_CASE ("analog: screenshots of every rack module in every mode, before / after a polish (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-polish]")
 {
     using osp::plugin::rack::Kind;
