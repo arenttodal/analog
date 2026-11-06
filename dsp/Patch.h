@@ -1,6 +1,8 @@
 #pragma once
 
+#include "engine/Dampen.h"
 #include "engine/GranularSource.h"
+#include "engine/LayerEq.h"
 #include "engine/Modulation.h"
 #include "engine/ReimaginedModes.h"
 #include "engine/Shaping.h"
@@ -34,6 +36,8 @@ enum class NoiseColor { white, juno };
 enum class MorphMethod { imprint, fuse, weave };
 enum class MorphCarrier { osc1, osc2, both };
 enum class MorphOutput { morphOnly, layered };
+/** State version 8: what card C (the hybrid slot) plays; only the selected one sounds. */
+enum class HybridType { sample, oscillator, noise, instrumentPatch };
 
 /** A DCO slot's settings (its pulse width is the slot's WIDTH, its tuning and level the slot's). */
 struct DcoSettings
@@ -73,9 +77,9 @@ struct OrganicSettings
 /** MORPH: the recording turned into the chosen analog carrier. */
 struct MorphSettings
 {
-    bool enabled = false;
-    double position = 0.0;        ///< 0 the recording .. 1 the carrier
-    MorphMethod method = MorphMethod::imprint;
+    bool enabled = false;         ///< (the instrument's parameter defaults to on: state version 9)
+    double position = 0.5;        ///< state version 9: 0 the oscillators (A+B) .. 1 card C (before: the reverse)
+    MorphMethod method = MorphMethod::fuse;
     MorphCarrier carrier = MorphCarrier::both;
     double texture = 0.5;         ///< 0..1: the recording's noise / bow residue
     double attack = 0.5;          ///< 0..1: the recording's attack kept
@@ -189,7 +193,24 @@ struct Patch
     // LFO (global, as on the original instrument): ANDOR OSP's LFO 1 (shape, rate or sync,
     // phase, polarity, free / retrigger / one shot; CUSTOM is its drawn curve, Synth::setLfoCurve).
     osp::mod::LfoSettings lfo;
-    double lfoAmount = 0.0;         ///< 0..1: how much of the depths below is applied (the mod wheel adds the rest)
+    double lfoAmount = 0.0;         ///< 0..1: how much of the depths below is applied (WHEEL: the mod wheel adds the rest)
+    /** State version 10: the mod wheel brings in the rest of the depths below (the classic
+        wheel-to-LFO link). Off by default: the wheel moves only what it is routed to. */
+    bool wheelToLfo = false;
+
+    /** State version 11: MOVEMENT's lanes (the effects rack). Lane A is MOVEMENT itself (the
+        movement settings in `effects`, the MOVEMENT macro); lane B a second, independent
+        MOVEMENT with its own settings, in series after A, off by default. The macro scales
+        both: each lane plays at MOVEMENT x its LEVEL. Each lane's SYNC (PULSE on the tempo)
+        and PHASE are its Shaping's pulseSync, pulseDivision and movementPhase. */
+    struct MovementLane
+    {
+        bool on = true;
+        double level = 1.0;   ///< 0..1
+    };
+    MovementLane movementA;
+    MovementLane movementBLane { false, 1.0 };
+    osp::Shaping movementB;   ///< lane B's settings (its movement fields; its SHAPER CUSTOM steps from the shell)
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45
@@ -222,10 +243,13 @@ struct Patch
     double outputDb = 0.0;        ///< the master volume
     std::uint32_t seed = 1;
 
-    // The source: the oscillators as they are (ONE SHOT) or grains taken live from each
-    // voice's own recent sound (GRANULAR: POS how far back, SIZE, DENS, TUNE, SPREAD).
+    // Card A's source: OSC 1 (and the noise) as it is (REGULAR) or grains taken live from
+    // each voice's own recent OSC 1 sound (GRANULAR: POS how far back, SIZE, DENS, TUNE, SPREAD).
     bool granular = false;
     osp::GranularParams grains;
+    // Card B's, independently (state version 8): OSC 2 (and the ring) or its grains.
+    bool granular2 = false;
+    osp::GranularParams grains2;
 
     // REIMAGINED: ANDOR OSP's modes on the live sound (KALEIDOSCOPE, TAPE FRAME, TOYBOX,
     // MIRAGE; MOSAIC needs a recording's harmonic analysis and leaves the sound unchanged).
@@ -246,6 +270,48 @@ struct Patch
     bool chorusNoise = false;
     OrganicSettings organic;
     MorphSettings morph;
+    /** Each card's EQ and DAMPEN (ANDOR OSP's layerA/B.eq.* and .dampen.*), on that card's
+        own part of each voice, before the filter: A the oscillators and the noise, B ORGANIC
+        (and MORPH's result). Off by default: a patch without them sounds exactly as before.
+        DAMPEN's curve over the keys is the synth's (the shell's DAMPEN curves). */
+    osp::eq::Settings eqA, eqB;
+    osp::dampen::Settings dampenA, dampenB;
+
+    // State version 8: three engines (docs/THREE_ENGINE_ARCHITECTURE.md). Card A is OSC 1,
+    // card B OSC 2 (the shell's layer C), card C the hybrid (the shell's layer B: ORGANIC).
+    double osc1FineCents = 0.0;   ///< OSC 1's own DETUNE (OSC 2 had one: osc2FineCents)
+    /** Each oscillator's card M / S, resolved (a solo anywhere silences the cards without one).
+        Neutral by default: the legacy path, untouched. */
+    bool osc1Heard = true, osc2Heard = true;
+    /** Card B's EQ and DAMPEN (the shell's layerC.*): OSC 2's part (and ring), as card A's
+        is now OSC 1's (and the noise mixer's). */
+    osp::eq::Settings eqC;
+    osp::dampen::Settings dampenC;
+    HybridType hybridType = HybridType::sample;
+    /** OSC 3 (the hybrid as an oscillator): the slots' models and code, no sync or Poly Mod. */
+    OscModel osc3Model = OscModel::classic;
+    Osc2Wave osc3Wave = Osc2Wave::saw;
+    int osc3Octave = 0;
+    double osc3Coarse = 0.0, osc3FineCents = 0.0;
+    double osc3Width = 0.5;
+    double lfoWidth3 = 0.0;       ///< LFO 1 to OSC 3's pulse width (-0.45..0.45)
+    DcoSettings dco3;
+    WideSettings wide3;
+    /** NOISE (the hybrid as a noise source): the voice's own seeded noise, COLOR (white or the
+        Juno's), TONE (a low-pass, 0..1 of 200 Hz..18 kHz), MOVEMENT (a slow seeded drift of its
+        level, 0..1). It does not follow the key. */
+    NoiseColor hybridNoiseColor = NoiseColor::white;
+    double hybridNoiseTone = 1.0;
+    double hybridNoiseMovement = 0.0;
+    /** Card C's own pitch for a SAMPLE or INSTRUMENT PATCH (the notes it is played with move:
+        OCT octaves, DETUNE cents; its TUNE is the shell's layerB.tune). */
+    int hybridOctave = 0;
+    double hybridFineCents = 0.0;
+    /** VELO: how much a card's level follows velocity (0: not at all, the level as set; 1: soft
+        notes leave it silent, the hardest at its level). OSC 2's (card B) and card C's. */
+    double osc2Velo = 0.0, hybridVelo = 0.0;
+    /** NOISE's KEYS: how far its TONE follows the key (0: fixed; 1: an octave per octave from C4). */
+    double hybridNoiseKeys = 0.0;
 };
 
 } // namespace andor::analog

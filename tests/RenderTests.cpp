@@ -144,11 +144,12 @@ TEST_CASE ("render: every modulation route moves the sound when on, and nothing 
     CHECK (identical (play (depths), reference));
 }
 
-TEST_CASE ("render: the mod wheel brings in the LFO's depths", "[render][modulation]")
+TEST_CASE ("render: with WHEEL, the mod wheel brings in the LFO's depths", "[render][modulation]")
 {
     auto p = measurementPatch();
     p.lfoAmount = 0.0;
     p.lfoPitch1 = 1.0;
+    p.wheelToLfo = true;
     auto quiet = makeSynth (p);
     const auto still = render (*quiet, 1.0, { on (0, 69) });
     auto moving = makeSynth (p);

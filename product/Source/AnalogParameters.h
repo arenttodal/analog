@@ -120,6 +120,34 @@ namespace andor::analog::params
     inline const juce::String chorusNoise = "analog.juno.chorusNoise";
     inline const juce::String osc1Enabled = "analog.osc1.enabled";
     inline const juce::String osc2Enabled = "analog.osc2.enabled";
+    // State version 8: three engines (docs/THREE_ENGINE_ARCHITECTURE.md).
+    inline const juce::String osc1Fine = "analog.osc1.fine";
+    inline const juce::String hybridType = "analog.hybrid.type";
+    inline const juce::String osc3Model = "analog.osc3.model";
+    inline const juce::String osc3Wave = "analog.osc3.wave";
+    inline const juce::String osc3Octave = "analog.osc3.octave";
+    inline const juce::String osc3Coarse = "analog.osc3.coarse";
+    inline const juce::String osc3Fine = "analog.osc3.fine";
+    inline const juce::String osc3Width = "analog.osc3.width";
+    inline const juce::String lfoWidth3 = "analog.lfo.width3";
+    inline const juce::String osc3DcoSaw = "analog.osc3.dco.saw";
+    inline const juce::String osc3DcoPulse = "analog.osc3.dco.pulse";
+    inline const juce::String osc3DcoSub = "analog.osc3.dco.subLevel";
+    inline const juce::String osc3DcoPwmSource = "analog.osc3.dco.pwmSource";
+    inline const juce::String osc3DcoPwmDepth = "analog.osc3.dco.pwmDepth";
+    inline const juce::String osc3WideWave = "analog.osc3.wide.wave";
+    inline const juce::String osc3WideShape = "analog.osc3.wide.shape";
+    inline const juce::String osc3WideSpread = "analog.osc3.wide.spread";
+    inline const juce::String hybridNoiseColor = "analog.hybrid.noise.color";
+    inline const juce::String hybridNoiseTone = "analog.hybrid.noise.tone";
+    inline const juce::String hybridNoiseMovement = "analog.hybrid.noise.movement";
+    inline const juce::String hybridOctave = "analog.hybrid.octave";
+    inline const juce::String hybridFine = "analog.hybrid.fine";
+    inline const juce::String osc2Velo = "analog.osc2.velo";
+    inline const juce::String hybridVelo = "analog.hybrid.velo";
+    inline const juce::String hybridNoiseKeys = "analog.hybrid.noise.keys";
+    /** State version 8's own parameters (appended), for its migration and tests. */
+    const juce::StringArray& version8Ids();
     // ORGANIC is the shell's layer B (ProductInfo::hybridSampleName): its card's own LEVEL,
     // PAN, TUNE, START, LOOP, FOLLOW, REVERSE, M and S (ANDOR OSP's layerB.*, the same
     // meaning) play it; only the root override is the instrument's.
@@ -134,6 +162,19 @@ namespace andor::analog::params
     inline const juce::String morphDetail = "analog.morph.detail";
     inline const juce::String morphLevelMatch = "analog.morph.levelMatch";
     inline const juce::String morphOutput = "analog.morph.output";
+    /** State version 10: the mod wheel brings in LFO 1's depths (off: it moves only its routes). */
+    inline const juce::String lfoWheel = "analog.lfo.wheel";
+    /** State version 11: MOVEMENT's lanes. Lane A is MOVEMENT itself ("movement.*") with its
+        own ON, LEVEL, SYNC, CYCLE and PHASE here; lane B has all of MOVEMENT's settings under
+        its prefix ("analog.movement.b." + "mode", "drift.speed", ... "shaper.custom") and the
+        same five. */
+    inline const juce::String movementAPrefix = "analog.movement.a.";
+    inline const juce::String movementBPrefix = "analog.movement.b.";
+    /** A lane's own (0 A, 1 B): "on", "level", "sync", "pulse.division", "phase"; for lane B
+        also every MOVEMENT setting's name. */
+    inline juce::String movementLaneId (int lane, const char* name) { return (lane == 0 ? movementAPrefix : movementBPrefix) + name; }
+    /** MOVEMENT's settings' names (each lane has them all: lane A as "movement." + name). */
+    const juce::StringArray& movementSettingNames();
     /** Every parameter state version 4 added (the V3 -> V4 migration sets them to their defaults). */
     const juce::StringArray& version4Ids();
 
@@ -162,10 +203,13 @@ namespace andor::analog::params
         /** The patch the parameters describe now (real-time safe). */
         Patch read() const noexcept;
         /** GRANULAR's KEY DNA as the parameters describe it (real-time safe; flat curves). */
+        /** KEY DNA before state version 6 (the analog.keyDna.* parameters): for migration. */
         osp::keydna::Settings keyDna (std::uint32_t seed) const noexcept;
+        /** KEY DNA's AMOUNT (layerA.keyDna.amount), 0..1. */
+        double keyDnaCardAmount() const noexcept;
 
         // Modulation (real-time safe).
-        static constexpr int maxValues = 256;
+        static constexpr int maxValues = 384;
         using Values = std::array<float, maxValues>;
         /** Every raw value now, in the reader's order. */
         void snapshot (Values& raw) const noexcept;

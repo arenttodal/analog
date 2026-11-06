@@ -5,17 +5,23 @@
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "ArpSection.h"
 #include "Binding.h"
 #include "CeramicSkin.h"
 #include "FactoryPatches.h"
 #include "MacroPopups.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
+#include "SampleImport.h"
+#include "SamplePatches.h"
+#include "KontaktImport.h"
+#include "SampleSourceUI.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
 #include "audio/utility/TestSignals.h"
 #include "core/PitchMath.h"
+#include "engine/RhythmicShaper.h"
 #include "io/AudioFileIO.h"
 
 #include <catch2/catch_approx.hpp>
@@ -25,6 +31,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <map>
+#include <optional>
 
 using andor::shell::ShellProcessor;
 using namespace andor::analog;
@@ -32,6 +39,21 @@ using Catch::Approx;
 
 namespace
 {
+    /** Points the shell's sample store at `folder` (empty: back to the default). POSIX setenv /
+        unsetenv do not exist on Windows; the CRT's _putenv_s does what the shell's getenv reads. */
+    void setSampleStore (const juce::File& folder)
+    {
+        const auto path = folder == juce::File() ? juce::String() : folder.getFullPathName();
+       #if JUCE_WINDOWS
+        ::_putenv_s ("ANDOR_SAMPLE_STORE", path.toRawUTF8());
+       #else
+        if (path.isEmpty())
+            ::unsetenv ("ANDOR_SAMPLE_STORE");
+        else
+            ::setenv ("ANDOR_SAMPLE_STORE", path.toRawUTF8(), 1);
+       #endif
+    }
+
     constexpr double rate = 48000.0;
     constexpr int block = 512;
 
@@ -43,6 +65,9 @@ namespace
     /** The test phrase: a chord, a pitch bend, a legato line, releases. */
     const std::vector<Note> phrase { { 0, 57, 90 }, { 0, 64, 90 }, { 0, 69, 90 }, { 9000, 72, 90 }, { 14000, 57, 0 }, { 14000, 64, 0 },
                                      { 15000, 74, 90 }, { 16000, 72, 0 }, { 20000, 69, 0 }, { 24000, 74, 0 } };
+
+    /** The mod wheel renderShell moves to at its start (CC 1, 0..127; below 0: untouched). */
+    int renderModWheel = -1;
 
     juce::AudioBuffer<float> renderShell (ShellProcessor& p, double seconds, const std::vector<Note>& notes = phrase, bool bend = true)
     {
@@ -59,6 +84,8 @@ namespace
                                    n.sample - pos);
             if (bend && pos <= 6000 && 6000 < pos + block)
                 midi.addEvent (juce::MidiMessage::pitchWheel (1, 12000), 6000 - pos);
+            if (renderModWheel >= 0 && pos == 0)
+                midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, renderModWheel), 0);
             p.processBlock (buffer, midi);
             const int n = std::min (block, total - pos);
             for (int ch = 0; ch < 2; ++ch)
@@ -191,7 +218,29 @@ namespace
             };
         };
         auto granular = [] (Patch& c) { c.granular = true; };
+        auto granular2 = [] (Patch& c) { c.granular2 = true; };   // (card B's own, state version 8)
+        auto abyss = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::abyss; };   // (ABYSS's own: heard on ABYSS)
+        auto vintage = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::vintage; };
+        auto bloom = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::bloom; };
+        auto bloomFree = [] (Patch& c) {   // (free TIME is heard when SYNC is off)
+            c.effects.spaceEngine = osp::SpaceEngine::bloom;
+            c.effects.bloomSync = false;
+        };
         std::map<juce::String, std::function<void (Patch&)>> modes {
+            { "space.abyss.gravity", abyss },
+            { "space.abyss.freeze", abyss },
+            { "space.abyss.resonance", abyss },
+            { "space.abyss.variant", abyss },
+            { "space.vintage.variant", vintage },
+            { "space.vintage.era", vintage },
+            { "space.vintage.diffusion", vintage },
+            { "space.bloom.variant", bloom },
+            { "space.bloom.sync", bloom },
+            { "space.bloom.division", bloom },
+            { "space.bloom.time", bloomFree },
+            { "space.bloom.diffusion", bloom },
+            { "echo.ascend.interval", [] (Patch& c) { c.effects.echoType = osp::EchoType::ascend; } },
+            { "echo.ascend.motion", [] (Patch& c) { c.effects.echoType = osp::EchoType::ascend; } },
             { params::unisonDetune, [] (Patch& c) { c.unison = true; } },
             { "glide", [] (Patch& c) { c.voiceMode = VoiceMode::mono; } },
             { "mod.lfo1.division", [] (Patch& c) { c.lfo.sync = true; } },
@@ -223,6 +272,11 @@ namespace
             { "layerA.granular.density", granular },
             { "layerA.granular.tune", granular },
             { "layerA.granular.spread", granular },
+            { "layerC.granular.position", granular2 },
+            { "layerC.granular.size", granular2 },
+            { "layerC.granular.density", granular2 },
+            { "layerC.granular.tune", granular2 },
+            { "layerC.granular.spread", granular2 },
             { "movement.tape.wow", movementMode (osp::MovementMode::tape) },
             { "movement.tape.flutter", movementMode (osp::MovementMode::tape) },
             { "movement.tape.wear", movementMode (osp::MovementMode::tape) },
@@ -238,6 +292,39 @@ namespace
             { "movement.shaper.smooth", movementMode (osp::MovementMode::shaper) },
             { "movement.shaper.custom", movementMode (osp::MovementMode::shaper) },
         };
+        // State version 11: MOVEMENT's lanes. Lane A's SYNC and CYCLE act on a PULSE, its PHASE
+        // on a SHAPER; lane B's settings act with lane B on, in their mode.
+        {
+            using namespace params;
+            auto laneA = [] (osp::MovementMode m, bool sync) { return [m, sync] (Patch& c) { c.effects.movementMode = m; c.effects.pulseSync = sync; }; };
+            modes[movementLaneId (0, "sync")] = laneA (osp::MovementMode::pulse, false);
+            modes[movementLaneId (0, "pulse.division")] = laneA (osp::MovementMode::pulse, true);
+            modes[movementLaneId (0, "phase")] = laneA (osp::MovementMode::shaper, false);
+            auto laneB = [] (osp::MovementMode m, bool sync) {
+                return [m, sync] (Patch& c) {
+                    c.movementBLane.on = true;
+                    c.movementB.movementMode = m;
+                    c.movementB.pulseSync = sync;
+                };
+            };
+            for (const char* name : { "level", "mode", "drift.speed", "drift.pitch", "drift.tone" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::drift, false);
+            modes[movementBPrefix + "mode"] = laneB (osp::MovementMode::tape, false);   // (from TAPE to another)
+            for (const char* name : { "tape.wow", "tape.flutter", "tape.wear" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::tape, false);
+            for (const char* name : { "chorus.rate", "chorus.width", "chorus.stereo" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::chorus, false);
+            for (const char* name : { "pulse.rate", "pulse.shape", "pulse.stereo", "sync" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::pulse, false);
+            modes[movementBPrefix + "pulse.division"] = laneB (osp::MovementMode::pulse, true);
+            for (const char* name : { "phase", "shaper.pattern", "shaper.rate", "shaper.target", "shaper.smooth" })
+                modes[movementBPrefix + name] = laneB (osp::MovementMode::shaper, false);
+            // CUSTOM plays lane B's own steps (THREE's, by default) instead of another pattern.
+            modes[movementBPrefix + "shaper.custom"] = [laneB] (Patch& c) {
+                laneB (osp::MovementMode::shaper, false) (c);
+                c.movementB.shaper.pattern = 7;
+            };
+        }
         // State version 4: each model's settings act in that model; PWM depth with a source
         // (and the source with a depth); SUPER SAW's spread on SUPER SAW; the OTA's voicing and
         // slope on the OTA; the Juno variant through the high-pass; the chorus' hiss with it on.
@@ -268,6 +355,31 @@ namespace
             };
         }
         modes[params::noiseColor] = [] (Patch& c) { c.noiseLevel = 0.5; };
+        // State version 8: card C as OSC 3 (each model's settings in that model) or NOISE.
+        auto osc3 = [] (OscModel m, std::function<void (Patch&)> more = {}) {
+            return [m, more] (Patch& c) {
+                c.hybridType = HybridType::oscillator;
+                c.osc3Model = m;
+                c.osc3Wave = Osc2Wave::all;
+                if (more != nullptr)
+                    more (c);
+            };
+        };
+        for (const auto& id : { params::osc3Model, params::osc3Wave, params::osc3Octave, params::osc3Coarse, params::osc3Fine, params::osc3Width, params::lfoWidth3 })
+            modes[id] = osc3 (OscModel::classic);
+        for (const auto& id : { params::osc3DcoSaw, params::osc3DcoPulse, params::osc3DcoSub })
+            modes[id] = osc3 (OscModel::dco);
+        modes[params::osc3DcoPwmSource] = osc3 (OscModel::dco, [] (Patch& c) { c.dco3.pulse = true; c.dco3.pwmDepth = 0.6; });
+        modes[params::osc3DcoPwmDepth] = osc3 (OscModel::dco, [] (Patch& c) { c.dco3.pulse = true; c.dco3.pwmSource = PwmSource::lfo; });
+        modes[params::osc3WideWave] = osc3 (OscModel::wide);
+        modes[params::osc3WideShape] = osc3 (OscModel::wide);
+        modes[params::osc3WideSpread] = osc3 (OscModel::wide, [] (Patch& c) { c.wide3.wave = WideWave::superSaw; });
+        for (const auto& id : { params::hybridNoiseColor, params::hybridNoiseTone, params::hybridNoiseMovement })
+            modes[id] = [] (Patch& c) { c.hybridType = HybridType::noise; };
+        modes[params::hybridNoiseKeys] = [] (Patch& c) {
+            c.hybridType = HybridType::noise;
+            c.hybridNoiseTone = 0.4;   // (KEYS moves the tone: heard below full brightness)
+        };
         modes[params::otaCharacter] = [] (Patch& c) {
             c.filterModel = FilterModel::ota;
             c.resonance = 0.6;
@@ -284,12 +396,12 @@ namespace
             modes[id] = [id] (Patch& c) {
                 c.morph.enabled = true;
                 c.morph.position = id == params::morphTexture || id == params::morphAttack ? 0.3 : 0.5;
+                if (id == params::morphDetail)
+                    c.tone = 1.0;   // (DETAIL's upper partials heard through an open filter)
             };
 
-        // KEY DNA is GRANULAR's, and its settings act while it is on.
-        for (const auto& id : { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
-                                params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune })
-            modes[id] = granular;
+        // KEY DNA is GRANULAR's, and its AMOUNT acts while it is on (the test switches it on).
+        modes[osp::plugin::InstrumentHost::keyDnaAmountId (0)] = granular;
         return { context, modes };
     }
 
@@ -313,9 +425,9 @@ TEST_CASE ("analog: the parameters' defaults are the INIT patch", "[analog][para
     params::Reader reader;
     reader.attach (p.parameters);
     auto init = params::valuesOf (Patch()), read = params::valuesOf (reader.read());
-    // The one exception: the A/B mix is ANDOR OSP's parameter, its default all A (one layer:
-    // not heard). The INIT patch's 0.5 is where the shell puts it when a recording joins.
-    CHECK (read.at ("ab.blend") == 0.0f);
+    // The A/B mix is ANDOR OSP's parameter (its default all A); three engines put it in the
+    // middle at once (every card heard), the INIT patch's 0.5.
+    CHECK (read.at ("ab.blend") == 0.5f);
     CHECK (init.at ("ab.blend") == 0.5f);
     init.erase ("ab.blend");
     read.erase ("ab.blend");
@@ -370,12 +482,18 @@ TEST_CASE ("analog: the factory presets are installed, listed and load exactly",
         params::Reader reader;
         reader.attach (p.parameters);
         checkSameValues (params::valuesOf (factory.patch), params::valuesOf (reader.read()), p);
-        // KEY DNA (not part of the patch): on, with the sound's variation, where it has one.
-        const auto dna = reader.keyDna (factory.patch.seed);
-        const auto wanted = keyDnaOf (factory);
-        CHECK (dna.enabled == wanted.enabled);
-        if (wanted.enabled)
-            CHECK (dna[osp::keydna::Param::size].variation == Approx (wanted[osp::keydna::Param::size].variation).margin (1.0e-3));
+        // KEY DNA (not part of the patch; ANDOR OSP's, in the preset's KeyDna tree): on, with
+        // the sound's own profile, where it has one; otherwise off.
+        const auto dna = p.keyDnaSettings (0);
+        if (factory.keyDna > 0.0)
+        {
+            auto wanted = keyDnaOf (factory);
+            wanted.amount = 1.0;
+            CHECK (dna == wanted);
+        }
+        else
+            CHECK_FALSE (dna.enabled);
+        CHECK (p.parameterValue (osp::plugin::InstrumentHost::keyDnaAmountId (0)) == 100.0f);
     }
     // A second instance does not write them again (same version), and a musician's preset
     // beside them is kept.
@@ -452,16 +570,28 @@ TEST_CASE ("analog: a session recalls the sound exactly", "[analog][state]")
     CHECK (identical (before, renderShell (q, 0.5)));
 }
 
-TEST_CASE ("analog: the card shows the oscillators, and its picture follows them", "[analog][editor]")
+TEST_CASE ("analog: cards A and B show OSC 1 and OSC 2, each its own picture following only its oscillator", "[analog][editor]")
 {
     ShellProcessor p;
-    osp::plugin::InstrumentHost::GeneratedSource a, b;
+    osp::plugin::InstrumentHost::GeneratedSource a, b, a2, b2;
     REQUIRE (p.generatedSource (0, a));
-    CHECK (a.name == "OSCILLATORS");
-    setValue (p, params::osc1Wave, 1.0f);   // pulse
-    REQUIRE (p.generatedSource (0, b));
-    CHECK (a.revision != b.revision);
-    CHECK (a.cycle != b.cycle);
+    REQUIRE (p.generatedSource (2, b));   // (card B is the shell's layer C)
+    CHECK (a.name == "OSC 1");
+    CHECK (b.name == "OSC 2");
+    CHECK (osp::plugin::InstrumentHost::shownLayerName (2) == "B");
+    CHECK (osp::plugin::InstrumentHost::shownLayerName (1) == "C");
+    setValue (p, params::osc1Wave, 1.0f);   // OSC 1 pulse: card A's picture moves, card B's does not
+    REQUIRE (p.generatedSource (0, a2));
+    REQUIRE (p.generatedSource (2, b2));
+    CHECK (a.cycle != a2.cycle);
+    CHECK (b.cycle == b2.cycle);
+    setValue (p, params::osc2Wave, 2.0f);   // OSC 2 pulse: card B's moves
+    REQUIRE (p.generatedSource (2, b2));
+    CHECK (b.cycle != b2.cycle);
+    // The empty hybrid: a stand-in (its card full, its picture faint, ADD SAMPLE).
+    osp::plugin::InstrumentHost::GeneratedSource c;
+    REQUIRE (p.generatedSource (1, c));
+    CHECK (c.placeholder.startsWith ("ADD SAMPLE"));
 }
 
 TEST_CASE ("analog: GRANULAR's grains are shown on the card where they read, on POS's scale", "[analog][editor][granular]")
@@ -497,8 +627,7 @@ TEST_CASE ("analog: GRANULAR's grains are shown on the card where they read, on 
 TEST_CASE ("analog: every control the interface enables moves the sound; every one it disables does not", "[analog][bindings]")
 {
     auto [context, modes] = soundContext();
-    const juce::StringArray keyDnaOn { params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize,
-                                       params::keyDnaDensity, params::keyDnaSpread, params::keyDnaTune };
+    const juce::StringArray keyDnaOn { osp::plugin::InstrumentHost::keyDnaAmountId (0) };
 
     // The arpeggiator's settings act while it plays (in 32nds: a few cycles in the phrase).
     // The modulation's sources and routes act through a route: each tried with one to TONE.
@@ -511,10 +640,19 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             setValue (q, osp::plugin::InstrumentHost::modRouteId (slot, "depth"), 50.0f);
         };
     };
-    for (const char* id : { "arp.pattern", "arp.rate", "arp.gate", "arp.octaves", "arp.swing", "arp.velocity" })
+    for (const char* id : { "arp.pattern", "arp.rate", "arp.gate", "arp.octaves", "arp.swing", "arp.velocity", "analog.arp.link", "analog.arp.cardA", "analog.arp.cardB", "analog.arp.cardC" })
         setups[id] = [] (ShellProcessor& q) {
             setValue (q, "arp.enabled", 1.0f);
             setValue (q, "arp.rate", 3.0f);
+        };
+    // The per-card arpeggiator's own settings act on their card while unlinked.
+    for (const char* id : { "analog.arp.cardB.pattern", "analog.arp.cardB.rate", "analog.arp.cardB.octaves", "analog.arp.cardC.pattern", "analog.arp.cardC.rate", "analog.arp.cardC.octaves" })
+        setups[id] = [] (ShellProcessor& q) {
+            setValue (q, "arp.enabled", 1.0f);
+            setValue (q, "analog.arp.link", 0.0f);
+            setValue (q, "arp.rate", 3.0f);
+            setValue (q, "analog.arp.cardB.rate", 3.0f);
+            setValue (q, "analog.arp.cardC.rate", 3.0f);
         };
     for (const char* name : { "shape", "rate", "sync", "division", "phase", "polarity", "mode", "scope" })
         setups[osp::plugin::InstrumentHost::modLfoId (1, name)] = [route, name] (ShellProcessor& q) {
@@ -534,8 +672,35 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
                 setValue (q, osp::plugin::InstrumentHost::modEnvId (e, "length"), 400.0f);
             };
     for (int r = 0; r < osp::mod::maxRoutes; ++r)
-        for (const char* name : { "source", "dest", "depth", "enabled" })
-            setups[osp::plugin::InstrumentHost::modRouteId (r, name)] = route (r, 1);   // LFO 1 -> TONE
+        for (const char* name : { "source", "dest", "depth", "enabled", "destExt" })
+            setups[osp::plugin::InstrumentHost::modRouteId (r, name)] = route (r, 1);   // LFO 1 -> TONE (destExt: -> MIX)
+
+    // Each card's EQ and DAMPEN (ANDOR OSP's): a band's settings act while the EQ and that band
+    // are on (a shelf or bell with gain); DAMPEN's while it is on (its corner in its own mode).
+    using Host = osp::plugin::InstrumentHost;
+    for (int layer = 0; layer < 3; ++layer)
+    {
+        for (const auto& name : Host::eqParameterNames())
+            setups[Host::eqParameterId (layer, name)] = [layer, name] (ShellProcessor& q) {
+                const auto band = name == "enabled" ? juce::String ("bell") : name.upToFirstOccurrenceOf (".", false, false);
+                setValue (q, Host::eqParameterId (layer, "enabled"), 1.0f);
+                setValue (q, Host::eqParameterId (layer, band + ".enabled"), 1.0f);
+                setValue (q, Host::eqParameterId (layer, band + ".frequency"), 2000.0f);
+                if (q.parameters.getParameter (Host::eqParameterId (layer, band + ".gain")) != nullptr)
+                    setValue (q, Host::eqParameterId (layer, band + ".gain"), 12.0f);
+                if (name == "enabled")
+                    setValue (q, Host::eqParameterId (layer, "enabled"), 0.0f);   // (then switched)
+                else if (name.endsWith (".enabled"))
+                    setValue (q, Host::eqParameterId (layer, name), 0.0f);
+            };
+        for (const char* name : { "mode", "amount", "frequency", "cutoff" })
+            setups[Host::dampenParameterId (layer, name)] = [layer, name] (ShellProcessor& q) {
+                setValue (q, Host::dampenParameterId (layer, "enabled"), 1.0f);
+                setValue (q, Host::dampenParameterId (layer, "amount"), 100.0f);
+                setValue (q, Host::dampenParameterId (layer, "cutoff"), 500.0f);
+                setValue (q, Host::dampenParameterId (layer, "mode"), juce::String (name) == "cutoff" ? 1.0f : 0.0f);
+            };
+    }
 
     const auto bound = params::engineParameterIds();
     auto isBound = [&bound] (const juce::String& id) {
@@ -564,10 +729,17 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         auto patch = context;
         if (const auto mode = modes.find (id); mode != modes.end())
             mode->second (patch);
+        renderModWheel = id == params::lfoWheel ? 127 : -1;   // (WHEEL acts with the wheel up)
         p.resetSettings();
         apply (p, patch);
         if (keyDnaOn.contains (id))
-            setValue (p, params::keyDna, 1.0f);
+        {
+            osp::keydna::Settings dna;   // (ANDOR OSP's editor's settings: on, each key its own grains)
+            dna.enabled = true;
+            for (const auto param : { osp::keydna::Param::position, osp::keydna::Param::size, osp::keydna::Param::density })
+                dna[param].variation = 0.6;
+            p.setKeyDnaSettings (0, dna, "KEY DNA", false);
+        }
         if (const auto setup = setups.find (id); setup != setups.end())
             setup->second (p);
         const auto reference = renderShell (p, 0.6);
@@ -592,10 +764,12 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             ++checkedUnbound;
         }
     }
+    renderModWheel = -1;
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
-    // and the modulation's: LFO 2, ENV 1 and 2, the 16 routes ("mod.*"; LFO 1's are listed).
-    CHECK (checkedBound == bound.size() - 4 + 7 + (8 + 2 * 7 + 4 * osp::mod::maxRoutes));
-    CHECK (checkedUnbound > 150);
+    // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), and
+    // the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
+    CHECK (checkedBound == bound.size() - 5 + 7 + 10 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 5: "analog.arp.*" is a pattern too)
+    CHECK (checkedUnbound > 100);
 }
 
 TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL through a route)", "[analog][modulation]")
@@ -616,6 +790,8 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
              { D::levelA, "layerA.level" }, { D::panA, "layerA.pan" }, { D::fineTuneA, "layerA.tune" }, { D::reimaginedA, "reimagined" },
              { D::grainPositionA, "layerA.granular.position" }, { D::grainDensityA, "layerA.granular.density" },
              { D::grainSizeA, "layerA.granular.size" }, { D::grainSpreadA, "layerA.granular.spread" },
+             { D::grainPositionC, "layerC.granular.position" }, { D::grainDensityC, "layerC.granular.density" },   // (card B's grains)
+             { D::grainSizeC, "layerC.granular.size" }, { D::grainSpreadC, "layerC.granular.spread" },
              { D::ampAttack, "attack" }, { D::ampDecay, "decay" }, { D::ampSustain, "sustainLevel" }, { D::ampRelease, "release" } })
         dests.emplace_back (d, juce::String (id));
 
@@ -650,6 +826,36 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
         CHECK (d > 1.0e-5);
         // ... and it shows on the control: the destination maps back to it.
         CHECK (osp::plugin::modui::destinationFor (id, true) == dest);
+    }
+
+    // ANDOR OSP's second destination list (mod.routeN.destExt): the header's MIX (the A/B mix
+    // between the oscillators and ORGANIC) and card A's KEY DNA AMOUNT (in GRANULAR, KEY DNA on).
+    for (const auto dest : { D::mixPosition, D::keyDnaAmountA })
+    {
+        INFO (osp::mod::destInfo (dest).name);
+        auto patch = context;
+        patch.granular = dest == D::keyDnaAmountA;
+        p.resetSettings();
+        apply (p, patch);
+        if (dest == D::keyDnaAmountA)
+        {
+            osp::keydna::Settings dna;
+            dna.enabled = true;
+            for (const auto param : { osp::keydna::Param::position, osp::keydna::Param::size, osp::keydna::Param::density })
+                dna[param].variation = 0.6;
+            p.setKeyDnaSettings (0, dna, "KEY DNA", false);
+            setValue (p, osp::plugin::InstrumentHost::keyDnaAmountId (0), 20.0f);
+        }
+        const auto reference = renderShell (p, 0.6);
+        // (MIX is the instrument's, not a note's: a global source, LFO 1; per-note MIX is later.)
+        setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "source"), dest == D::mixPosition ? 1.0f : vel);
+        setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "destExt"), static_cast<float> (osp::mod::extendedChoiceOf (dest)));
+        setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "depth"), 50.0f);
+        REQUIRE (p.modulationRoutes().size() == 1);
+        CHECK (p.modulationRoutes().front().state == osp::mod::RouteState::active);
+        const double d = differenceRms (reference, renderShell (p, 0.6));
+        UNSCOPED_INFO (20.0 * std::log10 (std::max (d, 1.0e-12)) << " dB");
+        CHECK (d > 1.0e-5);
     }
 }
 
@@ -723,6 +929,126 @@ TEST_CASE ("analog: a version-1 session or preset is migrated and sounds as it d
     ShellProcessor r;
     r.setStateInformation (withMovement.getData(), static_cast<int> (withMovement.getSize()));
     CHECK (r.parameters.getRawParameterValue ("motion")->load() == Approx (50.0f));
+}
+
+TEST_CASE ("analog: a version-5 session's KEY DNA moves into ANDOR OSP's editor and sounds as it did", "[analog][state][keydna]")
+{
+    // Version 5 kept KEY DNA in analog.keyDna.* (seeded by the patch's seed); version 6 in
+    // ANDOR OSP's KEY DNA (the session's KeyDna tree, AMOUNT layerA.keyDna.amount).
+    auto prepare = [] (ShellProcessor& q) {
+        apply (q, factoryPatches()[1].patch);
+        setValue (q, "space", 0.0f);
+        setValue (q, "echo", 0.0f);
+        setValue (q, "layerA.sourceMode", 1.0f);   // GRANULAR (the whole voice's then: both cards')
+        setValue (q, "layerC.sourceMode", 1.0f);
+        setValue (q, "seed", 4242.0f);
+    };
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        prepare (old);
+        setValue (old, params::keyDna, 1.0f);
+        setValue (old, params::keyDnaAmount, 70.0f);
+        setValue (old, params::keyDnaIndividuality, 80.0f);
+        setValue (old, params::keyDnaPosition, 60.0f);
+        setValue (old, params::keyDnaSize, 45.0f);
+        setValue (old, params::keyDnaDensity, 30.0f);
+        setValue (old, params::keyDnaSpread, 20.0f);
+        setValue (old, params::keyDnaTune, 10.0f);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 5);   // as version 5 wrote it: no KeyDna tree
+    xml->deleteAllChildElementsWithTagName ("KeyDna");
+    juce::MemoryBlock v5;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v5);
+
+    // What version 5 played: its parameters' profile (Reader::keyDna, the patch's seed).
+    ShellProcessor reference;
+    prepare (reference);
+    osp::keydna::Settings expected;
+    expected.enabled = true;
+    expected.individuality = 0.8;
+    expected.seed = 4242;
+    using osp::keydna::Param;
+    expected[Param::position].variation = 0.6;
+    expected[Param::size].variation = 0.45;
+    expected[Param::density].variation = 0.3;
+    expected[Param::spread].variation = 0.2;
+    expected[Param::tune].variation = 0.1;
+    reference.setKeyDnaSettings (0, expected, "KEY DNA", false);
+    setValue (reference, osp::plugin::InstrumentHost::keyDnaAmountId (0), 70.0f);
+    const auto played = renderShell (reference, 0.8);
+
+    ShellProcessor p;
+    p.setStateInformation (v5.getData(), static_cast<int> (v5.getSize()));
+    const auto dna = p.keyDnaSettings (0);
+    CHECK (dna.enabled);
+    CHECK (dna.seed == 4242u);
+    CHECK (dna.individuality == Approx (0.8).margin (1.0e-4));
+    CHECK (dna[Param::size].variation == Approx (0.45).margin (1.0e-4));
+    CHECK (p.parameterValue (osp::plugin::InstrumentHost::keyDnaAmountId (0)) == Approx (70.0f));
+    const auto migrated = renderShell (p, 0.8);
+    CHECK (differenceRms (migrated, played) < 1.0e-6);
+
+    // KEY DNA is heard (off, the sound differs), and today's session keeps it exactly.
+    ShellProcessor off;
+    prepare (off);
+    CHECK (differenceRms (renderShell (off, 0.8), played) > 1.0e-4);
+    juce::MemoryBlock now;
+    p.getStateInformation (now);
+    ShellProcessor q;
+    q.setStateInformation (now.getData(), static_cast<int> (now.getSize()));
+    CHECK (q.keyDnaSettings (0) == p.keyDnaSettings (0));
+    CHECK (differenceRms (renderShell (q, 0.8), played) < 1.0e-6);
+}
+
+TEST_CASE ("analog: KEY DNA is ANDOR OSP's editor: opened from the card, edits undoable, saved with the session", "[analog][editor][keydna]")
+{
+    ShellProcessor p;
+    CHECK (p.hasKeyDna());
+    setValue (p, "layerA.sourceMode", 1.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.refreshNow();
+    REQUIRE (ui.engineCard (0).onKeyDna != nullptr);
+    ui.engineCard (0).onKeyDna (0);
+    auto* panel = ui.keyDnaWindow();
+    REQUIRE (panel != nullptr);
+    CHECK (panel->layer() == 0);
+    CHECK (panel->isVisible());
+    CHECK (panel->getHeight() > 300);   // (ANDOR OSP's place: over the instrument, above the keys)
+
+    // An edit through the host (as the editor makes it): one undo step.
+    auto dna = p.keyDnaSettings (0);
+    dna.enabled = true;
+    dna[osp::keydna::Param::size].variation = 0.5;
+    p.setKeyDnaSettings (0, dna, "KEY DNA", true);
+    CHECK (p.keyDnaSettings (0).enabled);
+    p.undo().undo();
+    CHECK_FALSE (p.keyDnaSettings (0).enabled);
+    p.undo().redo();
+    CHECK (p.keyDnaSettings (0).enabled);
+    // A drawn curve is kept as drawn.
+    osp::mod::Curve curve;
+    curve.count = 3;
+    curve.points[0] = { 0.0f, 0.2f, 0.0f };
+    curve.points[1] = { 0.5f, 0.8f, 0.0f };
+    curve.points[2] = { 1.0f, 0.4f, 0.0f };
+    p.setKeyDnaCurve (0, osp::keydna::Param::position, curve, true);
+    CHECK (p.keyDnaCurve (0, osp::keydna::Param::position) == curve);
+    panel->refresh();
+    ui.closeKeyDna();
+    CHECK (ui.keyDnaWindow() == nullptr);
+
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.keyDnaSettings (0) == p.keyDnaSettings (0));
+    CHECK (q.keyDnaCurve (0, osp::keydna::Param::position) == curve);
+    editor.reset();
 }
 
 TEST_CASE ("analog: a version-2 session's BLEND moves into the oscillators' levels and sounds as it did", "[analog][state]")
@@ -809,7 +1135,8 @@ TEST_CASE ("analog: a version-3 session opens with every version-4 setting neutr
     {
         INFO (id);
         auto* parameter = p.parameters.getParameter (id);
-        CHECK (parameter->getValue() == Approx (parameter->getDefaultValue()).margin (1.0e-6));
+        // (MORPH, on in a new instrument since version 9, stays off in a session from before it.)
+        CHECK (parameter->getValue() == Approx (id == params::morphEnabled ? 0.0f : parameter->getDefaultValue()).margin (1.0e-6));
     }
     const auto after = renderShell (p, 0.5, phrase, false);
     for (int c = 0; c < 2; ++c)
@@ -841,41 +1168,103 @@ TEST_CASE ("analog: a version-4 session rests at the A/B mix's centre, where ORG
     CHECK (q.parameterValue ("ab.blend") == Approx (0.0f));
 }
 
+TEST_CASE ("analog: taking the MORPH knob in hand switches MORPH on; the factory presets have it on", "[analog][morph]")
+{
+    ShellProcessor p;
+    setValue (p, params::morphEnabled, 0.0f);   // (a preset or session with MORPH off)
+    auto* position = p.parameters.getParameter (params::morphPosition);
+    REQUIRE (position != nullptr);
+    position->beginChangeGesture();
+    position->setValueNotifyingHost (0.7f);
+    position->endChangeGesture();
+    CHECK (p.parameterValue (params::morphEnabled) >= 0.5f);
+    // Automation (no gesture) leaves the switch as it is.
+    setValue (p, params::morphEnabled, 0.0f);
+    position->setValueNotifyingHost (0.3f);
+    CHECK (p.parameterValue (params::morphEnabled) < 0.5f);
+    for (const auto& f : andor::analog::factoryPatches())
+    {
+        INFO (f.name);
+        CHECK (f.patch.morph.enabled);
+        CHECK_FALSE (f.patch.wheelToLfo);
+    }
+}
+
+TEST_CASE ("analog: the mod wheel moves nothing in a new instrument; a session from before keeps its wheel on LFO 1", "[analog][state][wheel]")
+{
+    {
+        ShellProcessor p;
+        CHECK (p.parameterValue (params::lfoWheel) < 0.5f);
+    }
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 9);
+    juce::MemoryBlock v9;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v9);
+    ShellProcessor p;
+    p.setStateInformation (v9.getData(), static_cast<int> (v9.getSize()));
+    CHECK (p.parameterValue (params::lfoWheel) >= 0.5f);   // (version 9 always linked the wheel to LFO 1)
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.parameterValue (params::lfoWheel) < 0.5f);
+}
+
+TEST_CASE ("analog: a version-8 session keeps its MORPH: its position turned round, on or off as saved", "[analog][state][morph]")
+{
+    // Version 9 hears card C live, runs the position the other way (0 % the oscillators) and
+    // is on in a new instrument. A session from before keeps what it had.
+    for (const bool on : { false, true })
+    {
+        juce::MemoryBlock session;
+        {
+            ShellProcessor old;
+            setValue (old, params::morphEnabled, on ? 1.0f : 0.0f);
+            setValue (old, params::morphPosition, 30.0f);   // (version 8: 30 % of the way to the carrier)
+            old.getStateInformation (session);
+        }
+        auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (xml != nullptr);
+        xml->setAttribute ("productVersion", 8);
+        juce::MemoryBlock v8;
+        juce::AudioProcessor::copyXmlToBinary (*xml, v8);
+        ShellProcessor p;
+        p.setStateInformation (v8.getData(), static_cast<int> (v8.getSize()));
+        INFO ((on ? "on" : "off"));
+        CHECK ((p.parameterValue (params::morphEnabled) >= 0.5f) == on);
+        CHECK (p.parameterValue (params::morphPosition) == Approx (70.0f));
+        // A version-9 session keeps its position as saved.
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        CHECK (q.parameterValue (params::morphPosition) == Approx (30.0f));
+    }
+}
+
 namespace
 {
-    /** A fresh editor at the reference size with the workbench's view preference reset (it is
-        kept in the product's documents folder, across launches). */
-    struct WorkbenchFixture
+    /** A fresh editor at a width (the reference 1448 by default), and an oscillator card's
+        well overlay (ProductInfo::wellOverlay): its controls, whether shown, its geometry. */
+    struct OverlayFixture
     {
-        explicit WorkbenchFixture (int width = 1448)
+        explicit OverlayFixture (int width = 1448)
         {
-            p.setWellViewState ({});
             editor.reset (p.createEditorIfNeeded());
             ui = &dynamic_cast<andor::shell::ShellEditor&> (*editor);
             editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
             ui->refreshNow();
         }
-        ~WorkbenchFixture()
+        osp::plugin::EngineCard& card (int layer) { return ui->engineCard (layer); }
+        osp::plugin::WellOverlay* overlay (int layer)
         {
-            editor.reset();
-            p.setWellViewState ({});
+            ui->refreshNow();   // (a model changed: the shell remakes the overlay)
+            return card (layer).wellOverlayComponent();
         }
-        osp::plugin::EngineCard& card() { return ui->engineCard (0); }
-        osp::plugin::CardWellEditor* bench() { return card().wellEditorComponent(); }
-        /** The view preference, as the musician would set it (the shell keeps it). */
-        void view (bool detailed, int section = 0, bool pinned = false)
-        {
-            osp::plugin::CardWellEditor::ViewState v;
-            v.detailed = detailed;
-            v.section = section;
-            v.pinned = pinned;
-            p.setWellViewState (v);
-            if (bench() != nullptr)
-                bench()->setViewState (v);
-            ui->refreshNow();
-        }
-        /** The workbench's control bound to `id` (null: none), and whether it is on screen. */
-        juce::Component* control (const juce::String& id)
+        /** The overlay's control bound to `id` (null: none). */
+        static juce::Component* control (juce::Component& root, const juce::String& id)
         {
             juce::Component* found = nullptr;
             std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
@@ -886,23 +1275,26 @@ namespace
                     find (*child);
                 }
             };
-            if (bench() != nullptr)
-                find (*bench());
+            find (root);
             return found;
         }
-        bool shown (const juce::String& id)
+        /** Shown on screen (every parent visible, up to the overlay). */
+        static bool shown (osp::plugin::WellOverlay& o, const juce::String& id)
         {
-            auto* c = control (id);
-            for (; c != nullptr && c != bench(); c = c->getParentComponent())
+            auto* c = control (o, id);
+            if (c == nullptr)
+                return false;
+            for (; c != nullptr && c != &o; c = c->getParentComponent())
                 if (! c->isVisible())
                     return false;
-            return c != nullptr && bench()->isVisible();
+            return o.isVisible();
         }
-        /** The view's leaf controls on screen: inside the well, none overlapping another. */
-        void checkLayout()
+        /** The overlay's leaf controls on screen: inside the well, none overlapping another,
+            each a reachable target. Returns their boxes by their bound ID. */
+        static std::map<juce::String, juce::Rectangle<int>> checkLayout (osp::plugin::WellOverlay& o, int atLeast)
         {
-            REQUIRE (bench() != nullptr);
-            const auto well = bench()->getLocalBounds();
+            const auto well = o.getLocalBounds();
+            std::map<juce::String, juce::Rectangle<int>> byId;
             std::vector<juce::Rectangle<int>> boxes;
             std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
                 for (auto* child : c.getChildren())
@@ -911,31 +1303,30 @@ namespace
                         continue;
                     const bool leaf = dynamic_cast<juce::Button*> (child) != nullptr || dynamic_cast<osp::plugin::MiniKnob*> (child) != nullptr
                                       || dynamic_cast<osp::plugin::SegmentedControl*> (child) != nullptr
-                                      || dynamic_cast<osp::plugin::ValueSelector*> (child) != nullptr || child->getComponentID().isNotEmpty();
+                                      || dynamic_cast<osp::plugin::ValueSelector*> (child) != nullptr;
                     if (leaf)
                     {
-                        const auto box = bench()->getLocalArea (child, child->getLocalBounds());
-                        INFO (child->getTitle() << " " << child->getComponentID() << " at " << box.toString() << " in " << well.toString());
+                        const auto box = o.getLocalArea (child, child->getLocalBounds());
+                        INFO (child->getTitle() << " at " << box.toString() << " in " << well.toString());
                         CHECK (well.contains (box));
-                        CHECK (box.getHeight() >= 24);   // (a reachable target)
+                        CHECK (box.getHeight() >= 22);   // (a reachable target)
+                        CHECK (box.getWidth() >= 44);
                         for (const auto& other : boxes)
                             CHECK_FALSE (box.intersects (other));
                         boxes.push_back (box);
+                        auto tags = osp::plugin::binding::tagsOf (*child);
+                        if (auto* knob = dynamic_cast<osp::plugin::MiniKnob*> (child))
+                            tags.addArray (osp::plugin::binding::tagsOf (knob->slider));
+                        for (const auto& tag : tags)
+                            byId[tag] = box;
                     }
                     else
                         walk (*child);
                 }
             };
-            walk (*bench());
-            CHECK (boxes.size() >= 6);
-        }
-        std::map<juce::String, float> values()
-        {
-            std::map<juce::String, float> v;
-            for (auto* parameter : p.getParameters())
-                if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
-                    v[withId->paramID] = parameter->getValue();
-            return v;
+            walk (o);
+            CHECK (static_cast<int> (boxes.size()) >= atLeast);
+            return byId;
         }
 
         ShellProcessor p;
@@ -949,341 +1340,6 @@ namespace
         const auto now = juce::Time::getCurrentTime();
         return juce::MouseEvent (source, at, {}, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, at, now, 1, false);
     }
-}
-
-TEST_CASE ("analog: OSCILLATORS beside M and S opens the workbench in the waveform's well; DETUNE is a plain control", "[analog][editor][workbench]")
-{
-    WorkbenchFixture f;
-    auto& ui = *f.ui;
-    auto& card = f.card();
-    auto press = [&] (juce::Component& c, juce::Point<float> at) {   // as a real click: the watch, then the component
-        ui.pressAnywhere (&c);
-        c.mouseDown (mouseEventFor (c, at));
-        c.mouseUp (mouseEventFor (c, at));
-    };
-
-    // At first the waveform; no workbench made yet (nothing at start-up unless pinned).
-    CHECK (card.display().isVisible());
-    CHECK_FALSE (ui.isWellEditorShown());
-    CHECK (f.bench() == nullptr);
-
-    // The heading's door covers the word's glyphs, right of M and S, inside the text area.
-    REQUIRE (card.hasHeadingDoor());
-    const auto heading = card.headingBounds();
-    REQUIRE (! heading.isEmpty());
-    auto* door = card.getComponentAt (heading.getCentre());
-    REQUIRE (door != nullptr);
-    CHECK (card.isHeading (door));
-    juce::Component* mute = nullptr;
-    juce::Component* solo = nullptr;
-    for (auto* child : card.getChildren())
-        if (auto* b = dynamic_cast<osp::plugin::LayerStateButton*> (child))
-            (mute == nullptr ? mute : solo) = b;
-    REQUIRE (mute != nullptr);
-    REQUIRE (solo != nullptr);
-    CHECK (heading.getX() >= mute->getRight());
-    CHECK (! heading.intersects (mute->getBounds()));
-    CHECK (! heading.intersects (solo->getBounds()));
-    CHECK (heading.getWidth() < card.getWidth() / 3);   // the word, not the header
-
-    // A click shows the workbench exactly in the well (the card does not move or resize, no
-    // popover opens); a second click brings the waveform back.
-    const auto cardBounds = card.getBounds();
-    const auto well = card.display().getBounds();
-    const auto before = f.values();
-    press (*door, door->getLocalBounds().getCentre().toFloat());
-    REQUIRE (ui.isWellEditorShown());
-    REQUIRE (f.bench() != nullptr);
-    CHECK (f.bench()->getBounds() == well);
-    CHECK_FALSE (card.display().isVisible());   // (it does not draw beneath)
-    CHECK (card.getBounds() == cardBounds);
-    CHECK (ui.openPopupIndex() == -1);
-    CHECK (ui.openPopupPanel() == nullptr);
-    CHECK (card.getComponentAt (well.getCentre()) != &card.display());
-    // A click inside it (or on the card's knobs) does not close it.
-    ui.pressAnywhere (f.bench());
-    CHECK (ui.isWellEditorShown());
-    press (*door, door->getLocalBounds().getCentre().toFloat());
-    CHECK_FALSE (ui.isWellEditorShown());
-    CHECK (card.display().isVisible());
-    CHECK (f.bench() != nullptr);   // (kept, hidden: it never intercepts a click)
-    CHECK_FALSE (f.bench()->isVisible());
-    CHECK (card.getComponentAt (well.getCentre()) == &card.display());
-    // WAVE in its toolbar does the same as the heading; so does Escape.
-    press (*door, door->getLocalBounds().getCentre().toFloat());
-    REQUIRE (ui.isWellEditorShown());
-    auto* wave = dynamic_cast<juce::Button*> (f.bench()->findChildWithID ("wave"));
-    REQUIRE (wave != nullptr);
-    wave->onClick();
-    CHECK_FALSE (ui.isWellEditorShown());
-    press (*door, door->getLocalBounds().getCentre().toFloat());
-    REQUIRE (ui.isWellEditorShown());
-    ui.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
-    CHECK_FALSE (ui.isWellEditorShown());
-    // The keyboard: Return and Space on the focused word.
-    CHECK (door->getWantsKeyboardFocus());
-    door->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
-    CHECK (ui.isWellEditorShown());
-    door->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey));
-    CHECK_FALSE (ui.isWellEditorShown());
-    CHECK (door->getTitle().isNotEmpty());   // (its accessibility handler is a button; it exists once on screen)
-    // Opening and closing it changed no parameter.
-    CHECK (f.values() == before);
-
-    // M and S still mute and solo the layer, the workbench open or not.
-    press (*door, door->getLocalBounds().getCentre().toFloat());
-    const float muteBefore = f.p.parameters.getRawParameterValue ("layerA.mute")->load();
-    press (*mute, mute->getLocalBounds().getCentre().toFloat());
-    CHECK (f.p.parameters.getRawParameterValue ("layerA.mute")->load() != muteBefore);
-    CHECK (ui.isWellEditorShown());
-    press (*mute, mute->getLocalBounds().getCentre().toFloat());
-
-    // DETUNE: OSC 2's fine tuning, enabled, a modulation target; clicking or dragging it moves
-    // the tuning and never opens anything.
-    juce::Slider* detune = nullptr;
-    std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
-        for (auto* child : c.getChildren())
-        {
-            if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && s->getProperties()["paramId"].toString() == params::osc2Fine
-                                                               && c.getParentComponent() == &card)
-                detune = s;
-            if (child != f.bench())
-                find (*child);
-        }
-    };
-    find (card);
-    REQUIRE (detune != nullptr);
-    CHECK (detune->isEnabled());
-    setValue (f.p, params::osc2Fine, -12.0f);
-    CHECK (detune->getValue() == Approx (-12.0));
-    auto* knob = detune->getParentComponent();
-    REQUIRE (knob != nullptr);
-    press (*door, door->getLocalBounds().getCentre().toFloat());   // (the waveform again)
-    const auto caption = card.startLabelBounds();
-    press (*knob, knob->getLocalPoint (&card, caption.getCentre()).toFloat());   // its name
-    CHECK (ui.openPopupIndex() == -1);
-    CHECK_FALSE (ui.isWellEditorShown());
-    detune->setValue (25.0, juce::sendNotificationSync);   // a drag's result
-    CHECK (f.p.parameters.getRawParameterValue (params::osc2Fine)->load() == Approx (25.0f).margin (0.01f));
-    CHECK (ui.openPopupIndex() == -1);
-    // No popover route for the oscillators any more (the old one is gone); the start
-    // control has none; the first macro is MORPH's.
-    ui.openPopup (andor::shell::ShellEditor::generatorHeaderPopup);
-    CHECK (ui.openPopupPanel() == nullptr);
-    ui.openPopup (andor::shell::ShellEditor::startControlPopup);
-    CHECK (ui.openPopupPanel() == nullptr);
-    ui.openPopup (0);
-    REQUIRE (ui.openPopupPanel() != nullptr);
-    CHECK (ui.openPopupPanel()->getTitle() == "MORPH");
-    ui.closePopup();
-}
-
-TEST_CASE ("analog: the workbench shows each model's own controls, Quick and Detailed, in the well at every size", "[analog][editor][workbench]")
-{
-    WorkbenchFixture f;
-    f.ui->showWellEditor (true);
-    REQUIRE (f.ui->isWellEditorShown());
-
-    // QUICK (the default): both oscillators, each its model, ON, its waves, its main controls.
-    CHECK_FALSE (f.bench()->viewState().detailed);
-    for (const auto& id : { params::osc1Model, params::osc2Model, params::osc1Enabled, params::osc2Enabled, params::osc1Wave, params::osc2Wave,
-                            params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::osc2Octave, params::osc2Level })
-    {
-        INFO (id);
-        CHECK (f.shown (id));
-    }
-    CHECK_FALSE (f.shown (params::osc1DcoSub));
-    CHECK_FALSE (f.shown (params::osc1WideShape));
-    CHECK (f.control (params::lfoPitch1) == nullptr);   // (Detailed's: not made in Quick)
-    f.checkLayout();
-    // DCO on OSC 1, WIDE on OSC 2: the view follows (also a change from elsewhere: automation,
-    // a preset). A model's settings are kept while another is shown.
-    setValue (f.p, params::osc1Width, 30.0f);
-    setValue (f.p, params::osc1Model, 1.0f);
-    setValue (f.p, params::osc2Model, 2.0f);
-    f.ui->refreshNow();
-    CHECK_FALSE (f.shown (params::osc1Wave));
-    CHECK (f.shown (params::osc1DcoSaw));
-    CHECK (f.shown (params::osc1DcoPulse));
-    CHECK (f.shown (params::osc1DcoSub));
-    CHECK (f.shown (params::osc1Width));
-    CHECK (f.shown (params::osc2WideWave));
-    CHECK (f.shown (params::osc2WideShape));
-    CHECK (f.shown (params::osc2WideSpread));
-    CHECK_FALSE (f.shown (params::osc2Wave));
-    f.checkLayout();
-    setValue (f.p, params::osc1Model, 0.0f);
-    CHECK (f.p.parameterValue (params::osc1Width) == Approx (30.0f).margin (0.1f));
-    // A control in the workbench moves its parameter (and so the sound): its attachment.
-    auto* level = dynamic_cast<osp::plugin::MiniKnob*> (f.control (params::osc2Level));
-    REQUIRE (level != nullptr);
-    level->slider.setValue (55.0, juce::sendNotificationSync);
-    CHECK (f.p.parameterValue (params::osc2Level) == Approx (55.0f).margin (0.2f));
-    // SPREAD acts on SUPER SAW only: faded otherwise, lit with it.
-    CHECK (f.control (params::osc2WideSpread)->getAlpha() < 0.5f);
-    setValue (f.p, params::osc2WideWave, 4.0f);
-    f.ui->refreshNow();
-    CHECK (f.control (params::osc2WideSpread)->getAlpha() == Approx (1.0f));
-
-    // QUICK <-> DETAILED changes the view only, never a value.
-    const auto before = f.values();
-    // DETAILED: one section at a time; together they hold every oscillator setting the old
-    // popover had (and that the engine plays).
-    const std::vector<std::vector<juce::String>> sections {
-        { params::osc1Model, params::osc1Enabled, params::osc1Octave, params::osc1Coarse, params::osc1Width, params::osc1Level, params::lfoPitch1, params::lfoWidth1 },
-        { params::osc2Model, params::osc2Enabled, params::osc2Octave, params::osc2Coarse, params::osc2Fine, params::osc2Width, params::osc2Level, params::lfoPitch2,
-          params::lfoWidth2, params::osc2WideWave, params::osc2WideShape, params::osc2WideSpread },
-        { params::sync, params::osc2KeyTrack, params::osc2LowFreq, params::ringMix, params::polyModEnv, params::polyModOsc2, params::polyModToPitch1,
-          params::polyModToWidth1, params::polyModToCutoff },
-        { params::noise, params::noiseColor, params::polyphony, params::unison, params::unisonDetune, params::spread },
-        { params::keyDna, params::keyDnaAmount, params::keyDnaIndividuality, params::keyDnaPosition, params::keyDnaSize, params::keyDnaDensity,
-          params::keyDnaSpread, params::keyDnaTune },
-    };
-    for (int section = 0; section < 5; ++section)
-    {
-        f.view (true, section);
-        for (const auto& id : sections[static_cast<std::size_t> (section)])
-        {
-            INFO ("section " << section << ": " << id);
-            CHECK (f.shown (id));
-        }
-        f.checkLayout();
-    }
-    // OSC 1 as a DCO in Detailed: its PWM source and depth as well.
-    setValue (f.p, params::osc1Model, 1.0f);
-    f.view (true, 0);
-    CHECK (f.shown (params::osc1DcoPwmSource));
-    CHECK (f.shown (params::osc1DcoPwmDepth));
-    CHECK (f.shown (params::osc1DcoSub));
-    f.checkLayout();
-    setValue (f.p, params::osc1Model, 0.0f);
-    f.view (false);
-    CHECK (f.values() == before);
-    // The section chosen is kept while Quick is shown, and comes back with Detailed (the
-    // toolbar's own QUICK | DETAILED; the shell keeps the choice).
-    f.view (true, 3);
-    auto* detail = f.bench()->findChildWithID ("detail");
-    REQUIRE (detail != nullptr);
-    detail->mouseDown (mouseEventFor (*detail, { 5.0f, 5.0f }));   // QUICK
-    CHECK_FALSE (f.bench()->viewState().detailed);
-    CHECK_FALSE (f.p.wellViewState().detailed);
-    CHECK (f.p.wellViewState().section == 3);
-    CHECK (f.control (params::noise) == nullptr);   // (MORE's controls are gone with it)
-    detail->mouseDown (mouseEventFor (*detail, { static_cast<float> (detail->getWidth()) - 5.0f, 5.0f }));   // DETAILED
-    CHECK (f.bench()->viewState().detailed);
-    CHECK (f.bench()->viewState().section == 3);
-    CHECK (f.shown (params::noise));
-    f.view (false);
-    CHECK (f.values() == before);
-
-    // Smaller windows scale the whole instrument: the well's own layout is the same. Two
-    // cards (ORGANIC loaded) make the well narrower: Quick and every section still fit.
-    {
-        Scratch scratch;
-        loadOrganic (f.p, writeRecording (scratch.dir, "workbench stand-in.wav", 57, 1.0));
-        f.ui->refreshNow();
-        REQUIRE (f.ui->visibleCardCount() == 2);
-        REQUIRE (f.ui->isWellEditorShown());
-        CHECK (f.bench()->getBounds() == f.card().display().getBounds());
-        CHECK (f.bench()->getWidth() < 800);
-        f.view (false);
-        f.checkLayout();
-        for (int section = 0; section < 5; ++section)
-        {
-            INFO ("narrow, section " << section);
-            f.view (true, section);
-            f.checkLayout();
-        }
-        // ORGANIC's card has no oscillator editor; its heading opens nothing.
-        CHECK_FALSE (f.ui->engineCard (1).hasHeadingDoor());
-        CHECK (f.ui->engineCard (1).wellEditorComponent() == nullptr);
-        f.view (false);
-    }
-}
-
-TEST_CASE ("analog: the EQ takes the well and gives it back to a pinned workbench; the pin outlives the window", "[analog][editor][workbench]")
-{
-    WorkbenchFixture f;
-    auto& card = f.card();
-    auto& ui = *f.ui;
-    const auto before = f.values();
-
-    // Unpinned: the EQ replaces it; closing the EQ shows the waveform.
-    ui.showWellEditor (true);
-    REQUIRE (card.onEqToggle != nullptr);
-    card.onEqToggle (0, true);
-    CHECK (card.isEqOpen());
-    CHECK_FALSE (ui.isWellEditorShown());
-    CHECK_FALSE (f.bench()->isVisible());
-    card.onEqToggle (0, false);
-    CHECK_FALSE (card.isEqOpen());
-    CHECK_FALSE (ui.isWellEditorShown());
-    CHECK (card.display().isVisible());
-    // From the waveform: EQ open and closed, the waveform again.
-    card.onEqToggle (0, true);
-    card.onEqToggle (0, false);
-    CHECK_FALSE (ui.isWellEditorShown());
-
-    // PIN (its key): the EQ still takes the well, and gives it back when it closes.
-    ui.showWellEditor (true);
-    auto* pin = dynamic_cast<juce::Button*> (f.bench()->findChildWithID ("pin"));
-    REQUIRE (pin != nullptr);
-    CHECK (pin->getTitle().isNotEmpty());
-    pin->setToggleState (true, juce::dontSendNotification);
-    pin->onClick();
-    CHECK (f.p.wellViewState().pinned);
-    card.onEqToggle (0, true);
-    CHECK (card.isEqOpen());
-    CHECK_FALSE (ui.isWellEditorShown());
-    card.onEqToggle (0, false);
-    CHECK (ui.isWellEditorShown());
-    CHECK_FALSE (card.isEqOpen());
-    // The heading while the EQ is open: the workbench takes the well back, the EQ closes.
-    card.onEqToggle (0, true);
-    ui.toggleWellEditor();
-    CHECK (ui.isWellEditorShown());
-    CHECK_FALSE (card.isEqOpen());
-    // None of it is sound: no parameter moved.
-    CHECK (f.values() == before);
-
-    // A preset (or a factory sound) leaves it where it is, showing the new values.
-    apply (f.p, factoryPatches()[8].patch);
-    ui.refreshNow();
-    CHECK (ui.isWellEditorShown());
-    // Detailed and its section are kept with the pin.
-    f.view (true, 2, true);
-    // The window closes and opens again (or the plugin): pinned, it opens with the workbench,
-    // in Detailed, at the same section.
-    f.editor.reset();
-    f.editor.reset (f.p.createEditorIfNeeded());
-    f.ui = &dynamic_cast<andor::shell::ShellEditor&> (*f.editor);
-    f.ui->refreshNow();
-    CHECK (f.ui->isWellEditorShown());
-    REQUIRE (f.bench() != nullptr);
-    CHECK (f.bench()->viewState().detailed);
-    CHECK (f.bench()->viewState().section == 2);
-    {
-        // Another instance of the plugin (a new processor) reads the same preference.
-        ShellProcessor other;
-        CHECK (other.wellViewState().pinned);
-        CHECK (other.wellViewState().section == 2);
-    }
-    // The heading hides it and unpins (the musician's own choice outranks the pin).
-    f.ui->toggleWellEditor();
-    CHECK_FALSE (f.ui->isWellEditorShown());
-    CHECK_FALSE (f.p.wellViewState().pinned);
-    f.editor.reset();
-    f.editor.reset (f.p.createEditorIfNeeded());
-    f.ui = &dynamic_cast<andor::shell::ShellEditor&> (*f.editor);
-    f.ui->refreshNow();
-    CHECK_FALSE (f.ui->isWellEditorShown());
-    // Closing the window with it open is safe (no callback outlives it).
-    f.ui->showWellEditor (true);
-    f.editor.reset();
-    // The view is not in the session (nor in a preset: presets are written from parameters).
-    juce::MemoryBlock state;
-    f.p.getStateInformation (state);
-    CHECK_FALSE (state.toString().contains ("pinned"));
 }
 
 TEST_CASE ("analog: its walnut finish is its own: copper, its own pieces, ANDOR OSP's within a scope; every window the same", "[analog][editor][materials]")
@@ -1342,7 +1398,6 @@ TEST_CASE ("analog: its walnut finish is its own: copper, its own pieces, ANDOR 
     // Two windows (of two instances) draw the same: no instance changes another's look.
     {
         ShellProcessor q;
-        p.setWellViewState ({});
         std::unique_ptr<juce::AudioProcessorEditor> a (p.createEditorIfNeeded()), b (q.createEditorIfNeeded());
         a->setSize (1448, 1086);
         b->setSize (1448, 1086);
@@ -1403,35 +1458,98 @@ TEST_CASE ("analog: the FILTER popover shows each model's own controls, and fits
         INFO ("popover " << area.toString() << " in " << ui.getLocalBounds().toString());
         CHECK (ui.getLocalBounds().contains (area));
     };
-    // FILTER: the OTA's settings only with the OTA; the Juno variant where it acts.
+    // Its pages (FILTER, VOICE, PAIR): the tab row, moved with the arrow keys as a musician would.
+    auto tabs = [&ui]() -> juce::Component* {
+        juce::Component* found = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (child->getTitle() == "Pages")
+                    found = child;
+                find (*child);
+            }
+        };
+        if (auto* panel = ui.openPopupPanel())
+            find (*panel);
+        return found;
+    };
+    // How many of the page's controls show (its hierarchy: the first page kept short).
+    auto shownControls = [&ui] {
+        int n = 0;
+        auto* panel = ui.openPopupPanel();
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (! child->isVisible())
+                    continue;
+                if (osp::plugin::binding::tagsOf (*child).size() > 0 || dynamic_cast<osp::plugin::MiniKnob*> (child) != nullptr)
+                    ++n;
+                else
+                    walk (*child);
+            }
+        };
+        walk (*panel);
+        return n;
+    };
     ui.openPopup (2);
+    REQUIRE (tabs() != nullptr);
+    // FILTER (the first page): its type, its four knobs, its envelope, its drive; the OTA's
+    // settings only with the OTA. Nothing else.
     fits();
+    CHECK (shown (params::filterModel));
+    CHECK (shown (params::resonance));
+    CHECK (shown (params::filterAttack));
+    CHECK (shown (params::filterDrive));
     CHECK_FALSE (shown (params::otaCharacter));
-    CHECK_FALSE (shown (params::junoVariant));
+    CHECK_FALSE (shown (params::chorusMode));
+    CHECK_FALSE (shown (params::sync));
+    CHECK (shownControls() <= 12);
     setValue (p, params::filterModel, 1.0f);
     ui.refreshNow();
     CHECK (shown (params::otaCharacter));
     CHECK (shown (params::otaSlope));
     CHECK (shown (params::junoVariant));
-    setValue (p, params::otaCharacter, 1.0f);   // JUPITER: no Juno variant
-    ui.refreshNow();
-    CHECK_FALSE (shown (params::junoVariant));
-    CHECK (shown (params::chorusMode));
-    CHECK (shown (params::lfoDelay));
     fits();
+    // VOICE: the amplifier, the voices, LFO 1's depths, the chorus, the character.
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
+    ui.refreshNow();
+    CHECK (shown (params::vcaMode));
+    CHECK (shown (params::polyphony));
+    CHECK (shown (params::lfoDelay));
+    CHECK (shown (params::chorusMode));
+    CHECK (shown (params::analogAmount));
+    CHECK_FALSE (shown (params::resonance));
+    fits();
+    // PAIR: what the two oscillators do together.
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
+    ui.refreshNow();
+    CHECK (shown (params::sync));
+    CHECK (shown (params::ringMix));
+    CHECK (shown (params::polyModEnv));
+    CHECK (shown (params::polyModToCutoff));
+    CHECK (shown (params::noise));
+    CHECK_FALSE (shown (params::vcaMode));
+    fits();
+    // Every control the old single page had is still on one of the three.
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::leftKey));
+    tabs()->keyPressed (juce::KeyPress (juce::KeyPress::leftKey));
+    ui.refreshNow();
+    CHECK (shown (params::resonance));   // (back on FILTER)
 }
 
 TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscillators, plays it, recalls it", "[analog][organic]")
 {
+    // (The layers as they are: MORPH, on in a new instrument, is MORPH's test.)
     Scratch scratch;
     const auto file = writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5);
     ShellProcessor p;
     setValue (p, "space", 0.0f);
+    setValue (p, params::morphEnabled, 0.0f);
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     editor->setSize (1448, 1086);
     ui.refreshNow();
-    CHECK (ui.visibleCardCount() == 1);   // the oscillators alone: the hero card
+    CHECK (ui.visibleCardCount() == 3);   // OSC 1, OSC 2 and the hybrid (empty: its stand-in)
     CHECK (ui.isInterestedInFileDrag ({ file.getFullPathName() }));
     const auto synth = renderShell (p, 0.6);
 
@@ -1439,9 +1557,8 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
     CHECK (p.currentInstrument (1)->model->original.continuation.hasJumps());   // (it sustains: LOOP has a loop)
     CHECK (p.parameterValue ("ab.blend") == Catch::Approx (0.5f));   // (it joins at the A/B mix's centre)
     ui.refreshNow();
-    CHECK (ui.visibleCardCount() == 2);   // two equal cards
-    CHECK (ui.engineCard (0).hasHeadingDoor());
-    CHECK_FALSE (ui.engineCard (1).hasHeadingDoor());   // ORGANIC's name opens no oscillator settings
+    CHECK (ui.visibleCardCount() == 3);   // three equal cards
+    CHECK_FALSE (ui.engineCard (0).hasHeadingDoor());   // (three engines: sound design is in the well, not behind the name)
     const auto layered = renderShell (p, 0.6);
     CHECK (differenceRms (synth, layered) > 1.0e-4);
     // ORGANIC alone: both oscillators off.
@@ -1491,22 +1608,23 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
         REQUIRE (q.loadState (1) == osp::plugin::InstrumentHost::LoadState::ready);
         CHECK (differenceRms (renderShell (q, 0.6), layered) < 1.0e-6);
     }
-    // Removed: the oscillators alone again, one card.
+    // Removed: the oscillators alone again (the hybrid's column its ADD SAMPLE card).
     p.removeLayer (1);
     p.pollLoads();
     renderShell (p, 0.05);   // (the hand-over happens in a block)
     ui.refreshNow();
-    CHECK (ui.visibleCardCount() == 1);
+    CHECK (ui.visibleCardCount() == 3);   // (card C's stand-in)
     CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
 }
 
-TEST_CASE ("analog: MORPH is the first macro; it tells whether it can morph, and turns the recording into the oscillators", "[analog][organic][morph]")
+TEST_CASE ("analog: MORPH is the first macro, on and half way in a new instrument; it fuses the oscillators with card C", "[analog][organic][morph]")
 {
     Scratch scratch;
     ShellProcessor p;
     setValue (p, "space", 0.0f);
-    // Nothing loaded: unavailable, said so; MORPH on changes nothing a musician hears as a morph
-    // (the oscillators play).
+    CHECK (p.parameterValue (params::morphEnabled) >= 0.5f);
+    CHECK (p.parameterValue (params::morphPosition) == Approx (50.0f));
+    // Card C silent: said so; MORPH on changes nothing (the oscillators play as they are).
     CHECK (p.engineStatus ("morph").isNotEmpty());
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
@@ -1521,10 +1639,12 @@ TEST_CASE ("analog: MORPH is the first macro; it tells whether it can morph, and
 
     loadOrganic (p, writeRecording (scratch.dir, "stand-in A3.wav", 57, 2.5));
     CHECK (p.engineStatus ("morph").isEmpty());   // ready
-    // The ends: 0 % the recording (the oscillators replaced by it), 100 % the oscillators.
-    setValue (p, params::morphPosition, 100.0f);
-    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-3 * std::max (1.0e-6, rmsOf (synth)) + 1.0e-6);
+    // The ends: 0 % the oscillators, 100 % the recording (the oscillators replaced by it);
+    // with LEVEL MATCH off, each exactly as it plays.
+    setValue (p, params::morphLevelMatch, 0.0f);
     setValue (p, params::morphPosition, 0.0f);
+    CHECK (differenceRms (renderShell (p, 0.8), synth) < 1.0e-3 * std::max (1.0e-6, rmsOf (synth)) + 1.0e-6);
+    setValue (p, params::morphPosition, 100.0f);
     const auto recordingEnd = renderShell (p, 0.8);
     setValue (p, params::morphEnabled, 0.0f);
     setValue (p, params::osc1Enabled, 0.0f);
@@ -1533,6 +1653,7 @@ TEST_CASE ("analog: MORPH is the first macro; it tells whether it can morph, and
     setValue (p, params::osc1Enabled, 100.0f);
     setValue (p, params::osc2Enabled, 100.0f);
     setValue (p, params::morphEnabled, 1.0f);
+    setValue (p, params::morphLevelMatch, 1.0f);
     // The middle: each method its own sound.
     std::vector<juce::AudioBuffer<float>> methods;
     setValue (p, params::morphPosition, 50.0f);
@@ -1632,7 +1753,6 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     const auto before = osp::plugin::skin::look();
     osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
     ShellProcessor p;
-    p.setWellViewState ({});
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     auto shoot = [&] (const juce::String& name, float scale = 1.0f) {
@@ -1654,46 +1774,41 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
         shoot (juce::String ("analog-popover-") + names[m]);
         ui.closePopup();
     }
-    // The OSCILLATOR WORKBENCH in the card's well: QUICK, each DETAILED section, each model.
-    auto view = [&] (bool detailed, int section) {
-        osp::plugin::CardWellEditor::ViewState v;
-        v.detailed = detailed;
-        v.section = section;
-        p.setWellViewState (v);
-        if (auto* bench = ui.engineCard (0).wellEditorComponent())
-            bench->setViewState (v);
+    // Each oscillator's well with its controls revealed (as the pointer would): every model.
+    auto reveal = [&] (int layer, bool shown) {
+        ui.refreshNow();
+        if (auto* o = ui.engineCard (layer).wellOverlayComponent())
+            o->setRevealedForTest (shown);
     };
-    view (false, 0);
-    ui.showWellEditor (true);
-    shoot ("analog-workbench-quick");
-    shoot ("analog-workbench-quick@2x", 2.0f);
-    const char* sections[] = { "osc1", "osc2", "pair", "more", "keydna" };
-    for (int section = 0; section < 5; ++section)
+    const char* modelNames[] = { "classic", "dco", "wide" };
+    for (int model = 0; model < 3; ++model)
     {
-        view (true, section);
-        shoot (juce::String ("analog-workbench-detailed-") + sections[section]);
+        setValue (p, params::osc1Model, static_cast<float> (model));
+        setValue (p, params::osc2Model, static_cast<float> ((model + 1) % 3));
+        reveal (0, true);
+        shoot (juce::String ("analog-osc1-hover-") + modelNames[model]);
+        reveal (0, false);
+        reveal (2, true);
+        shoot (juce::String ("analog-osc2-hover-") + modelNames[(model + 1) % 3]);
+        reveal (2, false);
     }
     setValue (p, params::osc1Model, 1.0f);
     setValue (p, params::osc1DcoPulse, 1.0f);
     setValue (p, params::osc1DcoSub, 60.0f);
+    setValue (p, params::osc1DcoPwmSource, 1.0f);
+    setValue (p, params::osc1DcoPwmDepth, 40.0f);
     setValue (p, params::osc2Model, 2.0f);
     setValue (p, params::osc2WideWave, 4.0f);
     setValue (p, params::osc2WideSpread, 45.0f);
-    view (false, 0);
-    shoot ("analog-workbench-quick-dco-wide");
-    view (true, 0);
-    shoot ("analog-workbench-detailed-osc1-dco");
-    view (true, 1);
-    shoot ("analog-workbench-detailed-osc2-wide");
-    view (false, 0);
-    // The EQ takes the well; the heading shows which view is open.
-    ui.engineCard (0).onEqToggle (0, true);
-    shoot ("analog-workbench-eq-priority");
-    ui.engineCard (0).onEqToggle (0, false);
-    ui.showWellEditor (false);
+    shoot ("analog-wide-dco-empty");
+    reveal (0, true);
+    shoot ("analog-wide-dco-empty-osc1-hover@2x", 2.0f);
+    reveal (0, false);
     setValue (p, params::osc1Model, 0.0f);
     setValue (p, params::osc1DcoPulse, 0.0f);
     setValue (p, params::osc1DcoSub, 0.0f);
+    setValue (p, params::osc1DcoPwmSource, 0.0f);
+    setValue (p, params::osc1DcoPwmDepth, 0.0f);
     setValue (p, params::osc2Model, 0.0f);
     setValue (p, params::osc2WideWave, 0.0f);
     setValue (p, params::osc2WideSpread, 0.0f);
@@ -1748,6 +1863,41 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     renderShell (p, 0.8, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
     ui.setArpExpanded (true);
     shoot ("analog-arp");
+    {
+        // The per-card arpeggiator: C alone plays the arpeggio (A and B hold the chord); then
+        // unlinked, B's own pattern (DOWN) and RATE in the editor.
+        std::function<osp::plugin::ArpInlinePanel* (juce::Component&)> find = [&] (juce::Component& c) -> osp::plugin::ArpInlinePanel* {
+            if (auto* panel = dynamic_cast<osp::plugin::ArpInlinePanel*> (&c))
+                return panel;
+            for (auto* child : c.getChildren())
+                if (auto* f = find (*child))
+                    return f;
+            return nullptr;
+        };
+        auto* panel = find (ui);
+        REQUIRE (panel != nullptr);
+        CHECK (panel->showsCards());
+        setValue (p, "analog.arp.cardA", 0.0f);
+        setValue (p, "analog.arp.cardB", 0.0f);
+        renderShell (p, 0.8, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
+        panel->refresh();
+        shoot ("analog-arp-card-c");
+        setValue (p, "analog.arp.cardA", 1.0f);
+        setValue (p, "analog.arp.cardB", 1.0f);
+        setValue (p, "analog.arp.cardC", 0.0f);   // (C holds the chord)
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "analog.arp.cardB.pattern", 1.0f);
+        setValue (p, "analog.arp.cardB.rate", 2.0f);
+        panel->setEditCard (1);
+        CHECK (panel->editedCard() == 1);
+        renderShell (p, 0.8, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
+        panel->refresh();
+        shoot ("analog-arp-unlinked-b");
+        panel->setEditCard (0);
+        for (const char* id : { "analog.arp.cardA", "analog.arp.cardB", "analog.arp.cardC", "analog.arp.link", "analog.arp.cardB.pattern", "analog.arp.cardB.rate" })
+            if (auto* q = p.parameters.getParameter (id))
+                q->setValueNotifyingHost (q->getDefaultValue());
+    }
     ui.setArpExpanded (false);
     setValue (p, "arp.enabled", 0.0f);
     // A sound with character on the card: Sync Bite's picture, keys held.
@@ -1758,24 +1908,2956 @@ TEST_CASE ("analog: screenshots of the instrument and its six popovers (ANALOG_S
     editor->setSize (869, juce::roundToInt (869.0f * 1086.0f / 1448.0f));
     shoot ("analog-window-869");
     apply (p, Patch());
-    ui.showWellEditor (true);
-    shoot ("analog-workbench-window-869");
+    // The three cards at the smallest and largest windows, OSC 1's well revealed.
+    reveal (0, true);
+    shoot ("analog-osc1-hover-window-869");
     editor->setSize (1810, juce::roundToInt (1810.0f * 1086.0f / 1448.0f));
-    shoot ("analog-workbench-window-1810");
+    shoot ("analog-osc1-hover-window-1810");
+    reveal (0, false);
     editor->setSize (1448, 1086);
-    {
-        // Two cards (ORGANIC loaded): the narrower well, QUICK and a DETAILED section.
-        Scratch scratch;
-        loadOrganic (p, writeRecording (scratch.dir, "workbench stand-in A3.wav", 57, 1.0));
-        view (false, 0);
-        shoot ("analog-workbench-two-cards-quick");
-        view (true, 1);
-        shoot ("analog-workbench-two-cards-detailed-osc2");
-        view (true, 2);
-        shoot ("analog-workbench-two-cards-detailed-pair");
-        view (false, 0);
-    }
-    ui.showWellEditor (false);
-    p.setWellViewState ({});
     osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: ORGANIC's card shows a read head per playing note, as ANDOR OSP's One Shot", "[analog][organic][display]")
+{
+    ShellProcessor p;
+    const auto& heads = p.grainSnapshot (1);
+    const std::vector<Note> held { { 0, 57, 100 } };
+    renderShell (p, 0.2, held, false);
+    CHECK (heads.playheads.load() == 0);   // nothing loaded: none
+
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 2.5));
+    renderShell (p, 0.5, held, false);
+    REQUIRE (heads.playheads.load() == 1);
+    const float early = heads.playheadPosition[0].load();
+    CHECK (early > 0.05f);
+    CHECK (early < 0.5f);
+    CHECK (heads.playheadLevel[0].load() > 0.1f);
+
+    // A chord: one head per note; further on as it plays.
+    const std::vector<Note> chord { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } };
+    renderShell (p, 0.9, chord, false);
+    CHECK (heads.playheads.load() >= 3);
+    CHECK (heads.playheadPosition[0].load() > early);
+    // The oscillators' card has no read head (its own grains are its picture).
+    CHECK (p.grainSnapshot (0).playheads.load() == 0);
+}
+
+TEST_CASE ("analog: screenshots of KEY DNA, the cards' EQ and ORGANIC's playhead (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-cards]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Scratch scratch;
+    {
+        ShellProcessor p;
+        loadOrganic (p, writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5));
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        auto shoot = [&] (const juce::String& name, float scale = 1.0f) {
+            ui.refreshNow();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, scale);
+            const auto file = out.getChildFile (name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        editor->setSize (1448, 1086);
+
+        // ORGANIC's read heads while a chord plays.
+        renderShell (p, 0.9, { { 0, 57, 100 }, { 0, 64, 100 }, { 0, 69, 100 } }, false);
+        shoot ("analog-organic-playheads");
+        shoot ("analog-organic-playheads@2x", 2.0f);
+
+        // Each card's EQ (a low cut and a presence lift on A; a high cut on B).
+        using Host = osp::plugin::InstrumentHost;
+        setValue (p, Host::eqParameterId (0, "enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (0, "hp.enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (0, "hp.frequency"), 120.0f);
+        setValue (p, Host::eqParameterId (0, "bell.enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (0, "bell.frequency"), 2500.0f);
+        setValue (p, Host::eqParameterId (0, "bell.gain"), 6.0f);
+        ui.engineCard (0).onEqToggle (0, true);
+        shoot ("analog-eq-card-a");
+        ui.engineCard (0).onEqToggle (0, false);
+        setValue (p, Host::eqParameterId (1, "enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (1, "lp.enabled"), 1.0f);
+        setValue (p, Host::eqParameterId (1, "lp.frequency"), 3500.0f);
+        ui.engineCard (1).onEqToggle (1, true);
+        shoot ("analog-eq-card-b");
+        ui.engineCard (1).onEqToggle (1, false);
+        shoot ("analog-eq-keys-lit");
+
+        // KEY DNA: the card's key in GRANULAR, then ANDOR OSP's editor.
+        setValue (p, "layerA.sourceMode", 1.0f);
+        osp::keydna::Settings dna;
+        dna.enabled = true;
+        dna.individuality = 0.5;
+        for (const auto param : { osp::keydna::Param::position, osp::keydna::Param::size, osp::keydna::Param::density, osp::keydna::Param::spread })
+            dna[param].variation = 0.45;
+        p.setKeyDnaSettings (0, dna, "KEY DNA", false);
+        ui.engineCard (0).showGranularControls (true, true);
+        shoot ("analog-keydna-key");
+        ui.engineCard (0).onKeyDna (0);
+        shoot ("analog-keydna-editor");
+        shoot ("analog-keydna-editor@2x", 2.0f);
+        ui.closeKeyDna();
+        editor.reset();
+    }
+    osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: three equal cards, A OSC 1, B OSC 2, C the hybrid; empty, C is a full card with a stand-in; loading never moves them", "[analog][editor][organic][dock]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    auto& osc1 = ui.engineCard (0);
+    auto& osc2 = ui.engineCard (2);   // (card B: the shell's layer C)
+    auto& c = ui.engineCard (1);      // (card C: the shell's layer B)
+    auto standIn = [&p] {
+        osp::plugin::InstrumentHost::GeneratedSource s;
+        return p.generatedSource (1, s) && s.placeholder.isNotEmpty();
+    };
+    // A new instance: A, B and C side by side at equal widths, all three full cards; C empty
+    // shows its stand-in (ADD SAMPLE) with its knobs and keys, never the compact dock.
+    CHECK_FALSE (ui.recordingDock().isVisible());
+    REQUIRE (ui.visibleCardCount() == 3);
+    CHECK (standIn());
+    CHECK (c.hasControl ("layerB.level"));
+    CHECK (c.hasControl (params::hybridOctave));
+    CHECK (osc1.getRight() < osc2.getX());
+    CHECK (osc2.getRight() < c.getX());
+    CHECK (std::abs (osc1.getWidth() - osc2.getWidth()) <= 1);
+    CHECK (std::abs (osc1.getWidth() - c.getWidth()) <= 1);
+    CHECK (c.getY() == osc1.getY());
+    CHECK (c.getHeight() == osc1.getHeight());
+    // The MIX starts in the middle: every card is heard.
+    CHECK (p.parameterValue ("ab.blend") == Approx (0.5f));
+    const auto columns = std::array<juce::Rectangle<int>, 3> { osc1.getBounds(), osc2.getBounds(), c.getBounds() };
+
+    // A recording: card C plays it in the same column; A and B never move.
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 1.5));
+    ui.refreshNow();
+    CHECK_FALSE (standIn());
+    REQUIRE (ui.visibleCardCount() == 3);
+    CHECK (c.getBounds() == columns[2]);
+    CHECK (osc1.getBounds() == columns[0]);
+    CHECK (osc2.getBounds() == columns[1]);
+    // Removed: the stand-in again, in the same column.
+    p.removeLayer (ShellProcessor::hybridLayer);
+    ui.refreshNow();
+    CHECK (standIn());
+    CHECK (c.getBounds() == columns[2]);
+    CHECK (ui.visibleCardCount() == 3);
+    // A file that cannot be read: said so; card C stays its stand-in.
+    const auto broken = scratch.dir.getChildFile ("broken.wav");
+    broken.replaceWithText ("not audio");
+    p.loadFile (broken, ShellProcessor::hybridLayer);
+    REQUIRE (p.waitForLoads (60000));
+    p.pollLoads();
+    ui.refreshNow();
+    CHECK (p.statusMessage().isNotEmpty());
+    // A session with a recording opens with it on card C.
+    loadOrganic (p, writeRecording (scratch.dir, "organic2.wav", 57, 1.5));
+    juce::MemoryBlock withRecording;
+    p.getStateInformation (withRecording);
+    editor.reset();
+    {
+        ShellProcessor q;
+        q.setStateInformation (withRecording.getData(), static_cast<int> (withRecording.getSize()));
+        REQUIRE (q.waitForLoads (60000));
+        q.pollLoads();
+        osp::plugin::InstrumentHost::GeneratedSource s;
+        CHECK_FALSE ((q.generatedSource (1, s) && s.placeholder.isNotEmpty()));
+        CHECK (q.currentInstrument (1) != nullptr);
+    }
+}
+
+//==============================================================================
+// The Sample Source importer (MVP A1) on the real Bukkehorn 4.5 recordings: they are not in the
+// repository, so these run when ANALOG_BUKKEHORN_SAMPLES names a folder holding them (and are
+// skipped otherwise). ANALOG_RENDER_DIR: renders for listening.
+namespace
+{
+    juce::File bukkehornManifest()
+    {
+        return juce::File (__FILE__).getParentDirectory().getParentDirectory().getParentDirectory().getChildFile ("docs/sample-source/bukkehorn-4.5-manifest.json");
+    }
+
+    /** ORGANIC's part only (the oscillators off), the filter open, no effects, a plain gate. */
+    Patch sampleSourcePatch()
+    {
+        Patch p;
+        p.osc1Enabled = p.osc2Enabled = false;
+        p.osc2Level = 0.0;
+        p.analogAmount = 0.0;
+        p.tone = 1.0;
+        p.resonance = 0.0;
+        p.keyTrack = 0.0;
+        p.envDepthSemitones = 0.0;
+        p.space = p.echo = p.motion = 0.0;
+        p.ampAttack = 0.001;
+        p.ampSustain = 1.0;
+        p.ampRelease = 0.02;
+        p.velocityRangeDb = 0.0;
+        p.stereoSpread = 0.0;
+        return p;
+    }
+
+    std::vector<float> renderSynthMono (Synth& synth, double seconds, const std::vector<Note>& notes)
+    {
+        const int total = static_cast<int> (seconds * rate);
+        std::vector<float> l (static_cast<std::size_t> (total)), r (l.size()), out (l.size());
+        int pos = 0;
+        while (pos < total)
+        {
+            const int n = std::min (256, total - pos);
+            for (const auto& note : notes)
+                if (note.sample >= pos && note.sample < pos + n)
+                {
+                    const std::uint8_t m[3] { static_cast<std::uint8_t> (note.velocity > 0 ? 0x90 : 0x80), static_cast<std::uint8_t> (note.note),
+                                              static_cast<std::uint8_t> (note.velocity) };
+                    synth.handleMidi (m, 3);
+                }
+            synth.render (l.data() + pos, r.data() + pos, n);
+            pos += n;
+        }
+        for (std::size_t i = 0; i < out.size(); ++i)
+            out[i] = 0.5f * (l[i] + r[i]);
+        return out;
+    }
+
+    void writeListening (const juce::String& name, const std::vector<float>& mono)
+    {
+        const char* dir = std::getenv ("ANALOG_RENDER_DIR");
+        if (dir == nullptr)
+            return;
+        juce::AudioBuffer<float> b (1, static_cast<int> (mono.size()));
+        b.copyFrom (0, 0, mono.data(), static_cast<int> (mono.size()));
+        const auto file = juce::File (dir).getChildFile (name + ".wav");
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        if (auto stream = std::unique_ptr<juce::OutputStream> (file.createOutputStream()))
+            if (auto writer = std::unique_ptr<juce::AudioFormatWriter> (wav.createWriterFor (stream.get(), rate, 1, 24, {}, 0)))
+            {
+                stream.release();
+                writer->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+            }
+    }
+}
+
+
+TEST_CASE ("analog: Bukkehorn 4.5's Voxx imports complete and plays its recordings at their keys", "[analog][bukkehorn]")
+{
+    const char* folder = std::getenv ("ANALOG_BUKKEHORN_SAMPLES");
+    if (folder == nullptr)
+    {
+        SKIP ("ANALOG_BUKKEHORN_SAMPLES not set (the recordings are not in the repository)");
+    }
+    const auto manifest = andor::analog::import::readManifest (bukkehornManifest());
+    REQUIRE (manifest.isObject());
+    // The 33 playable groups, in lane order; Voxx is lane A's eighth (group 7).
+    const auto groups = andor::analog::import::playableGroups (manifest);
+    CHECK (groups.size() == 33);
+    const auto voxx = andor::analog::import::loadGroup (manifest, 7, juce::File (folder));
+    INFO ("missing: " << voxx.missing.joinIntoString (", ") << " unreadable: " << voxx.unreadable.joinIntoString (", "));
+    REQUIRE (voxx.complete());
+    const auto& source = *voxx.source;
+    CHECK (source.name == "Voxx");
+    CHECK (source.zones.size() == 13);
+    // The source's level is the instrument's raised to Kontakt's (each zone keeps its own times
+    // the group's, +11.75 dB).
+    CHECK (source.gain == Approx (1.2795722 * juce::Decibels::decibelsToGain (andor::analog::import::kontaktLevelMatchDb)).epsilon (1.0e-4));
+    for (const auto& z : source.zones)
+        CHECK (z.gain >= 0.1f * 3.866971f - 1.0e-3f);
+    for (const auto& z : source.zones)
+    {
+        INFO (z.file);
+        CHECK (z.loop.on);   // (every Voxx zone loops)
+        CHECK (z.audio->sampleRate() == 44100.0);
+    }
+
+    Synth synth;
+    synth.prepare (rate, block, 4);
+    synth.setPatch (sampleSourcePatch());
+    synth.setSampleSource (&source);
+    synth.reset();
+
+    // Key 40: one zone (VOK MOODS-St [100936], keys 36-40, root 40): the output is that
+    // recording. (Many Voxx keys sound two or three overlapping zones, as below.)
+    const auto out = renderSynthMono (synth, 1.2, { { 0, 40, 100 } });
+    writeListening ("voxx-key40", out);
+    const auto& single = *std::find_if (source.zones.begin(), source.zones.end(), [] (const SampleZone& z) { return z.keyLo == 36 && z.keyHi == 40; });
+    std::vector<float> expected (out.size());
+    {
+        const auto& src = *single.audio;
+        for (std::size_t i = 0; i < expected.size(); ++i)
+            expected[i] = andor::analog::OrganicVoice::read (src, static_cast<double> (i) * src.sampleRate() / rate);
+    }
+    // Shape: correlated with the recording (best lag within 2 ms: the filter's small delay).
+    double best = 0.0;
+    const auto from = static_cast<std::size_t> (0.05 * rate), to = static_cast<std::size_t> (1.0 * rate);
+    for (int lag = 0; lag < 96; ++lag)
+    {
+        double xy = 0.0, xx = 0.0, yy = 0.0;
+        for (std::size_t i = from; i < to; ++i)
+        {
+            const double x = out[i + static_cast<std::size_t> (lag)], y = expected[i];
+            xy += x * y;
+            xx += x * x;
+            yy += y * y;
+        }
+        best = std::max (best, xy / std::sqrt (std::max (1.0e-20, xx * yy)));
+    }
+    UNSCOPED_INFO ("key 40 correlation with its recording: " << best);
+    CHECK (best > 0.97);
+    // Level: what Kontakt's chain gives (the recording x the zone's and group's volume x the
+    // instrument's), within 1.5 dB.
+    {
+        double o = 0.0, k = 0.0;
+        const double kontakt = static_cast<double> (single.gain) * 1.2795722;
+        for (std::size_t i = from; i < to; ++i)
+        {
+            o += static_cast<double> (out[i]) * out[i];
+            k += kontakt * kontakt * static_cast<double> (expected[i]) * expected[i];
+        }
+        const double db = 10.0 * std::log10 (o / k);
+        UNSCOPED_INFO ("level against Kontakt's chain: " << db << " dB");
+        CHECK (std::abs (db) < 1.5);
+    }
+    CHECK (synth.sampleZonesSounding() == 1);
+
+    // Overlapping zones sound together, as in Kontakt: key 52 three, 57 three, 47, 48 and 50 two.
+    for (const auto& [key, layers] : { std::pair<int, int> { 52, 3 }, { 57, 3 }, { 47, 2 }, { 48, 2 }, { 50, 2 }, { 45, 1 } })
+    {
+        INFO ("key " << key);
+        synth.reset();
+        renderSynthMono (synth, 0.1, { { 0, key, 100 } });
+        CHECK (synth.sampleZonesSounding() == layers);
+    }
+
+    // A held note outlives its recordings on the zones' loops (key 47's are 3.6 and 4.4 s long).
+    synth.reset();
+    const auto held = renderSynthMono (synth, 6.0, { { 0, 47, 100 } });
+    writeListening ("voxx-key47-held-6s", held);
+    auto rmsOver = [] (const std::vector<float>& x, double a, double b) {
+        double sum = 0.0;
+        const auto i0 = static_cast<std::size_t> (a * rate), i1 = std::min (x.size(), static_cast<std::size_t> (b * rate));
+        for (std::size_t i = i0; i < i1; ++i)
+            sum += static_cast<double> (x[i]) * x[i];
+        return std::sqrt (sum / static_cast<double> (std::max<std::size_t> (1, i1 - i0)));
+    };
+    CHECK (rmsOver (held, 5.0, 5.8) > 0.1 * rmsOver (held, 0.2, 1.5));
+
+    // A chord, released: nothing left sounding. Then the source removed mid-note: silent, finite.
+    synth.reset();
+    const auto chord = renderSynthMono (synth, 3.0, { { 0, 45, 100 }, { 0, 50, 100 }, { 0, 57, 100 }, { 96000, 45, 0 }, { 96000, 50, 0 }, { 96000, 57, 0 } });
+    writeListening ("voxx-chord", chord);
+    CHECK (rmsOver (chord, 2.7, 3.0) < 1.0e-6);
+    CHECK (synth.activeVoices() == 0);
+    renderSynthMono (synth, 0.3, { { 0, 52, 100 } });
+    synth.setSampleSource (nullptr);
+    const auto after = renderSynthMono (synth, 0.3, {});
+    for (const float x : after)
+        REQUIRE (std::isfinite (x));
+    CHECK (rmsOver (after, 0.1, 0.3) < 1.0e-4);   // (-80 dB: the filter's state dying away)
+    CHECK (synth.sampleZonesSounding() == 0);
+
+    // For listening: every zone at its root (one after another), and a phrase over the range.
+    if (std::getenv ("ANALOG_RENDER_DIR") != nullptr)
+    {
+        synth.setSampleSource (&source);
+        std::vector<Note> phrase;
+        int t = 0;
+        for (const int key : { 36, 40, 45, 47, 48, 50, 52, 53, 57, 60, 64 })
+        {
+            phrase.push_back ({ t, key, 100 });
+            phrase.push_back ({ t + 60000, key, 0 });
+            t += 72000;
+        }
+        synth.reset();
+        writeListening ("voxx-phrase", renderSynthMono (synth, static_cast<double> (t) / rate + 1.5, phrase));
+    }
+}
+
+namespace
+{
+    /** A small Kontakt-like manifest (two groups, two lanes) over recordings written to `dir`. */
+    juce::var syntheticManifest (const juce::File& dir)
+    {
+        writeRecording (dir, "Low [1].wav", 48, 1.5);
+        writeRecording (dir, "High [2].wav", 60, 1.5);
+        writeRecording (dir, "Other [3].wav", 55, 1.5);
+        const juce::String json = R"({ "schemaVersion": 1,
+            "source": { "nki": "Test.nki", "program": "Studio - Test Horn", "programVolumeLinear": 1.0 },
+            "lanes": { "A": { "firstGroup": 0, "selectedSlot": 0, "selectedGroup": 0 }, "B": { "firstGroup": 1, "selectedSlot": 0, "selectedGroup": 1 } },
+            "groups": [
+              { "index": 0, "lane": "A", "slot": 0, "name": "Horn", "volumeLinear": 1.0, "zones": [
+                  { "file": "Low [1].wav", "keyLo": 36, "keyHi": 53, "root": 48, "velLo": 1, "velHi": 127, "tuneCents": 0, "volumeLinear": 1.0, "sampleStart": 0,
+                    "loops": [ { "mode": 1, "start": 12000, "length": 36000, "count": 0, "alternating": false, "xfade": 4000 } ] },
+                  { "file": "High [2].wav", "keyLo": 54, "keyHi": 72, "root": 60, "velLo": 1, "velHi": 127, "tuneCents": 0, "volumeLinear": 1.0, "sampleStart": 0, "loops": [] } ] },
+              { "index": 1, "lane": "B", "slot": 0, "name": "Texture", "volumeLinear": 0.5, "zones": [
+                  { "file": "Other [3].wav", "keyLo": 40, "keyHi": 70, "root": 55, "velLo": 1, "velHi": 127, "tuneCents": 10, "volumeLinear": 1.0, "sampleStart": 0, "loops": [] } ] },
+              { "index": 2, "lane": "C", "slot": 0, "name": "Empty", "volumeLinear": 1.0, "zones": [] } ] })";
+        return juce::JSON::parse (json);
+    }
+}
+
+TEST_CASE ("analog: an imported patch becomes native presets that play, save, reopen and relink", "[analog][samplesource][presets]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto store = scratch.dir.getChildFile ("Store");
+    const auto presets = scratch.dir.getChildFile ("Presets");
+
+    // One preset per playable group, the saved lanes and the hybrid; the empty group none.
+    const auto made = andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), presets);
+    CHECK (made.missing.isEmpty());
+    CHECK (made.skipped.isEmpty());
+    juce::StringArray names;
+    for (const auto& f : made.files)
+        names.add (f.getFileNameWithoutExtension());
+    CHECK (names == juce::StringArray { "A1 Horn", "B1 Texture", "Saved Lanes", "Hybrid - Horn + Oscillators" });
+    CHECK (made.files[0].getParentDirectory().getFileName() == "Test Horn");
+    // The recordings are kept in the store, named by their content (three files), beside the
+    // import's record (its sounds).
+    CHECK (store.getChildFile ("Imported").findChildFiles (juce::File::findFiles, false, "*.wav").size() == 3);
+    CHECK (made.record.getFileName() == "Test Horn.import.xml");
+
+    // A preset opened: the source loads and plays in ORGANIC's place, the oscillators off.
+    auto open = [&] (ShellProcessor& q, const juce::File& file) {
+        osp::plugin::InstrumentHost::PresetEntry entry;   // (as the preset list opens one)
+        entry.name = file.getFileNameWithoutExtension();
+        entry.file = file;
+        q.openPresetEntry (entry);
+    };
+    // (The shell's sample store is where the engine looks for the kept recordings.)
+    setSampleStore (store);
+    open (p, made.files[0]);
+    REQUIRE (engine.waitForSampleSource (30000));
+    CHECK (engine.sampleSourceState().name == "A1 Horn");
+    CHECK (engine.sampleSourceState().missing.isEmpty());
+    CHECK (p.engineStatus ("sample").isEmpty());
+    CHECK (p.parameterValue (params::osc1Enabled) < 0.5f);
+    const std::vector<Note> note { { 0, 48, 100 } };
+    const auto played = renderShell (p, 1.0, note, false);
+    CHECK (rmsOf (played) > 1.0e-3);
+
+    // Saved with the session and reopened: the same source, the same sound.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    {
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        auto& e = dynamic_cast<AnalogEngine&> (q.productEngine());
+        REQUIRE (e.waitForSampleSource (30000));
+        CHECK (e.sampleSourceState().name == "A1 Horn");
+        CHECK (differenceRms (renderShell (q, 1.0, note, false), played) < 1.0e-6);
+    }
+
+    // The layered saved lanes: both groups sound where they overlap (Horn's Low and Texture).
+    open (p, made.files[2]);
+    REQUIRE (engine.waitForSampleSource (30000));
+    CHECK (engine.sampleSourceState().zones == 3);
+
+    // A factory preset (or a reset) has no imported source: back to none, silent ORGANIC.
+    p.resetSettings();
+    CHECK (engine.sampleSourceDefinition() == nullptr);
+
+    // A recording gone from the store: reported by name, and the rest still plays; relinked
+    // from a folder that has it, complete again.
+    open (p, made.files[0]);
+    REQUIRE (engine.waitForSampleSource (30000));
+    auto definition = engine.sampleSourceDefinition();
+    REQUIRE (definition != nullptr);
+    juce::File lowAsset;
+    for (const auto* z : definition->getChildWithTagNameIterator ("Zone"))
+        if (z->getStringAttribute ("file") == "Low [1].wav")
+            lowAsset = store.getChildFile ("Imported").getChildFile (z->getStringAttribute ("asset"));
+    REQUIRE (lowAsset.existsAsFile());
+    lowAsset.deleteFile();
+    {
+        // (A session reopened later, on a machine without that recording.)
+        ShellProcessor q;
+        auto& e = dynamic_cast<AnalogEngine&> (q.productEngine());
+        open (q, made.files[0]);
+        REQUIRE (e.waitForSampleSource (30000));
+        CHECK (e.sampleSourceState().missing == juce::StringArray { "Low [1].wav" });
+        CHECK (q.engineStatus ("sample").contains ("relink"));
+        CHECK (rmsOf (renderShell (q, 0.6, { { 0, 60, 100 } }, false)) > 1.0e-3);   // (High still plays)
+        CHECK (andor::analog::import::relink (*definition, samples, store.getChildFile ("Imported")) == 1);
+        e.setSampleSourceDefinition (std::move (definition), store.getChildFile ("Imported"));
+        REQUIRE (e.waitForSampleSource (30000));
+        CHECK (e.sampleSourceState().missing.isEmpty());
+        CHECK (q.engineStatus ("sample").isEmpty());
+    }
+    setSampleStore ({});
+}
+
+TEST_CASE ("analog: Bukkehorn 4.5 becomes native presets; Voxx's plays complete through the instrument", "[analog][bukkehorn][presets]")
+{
+    const char* folder = std::getenv ("ANALOG_BUKKEHORN_SAMPLES");
+    if (folder == nullptr)
+    {
+        SKIP ("ANALOG_BUKKEHORN_SAMPLES not set (the recordings are not in the repository)");
+    }
+    Scratch scratch;
+    const auto store = scratch.dir.getChildFile ("Store");
+    setSampleStore (store);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto manifest = andor::analog::import::readManifest (bukkehornManifest());
+    const auto made = andor::analog::import::generatePatches (p, manifest, juce::File (folder), store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+    juce::StringArray names;
+    for (const auto& f : made.files)
+        names.add (f.getFileNameWithoutExtension());
+    UNSCOPED_INFO ("generated: " << names.joinIntoString (", "));
+    UNSCOPED_INFO ("skipped (none of their recordings here): " << made.skipped.size());
+    CHECK (names.contains ("A8 Voxx"));
+    CHECK (names.contains ("Saved Lanes"));
+    CHECK (names.contains ("Hybrid - Voxx + Oscillators"));
+    CHECK (made.files[0].getParentDirectory().getFileName() == "Bukkehorn 4.5");
+
+    const auto voxx = made.files[names.indexOf ("A8 Voxx")];
+    osp::plugin::InstrumentHost::PresetEntry entry;
+    entry.name = "A8 Voxx";
+    entry.file = voxx;
+    p.openPresetEntry (entry);
+    REQUIRE (engine.waitForSampleSource (60000));
+    CHECK (engine.sampleSourceState().missing.isEmpty());
+    CHECK (engine.sampleSourceState().zones == 13);
+    // The definition keeps its link to the NKI group it came from.
+    const auto definition = engine.sampleSourceDefinition();
+    REQUIRE (definition != nullptr);
+    CHECK (definition->getStringAttribute ("origin") == "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5.nki");
+    CHECK (definition->getChildByName ("Group")->getIntAttribute ("index") == 7);
+
+    std::vector<Note> phrase;
+    int t = 0;
+    for (const int key : { 40, 45, 47, 50, 52, 57, 60 })
+    {
+        phrase.push_back ({ t, key, 100 });
+        phrase.push_back ({ t + 72000, key, 0 });
+        t += 96000;
+    }
+    const auto played = renderShell (p, static_cast<double> (t) / rate + 1.5, phrase, false);
+    CHECK (rmsOf (played) > 1.0e-3);
+    if (std::getenv ("ANALOG_RENDER_DIR") != nullptr)
+    {
+        std::vector<float> mono (static_cast<std::size_t> (played.getNumSamples()));
+        for (int i = 0; i < played.getNumSamples(); ++i)
+            mono[static_cast<std::size_t> (i)] = 0.5f * (played.getSample (0, i) + played.getSample (1, i));
+        writeListening ("preset-A8-Voxx", mono);
+        entry.name = "Hybrid";
+        entry.file = made.files[names.indexOf ("Hybrid - Voxx + Oscillators")];
+        p.openPresetEntry (entry);
+        REQUIRE (engine.waitForSampleSource (60000));
+        const auto hybrid = renderShell (p, static_cast<double> (t) / rate + 1.5, phrase, false);
+        for (int i = 0; i < hybrid.getNumSamples(); ++i)
+            mono[static_cast<std::size_t> (i)] = 0.5f * (hybrid.getSample (0, i) + hybrid.getSample (1, i));
+        writeListening ("preset-Hybrid-Voxx", mono);
+    }
+    setSampleStore ({});
+}
+
+TEST_CASE ("analog: the NKI reader refuses what it cannot read, with a reason, never a crash", "[analog][samplesource][nki]")
+{
+    Scratch scratch;
+    auto attempt = [&] (const juce::String& name, const juce::MemoryBlock& bytes) {
+        const auto f = scratch.dir.getChildFile (name);
+        f.replaceWithData (bytes.getData(), bytes.getSize());
+        return andor::analog::import::readNki (f);
+    };
+    juce::MemoryBlock garbage;
+    juce::Random random (7);
+    for (int i = 0; i < 4096; ++i)
+        garbage.append (&i, 1);
+    for (auto* r = static_cast<juce::uint8*> (garbage.getData()); r < static_cast<juce::uint8*> (garbage.getData()) + garbage.getSize(); ++r)
+        *r = static_cast<juce::uint8> (random.nextInt (256));
+    const auto bad = attempt ("garbage.nki", garbage);
+    CHECK (bad.manifest.isVoid());
+    CHECK (bad.error.isNotEmpty());
+    CHECK (attempt ("empty.nki", {}).error.isNotEmpty());
+    CHECK (andor::analog::import::readNki (scratch.dir.getChildFile ("absent.nki")).error.isNotEmpty());
+
+    // The real NKI (not in the repository) when given: every truncation refused cleanly, and the
+    // whole file read exactly as tools/kontakt reads it (the committed manifest).
+    const char* nkiPath = std::getenv ("ANALOG_BUKKEHORN_NKI");
+    if (nkiPath == nullptr)
+        return;
+    juce::MemoryBlock nki;
+    REQUIRE (juce::File (nkiPath).loadFileAsData (nki));
+    for (size_t cut : { size_t { 20 }, size_t { 300 }, nki.getSize() / 2, nki.getSize() - 1 })
+    {
+        INFO ("cut at " << cut);
+        CHECK (attempt ("cut.nki", juce::MemoryBlock (nki.getData(), cut)).error.isNotEmpty());
+    }
+    const auto read = andor::analog::import::readNki (juce::File (nkiPath));
+    INFO (read.error);
+    REQUIRE (read.manifest.isObject());
+    const auto tools = andor::analog::import::readManifest (bukkehornManifest());
+    CHECK (read.manifest["source"]["program"].toString() == tools["source"]["program"].toString());
+    CHECK (static_cast<double> (read.manifest["source"]["programVolumeLinear"]) == Approx (static_cast<double> (tools["source"]["programVolumeLinear"])));
+    for (const char* lane : { "A", "B", "C", "D" })
+        CHECK (static_cast<int> (read.manifest["lanes"][lane]["selectedGroup"]) == static_cast<int> (tools["lanes"][lane]["selectedGroup"]));
+    const auto* mine = read.manifest["groups"].getArray();
+    const auto* theirs = tools["groups"].getArray();
+    REQUIRE (mine != nullptr);
+    REQUIRE (theirs != nullptr);
+    REQUIRE (mine->size() == theirs->size());
+    int zones = 0;
+    for (int g = 0; g < mine->size(); ++g)
+    {
+        const auto& a = mine->getReference (g);
+        const auto& b = theirs->getReference (g);
+        INFO ("group " << g << " " << b["name"].toString());
+        CHECK (a["name"].toString() == b["name"].toString());
+        CHECK (a["lane"].toString() == b["lane"].toString());
+        CHECK (static_cast<int> (a["slot"]) == static_cast<int> (b["slot"]));
+        const auto* za = a["zones"].getArray();
+        const auto* zb = b["zones"].getArray();
+        REQUIRE (za->size() == zb->size());
+        for (int z = 0; z < za->size(); ++z)
+        {
+            const auto& x = za->getReference (z);
+            const auto& y = zb->getReference (z);
+            CHECK (x["file"].toString() == y["file"].toString());
+            for (const char* key : { "keyLo", "keyHi", "velLo", "velHi", "root", "frames", "rate", "channels", "sampleStart" })
+                CHECK (static_cast<int> (x[key]) == static_cast<int> (y[key]));
+            CHECK (static_cast<double> (x["tuneCents"]) == Approx (static_cast<double> (y["tuneCents"])).margin (0.01));
+            CHECK (static_cast<double> (x["volumeLinear"]) == Approx (static_cast<double> (y["volumeLinear"])).epsilon (1.0e-5));
+            CHECK (x["loops"].size() == y["loops"].size());
+            if (x["loops"].size() > 0)
+            {
+                CHECK (static_cast<int> (x["loops"][0]["start"]) == static_cast<int> (y["loops"][0]["start"]));
+                CHECK (static_cast<int> (x["loops"][0]["length"]) == static_cast<int> (y["loops"][0]["length"]));
+                CHECK (static_cast<int> (x["loops"][0]["xfade"]) == static_cast<int> (y["loops"][0]["xfade"]));
+            }
+            ++zones;
+        }
+    }
+    CHECK (zones == 333);
+    // Its samples are expected beside it, in the folder its file list names.
+    CHECK (read.manifest["source"]["sampleFolder"].toString() == "Evenant Engine v2 - Finding Rhythm - Bukkehorn 4.5 Samples");
+}
+
+TEST_CASE ("analog: an imported source takes ORGANIC's card; its sounds are picked from its heading; the A/B mix blends it", "[analog][samplesource][editor]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    const auto store = scratch.dir.getChildFile ("Store");
+    setSampleStore (store);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto made = andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+    REQUIRE (made.record.existsAsFile());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.refreshNow();
+    REQUIRE (ui.visibleCardCount() == 3);   // (empty: card C's stand-in)
+
+    auto open = [&] (int index) {
+        osp::plugin::InstrumentHost::PresetEntry entry;
+        entry.name = made.files[index].getFileNameWithoutExtension();
+        entry.file = made.files[index];
+        p.openPresetEntry (entry);
+        REQUIRE (engine.waitForSampleSource (30000));
+        ui.refreshNow();
+    };
+    // An imported sound: ORGANIC's card shows it (its name, its picture), the dock gives way.
+    open (0);
+    CHECK (ui.visibleCardCount() == 3);
+    osp::plugin::InstrumentHost::GeneratedSource shown;
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == juce::String::fromUTF8 ("Test Horn \xc2\xb7 A1 Horn"));
+    CHECK (shown.cycle.size() > 16);
+    CHECK (ui.engineCard (1).hasHeadingDoor());
+
+    // Its heading opens the sounds; a click plays another (the patch's settings stay).
+    const auto tone = p.parameterValue (params::tone);
+    ui.openPopup (andor::shell::ShellEditor::hybridHeaderPopup);
+    auto* panel = ui.openPopupPanel();
+    REQUIRE (panel != nullptr);
+    juce::TextButton* texture = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText() == "B1 Texture")
+                texture = b;
+            find (*child);
+        }
+    };
+    find (*panel);
+    REQUIRE (texture != nullptr);
+    texture->onClick();
+    REQUIRE (engine.waitForSampleSource (30000));
+    CHECK (engine.sampleSourceState().name == "B1 Texture");
+    CHECK (p.parameterValue (params::tone) == tone);
+    ui.closePopup();
+
+    // A/B mix (the hybrid preset: the oscillators and the source): all A is the oscillators
+    // alone, all B the source alone.
+    open (3);
+    const std::vector<Note> note { { 0, 48, 100 } };
+    p.setParameterValue ("ab.blend", 0.0f);
+    const auto allA = renderShell (p, 0.6, note, false);
+    p.setParameterValue ("ab.blend", 1.0f);
+    const auto allB = renderShell (p, 0.6, note, false);
+    p.setParameterValue ("ab.blend", 0.5f);
+    const auto both = renderShell (p, 0.6, note, false);
+    engine.setSampleSourceDefinition (nullptr, {});
+    REQUIRE (engine.waitForSampleSource (30000));
+    p.setParameterValue ("ab.blend", 0.0f);
+    const auto oscillatorsOnly = renderShell (p, 0.6, note, false);
+    CHECK (differenceRms (allA, oscillatorsOnly) < 1.0e-5);
+    CHECK (rmsOf (allB) > 1.0e-3);
+    CHECK (differenceRms (both, allA) > 1.0e-4);
+    CHECK (differenceRms (both, allB) > 1.0e-4);
+    ui.refreshNow();
+    // (Card C still an INSTRUMENT PATCH, none chosen: its card says so; Remove makes it a SAMPLE again.)
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == "INSTRUMENT PATCH");
+    p.removeLayer (ShellProcessor::hybridLayer);   // (the card's Remove: what it shows)
+    ui.refreshNow();
+    CHECK (engine.hybridType() == andor::analog::HybridType::sample);
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.placeholder.startsWith ("ADD SAMPLE"));   // (nothing: the stand-in again)
+
+    // A recording dropped onto card C plays (C becomes a SAMPLE); the imported sound stays,
+    // dormant, and plays again when C is an INSTRUMENT PATCH. Nothing is lost on the way.
+    open (0);
+    CHECK (engine.hybridType() == andor::analog::HybridType::instrumentPatch);
+    const auto patchSound = renderShell (p, 0.6, note, false);
+    loadOrganic (p, writeRecording (scratch.dir, "organic.wav", 57, 1.0));
+    ui.refreshNow();
+    CHECK (engine.hybridType() == andor::analog::HybridType::sample);
+    CHECK (engine.sampleSourceDefinition() != nullptr);
+    CHECK (ui.visibleCardCount() == 3);
+    const auto recordingSound = renderShell (p, 0.6, note, false);
+    CHECK (differenceRms (recordingSound, patchSound) > 1.0e-4);
+    engine.setHybridType (andor::analog::HybridType::instrumentPatch);
+    CHECK (differenceRms (renderShell (p, 0.6, note, false), patchSound) < 2.0e-3);
+    CHECK (p.loadState (ShellProcessor::hybridLayer) == osp::plugin::InstrumentHost::LoadState::ready);   // (the recording kept)
+    engine.setHybridType (andor::analog::HybridType::sample);
+    CHECK (differenceRms (renderShell (p, 0.6, note, false), recordingSound) < 2.0e-3);
+    p.removeLayer (ShellProcessor::hybridLayer);
+    ui.refreshNow();
+    CHECK (engine.sampleSourceDefinition() != nullptr);   // (still kept for its type)
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.placeholder.startsWith ("ADD SAMPLE"));
+    editor.reset();
+    setSampleStore ({});
+}
+
+TEST_CASE ("analog: the import review counts what it found and what is missing", "[analog][samplesource][nki]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    {
+        andor::analog::ImportReview review (manifest, samples);
+        CHECK (review.groupsFound() == 2);
+        CHECK (review.recordingsTotal() == 3);
+        CHECK (review.recordingsMissing() == 0);
+        int started = -2;
+        review.onImport = [&started] (int g) { started = g; };
+        review.setSize (560, 520);
+        CHECK (review.summary().contains ("2 sounds"));
+    }
+    samples.getChildFile ("High [2].wav").deleteFile();
+    andor::analog::ImportReview partial (manifest, samples);
+    CHECK (partial.recordingsMissing() == 1);
+    CHECK (partial.summary().contains ("1 not in the folder"));
+}
+
+TEST_CASE ("analog: screenshots of the Sample Source importer (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-import]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Scratch scratch;
+    // The real Bukkehorn manifest and recordings when given, else the synthetic ones.
+    const char* folder = std::getenv ("ANALOG_BUKKEHORN_SAMPLES");
+    juce::var manifest;
+    juce::File samples;
+    if (folder != nullptr)
+    {
+        manifest = andor::analog::import::readManifest (bukkehornManifest());
+        samples = juce::File (folder);
+    }
+    else
+    {
+        samples = scratch.dir.getChildFile ("Test Horn Samples");
+        samples.createDirectory();
+        manifest = syntheticManifest (samples);
+    }
+    const auto store = scratch.dir.getChildFile ("Store");
+    setSampleStore (store);
+    {
+        ShellProcessor p;
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        auto shoot = [&] (const juce::String& name, juce::Component& c) {
+            ui.refreshNow();
+            const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile (name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        editor->setSize (1448, 1086);
+        shoot ("import-dock", *editor);
+
+        andor::analog::ImportReview review (manifest, samples);
+        review.setSize (560, 520);
+        shoot ("import-review", review);
+
+        const auto made = andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+        int index = 0;
+        for (int i = 0; i < made.files.size(); ++i)
+            if (made.files[i].getFileNameWithoutExtension().contains ("Voxx") && ! made.files[i].getFileNameWithoutExtension().contains ("Hybrid"))
+                index = i;
+        osp::plugin::InstrumentHost::PresetEntry entry;
+        entry.name = made.files[index].getFileNameWithoutExtension();
+        entry.file = made.files[index];
+        p.openPresetEntry (entry);
+        REQUIRE (engine.waitForSampleSource (60000));
+        renderShell (p, 0.8, { { 0, 45, 100 }, { 0, 52, 100 } }, false);
+        shoot ("import-card-b-playing", *editor);
+        ui.openPopup (andor::shell::ShellEditor::hybridHeaderPopup);
+        shoot ("import-sound-popover", *editor);
+        ui.closePopup();
+        editor.reset();
+    }
+    setSampleStore ({});
+    osp::plugin::skin::setLook (before);
+}
+
+namespace
+{
+    const andor::analog::FactoryPatch& factoryNamed (const std::string& name)
+    {
+        for (const auto& f : factoryPatches())
+            if (f.name == name)
+                return f;
+        FAIL ("no factory patch " << name);
+        return factoryPatches().front();
+    }
+}
+
+TEST_CASE ("analog: the AMP envelope on screen is what plays in the Juno patches (ENV LINK, VCA GATE)", "[analog][juno][envelope]")
+{
+    const std::vector<Note> held { { 0, 57, 100 }, { 0, 64, 100 }, { 20000, 57, 0 }, { 20000, 64, 0 } };
+    SECTION ("ENV LINK: the AMP envelope shapes amplitude and filter; FILTER ENVELOPE rests")
+    {
+        ShellProcessor p;
+        apply (p, factoryNamed ("Brass Section 106").patch);
+        setValue (p, "space", 0.0f);
+        REQUIRE (p.parameterValue (params::envLink) >= 0.5f);
+        const auto reference = renderShell (p, 0.6, held, false);
+        const double again = differenceRms (reference, renderShell (p, 0.6, held, false));   // (the same settings: the floor)
+        setValue (p, "attack", 900.0f);   // AMP's attack: heard
+        const double ampMoved = differenceRms (reference, renderShell (p, 0.6, held, false));
+        setValue (p, "attack", 90.0f);
+        setValue (p, params::filterAttack, 1.5f);   // the filter's own: resting while linked
+        const double filterMoved = differenceRms (reference, renderShell (p, 0.6, held, false));
+        UNSCOPED_INFO ("again " << again << ", AMP attack " << ampMoved << ", filter attack " << filterMoved);
+        CHECK (ampMoved > 1.0e-3);
+        CHECK (filterMoved <= again * 1.5 + 1.0e-9);
+    }
+    SECTION ("VCA GATE: the AMP picture says GATE; editing the envelope gives the amplitude back to it")
+    {
+        ShellProcessor p;
+        apply (p, factoryNamed ("DCO Bass 106").patch);
+        REQUIRE (p.parameterValue (params::vcaMode) >= 0.5f);
+        const auto& info = andor::shell::productInfo();
+        REQUIRE (info.ampEnvelopeNote != nullptr);
+        CHECK (info.ampEnvelopeNote (p) == "GATE");
+        // A preset or automation setting AMP's values is not the musician editing it.
+        setValue (p, "release", 800.0f);
+        CHECK (p.parameterValue (params::vcaMode) >= 0.5f);
+        const auto gated = renderShell (p, 0.6, held, false);
+        // A knob or handle starts a gesture: the amplitude follows the envelope again.
+        auto* attack = p.parameters.getParameter ("attack");
+        attack->beginChangeGesture();
+        attack->setValueNotifyingHost (attack->convertTo0to1 (400.0f));
+        attack->endChangeGesture();
+        CHECK (p.parameterValue (params::vcaMode) < 0.5f);
+        CHECK (info.ampEnvelopeNote (p).isEmpty());
+        CHECK (differenceRms (gated, renderShell (p, 0.6, held, false)) > 1.0e-3);
+    }
+}
+
+TEST_CASE ("analog: a version-6 session with ENV LINK keeps its sound (its filter envelope becomes AMP's)", "[analog][state][juno]")
+{
+    auto prepare = [] (ShellProcessor& q) {
+        apply (q, factoryNamed ("Brass Section 106").patch);
+        setValue (q, "space", 0.0f);
+        setValue (q, params::filterAttack, 0.2f);
+        setValue (q, params::filterDecay, 0.9f);
+        setValue (q, params::filterSustain, 30.0f);
+        setValue (q, params::filterRelease, 0.5f);
+    };
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        prepare (old);
+        setValue (old, "attack", 5.0f);   // AMP's, unused by version 6 while linked
+        setValue (old, "release", 3000.0f);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 6);
+    juce::MemoryBlock v6;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v6);
+
+    ShellProcessor reopened;
+    reopened.setStateInformation (v6.getData(), static_cast<int> (v6.getSize()));
+    CHECK (reopened.parameterValue ("attack") == Approx (200.0f).margin (0.5f));
+    CHECK (reopened.parameterValue ("decay") == Approx (900.0f).margin (0.5f));
+    CHECK (reopened.parameterValue ("sustainLevel") == Approx (30.0f).margin (0.01f));
+    CHECK (reopened.parameterValue ("release") == Approx (500.0f).margin (0.5f));
+
+    // ... and an unlinked session's AMP is left alone.
+    ShellProcessor plain;
+    apply (plain, factoryPatches()[0].patch);
+    setValue (plain, params::envLink, 0.0f);
+    setValue (plain, "attack", 5.0f);
+    juce::MemoryBlock plainSession;
+    plain.getStateInformation (plainSession);
+    auto plainXml = juce::AudioProcessor::getXmlFromBinary (plainSession.getData(), static_cast<int> (plainSession.getSize()));
+    plainXml->setAttribute ("productVersion", 6);
+    juce::AudioProcessor::copyXmlToBinary (*plainXml, plainSession);
+    ShellProcessor plainReopened;
+    plainReopened.setStateInformation (plainSession.getData(), static_cast<int> (plainSession.getSize()));
+    CHECK (plainReopened.parameterValue ("attack") == Approx (5.0f).margin (0.01f));
+}
+
+TEST_CASE ("analog: each oscillator's well reveals its model's own controls on hover, at every window size; pitch and level stay on the card", "[analog][editor][overlay]")
+{
+    using namespace params;
+    struct Expect
+    {
+        int model;
+        std::vector<juce::String> one, two;   // OSC 1's and OSC 2's controls for that model
+    };
+    const std::vector<Expect> expected {
+        { 0, { osc1Wave, osc1Width, lfoWidth1 }, { osc2Wave, osc2Width, lfoWidth2 } },
+        { 1, { osc1DcoSaw, osc1DcoPulse, osc1DcoSub, osc1Width, osc1DcoPwmDepth, osc1DcoPwmSource },
+          { osc2DcoSaw, osc2DcoPulse, osc2DcoSub, osc2Width, osc2DcoPwmDepth, osc2DcoPwmSource } },
+        { 2, { osc1WideWave, osc1WideShape, osc1WideSpread, osc1Width, lfoWidth1 }, { osc2WideWave, osc2WideShape, osc2WideSpread, osc2Width, lfoWidth2 } },
+    };
+    const juce::StringArray cardLevel { osc1Level, osc1Coarse, osc1Octave, osc1Fine, osc2Level, osc2Coarse, osc2Octave, osc2Fine, "layerA.pan" };
+    for (const int width : { 869, 1448, 1810 })
+    {
+        INFO ("window " << width);
+        OverlayFixture f (width);
+        for (const int layer : { 0, 2 })
+        {
+            const int slot = layer == 0 ? 1 : 2;
+            for (const auto& e : expected)
+            {
+                INFO ("OSC " << slot << " model " << e.model);
+                setValue (f.p, slot == 1 ? osc1Model : osc2Model, static_cast<float> (e.model));
+                auto* o = f.overlay (layer);
+                REQUIRE (o != nullptr);
+                CHECK (o->getBounds() == f.card (layer).display().getBounds());
+                // At rest: the waveform, and only the model's dropdown over it.
+                o->setRevealedForTest (false);
+                CHECK (OverlayFixture::shown (*o, slot == 1 ? osc1Model : osc2Model));
+                for (const auto& id : slot == 1 ? e.one : e.two)
+                    CHECK_FALSE (OverlayFixture::shown (*o, id));
+                // Hovered: the model's own controls, inside the well, none overlapping.
+                o->setRevealedForTest (true);
+                const auto boxes = OverlayFixture::checkLayout (*o, static_cast<int> ((slot == 1 ? e.one : e.two).size()) + 1);
+                for (const auto& id : slot == 1 ? e.one : e.two)
+                {
+                    INFO (id);
+                    CHECK (OverlayFixture::shown (*o, id));
+                }
+                // Never the card's own business: pitch and level.
+                for (const auto& id : cardLevel)
+                    CHECK (OverlayFixture::control (*o, id) == nullptr);
+                // WIDE: SHAPE and SPREAD side by side, a pair.
+                if (e.model == 2)
+                {
+                    const auto shape = boxes.find (slot == 1 ? osc1WideShape : osc2WideShape), spread = boxes.find (slot == 1 ? osc1WideSpread : osc2WideSpread);
+                    REQUIRE (shape != boxes.end());
+                    REQUIRE (spread != boxes.end());
+                    CHECK (spread->second.getX() >= shape->second.getRight());
+                    CHECK (spread->second.getX() - shape->second.getRight() <= 4);
+                    CHECK (spread->second.getY() == shape->second.getY());
+                }
+            }
+            setValue (f.p, slot == 1 ? osc1Model : osc2Model, 0.0f);
+        }
+        // The cards' own knobs: DETUNE, TUNE, OCT, LEVEL of that oscillator.
+        CHECK (f.card (0).hasControl (osc1Fine));
+        CHECK (f.card (0).hasControl (osc1Coarse));
+        CHECK (f.card (0).hasControl (osc1Octave));
+        CHECK (f.card (0).hasControl (osc1Level));
+        CHECK (f.card (2).hasControl (osc2Fine));
+        CHECK (f.card (2).hasControl (osc2Level));
+    }
+    // A model's settings outlive another model playing.
+    ShellProcessor p;
+    setValue (p, osc1Model, 1.0f);
+    setValue (p, osc1DcoSub, 60.0f);
+    setValue (p, osc1Model, 2.0f);
+    setValue (p, osc1WideSpread, 30.0f);
+    setValue (p, osc1Model, 1.0f);
+    CHECK (p.parameterValue (osc1DcoSub) == Approx (60.0f));
+    CHECK (p.parameterValue (osc1WideSpread) == Approx (30.0f));
+}
+
+TEST_CASE ("analog: card C is a SAMPLE, OSC 3, NOISE or an INSTRUMENT PATCH; only the selected one plays, and each survives save and reload", "[analog][hybrid]")
+{
+    using namespace params;
+    using andor::analog::HybridType;
+    const std::vector<Note> note { { 0, 57, 100 } };
+    auto prepare = [] (ShellProcessor& q) {
+        setValue (q, "space", 0.0f);
+        setValue (q, "echo", 0.0f);
+        setValue (q, osc1Enabled, 0.0f);   // (the analog pair silent: card C alone)
+        setValue (q, osc2Enabled, 0.0f);
+        q.setParameterValue ("ab.blend", 0.5f);
+    };
+    ShellProcessor p;
+    prepare (p);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    // A new instance: an empty SAMPLE, no sound from C.
+    CHECK (engine.hybridType() == HybridType::sample);
+    CHECK (rmsOf (renderShell (p, 0.5, note, false)) < 1.0e-5);
+
+    // OSC 3: a third oscillator, tuned by its own card knobs.
+    engine.setHybridType (HybridType::oscillator);
+    const auto osc3 = renderShell (p, 0.5, note, false);
+    CHECK (rmsOf (osc3) > 1.0e-3);
+    setValue (p, osc3Coarse, 7.0f);
+    CHECK (differenceRms (renderShell (p, 0.5, note, false), osc3) > 1.0e-3);
+    osp::plugin::InstrumentHost::GeneratedSource shown;
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == "OSC 3");
+    CHECK (shown.periodic);
+
+    // NOISE: its own, not following the key, the same on every render (seeded).
+    engine.setHybridType (HybridType::noise);
+    setValue (p, hybridNoiseTone, 40.0f);
+    setValue (p, keyTrack, 0.0f);   // (the shared filter's key tracking off: the source itself is what is measured)
+    const auto low = renderShell (p, 0.5, { { 0, 40, 100 } }, false), high = renderShell (p, 0.5, { { 0, 84, 100 } }, false);
+    REQUIRE (rmsOf (low) > 1.0e-3);
+    CHECK (std::abs (20.0 * std::log10 (rmsOf (high) / rmsOf (low))) < 1.5);
+    REQUIRE (p.generatedSource (1, shown));
+    CHECK (shown.name == "NOISE");
+    setValue (p, hybridNoiseColor, 1.0f);
+    setValue (p, hybridNoiseMovement, 70.0f);
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    {
+        ShellProcessor a, b;
+        a.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        b.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        auto& ea = dynamic_cast<AnalogEngine&> (a.productEngine());
+        CHECK (ea.hybridType() == HybridType::noise);
+        CHECK (a.parameterValue (hybridNoiseMovement) == Approx (70.0f));
+        CHECK (differenceRms (renderShell (a, 0.5, note, false), renderShell (b, 0.5, note, false)) < 1.0e-7);
+    }
+
+    // A recording loaded while C is NOISE: C becomes a SAMPLE and plays it; NOISE comes back as it was.
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "hybrid.wav", 57, 1.5));
+    CHECK (engine.hybridType() == HybridType::sample);
+    const auto recording = renderShell (p, 0.5, note, false);
+    CHECK (rmsOf (recording) > 1.0e-3);
+    engine.setHybridType (HybridType::noise);
+    const auto noiseAgain = renderShell (p, 0.5, note, false);
+    CHECK (differenceRms (noiseAgain, recording) > 1.0e-3);   // (the recording silent beneath)
+    engine.setHybridType (HybridType::sample);
+    CHECK (differenceRms (renderShell (p, 0.5, note, false), recording) < 2.0e-3);
+
+    // The cards' knobs and the well follow C's type.
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (1448, 1086);
+        for (const auto type : { HybridType::sample, HybridType::oscillator, HybridType::noise, HybridType::instrumentPatch })
+        {
+            INFO ("type " << static_cast<int> (type));
+            engine.setHybridType (type);
+            ui.refreshNow();
+            auto& card = ui.engineCard (1);
+            REQUIRE (card.isVisible());
+            CHECK (card.hasControl ("layerB.level"));
+            CHECK (card.hasControl (osc3Fine) == (type == HybridType::oscillator));
+            CHECK (card.hasControl (osc3Octave) == (type == HybridType::oscillator));
+            auto* o = card.wellOverlayComponent();
+            REQUIRE (o != nullptr);
+            o->setRevealedForTest (false);
+            CHECK (OverlayFixture::shown (*o, hybridType));   // (its type, always)
+            o->setRevealedForTest (true);
+            OverlayFixture::checkLayout (*o, 1);
+            CHECK (OverlayFixture::shown (*o, hybridNoiseColor) == (type == HybridType::noise));
+            CHECK (card.hasControl (hybridNoiseTone) == (type == HybridType::noise));
+            CHECK (card.hasControl (hybridNoiseKeys) == (type == HybridType::noise));
+            CHECK (card.hasControl (hybridVelo) == (type == HybridType::noise || type == HybridType::oscillator));
+            CHECK (card.hasControl (hybridOctave) == (type == HybridType::sample || type == HybridType::instrumentPatch));
+            CHECK (OverlayFixture::shown (*o, osc3Model) == (type == HybridType::oscillator));
+            CHECK (OverlayFixture::shown (*o, osc3Wave) == (type == HybridType::oscillator));
+        }
+        engine.setHybridType (HybridType::sample);
+    }
+}
+
+TEST_CASE ("analog: a session from before three engines that held an imported sound opens with card C its INSTRUMENT PATCH", "[analog][hybrid][state][samplesource]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    const auto store = scratch.dir.getChildFile ("Store");
+    setSampleStore (store);
+    juce::MemoryBlock v7;
+    {
+        ShellProcessor p;
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        auto definition = andor::analog::import::makeDefinition (manifest, { 0 }, "A1 Horn", samples, store.getChildFile ("Imported"));
+        REQUIRE (definition.xml != nullptr);
+        engine.setSampleSourceDefinition (std::move (definition.xml), store.getChildFile ("Imported"));
+        REQUIRE (engine.waitForSampleSource (30000));
+        juce::MemoryBlock session;
+        p.getStateInformation (session);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (xml != nullptr);
+        xml->setAttribute ("productVersion", 7);   // as version 7 wrote it: no hybrid type
+        std::function<void (juce::XmlElement&)> drop = [&] (juce::XmlElement& e) {
+            for (auto* child = e.getFirstChildElement(); child != nullptr;)
+            {
+                auto* next = child->getNextElement();
+                if (child->getStringAttribute ("id") == params::hybridType)
+                    e.removeChildElement (child, true);
+                else
+                    drop (*child);
+                child = next;
+            }
+        };
+        drop (*xml);
+        juce::AudioProcessor::copyXmlToBinary (*xml, v7);
+    }
+    ShellProcessor q;
+    q.setStateInformation (v7.getData(), static_cast<int> (v7.getSize()));
+    auto& e = dynamic_cast<AnalogEngine&> (q.productEngine());
+    REQUIRE (e.waitForSampleSource (30000));
+    CHECK (e.hybridType() == andor::analog::HybridType::instrumentPatch);
+    setValue (q, "space", 0.0f);
+    CHECK (rmsOf (renderShell (q, 0.5, { { 0, 57, 100 } }, false)) > 1.0e-3);
+    setSampleStore ({});
+}
+
+TEST_CASE ("analog: MIX sets the analog pair against whatever card C plays; MORPH fuses them, whatever C plays", "[analog][hybrid][morph]")
+{
+    using namespace params;
+    using andor::analog::HybridType;
+    const std::vector<Note> note { { 0, 57, 100 } };
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    setValue (p, "echo", 0.0f);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto pairOnly = renderShell (p, 0.5, note, false);   // (C empty: the INIT pair, untouched)
+    for (const auto type : { HybridType::oscillator, HybridType::noise })
+    {
+        INFO ("type " << static_cast<int> (type));
+        engine.setHybridType (type);
+        p.setParameterValue ("ab.blend", 0.0f);   // all the analog pair
+        CHECK (differenceRms (renderShell (p, 0.5, note, false), pairOnly) < 2.0e-3);
+        p.setParameterValue ("ab.blend", 1.0f);   // all card C
+        const auto cOnly = renderShell (p, 0.5, note, false);
+        CHECK (rmsOf (cOnly) > 1.0e-3);
+        CHECK (differenceRms (cOnly, pairOnly) > 1.0e-3);
+        p.setParameterValue ("ab.blend", 0.5f);   // both, each at full level (the centre's law)
+        const auto both = renderShell (p, 0.5, note, false);
+        CHECK (differenceRms (both, pairOnly) > 1.0e-3);
+        CHECK (differenceRms (both, cOnly) > 1.0e-3);
+        // MORPH (on, half way, as a new instrument has it) hears card C live: it is ready, and
+        // at the mix's centre the two are fused, not layered.
+        CHECK (p.engineStatus ("morph").isEmpty());
+        p.setParameterValue (params::morphEnabled, 0.0f);
+        const auto layered = renderShell (p, 0.5, note, false);
+        p.setParameterValue (params::morphEnabled, 1.0f);
+        CHECK (differenceRms (both, layered) > 1.0e-3);
+    }
+    // Card C as an empty SAMPLE: MORPH says it has nothing to fuse; with a recording, ready.
+    engine.setHybridType (HybridType::sample);
+    CHECK (p.engineStatus ("morph").isNotEmpty());
+    Scratch scratch;
+    loadOrganic (p, writeRecording (scratch.dir, "morph.wav", 57, 2.5));
+    CHECK (p.engineStatus ("morph").isEmpty());
+}
+
+TEST_CASE ("analog: screenshots of the three engines in their combinations, every width (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-three]")
+{
+    using namespace params;
+    using andor::analog::HybridType;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Scratch scratch;
+    const auto store = scratch.dir.getChildFile ("Store");
+    setSampleStore (store);
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto reveal = [&] (int layer, bool shown) {
+        ui.refreshNow();
+        if (auto* o = ui.engineCard (layer).wellOverlayComponent())
+            o->setRevealedForTest (shown);
+    };
+    auto models = [&] (int one, int two) {
+        setValue (p, osc1Model, static_cast<float> (one));
+        setValue (p, osc2Model, static_cast<float> (two));
+    };
+    // A synthetic imported instrument (its sounds) for the INSTRUMENT PATCH state.
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    andor::analog::import::generatePatches (p, manifest, samples, store.getChildFile ("Imported"), scratch.dir.getChildFile ("Presets"));
+    const auto recording = writeRecording (scratch.dir, "nyckelharpa stand-in A3.wav", 57, 2.5);
+    for (const int width : { 1448, 869, 1810 })
+    {
+        const auto w = juce::String (width);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        p.removeLayer (ShellProcessor::hybridLayer);
+        engine.setSampleSourceDefinition (nullptr, {});
+        engine.setHybridType (HybridType::sample);
+        models (0, 0);
+        shoot ("three-" + w + "-1-classic-classic-empty");
+        models (2, 1);
+        setValue (p, osc1WideWave, 4.0f);
+        setValue (p, osc1WideSpread, 45.0f);
+        setValue (p, osc2DcoPulse, 1.0f);
+        setValue (p, osc2DcoSub, 50.0f);
+        shoot ("three-" + w + "-2-wide-dco-empty");
+        reveal (0, true);
+        shoot ("three-" + w + "-2-wide-dco-empty-osc1-hover");
+        reveal (0, false);
+        reveal (2, true);
+        shoot ("three-" + w + "-2-wide-dco-empty-osc2-hover");
+        reveal (2, false);
+        models (0, 2);
+        loadOrganic (p, recording);
+        shoot ("three-" + w + "-3-classic-wide-sample");
+        models (1, 0);
+        andor::analog::chooseSound (p, *andor::analog::import::readRecord (store.getChildFile ("Imported"), "Test Horn.import.xml")->getFirstChildElement());
+        REQUIRE (engine.waitForSampleSource (30000));
+        shoot ("three-" + w + "-4-dco-classic-instrument");
+        reveal (1, true);
+        shoot ("three-" + w + "-4-dco-classic-instrument-c-hover");
+        reveal (1, false);
+        models (0, 1);
+        engine.setHybridType (HybridType::oscillator);
+        setValue (p, osc3Model, 2.0f);
+        setValue (p, osc3WideWave, 4.0f);
+        shoot ("three-" + w + "-5-classic-dco-osc3-wide");
+        reveal (1, true);
+        shoot ("three-" + w + "-5-classic-dco-osc3-wide-c-hover");
+        reveal (1, false);
+        engine.setHybridType (HybridType::noise);
+        setValue (p, hybridNoiseTone, 55.0f);
+        shoot ("three-" + w + "-6-classic-dco-noise");
+        reveal (1, true);
+        shoot ("three-" + w + "-6-classic-dco-noise-c-hover");
+        reveal (1, false);
+        if (width == 1448)
+        {
+            // Each card's EQ (A OSC 1, B OSC 2, C the hybrid).
+            for (const int layer : { 0, 2, 1 })
+            {
+                ui.engineCard (layer).onEqToggle (layer, true);
+                shoot ("three-1448-7-eq-" + osp::plugin::InstrumentHost::shownLayerName (layer));
+                ui.engineCard (layer).onEqToggle (layer, false);
+            }
+            ui.openPopup (2);   // FILTER: its three pages
+            for (int page = 0; page < 3; ++page)
+            {
+                shoot ("three-1448-8-filter-popover-" + juce::String (page + 1));
+                std::function<juce::Component* (juce::Component&)> find = [&] (juce::Component& c) -> juce::Component* {
+                    for (auto* child : c.getChildren())
+                    {
+                        if (child->getTitle() == "Pages")
+                            return child;
+                        if (auto* f = find (*child))
+                            return f;
+                    }
+                    return nullptr;
+                };
+                if (auto* t = find (*ui.openPopupPanel()))
+                    t->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
+            }
+            ui.closePopup();
+            // SPACE: the rooms, then ABYSS (GRAVITY below 0: the swell; FROZEN: held).
+            ui.openPopup (4);
+            shoot ("three-1448-10-space-rooms");
+            setValue (p, "space.engine", 1.0f);
+            setValue (p, "space.abyss.gravity", -60.0f);
+            setValue (p, "space.abyss.resonance", 30.0f);
+            shoot ("three-1448-10-space-abyss");
+            setValue (p, "space.abyss.variant", 2.0f);   // INVERSE: the swell at GRAVITY 0
+            setValue (p, "space.abyss.gravity", 0.0f);
+            shoot ("three-1448-10-space-abyss-inverse");
+            setValue (p, "space.abyss.variant", 3.0f);   // ENDLESS
+            shoot ("three-1448-10-space-abyss-endless");
+            setValue (p, "space.abyss.variant", 1.0f);   // DARK, frozen, heavy
+            setValue (p, "space.abyss.freeze", 1.0f);
+            setValue (p, "space.abyss.gravity", 40.0f);
+            shoot ("three-1448-10-space-abyss-frozen");
+            setValue (p, "space.engine", 2.0f);   // VINTAGE
+            setValue (p, "space.vintage.variant", 1.0f);
+            shoot ("three-1448-10-space-vintage-plate");
+            setValue (p, "space.engine", 3.0f);   // BLOOM, synced, then a WASH
+            setValue (p, "space.bloom.diffusion", 25.0f);
+            shoot ("three-1448-10-space-bloom");
+            setValue (p, "space.bloom.variant", 3.0f);
+            setValue (p, "space.bloom.diffusion", 85.0f);
+            shoot ("three-1448-10-space-bloom-wash");
+            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.resonance", "space.abyss.freeze", "space.abyss.variant", "space.vintage.variant",
+                                    "space.bloom.variant", "space.bloom.diffusion" })
+                if (auto* q = p.parameters.getParameter (id))
+                    q->setValueNotifyingHost (q->getDefaultValue());
+            ui.closePopup();
+            // ECHO: ASCEND (its second row: INTERVAL, MOTION; the repeats' pitches in the picture).
+            setValue (p, "echo.type", 2.0f);
+            setValue (p, "echo.feedback", 60.0f);
+            ui.openPopup (5);
+            shoot ("three-1448-11-echo-ascend");
+            setValue (p, "echo.ascend.interval", 1.0f);   // +7, STEADY
+            setValue (p, "echo.ascend.motion", 1.0f);
+            shoot ("three-1448-11-echo-ascend-steady-fifth");
+            for (const char* id : { "echo.type", "echo.feedback", "echo.ascend.interval", "echo.ascend.motion" })
+                if (auto* q = p.parameters.getParameter (id))
+                    q->setValueNotifyingHost (q->getDefaultValue());
+            ui.closePopup();
+            // GRANULAR per card (state version 8): A granular, B regular; then both; the
+            // oscillator overlay gives the well to the grains.
+            setValue (p, "layerA.sourceMode", 1.0f);
+            reveal (0, true);
+            ui.engineCard (0).showGranularControls (true, true);
+            renderShell (p, 1.2, { { 0, 57, 100 }, { 0, 64, 100 } }, false);
+            shoot ("three-1448-9-granular-a-regular-b");
+            setValue (p, "layerC.sourceMode", 1.0f);
+            reveal (2, true);
+            ui.engineCard (2).showGranularControls (true, true);
+            renderShell (p, 1.2, { { 0, 57, 100 }, { 0, 64, 100 } }, false);
+            shoot ("three-1448-9-granular-a-granular-b");
+            setValue (p, "layerA.sourceMode", 0.0f);
+            setValue (p, "layerC.sourceMode", 0.0f);
+            reveal (0, false);
+            reveal (2, false);
+        }
+        setValue (p, osc3Model, 0.0f);
+        setValue (p, osc3WideWave, 0.0f);
+        setValue (p, osc1WideWave, 0.0f);
+        setValue (p, osc1WideSpread, 0.0f);
+        setValue (p, osc2DcoPulse, 0.0f);
+        setValue (p, osc2DcoSub, 0.0f);
+    }
+    editor.reset();
+    setSampleStore ({});
+    osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: a modulation source dragged onto a Granular card reaches its grain controls (cards A and B)", "[analog][editor][modulation][granular]")
+{
+    // The pointer's own hover never reaches a card while a source is dragged: resting on a
+    // Granular card's display brings its POS SIZE DENS TUNE SPREAD up, as in ANDOR OSP.
+    using D = osp::mod::Dest;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    setValue (p, "layerA.sourceMode", 1.0f);
+    setValue (p, "layerC.sourceMode", 1.0f);
+    ui.refreshNow();
+    auto& content = ui.contentForTest();
+    const int lfo1 = osp::mod::slot::lfo1;
+    for (const auto& [layer, dest] : { std::pair<int, D> { 0, D::grainPositionA }, { 2, D::grainPositionC } })
+    {
+        INFO ("layer " << layer);
+        auto& card = ui.engineCard (layer);
+        REQUIRE (card.isGranular());
+        CHECK_FALSE (card.granularControlsShown());
+        const auto display = content.getLocalArea (&card, card.display().getBounds()).toFloat();
+        ui.dragModulationForTest (lfo1, display.getCentre());
+        juce::Thread::sleep (420);   // (a rest, not a pass across it)
+        ui.dragModulationForTest (lfo1, display.getCentre());
+        CHECK (card.granularControlsShown());
+        juce::Slider* pos = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && s->getProperties()["paramId"].toString() == osp::plugin::InstrumentHost::layerParameterId (layer, "granular.position"))
+                    pos = s;
+                find (*child);
+            }
+        };
+        find (card);
+        REQUIRE (pos != nullptr);
+        CHECK (pos->isVisible());
+        const auto at = content.getLocalArea (pos, pos->getLocalBounds()).toFloat().getCentre();
+        ui.dragModulationForTest (lfo1, at);
+        ui.dropModulationForTest (lfo1, at);
+        bool routed = false;
+        for (const auto& r : p.modulationRoutes())
+            routed = routed || (r.route.dest == dest && r.route.source == osp::mod::Source::lfo1);
+        CHECK (routed);
+    }
+}
+
+TEST_CASE ("analog: an imported Kontakt patch writes no presets; earlier imports' presets leave the list, the user's stay", "[analog][samplesource][presets]")
+{
+    Scratch scratch;
+    const auto samples = scratch.dir.getChildFile ("Test Horn Samples");
+    samples.createDirectory();
+    const auto manifest = syntheticManifest (samples);
+    ShellProcessor p;
+    const auto store = scratch.dir.getChildFile ("Store").getChildFile ("Imported");
+    const auto presets = scratch.dir.getChildFile ("Presets");
+
+    // Today's import: the sounds in the record (card C's SOUNDS), no preset anywhere.
+    const auto made = andor::analog::import::generatePatches (p, manifest, samples, store);
+    CHECK (made.files.isEmpty());
+    const auto record = andor::analog::import::readRecord (store, made.record.getFileName());
+    REQUIRE (record != nullptr);
+    juce::StringArray sounds;
+    for (const auto* d : record->getChildWithTagNameIterator ("SampleSource"))
+        sounds.add (d->getStringAttribute ("name"));
+    CHECK (sounds == juce::StringArray { "A1 Horn", "B1 Texture", "Saved Lanes" });
+
+    // An earlier import's presets (as it wrote them), a preset the user saved among them and
+    // one elsewhere: the import's leave, the user's stay.
+    const auto earlier = andor::analog::import::generatePatches (p, manifest, samples, store, presets);
+    REQUIRE (earlier.files.size() == 4);
+    const auto ext = andor::shell::productInfo().presetExtension;
+    const auto mineBeside = presets.getChildFile ("Test Horn").getChildFile ("My Horn Pad" + ext);
+    const auto mineElsewhere = presets.getChildFile ("Mine" + ext);
+    REQUIRE (earlier.files[0].copyFileTo (mineBeside));
+    REQUIRE (earlier.files[0].copyFileTo (mineElsewhere));
+    CHECK (andor::analog::import::retireGeneratedPresets (presets, store) == 4);
+    for (const auto& f : earlier.files)
+        CHECK_FALSE (f.existsAsFile());
+    CHECK (mineBeside.existsAsFile());
+    CHECK (mineElsewhere.existsAsFile());
+    CHECK (andor::analog::import::retireGeneratedPresets (presets, store) == 0);   // (nothing left to move)
+    // ... and the import's sounds still play from the record.
+    CHECK (andor::analog::import::readRecord (store, made.record.getFileName()) != nullptr);
+}
+
+namespace
+{
+    /** What the voices start, block by block: a voice's note beginning (held), with its cards. */
+    struct LaneOnset
+    {
+        double seconds;
+        int note;
+        std::uint8_t cards;
+    };
+
+    struct LanePlay
+    {
+        std::vector<LaneOnset> onsets;
+        int minHeldOn = 99, maxHeldOn = 0;   ///< held voices on `holdCards` while the keys are down (after 0.3 s)
+        int heldAtEnd = 0, activeAtEnd = 0;
+        int allCardVoices = 0;               ///< onsets on every card (the one arpeggiator's)
+    };
+
+    /** Holds C E G from the start until `release` seconds, renders `seconds`; `each` runs
+        before every block (its start in seconds). */
+    LanePlay playLanes (ShellProcessor& p, double seconds, double release, std::uint8_t holdCards,
+                        const std::function<void (double)>& each = {})
+    {
+        p.prepareToPlay (rate, block);
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        const auto& synth = engine.synthForTest();
+        LanePlay result;
+        std::array<Synth::VoiceView, Synth::maxVoices> before {};
+        juce::AudioBuffer<float> buffer (2, block);
+        const int total = static_cast<int> (seconds * rate), releaseAt = static_cast<int> (release * rate);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            const double t = pos / rate;
+            if (each)
+                each (t);
+            juce::MidiBuffer midi;
+            for (int note : { 60, 64, 67 })
+            {
+                if (pos == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, static_cast<juce::uint8> (100)), 0);
+                if (releaseAt >= pos && releaseAt < pos + block)
+                    midi.addEvent (juce::MidiMessage::noteOff (1, note), releaseAt - pos);
+            }
+            p.processBlock (buffer, midi);
+            int heldOn = 0;
+            for (int s = 0; s < Synth::maxVoices; ++s)
+            {
+                const auto v = synth.voiceView (s);
+                const auto& b = before[static_cast<std::size_t> (s)];
+                if (v.active && v.held && (! b.active || ! b.held || b.note != v.note || b.cards != v.cards))
+                {
+                    result.onsets.push_back ({ t, v.note, v.cards });
+                    if (v.cards == Synth::allCards)
+                        ++result.allCardVoices;
+                }
+                if (v.active && v.held && v.cards == holdCards)
+                    ++heldOn;
+                before[static_cast<std::size_t> (s)] = v;
+            }
+            if (t > 0.3 && pos + block < releaseAt)
+            {
+                result.minHeldOn = std::min (result.minHeldOn, heldOn);
+                result.maxHeldOn = std::max (result.maxHeldOn, heldOn);
+            }
+        }
+        for (int s = 0; s < Synth::maxVoices; ++s)
+        {
+            const auto v = synth.voiceView (s);
+            result.heldAtEnd += v.held ? 1 : 0;
+            result.activeAtEnd += v.active ? 1 : 0;
+        }
+        return result;
+    }
+
+    std::vector<int> firstNotes (const LanePlay& play, std::uint8_t cards, int count)
+    {
+        std::vector<int> notes;
+        for (const auto& o : play.onsets)
+            if (o.cards == cards && static_cast<int> (notes.size()) < count)
+                notes.push_back (o.note);
+        return notes;
+    }
+}
+
+TEST_CASE ("analog: the arpeggiator on card C alone, while cards A and B hold the chord", "[analog][arp][cardarp]")
+{
+    ShellProcessor p;
+    REQUIRE (p.cardArpeggiator());
+    setValue (p, "arp.enabled", 1.0f);
+    setValue (p, "analog.arp.cardA", 0.0f);
+    setValue (p, "analog.arp.cardB", 0.0f);
+    const auto play = playLanes (p, 4.0, 2.0, 3);   // (A and B: bits 0 and 1)
+    INFO ("held on A+B: " << play.minHeldOn << " .. " << play.maxHeldOn);
+    // The chord sustains on A and B, all the way through.
+    CHECK (play.minHeldOn == 3);
+    CHECK (play.maxHeldOn == 3);
+    // C plays the arpeggio (UP, 1/8 at 120: about eight steps in two seconds), C E G in turn.
+    const auto c = firstNotes (play, 4, 6);
+    REQUIRE (c.size() >= 6);
+    CHECK (c == std::vector<int> { 60, 64, 67, 60, 64, 67 });
+    CHECK (play.allCardVoices == 0);
+    // Released: nothing held, everything fades.
+    CHECK (play.heldAtEnd == 0);
+    CHECK (play.activeAtEnd == 0);
+}
+
+TEST_CASE ("analog: unlinked, each card plays its own pattern; LINK with every card is the one arpeggiator", "[analog][arp][cardarp]")
+{
+    {
+        ShellProcessor p;
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "arp.pattern", 0.0f);         // A: UP
+        setValue (p, "analog.arp.cardB.pattern", 1.0f);   // B: DOWN
+        setValue (p, "analog.arp.cardC", 0.0f);           // C holds
+        const auto play = playLanes (p, 3.0, 2.0, 4);
+        CHECK (firstNotes (play, 1, 4) == std::vector<int> { 60, 64, 67, 60 });
+        CHECK (firstNotes (play, 2, 4) == std::vector<int> { 67, 64, 60, 67 });
+        CHECK (play.minHeldOn == 3);   // the chord on C
+        CHECK (play.allCardVoices == 0);
+        CHECK (play.heldAtEnd == 0);
+    }
+    {
+        // B on its own RATE: twice A's steps in the same time.
+        ShellProcessor p;
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "analog.arp.cardC", 0.0f);
+        setValue (p, "analog.arp.cardB.rate", 2.0f);   // 1/16 against A's 1/8
+        const auto play = playLanes (p, 2.2, 2.0, 4);
+        int a = 0, b = 0;
+        for (const auto& o : play.onsets)
+        {
+            a += o.cards == 1 ? 1 : 0;
+            b += o.cards == 2 ? 1 : 0;
+        }
+        INFO ("A " << a << " B " << b);
+        CHECK (b >= 2 * a - 2);
+        CHECK (b <= 2 * a + 2);
+    }
+    {
+        // LINK with every card (the default): the one arpeggiator, every card in each note.
+        ShellProcessor p;
+        setValue (p, "arp.enabled", 1.0f);
+        const auto play = playLanes (p, 2.0, 1.5, 7);
+        CHECK (firstNotes (play, 7, 4) == std::vector<int> { 60, 64, 67, 60 });
+        CHECK (static_cast<int> (play.onsets.size()) == play.allCardVoices);
+        CHECK (! dynamic_cast<AnalogEngine&> (p.productEngine()).synthForTest().cardRoutingOn());
+    }
+}
+
+TEST_CASE ("analog: changing the arpeggiator's cards and LINK mid-chord leaves no note hanging", "[analog][arp][cardarp]")
+{
+    ShellProcessor p;
+    setValue (p, "arp.enabled", 1.0f);
+    setValue (p, "analog.arp.cardB.pattern", 1.0f);
+    // A change every quarter second while the chord is held, then the keys come up.
+    const std::vector<std::pair<const char*, float>> changes { { "analog.arp.cardC", 0.0f }, { "analog.arp.link", 0.0f }, { "analog.arp.cardA", 0.0f },
+                                                                { "analog.arp.link", 1.0f }, { "analog.arp.cardB", 0.0f }, { "arp.enabled", 0.0f },
+                                                                { "arp.enabled", 1.0f }, { "analog.arp.cardA", 1.0f }, { "analog.arp.cardB", 1.0f },
+                                                                { "analog.arp.cardC", 1.0f }, { "analog.arp.link", 0.0f } };
+    std::size_t next = 0;
+    int heldAlong = 99;
+    auto& synth = dynamic_cast<AnalogEngine&> (p.productEngine()).synthForTest();
+    const auto play = playLanes (p, 6.0, 3.2, 0, [&] (double t) {
+        if (next < changes.size() && t >= 0.25 * static_cast<double> (next + 1))
+        {
+            setValue (p, changes[next].first, changes[next].second);
+            ++next;
+        }
+        if (t > 0.2 && t < 3.1)
+        {
+            // Something always sounds the held chord's notes (on whichever cards).
+            int held = 0;
+            for (int s = 0; s < Synth::maxVoices; ++s)
+                held += synth.voiceView (s).held ? 1 : 0;
+            if (t > 0.2 + 0.25 * static_cast<double> (next) + 0.05)   // (a step past the last change)
+                heldAlong = std::min (heldAlong, held);
+        }
+    });
+    CHECK (next == changes.size());
+    CHECK (heldAlong >= 1);
+    CHECK (play.heldAtEnd == 0);
+    CHECK (play.activeAtEnd == 0);
+}
+
+//==============================================================================
+// The effects rack (ANDOR OSP's shared rack host, opt-in): MOVEMENT expanded beside its macro.
+
+namespace
+{
+    std::map<juce::String, float> allParameterValues (ShellProcessor& p)
+    {
+        std::map<juce::String, float> values;
+        for (auto* param : p.getParameters())
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+                values[ranged->getParameterID()] = ranged->getValue();
+        return values;
+    }
+
+    int macroIndexOf (ShellProcessor& p, const juce::String& id)
+    {
+        for (int i = 0; i < osp::plugin::frame::macroCount; ++i)
+            if (p.macroSpecs()[static_cast<std::size_t> (i)].parameterId == id)
+                return i;
+        return -1;
+    }
+}
+
+TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view: nothing sounds different", "[analog][rack]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.refreshNow();
+    // The cards keep nothing under their knobs (their modifiers in the well): the instrument
+    // is shorter by their trim.
+    CHECK (ui.instrumentHeight() == Approx (1086.0f - osp::plugin::EngineCard::footTrim));
+
+    // MOVEMENT, ECHO and SPACE open racks (from their names: no key on the row).
+    REQUIRE (ui.hasRack (Kind::movement));
+    CHECK (ui.hasRack (Kind::echo));
+    CHECK (ui.hasRack (Kind::space));
+    CHECK_FALSE (ui.effectsRack().isVisible());
+    const auto before = allParameterValues (p);
+    const int heightBefore = editor->getHeight();
+    const float instrumentBefore = ui.instrumentHeight();
+
+    // A double-click on the name: the rack opens between the macros and the arpeggiator.
+    ui.toggleRackFromLabel (Kind::movement);
+    ui.refreshNow();
+    REQUIRE (ui.effectsRack().isShown (Kind::movement));
+    CHECK (ui.macroLabel (ui.rackMacro (Kind::movement))->isRackOpen());
+    CHECK (ui.effectsRack().isVisible());
+    const float rackHeight = ui.effectsRack().height();
+    CHECK (rackHeight > 200.0f);
+    CHECK (ui.instrumentHeight() == Approx (instrumentBefore + rackHeight + osp::plugin::design::layout::rackGap));
+    CHECK (editor->getHeight() > heightBefore);
+    CHECK (editor->getWidth() == 1448);
+    CHECK (ui.effectsRack().getY() >= 900 - static_cast<int> (osp::plugin::EngineCard::footTrim));
+    CHECK (ui.effectsRack().getHeight() <= 216);   // never taller than the macro panel
+    CHECK (p.rackExpanded() == 1);
+
+    // MOVEMENT's controls in the open, its knobs bound to the same parameters as the popover.
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY SPEED PITCH TONE");
+    setValue (p, "movement.mode", 4.0f);   // SHAPER (as automation would)
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "PATTERN RATE TARGET DEPTH SMOOTH PHASE");
+    setValue (p, "movement.mode", 1.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY WOW FLUTTER WEAR");
+    setValue (p, "movement.mode", 0.0f);
+    ui.refreshNow();
+
+    // The MOVEMENT name still opens its popover, with the rack open.
+    const int movement = macroIndexOf (p, "motion");
+    REQUIRE (movement >= 0);
+    ui.openPopup (movement);
+    CHECK (ui.openPopupPanel() != nullptr);
+    CHECK (ui.effectsRack().isShown (Kind::movement));
+
+    // The arpeggiator's editor opens under the rack (both shown, the keyboard under both).
+    ui.setArpExpanded (true);
+    ui.refreshNow();
+    CHECK (ui.instrumentHeight() == Approx (instrumentBefore + rackHeight + osp::plugin::design::layout::rackGap + osp::plugin::design::layout::arpShift));
+    ui.setArpExpanded (false);
+
+    // Collapsing restores the window; no parameter moved at any point.
+    ui.toggleRackFromLabel (Kind::movement);
+    ui.refreshNow();
+    CHECK_FALSE (ui.effectsRack().isShown (Kind::movement));
+    CHECK_FALSE (ui.effectsRack().isVisible());
+    CHECK (ui.instrumentHeight() == Approx (instrumentBefore));
+    CHECK (editor->getHeight() == heightBefore);
+    CHECK (allParameterValues (p) == before);
+}
+
+TEST_CASE ("analog: the rack's state is a view setting the session recalls", "[analog][rack]")
+{
+    using osp::plugin::rack::Kind;
+    juce::MemoryBlock session;
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        ui.setRackExpanded (Kind::movement, true);
+        p.getStateInformation (session);
+    }
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.rackExpanded() == 1);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (q.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    CHECK (ui.effectsRack().isShown (Kind::movement));
+    CHECK (ui.macroLabel (ui.rackMacro (Kind::movement))->isRackOpen());
+    // A session recalled into an open editor closes it again.
+    juce::MemoryBlock closed;
+    {
+        ShellProcessor r;
+        r.getStateInformation (closed);
+    }
+    q.setStateInformation (closed.getData(), static_cast<int> (closed.getSize()));
+    ui.refreshNow();
+    CHECK_FALSE (ui.effectsRack().isShown (Kind::movement));
+}
+
+TEST_CASE ("analog: screenshots of the MOVEMENT rack at every width, ARP open and closed (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-rack]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    for (const int width : { 1448, 869, 1810 })
+    {
+        const auto w = juce::String (width);
+        for (const bool arp : { false, true })
+        {
+            const auto a = juce::String (arp ? "-arp" : "");
+            ui.setRackExpanded (Kind::movement, false);
+            ui.setArpExpanded (arp);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            shoot ("rack-" + w + a + "-0-collapsed");
+            ui.setRackExpanded (Kind::movement, true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            setValue (p, "movement.mode", 0.0f);
+            shoot ("rack-" + w + a + "-1-drift");
+            if (width != 1448)
+                continue;
+            setValue (p, "movement.mode", 1.0f);
+            shoot ("rack-" + w + a + "-2-tape");
+            setValue (p, "movement.mode", 2.0f);
+            shoot ("rack-" + w + a + "-3-chorus");
+            setValue (p, "movement.mode", 3.0f);
+            shoot ("rack-" + w + a + "-4-pulse");
+            setValue (p, "movement.mode", 4.0f);
+            shoot ("rack-" + w + a + "-5-shaper");
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), true);
+            shoot ("rack-" + w + a + "-6-shaper-wide");
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), false);
+            ui.openPopup (macroIndexOf (p, "motion"));
+            shoot ("rack-" + w + a + "-7-shaper-popover");
+            ui.closePopup();
+        }
+    }
+}
+
+//==============================================================================
+// MOVEMENT's two lanes (state version 11) in the product: parameters, presets, copy / swap,
+// the second lane's SHAPER pattern with the session, and sessions from before lanes.
+
+TEST_CASE ("analog: MOVEMENT lane B is off and lane A on at 100 % in a new instrument and in an older session", "[analog][rack][lanes]")
+{
+    using namespace params;
+    ShellProcessor p;
+    CHECK (p.movementLaneCount() == 2);
+    CHECK (p.parameterValue (movementLaneId (0, "on")) >= 0.5f);
+    CHECK (p.parameterValue (movementLaneId (0, "level")) == Approx (100.0f));
+    CHECK (p.parameterValue (movementLaneId (1, "on")) < 0.5f);
+    // A session from version 10 (no lanes): the same, whatever the instrument had before.
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("productVersion", 10);
+    juce::MemoryBlock v10;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v10);
+    ShellProcessor q;
+    setValue (q, movementLaneId (1, "on"), 1.0f);
+    setValue (q, movementLaneId (0, "level"), 30.0f);
+    q.setStateInformation (v10.getData(), static_cast<int> (v10.getSize()));
+    CHECK (q.parameterValue (movementLaneId (1, "on")) < 0.5f);
+    CHECK (q.parameterValue (movementLaneId (0, "level")) == Approx (100.0f));
+}
+
+TEST_CASE ("analog: a MOVEMENT preset saves one lane and loads into one lane, touching nothing else", "[analog][rack][lanes][presets]")
+{
+    using namespace params;
+    Scratch scratch;
+    ShellProcessor p;
+    // Lane A: a SHAPER with a CUSTOM pattern, synced, moved.
+    setValue (p, "movement.mode", 4.0f);
+    setValue (p, "movement.shaper.rate", 1.0f);
+    setValue (p, "movement.shaper.custom", 1.0f);
+    setValue (p, movementLaneId (0, "phase"), 25.0f);
+    setValue (p, movementLaneId (0, "level"), 70.0f);
+    auto pattern = osp::RhythmicShaper::patternSteps (2);
+    pattern[3] = { 0.2f, 0.9f, osp::StepShape::up };
+    p.setLaneShaperPattern (0, pattern, false);
+    const auto file = scratch.dir.getChildFile ("Gated" + juce::String (".andormovement"));
+    REQUIRE (osp::plugin::writeMovementPreset (p, 0, file));
+
+    // Into lane B of another instrument: lane B becomes it (and plays); nothing else moves.
+    ShellProcessor q;
+    setValue (q, osc2Level, 33.0f);
+    setValue (q, "space", 41.0f);
+    const auto before = allParameterValues (q);
+    REQUIRE (osp::plugin::readMovementPreset (q, 1, file));
+    const auto after = allParameterValues (q);
+    for (const auto& [id, value] : after)
+        if (value != before.at (id))
+        {
+            INFO (id);
+            CHECK (id.startsWith (movementBPrefix));
+        }
+    CHECK (q.parameterValue (movementBPrefix + "mode") == Approx (4.0f));
+    CHECK (q.parameterValue (movementBPrefix + "shaper.rate") == Approx (1.0f));
+    CHECK (q.parameterValue (movementLaneId (1, "phase")) == Approx (25.0f).margin (0.1f));
+    CHECK (q.parameterValue (movementLaneId (1, "level")) == Approx (70.0f).margin (0.1f));
+    CHECK (q.parameterValue (movementLaneId (1, "on")) >= 0.5f);
+    CHECK (q.laneShaperPattern (1) == pattern);
+    CHECK (q.laneShaperPattern (0) == osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern));   // lane A untouched
+    // Not a MOVEMENT preset: nothing happens.
+    const auto other = scratch.dir.getChildFile ("not.andormovement");
+    other.replaceWithText ("{\"kind\":\"something else\"}");
+    CHECK_FALSE (osp::plugin::readMovementPreset (q, 0, other));
+}
+
+TEST_CASE ("analog: MOVEMENT's lanes copy and swap (settings and SHAPER pattern), and lane B's pattern comes back with the session", "[analog][rack][lanes]")
+{
+    using namespace params;
+    ShellProcessor p;
+    setValue (p, "movement.mode", 2.0f);
+    setValue (p, "movement.chorus.rate", 80.0f);
+    setValue (p, movementBPrefix + "mode", 3.0f);
+    setValue (p, movementLaneId (1, "on"), 1.0f);
+    auto patternB = osp::RhythmicShaper::patternSteps (7);
+    patternB[0] = { 0.1f, 0.4f, osp::StepShape::dip };
+    p.setLaneShaperPattern (1, patternB, false);
+
+    osp::plugin::swapMovementLanes (p);
+    CHECK (p.parameterValue ("movement.mode") == Approx (3.0f));
+    CHECK (p.parameterValue (movementBPrefix + "mode") == Approx (2.0f));
+    CHECK (p.parameterValue (movementBPrefix + "chorus.rate") == Approx (80.0f).margin (0.1f));
+    CHECK (p.laneShaperPattern (0) == patternB);
+    osp::plugin::swapMovementLanes (p);
+    CHECK (p.parameterValue ("movement.mode") == Approx (2.0f));
+
+    osp::plugin::copyMovementLane (p, 0, 1);
+    CHECK (p.parameterValue (movementBPrefix + "mode") == Approx (2.0f));
+    CHECK (p.parameterValue (movementBPrefix + "chorus.rate") == Approx (80.0f).margin (0.1f));
+    CHECK (p.laneShaperPattern (1) == p.laneShaperPattern (0));
+
+    // Lane B's pattern with the session.
+    p.setLaneShaperPattern (1, patternB, false);
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (q.laneShaperPattern (1) == patternB);
+    CHECK (q.parameterValue (movementLaneId (1, "on")) >= 0.5f);
+}
+
+TEST_CASE ("analog: the MOVEMENT rack shows each lane, its ON and its INTENSITY", "[analog][rack][lanes]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setRackExpanded (Kind::movement, true);
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    CHECK (osp::plugin::rackMovementLane (*module) == 0);
+    osp::plugin::showRackMovementLane (*module, 1);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementLane (*module) == 1);
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY SPEED PITCH TONE");   // lane B's DRIFT
+    setValue (p, params::movementBPrefix + "mode", 3.0f);
+    setValue (p, params::movementLaneId (1, "sync"), 1.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY TIMING CYCLE SHAPE STEREO PHASE");   // PULSE synced: CYCLE as a key
+}
+
+TEST_CASE ("analog: screenshots of MOVEMENT's two lanes in the rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-lanes]")
+{
+    using osp::plugin::rack::Kind;
+    using namespace params;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    setValue (p, "movement.mode", 2.0f);
+    setValue (p, movementBPrefix + "mode", 3.0f);
+    setValue (p, movementLaneId (1, "on"), 1.0f);
+    setValue (p, movementLaneId (1, "sync"), 1.0f);
+    setValue (p, movementLaneId (1, "level"), 70.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    for (const int width : { 1448, 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            ui.setArpExpanded (arp);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            auto* module = ui.effectsRack().module (Kind::movement);
+            const auto name = "lanes-" + juce::String (width) + (arp ? "-arp" : "");
+            osp::plugin::showRackMovementLane (*module, 0);
+            shoot (name + "-1-lane-a-chorus");
+            osp::plugin::showRackMovementLane (*module, 1);
+            shoot (name + "-2-lane-b-pulse-sync");
+            if (width == 1448 && ! arp)
+            {
+                setValue (p, movementBPrefix + "mode", 4.0f);
+                shoot (name + "-3-lane-b-shaper");
+                setValue (p, movementLaneId (1, "on"), 0.0f);
+                shoot (name + "-4-lane-b-off");
+                setValue (p, movementLaneId (1, "on"), 1.0f);
+                setValue (p, movementBPrefix + "mode", 3.0f);
+            }
+        }
+}
+
+//==============================================================================
+// Effects rack, phase 3: ECHO and SPACE on the same host (one module at a time).
+
+TEST_CASE ("analog: ECHO and SPACE expand into the rack, one module at a time, every control bound", "[analog][rack][rack-fx]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    const auto before = allParameterValues (p);
+    const float plain = ui.instrumentHeight();
+
+    // One at a time: ECHO's key closes MOVEMENT's module, SPACE's closes ECHO's.
+    ui.toggleRackFromLabel (Kind::movement);
+    ui.toggleRackFromLabel (Kind::echo);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::echo });
+    CHECK_FALSE (ui.macroLabel (ui.rackMacro (Kind::movement))->isRackOpen());
+    CHECK (ui.macroLabel (ui.rackMacro (Kind::echo))->isRackOpen());
+    CHECK (p.rackExpanded() == 2);
+    auto* echo = ui.effectsRack().module (Kind::echo);
+    REQUIRE (echo != nullptr);
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE TIMING STEREO");
+    setValue (p, "echo.type", 2.0f);   // ASCEND (as automation would)
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE CLOCK INTERVAL MOTION TIMING STEREO");
+    setValue (p, "echo.type", 0.0f);
+
+    ui.toggleRackFromLabel (Kind::space);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::space });
+    auto* space = ui.effectsRack().module (Kind::space);
+    REQUIRE (space != nullptr);
+    CHECK (osp::plugin::rackMovementCaptions (*space) == "PRE-DELAY SIZE DECAY DAMP MOD WIDTH LOW CUT HIGH CUT");
+    for (const auto& [engine, captions] : { std::pair { 1.0f, "PRE-DELAY SIZE DECAY DAMP GRAVITY RESONANCE MOD WIDTH FREEZE" },
+                                            std::pair { 2.0f, "PRE-DELAY SIZE DECAY DAMP DIFFUSION MOD WIDTH ERA" },
+                                            std::pair { 3.0f, "TIME DIFFUSION DECAY DAMP SYNC SIZE MOD WIDTH" } })
+    {
+        setValue (p, "space.engine", engine);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackMovementCaptions (*space) == juce::String (captions));
+    }
+    setValue (p, "space.engine", 0.0f);
+    ui.refreshNow();
+    // SPACE's module is taller (two rows of knobs): the window follows.
+    CHECK (ui.instrumentHeight() == Approx (plain + ui.effectsRack().height() + osp::plugin::design::layout::rackGap));
+
+    // The SPACE and ECHO names still open their popovers.
+    for (const char* id : { "space", "echo" })
+    {
+        ui.openPopup (macroIndexOf (p, id));
+        CHECK (ui.openPopupPanel() != nullptr);
+        ui.closePopup();
+    }
+    ui.toggleRackFromLabel (Kind::space);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds().empty());
+    CHECK (ui.instrumentHeight() == Approx (plain));
+    setValue (p, "echo.type", before.at ("echo.type") > 0.5f ? 1.0f : 0.0f);
+    setValue (p, "space.engine", 0.0f);
+    for (const auto& [id, value] : allParameterValues (p))
+    {
+        INFO (id);
+        CHECK (value == Approx (before.at (id)).margin (1.0e-6));
+    }
+}
+
+TEST_CASE ("analog: expanding or collapsing ECHO and SPACE never touches their tails (a view only)", "[analog][rack][rack-fx]")
+{
+    using osp::plugin::rack::Kind;
+    auto renderWith = [] (bool toggleRack) {
+        ShellProcessor p;
+        setValue (p, "space", 60.0f);
+        setValue (p, "echo", 60.0f);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        p.prepareToPlay (48000.0, 256);
+        juce::AudioBuffer<float> buffer (2, 256);
+        std::vector<float> out;
+        for (int block = 0; block < 48000 * 3 / 256; ++block)
+        {
+            juce::MidiBuffer midi;
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 57, static_cast<juce::uint8> (100)), 0);
+            if (block == 40)
+                midi.addEvent (juce::MidiMessage::noteOff (1, 57), 0);
+            if (toggleRack && block >= 60 && block % 30 == 0)
+            {
+                // In the tails: SPACE, ECHO and MOVEMENT open and close in turn.
+                const Kind kinds[] { Kind::space, Kind::echo, Kind::movement };
+                const auto kind = kinds[(block / 30) % 3];
+                ui.setRackExpanded (kind, ! ui.effectsRack().isShown (kind));
+                ui.refreshNow();
+            }
+            buffer.clear();
+            p.processBlock (buffer, midi);
+            out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + 256);
+        }
+        return out;
+    };
+    const auto plain = renderWith (false), toggled = renderWith (true);
+    REQUIRE (plain.size() == toggled.size());
+    CHECK (plain == toggled);
+    // (And the tails ring: SPACE and ECHO well after the note.)
+    double tail = 0.0;
+    for (std::size_t i = 48000 * 2; i < plain.size(); ++i)
+        tail = std::max (tail, static_cast<double> (std::abs (plain[i])));
+    CHECK (tail > 1.0e-4);
+}
+
+TEST_CASE ("analog: screenshots of the ECHO and SPACE racks at every width, ARP open and closed (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-rack-fx]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "space", 40.0f);
+    setValue (p, "echo", 50.0f);
+    for (const int width : { 1448, 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            const auto name = "rackfx-" + juce::String (width) + (arp ? "-arp" : "");
+            ui.setArpExpanded (arp);
+            ui.setRackExpanded (Kind::echo, true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            setValue (p, "echo.type", 0.0f);
+            shoot (name + "-1-echo-tape");
+            ui.setRackExpanded (Kind::space, true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            setValue (p, "space.engine", 0.0f);
+            shoot (name + "-2-space-rooms");
+            if (width != 1448 || arp)
+                continue;
+            ui.setRackExpanded (Kind::echo, true);
+            setValue (p, "echo.type", 2.0f);
+            setValue (p, "echo.sync", 1.0f);
+            shoot (name + "-3-echo-ascend-sync");
+            setValue (p, "echo.type", 1.0f);
+            shoot (name + "-4-echo-bbd");
+            ui.setRackExpanded (Kind::space, true);
+            for (const auto& [engine, label] : { std::pair { 1.0f, "abyss" }, std::pair { 2.0f, "vintage" }, std::pair { 3.0f, "bloom" } })
+            {
+                setValue (p, "space.engine", engine);
+                shoot (name + "-5-space-" + label);
+            }
+            setValue (p, "space.engine", 0.0f);
+            ui.openPopup (macroIndexOf (p, "space"));
+            shoot (name + "-6-space-popover-over-rack");
+            ui.closePopup();
+        }
+}
+
+//==============================================================================
+// Phase 4: card C's LINK, REVERSE, LOOP and FOLLOW as a compact row of icon keys in its well.
+
+TEST_CASE ("analog: card C's modifiers sit in its well, only those that apply, bound as before", "[analog][rack][wellmods]")
+{
+    using andor::analog::HybridType;
+    Scratch scratch;
+    ShellProcessor p;
+    loadOrganic (p, writeRecording (scratch.dir, "vowel.wav", 57, 2.0));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    setValue (p, params::hybridType, static_cast<float> (HybridType::sample));
+    ui.refreshNow();
+    auto& card = ui.engineCard (ShellProcessor::hybridLayer);
+    const auto well = card.display().getBounds();
+    const char* ids[] { "layerB.link", "layerB.reverse", "layerB.loop", "layerB.follow" };
+
+    // A SAMPLE: all four, small, at the well's top-left (no keys under the knobs any more).
+    int right = well.getX();
+    for (int i = 0; i < 4; ++i)
+    {
+        auto* key = card.modifierKey (i);
+        REQUIRE (key != nullptr);
+        INFO (ids[i]);
+        CHECK (key->isVisible());
+        CHECK (key->isInWell());
+        CHECK (well.contains (key->getBounds()));
+        CHECK (key->getY() < well.getY() + 40);
+        CHECK (key->getHeight() <= 26);
+        CHECK (key->getX() >= right);
+        right = key->getRight();
+        CHECK (osp::plugin::binding::tagsOf (*key).contains (ids[i]));   // the same parameter
+    }
+    CHECK (right < well.getCentreX());   // (the source's type stays at the top-right)
+
+    // A click and the keyboard toggle the same parameter as before, one gesture each.
+    auto* reverse = card.modifierKey (1);
+    const float was = p.parameterValue ("layerB.reverse");
+    reverse->toggle();
+    CHECK (p.parameterValue ("layerB.reverse") != was);
+    CHECK (reverse->getWantsKeyboardFocus());
+    CHECK (reverse->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK (p.parameterValue ("layerB.reverse") == was);
+
+    // An INSTRUMENT PATCH's zones do not play backwards: no REVERSE.
+    setValue (p, params::hybridType, static_cast<float> (HybridType::instrumentPatch));
+    ui.refreshNow();
+    CHECK (card.modifierKey (0)->isVisible());
+    CHECK_FALSE (card.modifierKey (1)->isVisible());
+    CHECK (card.modifierKey (2)->isVisible());
+    CHECK (card.modifierKey (3)->isVisible());
+    CHECK (card.modifierKey (2)->getX() < card.modifierKey (0)->getRight() + 40);   // (the row closes up)
+
+    // OSC 3 and NOISE: none.
+    for (const auto type : { HybridType::oscillator, HybridType::noise })
+    {
+        setValue (p, params::hybridType, static_cast<float> (type));
+        ui.refreshNow();
+        for (int i = 0; i < 4; ++i)
+            CHECK_FALSE (card.modifierKey (i)->isVisible());
+    }
+
+    // The EQ takes the well: the keys give way, and come back.
+    setValue (p, params::hybridType, static_cast<float> (HybridType::sample));
+    ui.refreshNow();
+    card.setEqOpen (true);
+    CHECK_FALSE (card.modifierKey (0)->isVisible());
+    card.setEqOpen (false);
+    ui.refreshNow();
+    CHECK (card.modifierKey (0)->isVisible());
+
+    // Cards A and B (the oscillators) show none, as before.
+    for (int i = 0; i < 4; ++i)
+        if (auto* key = ui.engineCard (0).modifierKey (i))
+            CHECK_FALSE (key->isVisible());
+}
+
+//==============================================================================
+// The unified rack: MOVEMENT, ECHO and SPACE share SPACE's structure and the same preset rules.
+
+TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, the controls row, the picture", "[analog][rack][unified]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    std::map<Kind, std::array<juce::Rectangle<int>, 4>> slots;
+    std::map<Kind, float> heights;
+    for (const auto kind : { Kind::movement, Kind::echo, Kind::space })
+    {
+        ui.setRackExpanded (kind, true);
+        ui.refreshNow();
+        auto* module = ui.effectsRack().module (kind);
+        REQUIRE (module != nullptr);
+        for (int s = 2; s <= 5; ++s)
+            slots[kind][static_cast<std::size_t> (s - 2)] = osp::plugin::rackSlot (*module, s);
+        heights[kind] = ui.effectsRack().height();
+    }
+    for (const auto kind : { Kind::echo, Kind::space })
+    {
+        INFO (osp::plugin::rack::name (kind));
+        CHECK (slots[kind][0] == slots[Kind::movement][0]);                   // MODE: same place and size
+        CHECK (slots[kind][1] == slots[Kind::movement][1]);                   // PRESET
+        CHECK (slots[kind][2].getY() == slots[Kind::movement][2].getY());     // the controls row
+        CHECK (slots[kind][2].getHeight() == slots[Kind::movement][2].getHeight());
+        CHECK (slots[kind][2].getWidth() == slots[Kind::movement][2].getWidth());   // one cell size
+        CHECK (slots[kind][3] == slots[Kind::movement][3]);                   // the picture
+        CHECK (heights[kind] == heights[Kind::movement]);
+    }
+    CHECK (heights[Kind::space] <= 216.0f);   // never taller than the macro panel
+    CHECK (slots[Kind::space][1].getX() > slots[Kind::space][0].getRight());   // PRESET right of MODE
+    CHECK (slots[Kind::space][1].getWidth() > 2 * slots[Kind::space][0].getWidth());   // ... and larger
+
+    // SHAPER's precision editor (its magnifier): the one module that may be taller.
+    ui.setRackExpanded (Kind::movement, true);
+    setValue (p, "movement.mode", 4.0f);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    CHECK (osp::plugin::rackMovementCaptions (*movement) == "PATTERN RATE TARGET DEPTH SMOOTH PHASE");
+    osp::plugin::setRackMovementWide (*movement, true);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().height() > 216.0f);
+    CHECK (osp::plugin::rackSlot (*movement, 5).getWidth() > 2 * slots[Kind::movement][3].getWidth());
+    osp::plugin::setRackMovementWide (*movement, false);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().height() == Approx (heights[Kind::movement]));
+}
+
+TEST_CASE ("analog: rack presets - by mode, the arrows, NAME * once edited, CUSTOM, your own, nothing else touched", "[analog][rack][unified][rackpresets]")
+{
+    using osp::plugin::rack::Kind;
+    using namespace params;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+
+    // ECHO: the instrument's own settings are a preset of TAPE's; the list is TAPE's.
+    ui.setRackExpanded (Kind::echo, true);
+    ui.refreshNow();
+    auto* echo = ui.effectsRack().module (Kind::echo);
+    REQUIRE (echo != nullptr);
+    CHECK (osp::plugin::rackPresetText (*echo) == "Dotted Eighth");
+    CHECK (osp::plugin::rackPresetNames (*echo).joinIntoString ("|") == "Dotted Eighth|Slapback|Worn Loop|Dub Wash");
+    setValue (p, osp::plugin::InstrumentHost::layerParameterId (0, "level"), 70.0f);
+    setValue (p, "space.decay", 4.2f);
+    const auto before = allParameterValues (p);
+    REQUIRE (osp::plugin::rackPresetChoose (*echo, "Worn Loop"));
+    CHECK (osp::plugin::rackPresetText (*echo) == "Worn Loop");
+    CHECK (p.parameterValue ("echo.feedback") == Approx (68.0f).margin (0.1f));
+    for (const auto& [id, v] : allParameterValues (p))
+        if (v != before.at (id))
+        {
+            INFO (id);
+            CHECK (id.startsWith ("echo."));   // ECHO's own settings only
+        }
+    // Edited: NAME *; the arrows step through TAPE's presets only.
+    setValue (p, "echo.feedback", 20.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*echo) == "Worn Loop *");
+    osp::plugin::rackPresetStep (*echo, 1);
+    CHECK (osp::plugin::rackPresetText (*echo) == "Dub Wash");
+    osp::plugin::rackPresetStep (*echo, 1);
+    CHECK (osp::plugin::rackPresetText (*echo) == "Dotted Eighth");
+    CHECK (p.parameterValue ("echo.type") == Approx (0.0f));
+    // Another mode: its own presets; settings no preset has are CUSTOM.
+    setValue (p, "echo.type", 1.0f);
+    setValue (p, "echo.feedback", 33.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetNames (*echo).contains ("Bucket Eighths"));
+    CHECK_FALSE (osp::plugin::rackPresetNames (*echo).contains ("Worn Loop"));
+    CHECK (osp::plugin::rackPresetText (*echo) == "CUSTOM");
+    // Your own: saved, listed in its mode, recalled.
+    REQUIRE (osp::plugin::rackPresetSave (*echo, "My BBD"));
+    CHECK (osp::plugin::rackPresetText (*echo) == "My BBD");
+    CHECK (osp::plugin::rackPresetNames (*echo).contains ("My BBD"));
+    REQUIRE (osp::plugin::rackPresetChoose (*echo, "Bucket Slap"));
+    REQUIRE (osp::plugin::rackPresetChoose (*echo, "My BBD"));
+    CHECK (p.parameterValue ("echo.feedback") == Approx (33.0f).margin (0.1f));
+
+    // SPACE: its presets as before (spacepresets), by engine.
+    ui.setRackExpanded (Kind::space, true);
+    ui.refreshNow();
+    auto* space = ui.effectsRack().module (Kind::space);
+    REQUIRE (space != nullptr);
+    CHECK (osp::plugin::rackPresetNames (*space).size() > 10);
+    const auto first = osp::plugin::rackPresetNames (*space)[0];
+    REQUIRE (osp::plugin::rackPresetChoose (*space, first));
+    CHECK (osp::plugin::rackPresetText (*space) == first);
+    setValue (p, "space.damping", 77.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*space) == first + " *");
+
+    // MOVEMENT: each lane its own mode and preset; lane A's never lane B's.
+    ui.setRackExpanded (Kind::movement, true);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    REQUIRE (movement != nullptr);
+    CHECK (osp::plugin::rackPresetText (*movement) == "Gentle Drift");
+    setValue (p, "movement.mode", 2.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*movement) == "Ensemble");
+    const auto laneB = allParameterValues (p);
+    REQUIRE (osp::plugin::rackPresetChoose (*movement, "Slow Sweep"));
+    CHECK (p.parameterValue ("movement.chorus.rate") == Approx (20.0f).margin (0.1f));
+    for (const auto& [id, v] : allParameterValues (p))
+        if (id.startsWith (movementBPrefix))
+        {
+            INFO (id);
+            CHECK (v == laneB.at (id));
+        }
+    osp::plugin::showRackMovementLane (*movement, 1);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*movement) == "Gentle Drift");   // lane B: its own
+    REQUIRE (osp::plugin::rackPresetSave (*movement, "B wander"));
+    osp::plugin::showRackMovementLane (*movement, 0);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*movement) == "Slow Sweep");     // lane A: still its own
+    // Each mode keeps its settings when the mode changes back.
+    setValue (p, "movement.mode", 1.0f);
+    setValue (p, "movement.mode", 2.0f);
+    CHECK (p.parameterValue ("movement.chorus.rate") == Approx (20.0f).margin (0.1f));
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: every rack's first control sits at one X, in every mode; the grid never moves", "[analog][rack][unified]")
+{
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    std::optional<juce::Rectangle<int>> reference;
+    auto check = [&] (Kind kind, const char* id, int choices)
+    {
+        ui.setRackExpanded (kind, true);
+        for (int m = 0; m < choices; ++m)
+        {
+            setValue (p, id, static_cast<float> (m));
+            ui.refreshNow();
+            auto* module = ui.effectsRack().module (kind);
+            REQUIRE (module != nullptr);
+            const auto cell = osp::plugin::rackSlot (*module, 4);
+            INFO (osp::plugin::rack::name (kind) << " mode " << m);
+            if (! reference)
+                reference = cell;
+            CHECK (cell.getX() == reference->getX());           // left-aligned on one grid
+            CHECK (cell.getY() == reference->getY());
+            CHECK (cell.getWidth() == reference->getWidth());   // one pitch
+        }
+    };
+    check (Kind::space, "space.engine", 5);
+    check (Kind::movement, "movement.mode", 5);
+    check (Kind::echo, "echo.type", 3);
+}
+
+TEST_CASE ("analog: a rack preset's name, and its *, follow the settings through collapse, automation and the session", "[analog][rack][unified][rackpresets]")
+{
+    using osp::plugin::rack::Kind;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    juce::MemoryBlock session;
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        ui.setRackExpanded (Kind::echo, true);
+        ui.refreshNow();
+        REQUIRE (osp::plugin::rackPresetChoose (*ui.effectsRack().module (Kind::echo), "Worn Loop"));
+        // A change from the host (automation, undo) is a change: NAME *; back to the preset's value, NAME.
+        const float feedback = p.parameterValue ("echo.feedback");
+        setValue (p, "echo.feedback", 20.0f);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop *");
+        setValue (p, "echo.feedback", feedback);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop");
+        setValue (p, "echo.feedback", 20.0f);
+        // Collapsed and opened again (another module between): still the edited preset.
+        ui.setRackExpanded (Kind::space, true);
+        ui.setRackExpanded (Kind::echo, true);
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop *");
+        p.getStateInformation (session);
+    }
+    // A new editor on the restored session: the same name and *.
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (q.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setRackExpanded (Kind::echo, true);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackPresetText (*ui.effectsRack().module (Kind::echo)) == "Worn Loop *");
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: SHAPER's rack presets are every pattern the popover offers, each loading its pattern", "[analog][rack][unified][rackpresets]")
+{
+    using osp::plugin::rack::Kind;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setRackExpanded (Kind::movement, true);
+    setValue (p, "movement.mode", 4.0f);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    REQUIRE (movement != nullptr);
+    const auto names = osp::plugin::rackPresetNames (*movement);
+    CHECK (names.size() == osp::RhythmicShaper::patternCount);
+    CHECK (names[0] == "Three");   // the instrument's own first
+    for (int i = 0; i < osp::RhythmicShaper::patternCount; ++i)
+    {
+        const auto upper = juce::String (osp::RhythmicShaper::patternName (i));
+        const auto name = upper.toLowerCase().substring (0, 1).toUpperCase() + upper.toLowerCase().substring (1);
+        INFO (name);
+        REQUIRE (names.contains (name));
+        REQUIRE (osp::plugin::rackPresetChoose (*movement, name));
+        CHECK (p.parameterValue ("movement.shaper.pattern") == Approx (static_cast<float> (i)));
+        ui.refreshNow();
+        CHECK (osp::plugin::rackPresetText (*movement) == name);
+    }
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: screenshots of MOVEMENT, ECHO and SPACE in the unified rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-unified]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    setValue (p, "space", 40.0f);
+    setValue (p, "echo", 50.0f);
+    for (const int width : { 1448, 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            const auto name = "unified-" + juce::String (width) + (arp ? "-arp" : "");
+            ui.setArpExpanded (arp);
+            for (const auto& [kind, label] : { std::pair { Kind::movement, "1-movement" }, std::pair { Kind::echo, "2-echo" }, std::pair { Kind::space, "3-space" } })
+            {
+                ui.setRackExpanded (kind, true);
+                editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+                shoot (name + "-" + label);
+            }
+            if (width != 1448 || arp)
+                continue;
+            ui.setRackExpanded (Kind::movement, true);
+            for (const auto& [mode, label] : { std::pair { 0.0f, "drift" }, std::pair { 1.0f, "tape" }, std::pair { 2.0f, "chorus" }, std::pair { 3.0f, "pulse" },
+                                               std::pair { 4.0f, "shaper" } })
+            {
+                setValue (p, "movement.mode", mode);
+                shoot (name + "-4-movement-" + label);
+            }
+            setValue (p, params::movementLaneId (0, "sync"), 1.0f);
+            setValue (p, "movement.mode", 3.0f);
+            shoot (name + "-5-movement-pulse-sync");
+            setValue (p, "movement.mode", 4.0f);
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            shoot (name + "-6-shaper-precision-editor");
+            osp::plugin::setRackMovementWide (*ui.effectsRack().module (Kind::movement), false);
+            ui.setRackExpanded (Kind::echo, true);
+            setValue (p, "echo.type", 2.0f);
+            shoot (name + "-7-echo-ascend");
+            ui.setRackExpanded (Kind::space, true);
+            setValue (p, "space.engine", 1.0f);
+            shoot (name + "-8-space-abyss");
+            setValue (p, "space.engine", 0.0f);
+        }
+}
+
+//==============================================================================
+// No mark on the macro row: a click on an effect's name opens its popover, a double-click its
+// rack (the popover never flashing first), a right-click offers both, Enter opens the rack.
+
+namespace
+{
+    juce::MouseEvent labelEvent (juce::Component& c, juce::ModifierKeys mods, int clicks)
+    {
+        auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        const auto at = c.getLocalBounds().getCentre().toFloat();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, at, now, clicks, false);
+    }
+    void clickLabel (osp::plugin::MacroLabel& l)
+    {
+        const auto e = labelEvent (l, juce::ModifierKeys::leftButtonModifier, 1);
+        l.mouseDown (e);
+        l.mouseUp (e);
+    }
+    void doubleClickLabel (osp::plugin::MacroLabel& l)
+    {
+        clickLabel (l);
+        const auto second = labelEvent (l, juce::ModifierKeys::leftButtonModifier, 2);
+        l.mouseDown (second);
+        l.mouseDoubleClick (second);
+        l.mouseUp (second);
+    }
+}
+
+TEST_CASE ("analog: an effect's name - click for settings, double-click for its rack, right-click for both, Enter", "[analog][rack][rackclicks]")
+{
+    // The label itself: a click waits for a possible double-click, which cancels it.
+    {
+        osp::plugin::MacroLabel label ("ECHO", true);
+        label.setBounds (0, 0, 150, 22);
+        int clicks = 0, racks = 0, menus = 0;
+        label.onClick = [&] { ++clicks; };
+        label.setRackActions ([&] { ++racks; }, [&] { ++menus; });
+        CHECK (label.getTooltip() == juce::String::fromUTF8 ("Click for settings \xc2\xb7 Double-click for rack"));
+        CHECK (label.getWantsKeyboardFocus());
+        CHECK_FALSE (label.getMouseClickGrabsKeyboardFocus());
+
+        clickLabel (label);
+        CHECK (clicks == 0);   // not yet: a second click may follow
+        CHECK (label.isClickPending());
+        label.flushPendingClick();   // (the double-click interval has passed)
+        CHECK (clicks == 1);
+        CHECK (racks == 0);
+
+        doubleClickLabel (label);
+        CHECK (racks == 1);
+        CHECK_FALSE (label.isClickPending());
+        label.flushPendingClick();
+        CHECK (clicks == 1);   // the popover never opened on the way
+
+        const auto right = labelEvent (label, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier), 1);
+        label.mouseDown (right);
+        label.mouseUp (right);
+        CHECK (menus == 1);
+        CHECK_FALSE (label.isClickPending());
+        CHECK (clicks == 1);
+
+        CHECK (label.keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+        CHECK (racks == 2);
+        CHECK (label.keyPressed (juce::KeyPress (juce::KeyPress::F10Key, juce::ModifierKeys::shiftModifier, 0)));
+        CHECK (menus == 2);
+    }
+    // A name without a rack: a click acts at once, as before (no latency added).
+    {
+        osp::plugin::MacroLabel label ("DRIVE", true);
+        label.setBounds (0, 0, 150, 22);
+        int clicks = 0;
+        label.onClick = [&] { ++clicks; };
+        clickLabel (label);
+        CHECK (clicks == 1);
+        CHECK_FALSE (label.isClickPending());
+        CHECK_FALSE (label.getWantsKeyboardFocus());
+    }
+
+    // In the instrument.
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    auto& movement = *ui.macroLabel (ui.rackMacro (Kind::movement));
+    auto& echo = *ui.macroLabel (ui.rackMacro (Kind::echo));
+    CHECK (ui.rackMacro (Kind::movement) == macroIndexOf (p, "motion"));
+    CHECK (ui.macroLabel (macroIndexOf (p, "drive"))->getTooltip().isEmpty() == ui.macroLabel (macroIndexOf (p, "drive"))->getTooltip().isEmpty());   // (DRIVE: no rack)
+
+    // Click: the popover (after the interval), no rack.
+    clickLabel (movement);
+    CHECK (ui.openPopupPanel() == nullptr);
+    movement.flushPendingClick();
+    CHECK (ui.openPopupIndex() == macroIndexOf (p, "motion"));
+    CHECK (ui.effectsRack().shownKinds().empty());
+
+    // Double-click with the popover open: the popover closes, the rack opens.
+    doubleClickLabel (movement);
+    ui.refreshNow();
+    CHECK (ui.openPopupPanel() == nullptr);
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::movement });
+    CHECK (movement.isRackOpen());
+    // Another name: straight to its rack.
+    doubleClickLabel (echo);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::echo });
+    CHECK_FALSE (movement.isRackOpen());
+    CHECK (echo.isRackOpen());
+    // The same name again: closed.
+    doubleClickLabel (echo);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds().empty());
+    CHECK_FALSE (echo.isRackOpen());
+
+    // Enter (with the keyboard's focus on the name).
+    CHECK (movement.keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+    ui.refreshNow();
+    CHECK (ui.effectsRack().isShown (Kind::movement));
+
+    // The context menu: Quick Settings, Close Rack (Open Rack when closed); each acts.
+    auto items = [] (const juce::PopupMenu& menu) {
+        std::vector<std::pair<juce::String, std::function<void()>>> list;
+        for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+            list.push_back ({ it.getItem().text, it.getItem().action });
+        return list;
+    };
+    auto menu = items (ui.rackLabelMenu (ui.rackMacro (Kind::movement), Kind::movement));
+    REQUIRE (menu.size() == 2);
+    CHECK (menu[0].first == "Quick Settings");
+    CHECK (menu[1].first == "Close Rack");
+    menu[0].second();
+    CHECK (ui.openPopupIndex() == macroIndexOf (p, "motion"));
+    CHECK (ui.effectsRack().isShown (Kind::movement));   // (both: the popover over the open rack)
+    menu[1].second();
+    ui.refreshNow();
+    CHECK_FALSE (ui.effectsRack().isShown (Kind::movement));
+    CHECK (ui.openPopupPanel() == nullptr);
+    menu = items (ui.rackLabelMenu (ui.rackMacro (Kind::space), Kind::space));
+    CHECK (menu[1].first == "Open Rack");
+    menu[1].second();
+    ui.refreshNow();
+    CHECK (ui.effectsRack().isShown (Kind::space));
+
+    // Recalled with the session: the rack and its name's underline.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    std::unique_ptr<juce::AudioProcessorEditor> second (q.createEditorIfNeeded());
+    auto& ui2 = dynamic_cast<andor::shell::ShellEditor&> (*second);
+    CHECK (ui2.effectsRack().isShown (Kind::space));
+    CHECK (ui2.macroLabel (ui2.rackMacro (Kind::space))->isRackOpen());
+}
+
+TEST_CASE ("analog: screenshots of the macro row - every rack closed, each open (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-macrorow]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    shoot ("macrorow-0-closed");
+    for (const auto& [kind, label] : { std::pair { Kind::movement, "1-movement" }, std::pair { Kind::echo, "2-echo" }, std::pair { Kind::space, "3-space" } })
+    {
+        ui.toggleRackFromLabel (kind);
+        shoot ("macrorow-" + juce::String (label));
+        ui.toggleRackFromLabel (kind);
+    }
+}
+
+TEST_CASE ("analog: MOVEMENT's header is the title and A / B; each lane's ON in its settings; copy / swap from A / B's menu", "[analog][rack][lanes]")
+{
+    using osp::plugin::rack::Kind;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setRackExpanded (Kind::movement, true);
+    ui.refreshNow();
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    const auto onA = params::movementLaneId (0, "on"), onB = params::movementLaneId (1, "on");
+
+    // The title row: only the lane selector (no ON, no LANES, no COPY / SWAP keys).
+    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Lane A|Lane B");
+
+    // Choosing a lane shows it and never switches either lane on or off.
+    const float a0 = p.parameterValue (onA), b0 = p.parameterValue (onB);
+    osp::plugin::showRackMovementLane (*module, 1);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackMovementLane (*module) == 1);
+    CHECK (p.parameterValue (onA) == a0);
+    CHECK (p.parameterValue (onB) == b0);
+    osp::plugin::showRackMovementLane (*module, 0);
+    ui.refreshNow();
+    CHECK (p.parameterValue (onA) == a0);
+    CHECK (p.parameterValue (onB) == b0);
+
+    // The shown lane's ON: at the controls row's end, under PRESET's right end, never on a cell.
+    for (int mode = 0; mode < 5; ++mode)
+    {
+        setValue (p, "movement.mode", static_cast<float> (mode));
+        ui.refreshNow();
+        const auto on = osp::plugin::rackMovementLaneSwitch (*module);
+        const auto preset = osp::plugin::rackSlot (*module, 3), cell = osp::plugin::rackSlot (*module, 4);
+        INFO ("mode " << mode);
+        REQUIRE (! on.isEmpty());
+        CHECK (on.getRight() == preset.getRight());
+        CHECK (on.getY() > preset.getBottom());
+        CHECK (on.getY() < cell.getY() + 20);   // on the captions' line
+        CHECK (on.getX() > cell.getX() + 6 * cell.getWidth());   // right of the widest row (six cells)
+    }
+    // It switches the shown lane only.
+    osp::plugin::showRackMovementLane (*module, 1);
+    ui.refreshNow();
+    osp::plugin::clickRackMovementLaneSwitch (*module);
+    CHECK (p.parameterValue (onB) != b0);
+    CHECK (p.parameterValue (onA) == a0);
+    osp::plugin::clickRackMovementLaneSwitch (*module);
+    CHECK (p.parameterValue (onB) == b0);
+
+    // Copy and swap: from the A / B selector's menu, and the same in the presets' menu.
+    const auto actions = osp::plugin::rackMovementLaneActions (*module);
+    CHECK (actions.size() == 3);
+    CHECK (actions[2] == "Swap lanes A and B");
+    CHECK (osp::plugin::rackMovementPresetMenuExtras (*module) == actions);
+    setValue (p, juce::String ("movement.mode"), 2.0f);
+    setValue (p, params::movementBPrefix + "mode", 0.0f);
+    osp::plugin::runRackMovementLaneAction (*module, 0);   // copy A > B
+    CHECK (p.parameterValue (params::movementBPrefix + "mode") == Approx (2.0f));
+    setValue (p, params::movementBPrefix + "mode", 3.0f);
+    osp::plugin::runRackMovementLaneAction (*module, 2);   // swap
+    CHECK (p.parameterValue (juce::String ("movement.mode")) == Approx (3.0f));
+    CHECK (p.parameterValue (params::movementBPrefix + "mode") == Approx (2.0f));
+    osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: screenshots of MOVEMENT's header - A / B, each lane on or off, next to ECHO and SPACE (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-header]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    auto* module = ui.effectsRack().module (Kind::movement);
+    REQUIRE (module != nullptr);
+    shoot ("header-a-shown-b-off");
+    setValue (p, params::movementLaneId (1, "on"), 1.0f);
+    setValue (p, params::movementBPrefix + "mode", 2.0f);
+    osp::plugin::showRackMovementLane (*module, 1);
+    shoot ("header-b-shown-both-on");
+    setValue (p, params::movementLaneId (0, "on"), 0.0f);
+    shoot ("header-b-shown-a-off");
+    setValue (p, params::movementLaneId (0, "on"), 1.0f);
+    setValue (p, params::movementLaneId (1, "on"), 0.0f);
+    shoot ("header-b-shown-b-off");
+    setValue (p, params::movementBPrefix + "mode", 4.0f);
+    osp::plugin::setRackMovementWide (*module, true);
+    shoot ("header-shaper-wide");
+    osp::plugin::setRackMovementWide (*module, false);
+    osp::plugin::showRackMovementLane (*module, 0);
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        ui.setArpExpanded (true);
+        shoot ("header-" + juce::String (w) + "-arp");
+        ui.setArpExpanded (false);
+        shoot ("header-" + juce::String (w));
+    }
+    width = 1448;
+    ui.setRackExpanded (Kind::echo, true);
+    shoot ("header-echo");
+    ui.setRackExpanded (Kind::space, true);
+    shoot ("header-space");
+}
+
+TEST_CASE ("analog: screenshots of every rack module in every mode, before / after a polish (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-polish]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, "motion", 60.0f);
+    setValue (p, "space", 40.0f);
+    setValue (p, "echo", 50.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    const char* modes[] { "drift", "tape", "chorus", "pulse", "shaper" };
+    for (int m = 0; m < 5; ++m)
+    {
+        setValue (p, "movement.mode", static_cast<float> (m));
+        if (m == 3)
+            setValue (p, params::movementLaneId (0, "sync"), 1.0f);
+        shoot (juce::String ("polish-movement-") + modes[m]);
+    }
+    ui.setRackExpanded (Kind::echo, true);
+    const char* echoes[] { "tape", "bbd", "ascend" };
+    for (int m = 0; m < 3; ++m)
+    {
+        setValue (p, "echo.type", static_cast<float> (m));
+        shoot (juce::String ("polish-echo-") + echoes[m]);
+    }
+    setValue (p, "echo.type", 0.0f);
+    ui.setRackExpanded (Kind::space, true);
+    setValue (p, "space.engine", 0.0f);
+    setValue (p, "space.type", 1.0f);
+    shoot ("polish-space-hall");
+    setValue (p, "space.type", 2.0f);
+    shoot ("polish-space-plate");
+    for (const auto& [engine, label] : { std::pair { 1.0f, "abyss" }, std::pair { 2.0f, "vintage" }, std::pair { 3.0f, "bloom" } })
+    {
+        setValue (p, "space.engine", engine);
+        shoot (juce::String ("polish-space-") + label);
+    }
+    setValue (p, "space.engine", 0.0f);
+    setValue (p, "space.type", 1.0f);
+    for (const int w : { 869, 1810 })
+        for (const bool arp : { false, true })
+        {
+            width = w;
+            ui.setArpExpanded (arp);
+            for (const auto& [kind, label] : { std::pair { Kind::movement, "movement" }, std::pair { Kind::echo, "echo" }, std::pair { Kind::space, "space" } })
+            {
+                ui.setRackExpanded (kind, true);
+                shoot ("polish-" + juce::String (w) + (arp ? "-arp-" : "-") + label);
+            }
+        }
 }

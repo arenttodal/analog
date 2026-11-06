@@ -7,8 +7,11 @@
 #include "LadderFilter.h"
 #include "Oscillator.h"
 #include "OrganicVoice.h"
+#include "SampleSource.h"
+#include "ZonePlayer.h"
+#include "VoiceEq.h"
 #include "OtaFilter.h"
-#include "morph/MorphVoice.h"
+#include "morph/LiveMorph.h"
 #include "LiveGranulator.h"
 #include "Patch.h"
 #include "PolyBlep.h"
@@ -92,11 +95,24 @@ public:
     void setTransport (const osp::HostTiming& timing) noexcept;
     /** LFO 1's CUSTOM shape (its drawn curve). Real-time safe. */
     void setLfoCurve (const osp::mod::Curve& curve) noexcept;
+    /** A card's DAMPEN curve over the keys (layer 0 the oscillators, 1 ORGANIC: the shell's
+        DAMPEN curves). Real-time safe. */
+    void setDampenCurve (int layer, const osp::mod::Curve& curve) noexcept;
+    /** Tests only: card A's EQ / DAMPEN on the oscillators' sum, as before state version 8 (to
+        prove a migrated pair, the same curve on both cards, sounds as the old one). */
+    void setLegacyCardsForTest (bool legacy) noexcept { legacyCards = legacy; }
     /** GRANULAR's KEY DNA (each key's own granular identity); recomputed only when it
         changes. Real-time safe. */
     void setKeyDna (const osp::keydna::Settings& settings) noexcept;
+    /** GRANULAR's KEY DNA from outside (the shell's: ANDOR OSP's editor computes the profile
+        off the audio thread): its table, valid until the next call (null: none), and AMOUNT
+        (0..1, live). Replaces what setKeyDna set. Real-time safe. */
+    void setKeyDnaTable (const osp::keydna::Table* table) noexcept { keyDnaInUse = table; }
+    void setKeyDnaAmount (double amount) noexcept { keyDna.amount = std::clamp (amount, 0.0, 1.0); }
     /** MOVEMENT SHAPER's playhead (0..1), for its picture. */
     float shaperPhase() const noexcept { return effects.shaperPhase(); }
+    /** A MOVEMENT lane's SHAPER playhead (0 A, 1 B), -1 when idle. */
+    float shaperPhase (int lane) const noexcept { return effects.shaperPhase (lane); }
 
     /** The modulation (ANDOR OSP's: LFO 1 and 2, ENV 1 and 2, VEL, NOTE, the wheel, CC 1-4
         and pressure through 16 routes) and the controllers CC 1-4 follow. LFO 1 is the
@@ -117,6 +133,24 @@ public:
     /** The newest sounding voice's modulation (the panel's meters), or null. */
     const osp::mod::VoiceState* newestModulation() const noexcept;
 
+    /** The arpeggiator's card lanes (the shell's per-card arpeggiator): while on, a note's MIDI
+        channel names the cards it sounds on, as 1 + a mask (bit 0 card A: OSC 1 and the
+        noise; bit 1 card B: OSC 2; bit 2 card C: the hybrid), so held notes can sustain on
+        some cards while an arpeggio plays others. Off (the default) every note sounds on
+        every card, whatever its channel. A card a voice does not sound is not computed where
+        it can be skipped (the oscillator pair, or the hybrid). */
+    void setCardRouting (bool on) noexcept { cardRouting = on; }
+    bool cardRoutingOn() const noexcept { return cardRouting; }
+    static constexpr std::uint8_t allCards = 7;
+    /** The cards a note on this channel sounds on (allCards unless routing is on). */
+    std::uint8_t cardsFor (int channel) const noexcept
+    {
+        if (! cardRouting)
+            return allCards;
+        const int mask = (channel - 1) & 7;
+        return static_cast<std::uint8_t> (mask == 0 ? allCards : mask);
+    }
+
     // Events, applied at the current position (between render calls).
     void noteOn (int channel, int note, float velocity) noexcept;
     void noteOff (int channel, int note) noexcept;
@@ -133,20 +167,23 @@ public:
         one is read no more once this returns: the notes playing it fade it out from a short
         copy. New notes play the new one. */
     void setOrganic (const osp::InstrumentModel* model) noexcept;
+    /** An imported sample source (the Sample Source importer) in ORGANIC's place: each note
+        sounds the zones its key and velocity select (overlapping ones together), through
+        ORGANIC's level, the A/B mix and card B. Null: ORGANIC's recording (or nothing). The
+        same lifetime contract as setOrganic (the old one is not read after this returns).
+        Real-time safe. */
+    void setSampleSource (const SampleSource* source) noexcept;
+    const SampleSource* sampleSourceInUse() const noexcept { return sampleSource; }
+    /** The imported source's zones sounding now, over every voice (tests, the status line). */
+    int sampleZonesSounding() const noexcept
+    {
+        int n = 0;
+        for (const auto& v : voices)
+            for (int i = 0; i < v.zoneCount; ++i)
+                n += v.zones[static_cast<std::size_t> (i)].playing() ? 1 : 0;
+        return n;
+    }
     const osp::InstrumentModel* organicModel() const noexcept { return organicSource; }
-    /** MORPH's analysis of ORGANIC's recording (built off the audio thread), for `model`: it
-        applies while that model is the one playing. Null: none (MORPH unavailable: the
-        sources play as they are). Audio thread; the profile must outlive its use here. */
-    void setMorphProfile (const morph::MorphProfile* profile, const osp::InstrumentModel* model) noexcept
-    {
-        morphProfile = profile;
-        morphModel = model;
-    }
-    /** MORPH can play now: a pitched profile for the recording that plays. */
-    bool morphAvailable() const noexcept
-    {
-        return morphProfile != nullptr && morphModel == organicSource && organicSource != nullptr && morphProfile->kind == morph::MorphProfile::Kind::pitched;
-    }
 
     /** Renders `numSamples` into left/right (overwritten); any length (in pieces of the prepared maximum). */
     void render (float* left, float* right, int numSamples) noexcept;
@@ -163,16 +200,27 @@ public:
         bool active = false, held = false;
         int note = -1;
         float amp = 0.0f;
+        std::uint8_t cards = 7;   ///< the cards it sounds on (setCardRouting)
+        double driftCents = 0.0;  ///< MOVEMENT DRIFT's wander of its pitch now (both lanes)
     };
     VoiceView voiceView (int slot) const noexcept;
 
     /** The variation each voice slot carries at ANALOG 100 % (cents of OSC 1 pitch). */
     double slotPitchOffsetCents (int slot) const noexcept;
-    /** The grains playing now in every sounding voice, while GRANULAR is on (the card's
-        picture); returns how many were written (at most `max`). Audio thread. */
-    int collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept;
-    /** A voice's grains now (tests). */
-    int grainCount (int slot) const noexcept { return voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))].granulator.grainCount(); }
+    /** The grains playing now in every sounding voice, while that card's GRANULAR is on (the
+        card's picture; `card` 0: A, OSC 1; 1: B, OSC 2); returns how many were written (at
+        most `max`). Audio thread. */
+    int collectGrains (int card, LiveGranulator::GrainDot* out, int max) const noexcept;
+    /** ORGANIC's read heads (card B's playheads, as ANDOR OSP's One Shot voices): one per voice
+        playing the recording, where it reads (0..1 of the recording shown) and how loud the
+        note is (its amplitude envelope, 0..1). Returns how many. Any thread that renders. */
+    int collectPlayheads (float* where, float* level, int max) const noexcept;
+    /** A voice's grains now (tests; `card` 0: A, 1: B). */
+    int grainCount (int slot, int card = 0) const noexcept
+    {
+        const auto& v = voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))];
+        return (card == 1 ? v.granulator2 : v.granulator).grainCount();
+    }
     /** How long each voice's recording is (seconds), and the longest a mode engine runs per call. */
     static constexpr double recordingSeconds = 1.5;
     static constexpr int modeInterval = 32;
@@ -198,6 +246,7 @@ private:
         bool held = false;        ///< its key is down
         bool sustained = false;   ///< released while the pedal holds it
         int channel = 0, note = -1;
+        std::uint8_t cards = 7;   ///< the cards this note sounds on (setCardRouting)
         std::uint64_t order = 0;  ///< note-on sequence (oldest first)
         std::uint64_t seed = 1;   ///< the note's own seed (grains, REIMAGINED, DRIFT)
         float velocity = 1.0f;
@@ -226,10 +275,20 @@ private:
         float resonance01 = 0.0f;
         float otaCutoffOffset = 0.0f; ///< semitones (the Juno-6's calibration)
         VoiceHighPass highPass;
+        // Each card's EQ and DAMPEN on its own part, before the filter (Patch::eqA ...).
+        VoiceEq eqA, eqB;
+        VoiceEq eqC;                  ///< state version 8: card B's (OSC 2), the shell's layer C
+        bool splitCards = false;      ///< card A's or B's EQ / DAMPEN on: each oscillator through its own
+        VoiceDampen dampenA, dampenB, dampenC;
+        bool dampenFresh = true;      ///< a new note: its damping lands at once
         int highPassTail = 0;         ///< samples the high-pass keeps running after it was switched off
         double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
         // ORGANIC: the recording this note plays beside the oscillators (into the same mixer).
         OrganicVoice organic;
+        std::array<ZonePlayer, SampleSource::maxLayers> zones;   ///< an imported source's zones for this note
+        std::array<double, SampleSource::maxLayers> zoneSteps {};
+        std::array<float, SampleSource::maxLayers> zoneGains {};
+        int zoneCount = 0;
         double organicStep = 0.0;     ///< source frames per internal sample (control rate)
         float organicGain = 0.0f;
         bool organicOn = false;       ///< playing, or fading a replaced recording out
@@ -239,13 +298,24 @@ private:
         bool layerGainsFresh = true;
         bool releaseWhenPlayedOut = false;   ///< FOLLOW off: the key was released; the recording plays out first
         // MORPH: the recording turned into the carrier (when its profile is ready).
-        morph::MorphVoice morph;
-        morph::CarrierSpectrum carrierSpectrum {};
+        morph::LiveMorph morph;       ///< MORPH: the oscillators and card C heard live, made one
+        double morphSourceHz = 220.0; ///< the fundamental card C plays for this note
         bool morphOn = false;
         int morphCountdown = 0;       ///< MORPH's control runs every fourth control period
         float lfoFade = 1.0f;
         Envelope amp, env;
         osp::Prng noise { 1 };
+        // State version 8: the hybrid as an oscillator (OSC 3: the slots' code, no sync or Poly
+        // Mod) or a noise source (its own seeded noise, COLOR, TONE, MOVEMENT).
+        HybridType hybridGen = HybridType::sample;   ///< oscillator / noise: this voice generates the hybrid
+        double phase3 = 0.0, dt3 = 0.0;
+        BlepLine line3;
+        osc::SlotExtra extra3;
+        osc::SlotPlan plan3;
+        float width3 = 0.5f, pwm3 = 0.0f, pwmEnv3 = 0.0f;
+        osp::Prng hybridNoise { 1 };
+        float hybridColour = 0.0f, hybridTone = 0.0f, hybridToneCoef = 1.0f, hybridMove = 1.0f, hybridMoveTarget = 1.0f;
+        int hybridMoveCountdown = 0;
 
         // Control rate: what each sample starts from.
         double dt1 = 0.0, dt2 = 0.0;
@@ -256,9 +326,15 @@ private:
         float makeUp = 1.0f;   ///< resonance and DRIVE make-up gain after the filter
         float otaMakeUp = 1.0f;   ///< the same after the OTA (DRIVE and TRIM only)
 
-        // The live sound: its recording, the grains read from it, KALEIDOSCOPE's parts.
-        LiveRecording recording;
+        // The live sound: its recording, the grains read from it, KALEIDOSCOPE's parts. Card A
+        // (OSC 1, the noise) and card B (OSC 2, the ring) each record and granulate their own
+        // part (state version 8: GRANULAR per card); card C's part never passes through grains.
+        LiveRecording recording;      ///< card A's part
         LiveGranulator granulator;
+        LiveRecording recording2;     ///< card B's part
+        LiveGranulator granulator2;
+        float partB = 0.0f, partC = 0.0f;   ///< this sample's card B and card C parts (at the filter's input level)
+        float cloud2 = 0.0f, grainMix2 = 0.0f;   ///< card B's (as cloud and grainMix)
         bool grainsPlay = false;      ///< GRANULAR: the grains are the voice's source
         float cloud = 0.0f;           ///< KALEIDOSCOPE's remapped grains under the oscillators (ONE SHOT)
         double grainStep = 1.0;       ///< the grains' read speed (REIMAGINED's wow)
@@ -287,6 +363,14 @@ private:
         std::array<double, 4> driftFrom {}, driftTo {}, driftNow {};
         int driftCountdown = 0, driftSegment = 1;
         osp::Prng driftRng { 1 };
+        // MOVEMENT lane B's own DRIFT wander, and the two combined (what the voice plays).
+        struct LaneDrift
+        {
+            std::array<double, 4> from {}, to {}, now {};
+            int countdown = 0, segment = 1;
+            osp::Prng rng { 1 };
+        } driftB;
+        std::array<double, 4> driftDepthA {}, driftDepthB {}, driftOut {};
 
         // A voice taken for a new note fades out first (3 ms), then starts the new one.
         int fade = 0;
@@ -307,6 +391,9 @@ private:
     double offsetOf (const Voice& v, osp::mod::Dest d) const noexcept { return v.mod.offset (modRuntime, d); }
     void rebuildModulation() noexcept;
     void updateDrift (Voice& v) noexcept;
+    void combineDrift (Voice& v) noexcept;
+    void glideDrift (std::array<double, 4>& from, std::array<double, 4>& to, std::array<double, 4>& now, int& countdown, int& segment, osp::Prng& rng,
+                     const std::array<double, 4>& depth, double rateHz) noexcept;
     void startModeEngine (Voice& v) noexcept;
     osp::ReimaginedControl modeControl (const Voice& v) const noexcept;
     /** Renders `count` oversampled samples of a voice, adding them (panned) to left/right. */
@@ -317,6 +404,13 @@ private:
     /** The mixer's output (at the filter's input level) through the voice's recording,
         GRANULAR, KALEIDOSCOPE's doubling and saturation. */
     float liveStages (Voice& v, float x) noexcept;
+    /** A card's DAMPEN and EQ on its own part of the voice (A: the oscillators, B: ORGANIC). */
+    float cardA (Voice& v, float x) noexcept;
+    float cardB (Voice& v, float x) noexcept;
+    float cardC (Voice& v, float x) noexcept;
+    /** The hybrid's own sound this sample (OSC 3 or NOISE), at full level (its card's LEVEL and
+        the A/B mix apply as to a recording). */
+    float hybridSample (Voice& v, float envValue) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
@@ -370,10 +464,14 @@ private:
     bool voiceRoutes = false;   ///< a route reaches something a voice reads
     std::uint64_t patchGeneration = 1;   ///< a new one: the voices' patches are copied from `current` again
     bool playedKeysOnly = false;
+    bool cardRouting = false;
     const ControlModulator* modulator = nullptr;
 
     // LFO (ANDOR OSP's LFO 1) and transport.
     osp::mod::CurveTable lfoCurve {};
+    bool legacyCards = false;
+    std::array<osp::mod::CurveTable, 3> dampenCurves { osp::mod::compileCurve (osp::dampen::defaultCurve()), osp::mod::compileCurve (osp::dampen::defaultCurve()),
+                                                       osp::mod::compileCurve (osp::dampen::defaultCurve()) };
     float lfoValue = 0.0f;
     osp::HostTiming timing;
     double ppqAtBlock = 0.0;
@@ -399,6 +497,7 @@ private:
     // GRANULAR's KEY DNA, REIMAGINED's live parts.
     osp::keydna::Settings keyDna;
     osp::keydna::Table keyDnaTable;
+    const osp::keydna::Table* keyDnaInUse = &keyDnaTable;   ///< setKeyDna's, or the shell's
     /** What the mode engines take for "the recording" on a live voice (they read only its
         length, rate and root there): TOYBOX the voice's own recording's length; TAPE FRAME a
         twelve-second tape (its FRAMEs, 3.6 to 11.4 s, are longer than what a voice keeps: its
@@ -417,9 +516,11 @@ private:
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
     const osp::InstrumentModel* organicSource = nullptr;
-    const morph::MorphProfile* morphProfile = nullptr;
+    const SampleSource* sampleSource = nullptr;
+    /** ORGANIC's part is sounding in a voice (its recording or an imported source's zones). */
+    static bool organicPlaying (const Voice& v) noexcept;
     float lastNoise = 0.0f;   ///< this sample's noise in the voice's mix (MORPH takes the pair without it)
-    const osp::InstrumentModel* morphModel = nullptr;
+    std::unique_ptr<morph::LiveMorph::Shared> morphShared;   ///< MORPH's transforms and windows (every voice's)
     JunoChorus chorus;            ///< state version 4: the chorus after the voices (off: bit-exact bypass)
     osp::PostProcessor effects;
     float dcL = 0.0f, dcR = 0.0f, dcStateL = 0.0f, dcStateR = 0.0f, dcCoef = 0.0f;
