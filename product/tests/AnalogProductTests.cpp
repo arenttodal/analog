@@ -4198,11 +4198,12 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
     {
         INFO (osp::plugin::rack::name (kind));
         CHECK (slots[kind][0] == slots[Kind::movement][0]);                   // MODE: same place and size
-        CHECK (slots[kind][1] == slots[Kind::movement][1]);                   // PRESET
-        CHECK (slots[kind][2].getY() == slots[Kind::movement][2].getY());     // the controls row
-        CHECK (slots[kind][2].getHeight() == slots[Kind::movement][2].getHeight());
-        CHECK (slots[kind][2].getWidth() == slots[Kind::movement][2].getWidth());   // one cell size
-        CHECK (slots[kind][3] == slots[Kind::movement][3]);                   // the picture
+        CHECK (slots[kind][1].getPosition() == slots[Kind::movement][1].getPosition());   // PRESET: beside it
+        CHECK (slots[kind][1].getHeight() == slots[Kind::movement][1].getHeight());       // (its width: the layout's)
+        CHECK (slots[kind][2] == slots[Kind::movement][2]);                   // the first control: one place, one size
+        CHECK (slots[kind][3].getRight() == slots[Kind::movement][3].getRight());   // the picture: its right edge fixed,
+        CHECK (slots[kind][3].getY() == slots[Kind::movement][3].getY());           // its height the same
+        CHECK (slots[kind][3].getHeight() == slots[Kind::movement][3].getHeight());
         CHECK (heights[kind] == heights[Kind::movement]);
     }
     CHECK (heights[Kind::space] <= 216.0f);   // never taller than the macro panel
@@ -4218,10 +4219,74 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
     osp::plugin::setRackMovementWide (*movement, true);
     ui.refreshNow();
     CHECK (ui.effectsRack().height() > 216.0f);
-    CHECK (osp::plugin::rackSlot (*movement, 5).getWidth() > 2 * slots[Kind::movement][3].getWidth());
+    CHECK (osp::plugin::rackSlot (*movement, 5).getWidth() > 2 * slots[Kind::space][3].getWidth());
     osp::plugin::setRackMovementWide (*movement, false);
     ui.refreshNow();
     CHECK (ui.effectsRack().height() == Approx (heights[Kind::movement]));
+}
+
+TEST_CASE ("analog: each rack mode has its layout - compact, medium or dense - and nothing but a mode change moves it", "[analog][rack][unified][density]")
+{
+    using osp::plugin::rack::Kind;
+    Scratch scratch;
+    osp::plugin::setRackPresetFolderForTest (scratch.dir);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    struct Case
+    {
+        Kind kind;
+        const char* id;
+        int mode, density;
+    };
+    // MOVEMENT DRIFT / TAPE / CHORUS: four controls (compact); PULSE, SHAPER six (medium);
+    // ECHO TAPE / BBD six (medium), ASCEND eight (dense); SPACE eight or nine (dense).
+    const Case cases[] { { Kind::movement, "movement.mode", 0, 0 }, { Kind::movement, "movement.mode", 1, 0 }, { Kind::movement, "movement.mode", 2, 0 },
+                         { Kind::movement, "movement.mode", 3, 1 }, { Kind::movement, "movement.mode", 4, 1 }, { Kind::echo, "echo.type", 0, 1 },
+                         { Kind::echo, "echo.type", 1, 1 },         { Kind::echo, "echo.type", 2, 2 },         { Kind::space, "space.engine", 0, 2 },
+                         { Kind::space, "space.engine", 1, 2 },     { Kind::space, "space.engine", 2, 2 },     { Kind::space, "space.engine", 3, 2 } };
+    std::map<int, juce::Rectangle<int>> pictureBy;
+    for (const auto& c : cases)
+    {
+        INFO (osp::plugin::rack::name (c.kind) << " mode " << c.mode);
+        ui.setRackExpanded (c.kind, true);
+        setValue (p, c.id, static_cast<float> (c.mode));
+        ui.refreshNow();
+        auto* module = ui.effectsRack().module (c.kind);
+        REQUIRE (module != nullptr);
+        CHECK (osp::plugin::rackDensity (*module) == c.density);
+        const auto picture = osp::plugin::rackSlot (*module, 5);
+        if (pictureBy.count (c.density) == 0)
+            pictureBy[c.density] = picture;
+        CHECK (picture == pictureBy[c.density]);   // one picture per layout, whichever module
+        // The cells all fit before the divider, and the picture is wider with fewer controls.
+        const auto first = osp::plugin::rackSlot (*module, 4);
+        CHECK ((first.getX() + 9 * first.getWidth() <= picture.getX() || c.density < 2));
+        // Presets of the mode, values, automation: nothing moves.
+        std::array<juce::Rectangle<int>, 4> before;
+        for (int s = 2; s <= 5; ++s)
+            before[static_cast<std::size_t> (s - 2)] = osp::plugin::rackSlot (*module, s);
+        osp::plugin::rackPresetStep (*module, 1);
+        osp::plugin::rackPresetStep (*module, 1);
+        for (const auto& [id, v] : allParameterValues (p))
+            if (id.startsWith (c.kind == Kind::movement ? "movement." : (c.kind == Kind::echo ? "echo." : "space.")) && ! id.endsWith (".mode")
+                && ! id.endsWith (".type") && ! id.endsWith (".engine") && ! id.endsWith (".sync"))
+                if (auto* param = p.parameters.getParameter (id))
+                    param->setValueNotifyingHost (0.37f);
+        ui.refreshNow();
+        CHECK (juce::roundToInt (p.parameterValue (c.id)) == c.mode);
+        for (int s = 2; s <= 5; ++s)
+        {
+            INFO ("slot " << s);
+            CHECK (osp::plugin::rackSlot (*module, s) == before[static_cast<std::size_t> (s - 2)]);
+        }
+    }
+    REQUIRE (pictureBy.size() == 3);
+    CHECK (pictureBy[0].getRight() == pictureBy[2].getRight());
+    CHECK (pictureBy[0].getX() < pictureBy[1].getX());
+    CHECK (pictureBy[1].getX() < pictureBy[2].getX());
+    osp::plugin::setRackPresetFolderForTest ({});
 }
 
 TEST_CASE ("analog: rack presets - by mode, the arrows, NAME * once edited, CUSTOM, your own, nothing else touched", "[analog][rack][unified][rackpresets]")
@@ -4669,7 +4734,7 @@ TEST_CASE ("analog: screenshots of the macro row - every rack closed, each open 
     }
 }
 
-TEST_CASE ("analog: MOVEMENT's header is the title and A / B; each lane's ON in its settings; copy / swap from A / B's menu", "[analog][rack][lanes]")
+TEST_CASE ("analog: MOVEMENT's header is the title, A / B and the shown lane's power; copy / swap from A / B's menu", "[analog][rack][lanes]")
 {
     using osp::plugin::rack::Kind;
     Scratch scratch;
@@ -4684,8 +4749,8 @@ TEST_CASE ("analog: MOVEMENT's header is the title and A / B; each lane's ON in 
     REQUIRE (module != nullptr);
     const auto onA = params::movementLaneId (0, "on"), onB = params::movementLaneId (1, "on");
 
-    // The title row: only the lane selector (no ON, no LANES, no COPY / SWAP keys).
-    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Lane A|Lane B");
+    // The title row: the lane selector and the shown lane's power (no LANES, no COPY / SWAP).
+    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Lane A|Lane B|Lane power");
 
     // Choosing a lane shows it and never switches either lane on or off.
     const float a0 = p.parameterValue (onA), b0 = p.parameterValue (onB);
@@ -4699,19 +4764,18 @@ TEST_CASE ("analog: MOVEMENT's header is the title and A / B; each lane's ON in 
     CHECK (p.parameterValue (onA) == a0);
     CHECK (p.parameterValue (onB) == b0);
 
-    // The shown lane's ON: at the controls row's end, under PRESET's right end, never on a cell.
+    // The shown lane's power: on the title row (right of A / B, by the collapse key), in every
+    // mode; nothing of it among the controls.
     for (int mode = 0; mode < 5; ++mode)
     {
         setValue (p, "movement.mode", static_cast<float> (mode));
         ui.refreshNow();
-        const auto on = osp::plugin::rackMovementLaneSwitch (*module);
-        const auto preset = osp::plugin::rackSlot (*module, 3), cell = osp::plugin::rackSlot (*module, 4);
+        const auto power = osp::plugin::rackMovementLaneSwitch (*module);
         INFO ("mode " << mode);
-        REQUIRE (! on.isEmpty());
-        CHECK (on.getRight() == preset.getRight());
-        CHECK (on.getY() > preset.getBottom());
-        CHECK (on.getY() < cell.getY() + 20);   // on the captions' line
-        CHECK (on.getX() > cell.getX() + 6 * cell.getWidth());   // right of the widest row (six cells)
+        REQUIRE (! power.isEmpty());
+        CHECK (power.getBottom() <= module->titleOffset() + 2);
+        CHECK (power.getX() > osp::plugin::rackSlot (*module, 5).getX());   // over the picture's column, at the right
+        CHECK (power.getRight() <= module->getWidth() - 22 - 26);          // before the collapse key
     }
     // It switches the shown lane only.
     osp::plugin::showRackMovementLane (*module, 1);
@@ -4792,6 +4856,197 @@ TEST_CASE ("analog: screenshots of MOVEMENT's header - A / B, each lane on or of
     shoot ("header-echo");
     ui.setRackExpanded (Kind::space, true);
     shoot ("header-space");
+}
+
+namespace
+{
+    juce::MouseEvent eventAt (juce::Component& c, juce::Point<float> at, int clicks = 1)
+    {
+        auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, juce::ModifierKeys::leftButtonModifier, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, at, now,
+                                 clicks, false);
+    }
+}
+
+TEST_CASE ("analog: the six modulation tabs never move - selection, routes, an editable curve", "[analog][modulation][modtabs]")
+{
+    using namespace osp::plugin;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    auto& panel = ui.modulationPanel();
+    REQUIRE (panel.hasStableTabs());
+    panel.showTab (0);
+    ui.refreshNow();
+    std::array<juce::Rectangle<float>, modui::tabCount> reference;
+    for (int t = 0; t < modui::tabCount; ++t)
+        reference[static_cast<std::size_t> (t)] = panel.tabArea (t);
+    for (int t = 1; t < modui::tabCount; ++t)
+        CHECK (reference[static_cast<std::size_t> (t)].getX() >= reference[static_cast<std::size_t> (t - 1)].getRight());   // in order, apart
+    int checks = 0;
+    auto unchanged = [&] (const char* when) {
+        for (int shown = 0; shown < modui::tabCount; ++shown)
+        {
+            panel.showTab (shown);
+            ui.refreshNow();
+            for (int t = 0; t < modui::tabCount; ++t)
+            {
+                INFO (when << ": tab " << shown << " shown, tab " << t);
+                CHECK (panel.tabArea (t) == reference[static_cast<std::size_t> (t)]);
+                ++checks;
+            }
+            CHECK (panel.expandArea().isEmpty());   // no key in the tab row
+            if (! panel.routesArea().isEmpty())
+                CHECK (panel.routesArea().getX() > reference.back().getRight());   // in its reserved place
+        }
+    };
+    unchanged ("no routes");
+    // Routes (the count's text changes width), editable curves (LFO 1 CUSTOM, ENV 1 ONE SHOT).
+    p.addModulationRoute (osp::mod::Source::vel, osp::mod::Dest::movement, 40.0f);
+    p.addModulationRoute (osp::mod::Source::note, osp::mod::Dest::space, 30.0f);
+    p.addModulationRoute (osp::mod::Source::lfo1, osp::mod::Dest::drive, 30.0f);
+    p.addModulationRoute (osp::mod::Source::lfo1, osp::mod::Dest::space, 30.0f);
+    unchanged ("routes");
+    setValue (p, InstrumentHost::modLfoId (0, "shape"), static_cast<float> (osp::mod::LfoShape::custom));
+    setValue (p, InstrumentHost::modEnvId (0, "mode"), 1.0f);
+    unchanged ("editable LFO 1 and ENV 1");
+    CHECK (checks == 3 * modui::tabCount * modui::tabCount);
+}
+
+TEST_CASE ("analog: VEL's and NOTE's larger curve editor opens from the display, edits that curve, and the session keeps it", "[analog][modulation][modtabs]")
+{
+    using namespace osp::plugin;
+    juce::MemoryBlock session;
+    std::map<int, osp::mod::Curve> edited;
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+        auto& panel = ui.modulationPanel();
+        for (const int source : { osp::mod::slot::vel, osp::mod::slot::note })
+        {
+            INFO ("source " << source);
+            panel.showTab (modui::tabOfSource (source));
+            ui.refreshNow();
+            auto& view = panel.curveView();
+            REQUIRE (view.source() == source);
+            const auto key = view.expandArea();
+            REQUIRE (! key.isEmpty());
+            CHECK (view.getLocalBounds().toFloat().contains (key));   // inside the display
+            // A click on it opens the larger editor on this source's curve.
+            const auto press = eventAt (view, key.getCentre());
+            view.mouseDown (press);
+            view.mouseUp (press);
+            REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::curvePopup);
+            auto* popup = dynamic_cast<ModCurvePopup*> (ui.openPopupPanel());
+            REQUIRE (popup != nullptr);
+            auto& big = popup->curveView();
+            CHECK (big.source() == source);
+            CHECK (big.isEditable());
+            if (big.getWidth() < 100)
+                big.setBounds (0, 0, 600, 280);
+            // An edit there: a double-click adds a point to this curve (and only this one).
+            const int index = modui::keyCurveIndex (source);
+            const auto before = p.modulationCurve (index);
+            const auto other = p.modulationCurve (index == 4 ? 5 : 4);
+            const auto plot = big.plotArea();
+            const auto at = juce::Point<float> (plot.getX() + 0.37f * plot.getWidth(), plot.getY() + 0.2f * plot.getHeight());
+            big.mouseDoubleClick (eventAt (big, at, 2));
+            CHECK (p.modulationCurve (index).count == before.count + 1);
+            CHECK (p.modulationCurve (index == 4 ? 5 : 4) == other);
+            edited[index] = p.modulationCurve (index);
+            ui.closePopup();
+        }
+        p.getStateInformation (session);
+    }
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    for (const auto& [index, curve] : edited)
+    {
+        INFO ("curve " << index);
+        CHECK (q.modulationCurve (index) == curve);
+    }
+}
+
+TEST_CASE ("analog: screenshots of the modulation panel's tabs, fixed and as before (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-modtabs]")
+{
+    using namespace osp::plugin;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    skin::setLook (skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    p.addModulationRoute (osp::mod::Source::vel, osp::mod::Dest::movement, 40.0f);
+    p.addModulationRoute (osp::mod::Source::lfo1, osp::mod::Dest::drive, 30.0f);
+    p.addModulationRoute (osp::mod::Source::lfo1, osp::mod::Dest::space, 30.0f);
+    setValue (p, InstrumentHost::modLfoId (0, "shape"), static_cast<float> (osp::mod::LfoShape::custom));
+    auto& panel = ui.modulationPanel();
+    for (const bool stable : { false, true })
+    {
+        panel.setStableTabs (stable);
+        for (int t = 0; t < modui::tabCount; ++t)
+        {
+            panel.showTab (t);
+            ui.refreshNow();
+            const auto image = editor->createComponentSnapshot (panel.getBoundsInParent().getUnion (panel.getBounds()).expanded (8), true, 1.0f);
+            const auto bounds = editor->getLocalArea (&panel, panel.getLocalBounds()).expanded (8);
+            const auto shot = editor->createComponentSnapshot (bounds, true, 1.0f);
+            juce::ignoreUnused (image);
+            const auto file = out.getChildFile (juce::String (stable ? "modtabs-fixed-" : "modtabs-before-") + juce::String (t) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (shot, stream);
+        }
+    }
+}
+
+TEST_CASE ("analog: screenshots of the rack's compact, medium and dense layouts at every width (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-adaptive]")
+{
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    setValue (p, "motion", 60.0f);
+    setValue (p, "space", 40.0f);
+    setValue (p, "echo", 50.0f);
+    setValue (p, params::movementLaneId (0, "sync"), 1.0f);
+    struct Shot
+    {
+        const char* name;
+        Kind kind;
+        const char* id;
+        int mode;
+    };
+    const Shot shots[] { { "movement-drift-4", Kind::movement, "movement.mode", 0 }, { "movement-pulse-6", Kind::movement, "movement.mode", 3 },
+                         { "movement-shaper-6", Kind::movement, "movement.mode", 4 }, { "echo-tape-6", Kind::echo, "echo.type", 0 },
+                         { "echo-ascend-8", Kind::echo, "echo.type", 2 },         { "space-abyss-9", Kind::space, "space.engine", 1 },
+                         { "space-hall-8", Kind::space, "space.engine", 0 } };
+    for (const int width : { 1448, 869, 1810 })
+        for (const auto& shot : shots)
+        {
+            ui.setRackExpanded (shot.kind, true);
+            setValue (p, shot.id, static_cast<float> (shot.mode));
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            ui.refreshNow();
+            ui.effectsRack().settle();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile ("adaptive-" + juce::String (width) + "-" + shot.name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        }
 }
 
 TEST_CASE ("analog: screenshots of every rack module in every mode, before / after a polish (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-polish]")

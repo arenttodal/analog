@@ -301,6 +301,7 @@ const ProductInfo& productInfo()
         // as cards A and B), only the ones that act on what card C plays: a SAMPLE all four; an
         // INSTRUMENT PATCH's zones LINK, LOOP and FOLLOW (they do not play backwards).
         p.cardModifiersInWell = true;
+        p.stableModulationTabs = true;
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)
                 return 0xf;
