@@ -106,6 +106,8 @@ namespace
             fill.closeSubPath();
             g.setColour (colour.withAlpha (0.12f));
             g.fillPath (fill);
+            g.setColour (colour.withAlpha (0.22f));
+            g.strokePath (p, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             g.setColour (colour);
             g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
@@ -142,7 +144,7 @@ namespace
                 if (const auto* s = dynamic_cast<const fx::StereoSpread*> (p))
                     sig << s->correlation.load() << s->scope.head.load();
                 if (const auto* u = dynamic_cast<const fx::Utility*> (p))
-                    sig << u->meterL.load() << u->meterR.load();
+                    sig << u->meterL.load() << u->meterR.load() << u->scope.head.load();
                 if (const auto* ph = dynamic_cast<const fx::Phaser*> (p))
                     sig << ph->notchHz[0].load();
                 if (const auto* fl = dynamic_cast<const fx::Flanger*> (p))
@@ -265,24 +267,34 @@ namespace
             auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (24.0f).withTrimmedBottom (20.0f);
             if (s.mode == fx::CompSettings::multiband)
             {
-                // Three bands: down (copper) above the line, up (green) below - live.
+                // Three bands where they are on a frequency axis (the crossovers at their real
+                // frequencies); down (copper) above the line, up (the glow) below - live.
+                plot.paintGrid (g);
                 const char* names[3] { "LOW", "MID", "HIGH" };
-                const float w = body.getWidth() / 3.0f;
+                const float xs[4] { plot.r.getX(), plot.x (s.lowHz), plot.x (s.highHz), plot.r.getRight() };
+                const float mid = plot.r.getCentreY();
                 for (int b = 0; b < 3; ++b)
                 {
-                    auto col = juce::Rectangle<float> (body.getX() + w * static_cast<float> (b), body.getY(), w, body.getHeight()).reduced (14.0f, 0.0f);
-                    const float mid = col.getCentreY();
-                    g.setColour (axis);
-                    g.fillRect (col.withHeight (1.0f).withY (mid));
+                    auto col = juce::Rectangle<float>::leftTopRightBottom (xs[b], plot.r.getY(), xs[b + 1], plot.r.getBottom());
+                    g.setColour (colour.withAlpha (b == 1 ? 0.06f : 0.10f));
+                    g.fillRect (col);
+                    if (b > 0)
+                    {
+                        g.setColour (colour.withAlpha (0.55f));
+                        g.fillRect (juce::Rectangle<float> (col.getX() - 0.5f, col.getY(), 1.0f, col.getHeight()));
+                    }
                     const float down = c != nullptr ? c->bandReductionDb[static_cast<std::size_t> (b)].load() : 0.0f;
                     const float up = c != nullptr ? c->bandBoostDb[static_cast<std::size_t> (b)].load() : 0.0f;
                     const float scale = 0.5f * col.getHeight() / 18.0f;
-                    g.setColour (juce::Colour (0xffc99470));
-                    g.fillRect (col.withTrimmedLeft (col.getWidth() * 0.3f).withTrimmedRight (col.getWidth() * 0.3f).withY (mid - std::min (18.0f, down) * scale).withHeight (std::min (18.0f, down) * scale));
+                    auto barCol = col.withSizeKeepingCentre (std::min (26.0f, col.getWidth() * 0.5f), col.getHeight());
+                    g.setColour (juce::Colour (0xffd99a6a));
+                    g.fillRect (barCol.withY (mid - std::min (18.0f, down) * scale).withHeight (std::min (18.0f, down) * scale));
                     g.setColour (colour);
-                    g.fillRect (col.withTrimmedLeft (col.getWidth() * 0.3f).withTrimmedRight (col.getWidth() * 0.3f).withY (mid + 1.0f).withHeight (std::min (18.0f, up) * scale));
-                    small (g, names[b], col.withHeight (12.0f).withY (col.getBottom() - 12.0f), juce::Justification::centred);
+                    g.fillRect (barCol.withY (mid + 1.0f).withHeight (std::min (18.0f, up) * scale));
+                    small (g, names[b], col.withHeight (12.0f).withY (col.getY() + 2.0f), juce::Justification::centred);
                 }
+                g.setColour (axis.withMultipliedAlpha (2.0f));
+                g.fillRect (plot.r.withHeight (1.0f).withY (mid));
                 header (g, area, "MULTIBAND " + juce::String (juce::roundToInt (100.0f * s.depth)) + " %",
                         textOf (host, pid (id, "multi.low")) (s.lowHz) + " / " + textOf (host, pid (id, "multi.high")) (s.highHz));
                 foot (g, area, "gain reduction above, upward gain below (live)");
@@ -538,26 +550,71 @@ namespace
         void paintUtility (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
         {
             const auto* u = dynamic_cast<const fx::Utility*> (live());
-            auto body = area.reduced (24.0f, 0.0f).withTrimmedTop (30.0f).withTrimmedBottom (26.0f);
+            const auto& s = settings.utility[static_cast<std::size_t> (id.slot)];
+            auto body = area.reduced (18.0f, 0.0f).withTrimmedTop (30.0f).withTrimmedBottom (24.0f);
+            auto scopeArea = body.removeFromRight (body.getWidth() * 0.42f);
+            body.removeFromRight (14.0f);
+            // The levels after it (live RMS), each channel's polarity marked when inverted.
             const float levels[2] { u != nullptr ? u->meterL.load() : 0.0f, u != nullptr ? u->meterR.load() : 0.0f };
+            const bool inverted[2] { s.invertLeft, s.invertRight };
             const char* names[2] { "L", "R" };
             for (int c = 0; c < 2; ++c)
             {
                 auto row = body.removeFromTop (22.0f);
-                body.removeFromTop (10.0f);
-                small (g, names[c], row.removeFromLeft (16.0f), juce::Justification::centredLeft);
-                auto bar = row.withSizeKeepingCentre (row.getWidth(), 8.0f);
+                body.removeFromTop (8.0f);
+                small (g, names[c], row.removeFromLeft (14.0f), juce::Justification::centredLeft);
+                auto mark = row.removeFromRight (34.0f);
+                if (inverted[c])
+                {
+                    g.setColour (juce::Colour (0xffe0a46a));
+                    g.drawRoundedRectangle (mark.reduced (2.0f, 4.0f), 3.0f, 1.0f);
+                    small (g, juce::String::fromUTF8 ("\xc3\x98 INV"), mark, juce::Justification::centred, 1.0f);
+                }
+                auto bar = row.withSizeKeepingCentre (row.getWidth() - 6.0f, 8.0f);
                 g.setColour (axis);
                 g.fillRoundedRectangle (bar, 3.0f);
                 const float db = 20.0f * std::log10 (std::max (1.0e-6f, levels[c]));
                 g.setColour (colour);
                 g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * std::clamp ((db + 60.0f) / 60.0f, 0.0f, 1.0f)), 3.0f);
+                for (const float tick : { -48.0f, -36.0f, -24.0f, -12.0f, -6.0f })
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.18f));
+                    g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * (tick + 60.0f) / 60.0f, bar.getBottom() + 2.0f, 1.0f, 3.0f));
+                }
             }
             const float corr = u != nullptr ? u->correlation.load() : 1.0f;
-            small (g, "CORRELATION " + juce::String (corr, 2), body.withHeight (14.0f), juce::Justification::centredLeft);
-            const auto& s = settings.utility[static_cast<std::size_t> (id.slot)];
+            auto meter = body.removeFromTop (8.0f).withTrimmedLeft (14.0f).withTrimmedRight (40.0f);
+            g.setColour (axis);
+            g.fillRoundedRectangle (meter, 3.0f);
+            g.setColour (corr < 0.0f ? juce::Colour (0xffe0a46a) : colour);
+            g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ meter.getX() + meter.getWidth() * 0.5f * (corr + 1.0f), meter.getCentreY() }));
+            small (g, "CORRELATION " + juce::String (corr, 2), body.withHeight (14.0f).translated (14.0f, 2.0f), juce::Justification::centredLeft);
+            // A goniometer of its output.
+            const auto c = scopeArea.getCentre();
+            const float rx = scopeArea.getWidth() * 0.46f, ry = scopeArea.getHeight() * 0.46f;
+            g.setColour (grid);
+            g.drawEllipse (juce::Rectangle<float> (2.0f * rx, 2.0f * ry).withCentre (c), 1.0f);
+            g.setColour (axis.withMultipliedAlpha (1.6f));
+            g.fillRect (juce::Rectangle<float> (c.x - rx, c.y - 0.5f, 2.0f * rx, 1.0f));
+            g.fillRect (juce::Rectangle<float> (c.x - 0.5f, c.y - ry, 1.0f, 2.0f * ry));
+            if (u != nullptr)
+            {
+                float peak = 1.0e-4f;
+                for (int i = 0; i < fx::ScopeTap::size; ++i)
+                    peak = std::max ({ peak, std::abs (u->scope.l[static_cast<std::size_t> (i)].load (std::memory_order_relaxed)),
+                                       std::abs (u->scope.r[static_cast<std::size_t> (i)].load (std::memory_order_relaxed)) });
+                const float k = 0.92f / (peak * 1.41421356f);
+                for (int i = 0; i < fx::ScopeTap::size; ++i)
+                {
+                    const float l = u->scope.l[static_cast<std::size_t> (i)].load (std::memory_order_relaxed);
+                    const float r = u->scope.r[static_cast<std::size_t> (i)].load (std::memory_order_relaxed);
+                    const juce::Point<float> at (c.x + (r - l) * 0.70710678f * k * rx, c.y - (l + r) * 0.70710678f * k * ry);
+                    g.setColour (colour.withAlpha (0.65f));
+                    g.fillEllipse (juce::Rectangle<float> (1.8f, 1.8f).withCentre (at));
+                }
+            }
             header (g, area, "GAIN " + textOf (host, pid (id, "gain")) (s.gainDb), "WIDTH " + juce::String (juce::roundToInt (100.0f * s.width)) + " %");
-            foot (g, area, "levels after it (live, RMS)");
+            foot (g, area, "levels and image after it (live)");
         }
 
         osp::plugin::InstrumentHost& host;
@@ -806,10 +863,24 @@ namespace
         return f;
     }
 
+    /** The controls' share of the body: where the graph is the instrument (EQ, the filter, the
+        shifter's map, an impulse), it takes more of the rack. */
+    float shareFor (Type type)
+    {
+        switch (type)
+        {
+            case Type::eq:
+            case Type::filter: return 0.52f;
+            case Type::shifter:
+            case Type::convolution: return 0.55f;
+            default: return 0.62f;
+        }
+    }
+
     class FxRack final : public ParameterRack
     {
     public:
-        explicit FxRack (osp::plugin::InstrumentHost& h) : ParameterRack (h, "FX", fxAccent (shownInstance.type), 0.62f), id (shownInstance)
+        explicit FxRack (osp::plugin::InstrumentHost& h) : ParameterRack (h, "FX", fxAccent (shownInstance.type), shareFor (shownInstance.type)), id (shownInstance)
         {
             juce::String title = fx::typeName (id.type);
             if (fx::capacity[static_cast<std::size_t> (id.type)] > 1)
@@ -952,17 +1023,21 @@ namespace
                         switchCell (pid (id, (band + ".on").c_str()), "BAND", { on, off }, "This band on or off");
                         group ({});
                         k ("mix", "MIX");
-                        k ("output", "OUTPUT");
                     }
                     else
                     {
+                        // Each pass filter's slope over its frequency (a setting of that control).
+                        selectorSegment (pid (id, "hp.steep"), "SLOPE", { { "12", "12 dB per octave", 0.0f }, { "24", "24 dB per octave", 1.0f } }, 76,
+                                         "Twelve or twenty-four dB per octave", "HP FREQ");
+                        selectorSegment (pid (id, "lp.steep"), "SLOPE", { { "12", "12 dB per octave", 0.0f }, { "24", "24 dB per octave", 1.0f } }, 76,
+                                         "Twelve or twenty-four dB per octave", "LP FREQ");
                         sw ("hp.on", "HIGH PASS", "A high pass under everything");
                         k ("hp.freq", "HP FREQ");
-                        sw ("hp.steep", "24 dB", "Twelve or twenty-four dB per octave");
                         group ({});
                         sw ("lp.on", "LOW PASS", "A low pass over everything");
                         k ("lp.freq", "LP FREQ");
-                        sw ("lp.steep", "24 dB", "Twelve or twenty-four dB per octave");
+                        group ({});
+                        k ("output", "OUTPUT");
                     }
                     break;
                 case Type::filter:
