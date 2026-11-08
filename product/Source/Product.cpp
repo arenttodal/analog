@@ -8,7 +8,9 @@
 #include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
 #include "AnalogRacks.h"
+#include "FxRack.h"
 #include "FxRouting.h"
+#include "FxParameters.h"
 #include "FactoryPatches.h"
 #include "KeyDnaState.h"
 #include "SamplePatches.h"
@@ -256,7 +258,10 @@ const ProductInfo& productInfo()
                        { "space", "SPACE", "Space: the room it plays in" },
                        { "echo", "ECHO", "Echo: repeats of the sound, from a tape echo or a bucket-brigade delay" } } };
         p.macroPopover = [] (int macro, osp::plugin::InstrumentHost& host) { return andor::analog::createMacroPopover (macro, host); };
-        p.addParameters = [] (juce::AudioProcessorValueTreeState::ParameterLayout& layout) { andor::analog::params::addTo (layout); };
+        p.addParameters = [] (juce::AudioProcessorValueTreeState::ParameterLayout& layout) {
+            andor::analog::params::addTo (layout);
+            andor::analog::fxparams::addTo (layout);   // (state version 12: the FX library's slots, appended)
+        };
         p.installFactoryPresets = installFactoryPresets;
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
         // envelope, the generator's level, pan, tune, REIMAGINED and grains) and these.
@@ -276,7 +281,9 @@ const ProductInfo& productInfo()
         // FILTER and MORPH: the product's own inline racks (the same rack, the same parts),
         // opened from their macro's name as the others (their popovers stay the quick view).
         p.productRacks = { { andor::analog::params::tone, osp::plugin::rack::Kind::filter, andor::analog::createFilterRack },
-                           { andor::analog::params::morphPosition, osp::plugin::rack::Kind::morph, andor::analog::createMorphRack } };
+                           { andor::analog::params::morphPosition, osp::plugin::rack::Kind::morph, andor::analog::createMorphRack },
+                           // The FX library's rack: no macro of its own; FX ROUTING opens it.
+                           { {}, osp::plugin::rack::Kind::fx, andor::analog::createFxRack } };
         // MOVEMENT's two lanes (state version 11): A is MOVEMENT itself, B a second one.
         {
             using namespace andor::analog::params;

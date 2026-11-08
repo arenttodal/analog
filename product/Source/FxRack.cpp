@@ -1,0 +1,1200 @@
+#include "FxRack.h"
+#include "AnalogEngine.h"
+#include "FxParameters.h"
+#include "FxPresets.h"
+#include "FxRouting.h"
+#include "OspLookAndFeel.h"
+#include "RackControls.h"
+#include "ShellEditor.h"
+#include "ShellProcessor.h"
+#include "fx/Effects.h"
+
+namespace andor::analog
+{
+
+namespace fonts = osp::plugin::fonts;
+namespace rackui = osp::plugin::rackui;
+using fx::InstanceId;
+using fx::Type;
+using osp::plugin::MiniKnob;
+using osp::plugin::rack::GraphFrame;
+using osp::plugin::rack::ParameterRack;
+
+namespace
+{
+    InstanceId shownInstance { Type::eq, 0 };
+    std::array<int, fx::totalInstances()> fxPageMemory {};
+    std::array<juce::String, fx::totalInstances()> presetNames;
+
+    AnalogEngine& engineOf (osp::plugin::InstrumentHost& host) { return dynamic_cast<AnalogEngine&> (dynamic_cast<andor::shell::ShellProcessor&> (host).productEngine()); }
+
+    juce::String pid (InstanceId id, const char* name) { return fxparams::idOf (id, name); }
+    float value (osp::plugin::InstrumentHost& host, InstanceId id, const char* name) { return host.parameterValue (pid (id, name)); }
+
+    MiniKnob::Formatter textOf (osp::plugin::InstrumentHost& host, const juce::String& id)
+    {
+        auto* p = host.apvts().getParameter (id);
+        return [p] (double v) { return p != nullptr ? p->getText (p->convertTo0to1 (static_cast<float> (v)), 16) : juce::String (v, 1); };
+    }
+
+    // The graphs' type and lines: the approved ECHO graph's (as AnalogRacks' graphs).
+    juce::Font meta() { return fonts::make (10.0f, fonts::Weight::regular, 0.02f); }
+    juce::Font label() { return fonts::make (9.5f, fonts::Weight::medium, 0.06f); }
+    const juce::Colour metaColour { 0xd9c2c7c5 }, labelColour { 0xcc9aa09e }, grid { 0x0dffffff }, axis { 0x12ffffff };
+
+    void header (juce::Graphics& g, juce::Rectangle<float> area, const juce::String& left, const juce::String& right)
+    {
+        const juce::Rectangle<float> line (area.getX() + 9.0f, area.getY() + 4.0f, area.getWidth() - 18.0f, 12.0f);
+        g.setFont (meta());
+        g.setColour (metaColour);
+        g.drawText (left, line, juce::Justification::centredLeft, true);
+        g.drawText (right, line, juce::Justification::centredRight, true);
+    }
+    void foot (juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text)
+    {
+        g.setFont (meta());
+        g.setColour (metaColour.withMultipliedAlpha (0.8f));
+        g.drawText (text, juce::Rectangle<float> (area.getX() + 9.0f, area.getBottom() - 15.0f, area.getWidth() - 18.0f, 12.0f), juce::Justification::centredLeft, true);
+    }
+    void small (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> r, juce::Justification j, float alpha = 1.0f)
+    {
+        g.setFont (label());
+        g.setColour (labelColour.withMultipliedAlpha (alpha));
+        g.drawText (text, r, j, false);
+    }
+
+    /** A log-frequency plot (20 Hz - 20 kHz) with its decades and a dB scale. */
+    struct FreqPlot
+    {
+        juce::Rectangle<float> r;
+        double lo = 20.0, hi = 20000.0, topDb = 18.0, bottomDb = -18.0;
+        float x (double hz) const { return r.getX() + r.getWidth() * static_cast<float> (std::log (hz / lo) / std::log (hi / lo)); }
+        float y (double db) const { return r.getY() + r.getHeight() * static_cast<float> ((topDb - std::clamp (db, bottomDb, topDb)) / (topDb - bottomDb)); }
+        double hzAt (float px) const { return lo * std::pow (hi / lo, std::clamp ((px - r.getX()) / r.getWidth(), 0.0f, 1.0f)); }
+        double dbAt (float py) const { return topDb - (topDb - bottomDb) * std::clamp ((py - r.getY()) / r.getHeight(), 0.0f, 1.0f); }
+        void paintGrid (juce::Graphics& g) const
+        {
+            for (const double hz : { 100.0, 1000.0, 10000.0 })
+            {
+                g.setColour (grid);
+                g.fillRect (juce::Rectangle<float> (x (hz) - 0.5f, r.getY(), 1.0f, r.getHeight()));
+                small (g, hz >= 1000.0 ? juce::String (hz / 1000.0, 0) + " kHz" : juce::String (hz, 0) + " Hz", { x (hz) - 30.0f, r.getBottom() + 2.0f, 60.0f, 12.0f },
+                       juce::Justification::centred, 0.8f);
+            }
+            g.setColour (axis);
+            g.fillRect (juce::Rectangle<float> (r.getX(), y (0.0) - 0.5f, r.getWidth(), 1.0f));
+        }
+        template <typename F>
+        void curve (juce::Graphics& g, F&& dbAtHz, juce::Colour colour) const
+        {
+            juce::Path p, fill;
+            for (int i = 0; i <= 200; ++i)
+            {
+                const double hz = lo * std::pow (hi / lo, i / 200.0);
+                const juce::Point<float> pt (x (hz), y (dbAtHz (hz)));
+                if (i == 0)
+                {
+                    p.startNewSubPath (pt);
+                    fill.startNewSubPath (pt.x, y (0.0));
+                }
+                else
+                    p.lineTo (pt);
+                fill.lineTo (pt);
+            }
+            fill.lineTo (r.getRight(), y (0.0));
+            fill.closeSubPath();
+            g.setColour (colour.withAlpha (0.12f));
+            g.fillPath (fill);
+            g.setColour (colour);
+            g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+    };
+
+    //==========================================================================
+    /** The effect's graph: computed from its settings (a UI-side copy of its processor gives the
+        exact curve its coefficients make) and metered from the engine's processor. */
+    class FxGraph final : public GraphFrame
+    {
+    public:
+        FxGraph (osp::plugin::InstrumentHost& h, InstanceId i) : host (h), id (i)
+        {
+            reader.attach (h.apvts());
+            if (id.type == Type::eq)
+                setInterceptsMouseClicks (true, false);   // (its band handles drag)
+        }
+
+        void refresh() override
+        {
+            juce::String sig;
+            reader.read (settings);
+            for (const auto& spec : fxparams::specsOf (id.type))
+                sig << host.parameterValue (pid (id, spec.name.toRawUTF8())) << ",";
+            if (const auto* p = live())
+            {
+                if (const auto* c = dynamic_cast<const fx::Compressor*> (p))
+                    sig << c->reductionDb.load() << c->bandReductionDb[0].load() << c->bandBoostDb[1].load() << c->bandReductionDb[2].load();
+                if (const auto* s = dynamic_cast<const fx::StereoSpread*> (p))
+                    sig << s->correlation.load();
+                if (const auto* u = dynamic_cast<const fx::Utility*> (p))
+                    sig << u->meterL.load() << u->meterR.load();
+                if (const auto* ph = dynamic_cast<const fx::Phaser*> (p))
+                    sig << ph->notchHz[0].load();
+                if (const auto* fl = dynamic_cast<const fx::Flanger*> (p))
+                    sig << fl->delayNowMs.load();
+            }
+            if (sig != shown)
+            {
+                shown = sig;
+                repaint();
+            }
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            dragging = -1;
+            for (int b = 0; b < 4; ++b)
+                if (handle (b).expanded (6.0f).contains (e.position))
+                    dragging = b;
+            if (dragging >= 0)
+                for (const char* n : { "freq", "gain" })
+                    if (auto* p = host.apvts().getParameter (pid (id, ("band" + std::to_string (dragging + 1) + "." + n).c_str())))
+                        p->beginChangeGesture();
+        }
+        void mouseDrag (const juce::MouseEvent& e) override
+        {
+            if (dragging < 0)
+                return;
+            const auto band = "band" + std::to_string (dragging + 1);
+            auto set = [&] (const char* n, double v) {
+                if (auto* p = host.apvts().getParameter (pid (id, (band + "." + n).c_str())))
+                    p->setValueNotifyingHost (p->convertTo0to1 (static_cast<float> (v)));
+            };
+            set ("freq", plot.hzAt (e.position.x));
+            set ("gain", plot.dbAt (e.position.y));
+            refresh();
+        }
+        void mouseUp (const juce::MouseEvent&) override
+        {
+            if (dragging >= 0)
+                for (const char* n : { "freq", "gain" })
+                    if (auto* p = host.apvts().getParameter (pid (id, ("band" + std::to_string (dragging + 1) + "." + n).c_str())))
+                        p->endChangeGesture();
+            dragging = -1;
+        }
+
+    protected:
+        void paintGraph (juce::Graphics& g, juce::Rectangle<float> area) override
+        {
+            reader.read (settings);
+            const auto colour = fxAccent (id.type).brighter (0.35f);
+            plot.r = area.reduced (14.0f, 0.0f).withTrimmedTop (24.0f).withTrimmedBottom (32.0f);
+            switch (id.type)
+            {
+                case Type::eq: paintEq (g, area, colour); break;
+                case Type::filter: paintFilter (g, area, colour); break;
+                case Type::compressor: paintComp (g, area, colour); break;
+                case Type::spread: paintSpread (g, area, colour); break;
+                case Type::phaser: paintPhaser (g, area, colour); break;
+                case Type::flanger: paintFlanger (g, area, colour); break;
+                case Type::shifter: paintShift (g, area, colour); break;
+                case Type::convolution: paintConv (g, area, colour); break;
+                case Type::utility: paintUtility (g, area, colour); break;
+                default: break;
+            }
+        }
+
+    private:
+        const fx::Processor* live() const { return engineOf (host).fxProcessor (id); }
+
+        juce::Rectangle<float> handle (int b) const
+        {
+            const auto& band = settings.eq[static_cast<std::size_t> (id.slot)].bands[static_cast<std::size_t> (b)];
+            return juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ plot.x (band.hz), plot.y (band.gainDb) });
+        }
+
+        void paintEq (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            fx::Equalizer view;
+            view.prepare (48000.0, 64);
+            view.set (settings, id.slot);
+            view.reset();
+            plot.topDb = 18.0;
+            plot.bottomDb = -18.0;
+            plot.paintGrid (g);
+            plot.curve (g, [&view] (double hz) { return view.responseDb (hz); }, colour);
+            const auto& s = settings.eq[static_cast<std::size_t> (id.slot)];
+            for (int b = 0; b < 4; ++b)
+            {
+                const auto& band = s.bands[static_cast<std::size_t> (b)];
+                const auto h = handle (b);
+                g.setColour (band.on ? colour : labelColour.withMultipliedAlpha (0.5f));
+                g.drawEllipse (h, 1.4f);
+                g.setFont (label());
+                g.drawText (juce::String (b + 1), h, juce::Justification::centred, false);
+            }
+            header (g, area, "PARAMETRIC", juce::String::fromUTF8 ("drag a band: frequency \xc2\xb7 gain"));
+        }
+
+        void paintFilter (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            fx::FxFilter view;
+            view.prepare (48000.0, 64);
+            view.set (settings, id.slot);
+            view.reset();
+            plot.topDb = 24.0;
+            plot.bottomDb = -48.0;
+            plot.paintGrid (g);
+            plot.curve (g, [&view] (double hz) { return view.responseDb (hz); }, colour);
+            const auto& s = settings.filter[static_cast<std::size_t> (id.slot)];
+            auto* type = host.apvts().getParameter (pid (id, "type"));
+            header (g, area, type != nullptr ? type->getCurrentValueAsText().toUpperCase() : juce::String(),
+                    "FREQ " + textOf (host, pid (id, "freq")) (s.hz) + juce::String::fromUTF8 (" \xc2\xb7 RESO ") + juce::String (juce::roundToInt (100.0f * s.resonance)) + " %");
+        }
+
+        void paintComp (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto& s = settings.comp[static_cast<std::size_t> (id.slot)];
+            const auto* c = dynamic_cast<const fx::Compressor*> (live());
+            const float gr = c != nullptr ? c->reductionDb.load() : 0.0f;
+            auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (24.0f).withTrimmedBottom (20.0f);
+            if (s.mode == fx::CompSettings::multiband)
+            {
+                // Three bands: down (copper) above the line, up (green) below - live.
+                const char* names[3] { "LOW", "MID", "HIGH" };
+                const float w = body.getWidth() / 3.0f;
+                for (int b = 0; b < 3; ++b)
+                {
+                    auto col = juce::Rectangle<float> (body.getX() + w * static_cast<float> (b), body.getY(), w, body.getHeight()).reduced (14.0f, 0.0f);
+                    const float mid = col.getCentreY();
+                    g.setColour (axis);
+                    g.fillRect (col.withHeight (1.0f).withY (mid));
+                    const float down = c != nullptr ? c->bandReductionDb[static_cast<std::size_t> (b)].load() : 0.0f;
+                    const float up = c != nullptr ? c->bandBoostDb[static_cast<std::size_t> (b)].load() : 0.0f;
+                    const float scale = 0.5f * col.getHeight() / 18.0f;
+                    g.setColour (juce::Colour (0xffc99470));
+                    g.fillRect (col.withTrimmedLeft (col.getWidth() * 0.3f).withTrimmedRight (col.getWidth() * 0.3f).withY (mid - std::min (18.0f, down) * scale).withHeight (std::min (18.0f, down) * scale));
+                    g.setColour (colour);
+                    g.fillRect (col.withTrimmedLeft (col.getWidth() * 0.3f).withTrimmedRight (col.getWidth() * 0.3f).withY (mid + 1.0f).withHeight (std::min (18.0f, up) * scale));
+                    small (g, names[b], col.withHeight (12.0f).withY (col.getBottom() - 12.0f), juce::Justification::centred);
+                }
+                header (g, area, "MULTIBAND " + juce::String (juce::roundToInt (100.0f * s.depth)) + " %",
+                        textOf (host, pid (id, "multi.low")) (s.lowHz) + " / " + textOf (host, pid (id, "multi.high")) (s.highHz));
+                foot (g, area, "gain reduction above, upward gain below (live)");
+                return;
+            }
+            // CLEAN: the static curve; FET: its fixed reference and ratio. A live GR meter.
+            auto curveArea = body.withTrimmedRight (50.0f);
+            const auto box = curveArea.withSizeKeepingCentre (std::min (curveArea.getWidth(), curveArea.getHeight() * 1.6f), curveArea.getHeight());
+            auto xy = [&] (float inDb, float outDb) {
+                return juce::Point<float> (box.getX() + box.getWidth() * (inDb + 60.0f) / 60.0f, box.getBottom() - box.getHeight() * (std::clamp (outDb, -60.0f, 0.0f) + 60.0f) / 60.0f);
+            };
+            g.setColour (grid);
+            for (const float d : { -48.0f, -36.0f, -24.0f, -12.0f })
+            {
+                g.fillRect (juce::Rectangle<float> (xy (d, d).x - 0.5f, box.getY(), 1.0f, box.getHeight()));
+                g.fillRect (juce::Rectangle<float> (box.getX(), xy (d, d).y - 0.5f, box.getWidth(), 1.0f));
+            }
+            g.setColour (axis);
+            g.drawLine (juce::Line<float> (xy (-60.0f, -60.0f), xy (0.0f, 0.0f)), 1.0f);
+            juce::Path p;
+            for (int i = 0; i <= 120; ++i)
+            {
+                const float in = -60.0f + 0.5f * static_cast<float> (i);
+                float out = in;
+                if (s.mode == fx::CompSettings::clean)
+                    out = fx::Compressor::cleanCurveDb (s, in) + s.makeupDb;
+                else
+                {
+                    constexpr std::array<float, 5> ratios { 4.0f, 8.0f, 12.0f, 20.0f, 40.0f };
+                    const float drive = in + s.fetInputDb, ratio = ratios[static_cast<std::size_t> (std::clamp (s.fetRatio, 0, 4))];
+                    const float over = drive + 18.0f;
+                    out = (s.fetColorOnly || over <= 0.0f ? drive : drive - (1.0f - 1.0f / ratio) * over) + s.fetOutputDb;
+                }
+                const auto pt = xy (in, out);
+                i == 0 ? p.startNewSubPath (pt) : p.lineTo (pt);
+            }
+            g.setColour (colour);
+            g.strokePath (p, juce::PathStrokeType (1.6f));
+            // The meter.
+            auto meter = body.removeFromRight (34.0f).withTrimmedTop (4.0f);
+            g.setColour (axis);
+            g.fillRoundedRectangle (meter.withWidth (8.0f), 2.0f);
+            const float h = meter.getHeight() * std::min (1.0f, gr / 24.0f);
+            g.setColour (juce::Colour (0xffc99470));
+            g.fillRoundedRectangle (meter.withWidth (8.0f).withHeight (h), 2.0f);
+            small (g, "GR", meter.withX (meter.getX() + 10.0f).withHeight (12.0f), juce::Justification::centredLeft);
+            header (g, area, s.mode == fx::CompSettings::clean ? "CLEAN" : "FET 76", "GR " + juce::String (gr, 1) + " dB");
+            foot (g, area, s.mode == fx::CompSettings::clean ? "static curve: in -60 .. 0 dB" : "input drives a fixed reference: more INPUT, more reduction");
+        }
+
+        void paintSpread (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto& s = settings.spread[static_cast<std::size_t> (id.slot)];
+            const auto* sp = dynamic_cast<const fx::StereoSpread*> (live());
+            auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (26.0f).withTrimmedBottom (22.0f);
+            // The voices' pitches (from the settings) across the stereo field.
+            constexpr std::array<int, 4> counts { 2, 4, 6, 8 };
+            const int voices = counts[static_cast<std::size_t> (std::clamp (s.voices, 0, 3))];
+            auto field = body.removeFromTop (body.getHeight() * 0.6f);
+            g.setColour (axis);
+            g.fillRect (field.withHeight (1.0f).withY (field.getCentreY()));
+            g.fillRect (juce::Rectangle<float> (field.getCentreX() - 0.5f, field.getY(), 1.0f, field.getHeight()));
+            small (g, "L", field.withWidth (12.0f), juce::Justification::centredLeft);
+            small (g, "R", field.withX (field.getRight() - 12.0f).withWidth (12.0f), juce::Justification::centredRight);
+            if (s.mode != fx::SpreadSettings::dimension)
+                for (int v = 0; v < voices; ++v)
+                {
+                    const float spread = voices > 1 ? 2.0f * static_cast<float> (v) / static_cast<float> (voices - 1) - 1.0f : 0.0f;
+                    const float side = (v % 2 == 0 ? -1.0f : 1.0f) * (0.35f + 0.65f * std::abs (spread)) * std::min (1.0f, s.width);
+                    const float cents = s.detuneCents * spread;
+                    const juce::Point<float> c (field.getCentreX() + 0.45f * field.getWidth() * side, field.getCentreY() - 0.45f * field.getHeight() * cents / 60.0f);
+                    g.setColour (colour);
+                    g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (c));
+                }
+            // Measured: correlation and side level.
+            const float corr = sp != nullptr ? sp->correlation.load() : 1.0f;
+            auto meter = body.withTrimmedTop (8.0f).withHeight (8.0f);
+            g.setColour (axis);
+            g.fillRoundedRectangle (meter, 3.0f);
+            const float x = meter.getX() + meter.getWidth() * 0.5f * (corr + 1.0f);
+            g.setColour (corr < 0.0f ? juce::Colour (0xffc99470) : colour);
+            g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ x, meter.getCentreY() }));
+            small (g, "-1", meter.withY (meter.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centredLeft, 0.8f);
+            small (g, "CORRELATION " + juce::String (corr, 2), meter.withY (meter.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centred);
+            small (g, "+1", meter.withY (meter.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centredRight, 0.8f);
+            static const char* modes[3] { "HYPER", "DIMENSION", "BOTH" };
+            header (g, area, juce::String (modes[std::clamp (s.mode, 0, 2)]) + (s.mode != 1 ? juce::String::fromUTF8 (" \xc2\xb7 ") + juce::String (voices) + juce::String::fromUTF8 (" voices \xc2\xb1") + juce::String (s.detuneCents, 1) + " ct" : juce::String()),
+                    "WIDTH " + juce::String (juce::roundToInt (100.0f * s.width)) + " %");
+        }
+
+        void paintPhaser (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto& s = settings.phaser[static_cast<std::size_t> (id.slot)];
+            const auto* ph = dynamic_cast<const fx::Phaser*> (live());
+            plot.topDb = 6.0;
+            plot.bottomDb = -30.0;
+            plot.paintGrid (g);
+            // The sweep's range (from the settings), and where the notches are now (live).
+            const double octaves = (s.mode == fx::PhaserSettings::deep ? 4.0 : 3.0) * s.depth;
+            g.setColour (colour.withAlpha (0.12f));
+            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (plot.x (std::max (20.0, s.centreHz * std::exp2 (-octaves))), plot.r.getY(),
+                                                                     plot.x (std::min (20000.0, s.centreHz * std::exp2 (octaves))), plot.r.getBottom()));
+            if (ph != nullptr)
+                for (const auto& n : ph->notchHz)
+                    if (const float hz = n.load(); hz > 20.0f)
+                    {
+                        g.setColour (colour);
+                        g.fillRect (juce::Rectangle<float> (plot.x (hz) - 0.75f, plot.r.getY(), 1.5f, plot.r.getHeight()));
+                    }
+            header (g, area, s.mode == fx::PhaserSettings::deep ? "DEEP" : "CLASSIC", s.sync ? juce::String ("SYNC") : juce::String (s.rateHz, 2) + " Hz");
+            foot (g, area, "the notches now (live) within the sweep's range");
+        }
+
+        void paintFlanger (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto& s = settings.flanger[static_cast<std::size_t> (id.slot)];
+            const auto* fl = dynamic_cast<const fx::Flanger*> (live());
+            const double d = 0.001 * (fl != nullptr ? fl->delayNowMs.load() : s.delayMs);
+            const double fb = std::clamp (static_cast<double> (s.feedback), -0.92, 0.92), mix = std::clamp (static_cast<double> (s.mix), 0.0, 1.0);
+            plot.topDb = 12.0;
+            plot.bottomDb = -30.0;
+            plot.paintGrid (g);
+            plot.curve (g, [&] (double hz) {
+                const auto z = std::polar (1.0, -2.0 * fx::dsp::pi * hz * d);
+                const auto wet = z / (1.0 - fb * z);
+                return 20.0 * std::log10 (std::max (1.0e-6, std::abs ((1.0 - mix) + mix * wet)));
+            }, colour);
+            header (g, area, s.mode == fx::FlangerSettings::throughZero ? "THROUGH-ZERO" : "CLASSIC", "DELAY " + juce::String (1000.0 * d, 2) + " ms");
+            foot (g, area, "its comb at the delay now (live)");
+        }
+
+        void paintShift (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto& s = settings.shifter[static_cast<std::size_t> (id.slot)];
+            auto body = area.reduced (18.0f, 0.0f).withTrimmedTop (28.0f).withTrimmedBottom (28.0f);
+            if (s.mode == fx::ShifterSettings::shift)
+            {
+                // Input frequency -> output: every partial moves by the same Hz (not a ratio).
+                const double shift = s.down ? -s.shiftHz : s.shiftHz;
+                auto xy = [&] (double in, double out) {
+                    return juce::Point<float> (body.getX() + body.getWidth() * static_cast<float> (in / 2000.0), body.getBottom() - body.getHeight() * static_cast<float> (std::clamp (out, 0.0, 2000.0) / 2000.0));
+                };
+                g.setColour (axis);
+                g.drawLine (juce::Line<float> (xy (0, 0), xy (2000, 2000)), 1.0f);
+                g.setColour (colour);
+                g.drawLine (juce::Line<float> (xy (std::max (0.0, -shift), std::max (0.0, shift)), xy (std::min (2000.0, 2000.0 - shift), std::min (2000.0, 2000.0 + shift))), 1.6f);
+                small (g, "IN 0 - 2 kHz", body.withY (body.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centredRight, 0.8f);
+                header (g, area, "SHIFT", (shift >= 0 ? "+" : "") + juce::String (shift, 1) + " Hz");
+                foot (g, area, "every partial moves by the same Hz (inharmonic)");
+                return;
+            }
+            // BLUR: each bin's magnitude settles over BLUR TIME (its smoothing, drawn).
+            juce::Path p;
+            for (int i = 0; i <= 100; ++i)
+            {
+                const double t = 0.5 * i / 100.0;
+                const double y = 1.0 - std::exp (-t / (std::max (10.0f, s.blurMs) * 0.001));
+                const juce::Point<float> pt (body.getX() + body.getWidth() * static_cast<float> (i) / 100.0f, body.getBottom() - body.getHeight() * static_cast<float> (y));
+                i == 0 ? p.startNewSubPath (pt) : p.lineTo (pt);
+            }
+            g.setColour (colour);
+            g.strokePath (p, juce::PathStrokeType (1.6f));
+            small (g, "0 - 500 ms", body.withY (body.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centredRight, 0.8f);
+            header (g, area, "BLUR " + juce::String (juce::roundToInt (100.0f * s.blurAmount)) + " %", juce::String (s.blurMs, 0) + " ms");
+            foot (g, area, "how fast each frequency's level follows (window 43 ms)");
+        }
+
+        void paintConv (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto& s = settings.conv[static_cast<std::size_t> (id.slot)];
+            const auto ir = engineOf (host).convolutionImpulse (id.slot);
+            auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (26.0f).withTrimmedBottom (24.0f);
+            if (ir != nullptr && ! ir->envelope.empty())
+            {
+                float peak = 1.0e-6f;
+                for (const float e : ir->envelope)
+                    peak = std::max (peak, e);
+                juce::Path p;
+                const float w = body.getWidth() / static_cast<float> (ir->envelope.size());
+                for (std::size_t i = 0; i < ir->envelope.size(); ++i)
+                {
+                    const float db = 20.0f * std::log10 (std::max (1.0e-5f, ir->envelope[i] / peak));
+                    const float h = body.getHeight() * std::clamp ((db + 60.0f) / 60.0f, 0.0f, 1.0f);
+                    p.addRectangle (body.getX() + w * static_cast<float> (i), body.getBottom() - h, std::max (1.0f, w - 0.5f), h);
+                }
+                g.setColour (colour.withAlpha (0.75f));
+                g.fillPath (p);
+                small (g, juce::String (ir->lengthSamples / ir->sampleRate, 2) + " s", body.withY (body.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centredRight, 0.8f);
+            }
+            header (g, area, ir != nullptr ? juce::String (ir->name).toUpperCase() : juce::String ("NO IMPULSE"), "DECAY " + juce::String (s.decaySeconds, 1) + " s");
+            foot (g, area, "the impulse's level over its length (-60 dB at the floor)");
+        }
+
+        void paintUtility (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto* u = dynamic_cast<const fx::Utility*> (live());
+            auto body = area.reduced (24.0f, 0.0f).withTrimmedTop (30.0f).withTrimmedBottom (26.0f);
+            const float levels[2] { u != nullptr ? u->meterL.load() : 0.0f, u != nullptr ? u->meterR.load() : 0.0f };
+            const char* names[2] { "L", "R" };
+            for (int c = 0; c < 2; ++c)
+            {
+                auto row = body.removeFromTop (22.0f);
+                body.removeFromTop (10.0f);
+                small (g, names[c], row.removeFromLeft (16.0f), juce::Justification::centredLeft);
+                auto bar = row.withSizeKeepingCentre (row.getWidth(), 8.0f);
+                g.setColour (axis);
+                g.fillRoundedRectangle (bar, 3.0f);
+                const float db = 20.0f * std::log10 (std::max (1.0e-6f, levels[c]));
+                g.setColour (colour);
+                g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * std::clamp ((db + 60.0f) / 60.0f, 0.0f, 1.0f)), 3.0f);
+            }
+            const float corr = u != nullptr ? u->correlation.load() : 1.0f;
+            small (g, "CORRELATION " + juce::String (corr, 2), body.withHeight (14.0f), juce::Justification::centredLeft);
+            const auto& s = settings.utility[static_cast<std::size_t> (id.slot)];
+            header (g, area, "GAIN " + textOf (host, pid (id, "gain")) (s.gainDb), "WIDTH " + juce::String (juce::roundToInt (100.0f * s.width)) + " %");
+            foot (g, area, "levels after it (live, RMS)");
+        }
+
+        osp::plugin::InstrumentHost& host;
+        InstanceId id;
+        fxparams::Reader reader;
+        fx::Settings settings;
+        FreqPlot plot;
+        juce::String shown;
+        int dragging = -1;
+    };
+
+    //==========================================================================
+    /** PRESET: < name > - a click lists the factory and user presets, saves and deletes; "*" when
+        the settings have moved from it. */
+    class PresetBar final : public juce::Component
+    {
+    public:
+        PresetBar (osp::plugin::InstrumentHost& h, InstanceId i) : host (h), id (i) { setTitle ("Preset"); }
+
+        juce::String current() const
+        {
+            auto& name = presetNames[static_cast<std::size_t> (id.flatIndex())];
+            return name.isEmpty() ? juce::String ("Default") : name;
+        }
+
+        bool modified() const
+        {
+            const auto name = presetNames[static_cast<std::size_t> (id.flatIndex())];
+            for (const auto& list : { fxpresets::factory (id.type), fxpresets::user (id.type) })
+                for (const auto& p : list)
+                    if (p.name == name)
+                        return ! fxpresets::matches (host, id, p);
+            return ! fxpresets::matches (host, id, {});
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat();
+            g.setColour (rackui::palette::segmentEdge);
+            g.fillRoundedRectangle (r, 4.0f);
+            g.setColour (rackui::palette::segmentFill);
+            g.fillRoundedRectangle (r.reduced (1.0f), 3.0f);
+            g.setColour (rackui::palette::segmentDivider);
+            g.fillRect (juce::Rectangle<float> (26.0f, 4.0f, 1.0f, r.getHeight() - 8.0f));
+            g.fillRect (juce::Rectangle<float> (r.getRight() - 27.0f, 4.0f, 1.0f, r.getHeight() - 8.0f));
+            g.setColour (rackui::palette::segmentText);
+            g.setFont (fonts::make (11.0f, fonts::Weight::regular));
+            g.drawText ("<", juce::Rectangle<float> (0.0f, 0.0f, 26.0f, r.getHeight()), juce::Justification::centred, false);
+            g.drawText (">", juce::Rectangle<float> (r.getRight() - 26.0f, 0.0f, 26.0f, r.getHeight()), juce::Justification::centred, false);
+            g.setColour (juce::Colour (0xff4b4945));
+            g.setFont (fonts::make (10.5f, fonts::Weight::medium, 0.02f));
+            g.drawText (current() + (modified() ? " *" : ""), r.reduced (30.0f, 0.0f), juce::Justification::centred, true);
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (e.position.x < 26.0f)
+                step (-1);
+            else if (e.position.x > static_cast<float> (getWidth()) - 26.0f)
+                step (1);
+            else
+                menu();
+        }
+
+    private:
+        std::vector<fxpresets::Preset> all() const
+        {
+            auto list = fxpresets::factory (id.type);
+            for (auto& p : fxpresets::user (id.type))
+                list.push_back (std::move (p));
+            return list;
+        }
+        void load (const fxpresets::Preset& p)
+        {
+            fxpresets::apply (host, id, p);
+            presetNames[static_cast<std::size_t> (id.flatIndex())] = p.name;
+            repaint();
+        }
+        void step (int delta)
+        {
+            const auto list = all();
+            if (list.empty())
+                return;
+            int at = -1;
+            for (int i = 0; i < static_cast<int> (list.size()); ++i)
+                if (list[static_cast<std::size_t> (i)].name == current())
+                    at = i;
+            at = (at + delta + static_cast<int> (list.size())) % static_cast<int> (list.size());
+            load (list[static_cast<std::size_t> (at)]);
+        }
+        void menu()
+        {
+            juce::PopupMenu m;
+            m.addSectionHeader ("FACTORY");
+            for (const auto& p : fxpresets::factory (id.type))
+                m.addItem (p.name, true, p.name == current(), [this, p] { load (p); });
+            const auto mine = fxpresets::user (id.type);
+            if (! mine.empty())
+            {
+                m.addSectionHeader ("YOURS");
+                for (const auto& p : mine)
+                    m.addItem (p.name, true, p.name == current(), [this, p] { load (p); });
+            }
+            m.addSeparator();
+            m.addItem ("Save as...", [safe = juce::Component::SafePointer<PresetBar> (this)] {
+                if (safe == nullptr)
+                    return;
+                auto* w = new juce::AlertWindow ("Save FX preset", "A name for these settings:", juce::MessageBoxIconType::NoIcon);
+                w->addTextEditor ("name", safe->current() == "Default" ? juce::String ("My ") + fx::typeName (safe->id.type) : safe->current());
+                w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result) {
+                    if (result == 1 && safe != nullptr)
+                        if (const auto name = w->getTextEditorContents ("name").trim(); name.isNotEmpty())
+                        {
+                            fxpresets::saveUser (safe->id.type, fxpresets::capture (safe->host, safe->id, name));
+                            presetNames[static_cast<std::size_t> (safe->id.flatIndex())] = name;
+                            safe->repaint();
+                        }
+                }), true);
+            });
+            bool isUser = false;
+            for (const auto& p : mine)
+                isUser = isUser || p.name == current();
+            m.addItem ("Delete " + current(), isUser, false, [this] {
+                fxpresets::removeUser (id.type, current());
+                presetNames[static_cast<std::size_t> (id.flatIndex())] = {};
+                repaint();
+            });
+            m.addItem ("Show presets folder", [this] {
+                auto folder = fxpresets::userFolder (id.type);
+                folder.createDirectory();
+                folder.revealToUser();
+            });
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        }
+
+        osp::plugin::InstrumentHost& host;
+        InstanceId id;
+    };
+
+    //==========================================================================
+    class FxRack final : public ParameterRack
+    {
+    public:
+        explicit FxRack (osp::plugin::InstrumentHost& h) : ParameterRack (h, "FX", fxAccent (shownInstance.type), 0.62f), id (shownInstance)
+        {
+            juce::String title = fx::typeName (id.type);
+            if (fx::capacity[static_cast<std::size_t> (id.type)] > 1)
+                title << " " << (id.slot + 1);
+            setHeading (title);
+            setHeaderSwitch (pid (id, "on"), "ON", juce::String (fx::typeName (id.type)) + " on (its own bypass: the route keeps it in place)");
+            if (id.type == Type::eq)
+                setPages ({ "BAND 1", "BAND 2", "BAND 3", "BAND 4", "HP / LP" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
+            else
+                setPages ({ "MAIN", "DETAIL" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
+            setGraph (std::make_unique<FxGraph> (h, id));
+        }
+
+    protected:
+        int buildKey() const override
+        {
+            // A mode or a sync switch changes the cells.
+            int k = 0;
+            if (host.apvts().getParameter (pid (id, "mode")) != nullptr)
+                k = juce::roundToInt (value (host, id, "mode")) + 1;
+            if (host.apvts().getParameter (pid (id, "sync")) != nullptr)
+                k += 10 * (value (host, id, "sync") >= 0.5f ? 1 : 0);
+            return k;
+        }
+
+        void build (int page) override
+        {
+            using P = rackui::Position;
+            const P on { "ON", "On", 1.0f }, off { "OFF", "Off", 0.0f };
+            auto k = [this] (const char* name, const char* caption) -> MiniKnob& { return knob (pid (id, name), caption, textOf (host, pid (id, name))); };
+            auto stepped = [this] (const char* name, const char* caption) -> MiniKnob& { return steppedKnob (pid (id, name), caption, textOf (host, pid (id, name))); };
+            auto sw = [this, on, off] (const char* name, const char* caption, const char* tip) { switchCell (pid (id, name), caption, { on, off }, tip); };
+            auto mode = [this] (std::vector<P> positions, int width, const char* tip) { selectorSegment (pid (id, "mode"), "MODE", std::move (positions), width, tip); };
+            auto preset = [this] { selectorComponent (std::make_unique<PresetBar> (host, id), "PRESET", 230); };
+            const int m = juce::roundToInt (value (host, id, "mode"));
+            switch (id.type)
+            {
+                case Type::spread:
+                    mode ({ { "HYPER", "Hyper", 0 }, { "DIMENSION", "Dimension", 1 }, { "BOTH", "Both", 2 } }, 240, "HYPER: detuned voices; DIMENSION: a short ensemble; BOTH: one then the other");
+                    preset();
+                    if (page == 0)
+                    {
+                        k ("width", "WIDTH");
+                        k ("detune", "DETUNE");
+                        stepped ("voices", "VOICES");
+                        k ("dimSize", "SIZE");
+                        k ("dimAmount", "AMOUNT");
+                        k ("mix", "MIX");
+                        group ({});
+                        sw ("lowMono", "LOW MONO", "Below the corner, the sound stays mono (no phasey bass)");
+                    }
+                    else
+                    {
+                        k ("hyperRate", "HYPER RATE");
+                        k ("dimRate", "DIM RATE");
+                        k ("lowMonoHz", "MONO BELOW");
+                        k ("output", "OUTPUT");
+                    }
+                    break;
+                case Type::compressor:
+                    mode ({ { "CLEAN", "Clean", 0 }, { "FET 76", "FET 76", 1 }, { "MULTIBAND", "Multiband", 2 } }, 260, "CLEAN: transparent; FET 76: fast feedback colour; MULTIBAND: three bands, up and down");
+                    preset();
+                    if (m == 0)
+                    {
+                        if (page == 0)
+                        {
+                            k ("threshold", "THRESHOLD");
+                            k ("ratio", "RATIO");
+                            k ("attack", "ATTACK");
+                            k ("release", "RELEASE");
+                            k ("knee", "KNEE");
+                            k ("makeup", "MAKEUP");
+                            k ("mix", "MIX");
+                        }
+                        else
+                        {
+                            segmentCell (pid (id, "detector"), "DETECTOR", { { "RMS", "RMS", 0 }, { "PEAK", "Peak", 1 } }, "What the detector follows");
+                            k ("link", "LINK");
+                            k ("sidechain", "SC HP");
+                            sw ("autoMakeup", "AUTO GAIN", "Makes up half of the reduction at 0 dBFS");
+                            k ("output", "OUTPUT");
+                        }
+                    }
+                    else if (m == 1)
+                    {
+                        if (page == 0)
+                        {
+                            k ("fet.input", "INPUT");
+                            k ("fet.output", "OUTPUT");
+                            k ("fet.attack", "ATTACK");
+                            k ("fet.release", "RELEASE");
+                            stepped ("fet.ratio", "RATIO");
+                            k ("fet.color", "COLOR");
+                            k ("mix", "MIX");
+                        }
+                        else
+                        {
+                            sw ("fet.link", "LINK", "One detector for both sides (the image stays put)");
+                            sw ("fet.colorOnly", "COLOR ONLY", "The colour without any gain reduction");
+                            k ("output", "TRIM");
+                        }
+                    }
+                    else
+                    {
+                        if (page == 0)
+                        {
+                            k ("multi.depth", "DEPTH");
+                            k ("multi.time", "TIME");
+                            k ("multi.tone", "TONE");
+                            k ("multi.low", "LOW X");
+                            k ("multi.high", "HIGH X");
+                            k ("mix", "MIX");
+                            group ({});
+                            sw ("multi.match", "MATCH", "Holds the loudness steady as DEPTH changes");
+                        }
+                        else
+                        {
+                            k ("multi.threshold", "THRESHOLD");
+                            k ("multi.down", "DOWN");
+                            k ("multi.up", "UP");
+                            k ("multi.deadband", "DEADBAND");
+                            k ("multi.lowGain", "LOW");
+                            k ("multi.midGain", "MID");
+                            k ("multi.highGain", "HIGH");
+                        }
+                    }
+                    break;
+                case Type::eq:
+                    preset();
+                    if (page < 4)
+                    {
+                        const auto band = "band" + std::to_string (page + 1);
+                        auto bandKnob = [&] (const char* n, const char* caption) { knob (pid (id, (band + "." + n).c_str()), caption, textOf (host, pid (id, (band + "." + n).c_str()))); };
+                        listCell (pid (id, (band + ".type").c_str()), "TYPE", "Peak, shelf or a pass filter");
+                        bandKnob ("freq", "FREQ");
+                        bandKnob ("gain", "GAIN");
+                        bandKnob ("q", "Q");
+                        switchCell (pid (id, (band + ".on").c_str()), "BAND", { on, off }, "This band on or off");
+                        group ({});
+                        k ("mix", "MIX");
+                        k ("output", "OUTPUT");
+                    }
+                    else
+                    {
+                        sw ("hp.on", "HIGH PASS", "A high pass under everything");
+                        k ("hp.freq", "HP FREQ");
+                        sw ("hp.steep", "24 dB", "Twelve or twenty-four dB per octave");
+                        group ({});
+                        sw ("lp.on", "LOW PASS", "A low pass over everything");
+                        k ("lp.freq", "LP FREQ");
+                        sw ("lp.steep", "24 dB", "Twelve or twenty-four dB per octave");
+                    }
+                    break;
+                case Type::filter:
+                    preset();
+                    if (page == 0)
+                    {
+                        listCell (pid (id, "type"), "TYPE", "The filter's response");
+                        k ("freq", "FREQ");
+                        k ("reso", "RESO");
+                        k ("drive", "DRIVE");
+                        k ("mix", "MIX");
+                        k ("output", "OUTPUT");
+                    }
+                    else
+                    {
+                        k ("pan", "PAN");
+                        k ("combDamp", "COMB DAMP");
+                        k ("formantShift", "FORMANT");
+                    }
+                    break;
+                case Type::phaser:
+                case Type::flanger:
+                {
+                    const bool phaser = id.type == Type::phaser;
+                    if (phaser)
+                        mode ({ { "CLASSIC", "Classic", 0 }, { "DEEP", "Deep", 1 } }, 180, "CLASSIC; DEEP: more stages and feedback, a wider sweep");
+                    else
+                        mode ({ { "CLASSIC", "Classic", 0 }, { "THRU-ZERO", "Through-zero", 1 } }, 200, "THROUGH-ZERO: the sweep passes the dry (6 ms latency)");
+                    preset();
+                    const bool sync = value (host, id, "sync") >= 0.5f;
+                    if (page == 0)
+                    {
+                        if (sync)
+                            stepped ("division", "RATE");
+                        else
+                            k ("rate", "RATE");
+                        switchCell (pid (id, "sync"), "TIMING", { { "FREE", "Free", 0 }, { "SYNC", "Sync", 1 } }, "Its own rate or the host's tempo");
+                        k ("depth", "DEPTH");
+                        if (phaser)
+                        {
+                            k ("center", "CENTER");
+                            k ("feedback", "FEEDBACK");
+                            stepped ("stages", "STAGES");
+                        }
+                        else
+                        {
+                            k ("delay", "DELAY");
+                            k ("feedback", "FEEDBACK");
+                        }
+                        k ("mix", "MIX");
+                    }
+                    else
+                    {
+                        k ("stereo", "STEREO");
+                        if (! phaser)
+                            k ("width", "WIDTH");
+                        k ("output", "OUTPUT");
+                    }
+                    break;
+                }
+                case Type::shifter:
+                    mode ({ { "SHIFT", "Shift", 0 }, { "BLUR", "Blur", 1 } }, 160, "SHIFT: every partial by the same Hz; BLUR: a spectral smear");
+                    preset();
+                    if (page == 0 && m == 0)
+                    {
+                        k ("hz", "SHIFT");
+                        switchCell (pid (id, "direction"), "DIR", { { "UP", "Up", 0 }, { "DOWN", "Down", 1 } }, "Upwards or downwards");
+                        k ("width", "WIDTH");
+                        k ("feedback", "FEEDBACK");
+                        k ("mix", "MIX");
+                    }
+                    else if (page == 0)
+                    {
+                        k ("blurAmount", "AMOUNT");
+                        k ("blurTime", "TIME");
+                        k ("mix", "MIX");
+                    }
+                    else
+                        k ("output", "OUTPUT");
+                    break;
+                case Type::convolution:
+                    mode ({ { "REALISTIC", "Realistic", 0 }, { "CREATIVE", "Creative", 1 } }, 200, "REALISTIC: the impulse as it is; CREATIVE: reverse and size freely");
+                    selectorList (pid (id, "impulse"), "IR", 140, "The impulse response it plays");
+                    preset();
+                    if (page == 0)
+                    {
+                        k ("predelay", "PRE-DELAY");
+                        k ("decay", "DECAY");
+                        k ("size", "SIZE");
+                        k ("width", "WIDTH");
+                        k ("mix", "MIX");
+                        k ("output", "OUTPUT");
+                    }
+                    else
+                    {
+                        k ("lowCut", "LOW CUT");
+                        k ("highCut", "HIGH CUT");
+                        sw ("normalize", "NORMALIZE", "Every impulse at the same level");
+                        sw ("reverse", "REVERSE", "The impulse played backwards (prepared, not live)");
+                    }
+                    break;
+                case Type::utility:
+                    preset();
+                    if (page == 0)
+                    {
+                        k ("gain", "GAIN");
+                        k ("pan", "BALANCE");
+                        k ("width", "WIDTH");
+                        sw ("monoBass", "MONO BASS", "Below the corner, mono");
+                        k ("monoBassHz", "BELOW");
+                        group ({});
+                        sw ("invertL", "INV L", "The left side's polarity");
+                        sw ("invertR", "INV R", "The right side's polarity");
+                    }
+                    else
+                    {
+                        sw ("hp.on", "HIGH PASS", "A high pass");
+                        k ("hp.freq", "HP FREQ");
+                        sw ("lp.on", "LOW PASS", "A low pass");
+                        k ("lp.freq", "LP FREQ");
+                        k ("output", "OUTPUT");
+                    }
+                    break;
+                default: break;
+            }
+        }
+
+    private:
+        InstanceId id;
+    };
+}
+
+namespace
+{
+    //==========================================================================
+    /** The quick settings a tile's click shows (docs/FX_EFFECTS_LIBRARY.md): the effect's name,
+        EXPAND (its full rack) and a close; MODE and PRESET; up to four knobs. The same
+        parameters as the rack (no copy): automation, undo and presets are theirs. */
+    class QuickPopover final : public juce::Component, private juce::Timer
+    {
+    public:
+        QuickPopover (osp::plugin::InstrumentHost& h, InstanceId i, std::function<void()> expandFn, std::function<void()> dismissFn)
+            : host (h), id (i), onExpand (std::move (expandFn)), onDismiss (std::move (dismissFn))
+        {
+            setTitle (juce::String (fx::typeName (id.type)) + " quick settings");
+            setWantsKeyboardFocus (true);
+            build();
+            startTimerHz (8);
+        }
+
+        static constexpr int pad = 12, titleH = 30, rowH = 27, knobW = 66, knobH = rackui::cellHeight;
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat();
+            g.setColour (juce::Colour (0x38291d23));
+            g.fillRoundedRectangle (r.translated (0.0f, 3.0f), 8.0f);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xfffbf8f2), 0.0f, 0.0f, juce::Colour (0xfff1eae0), 0.0f, r.getBottom(), false));
+            g.fillRoundedRectangle (r.reduced (0.5f), 8.0f);
+            g.setColour (juce::Colour (0xffd2c7b9));
+            g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
+            const auto accent = fxAccent (id.type);
+            auto icon = fxIcon (id.type);
+            icon.applyTransform (icon.getTransformToScaleToFit (juce::Rectangle<float> (static_cast<float> (pad), 9.0f, 15.0f, 15.0f), true));
+            g.setColour (accent);
+            g.strokePath (icon, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (juce::Colour (0xff313532));
+            g.setFont (fonts::make (11.0f, fonts::Weight::semibold, 0.075f));
+            g.drawText (title(), juce::Rectangle<int> (pad + 22, 6, getWidth() - 140, 20), juce::Justification::centredLeft, true);
+            g.setFont (fonts::make (8.5f, fonts::Weight::semibold, 0.08f));
+            g.setColour (hoverExpand ? juce::Colour (0xff313532) : juce::Colour (0xff716d65));
+            g.drawRoundedRectangle (expandArea().toFloat().reduced (0.5f), 4.0f, 1.0f);
+            g.drawText ("EXPAND", expandArea(), juce::Justification::centred, false);
+            g.setColour (juce::Colour (0xff716d65));
+            g.setFont (fonts::make (13.0f));
+            g.drawText (juce::String::fromUTF8 ("\xc3\x97"), closeArea(), juce::Justification::centred, false);
+            g.setColour (juce::Colour (0xffded5c9));
+            g.fillRect (pad, titleH, getWidth() - 2 * pad, 1);
+        }
+
+        void resized() override
+        {
+            int y = titleH + 7;
+            if (mode != nullptr || presets != nullptr)
+            {
+                auto row = juce::Rectangle<int> (pad, y, getWidth() - 2 * pad, rowH);
+                if (mode != nullptr)
+                    mode->setBounds (row.removeFromLeft (presets != nullptr ? 118 : row.getWidth()));
+                if (presets != nullptr)
+                    presets->setBounds (row.withTrimmedLeft (mode != nullptr ? 8 : 0));
+                y += rowH + 4;
+            }
+            const int total = static_cast<int> (knobs.size()) * knobW;
+            int x = (getWidth() - total) / 2;
+            for (auto& k : knobs)
+            {
+                k->setBounds (x, y, knobW, knobH);
+                x += knobW;
+            }
+        }
+
+        juce::Rectangle<int> preferredSize() const
+        {
+            const int w = std::max (272, 2 * pad + static_cast<int> (knobs.size()) * knobW);
+            const int h = titleH + 7 + (mode != nullptr || presets != nullptr ? rowH + 4 : 0) + knobH + 6;
+            return { w, h };
+        }
+
+        void mouseMove (const juce::MouseEvent& e) override
+        {
+            if (const bool over = expandArea().contains (e.getPosition()); over != hoverExpand)
+            {
+                hoverExpand = over;
+                repaint();
+            }
+            setMouseCursor (expandArea().contains (e.getPosition()) || closeArea().contains (e.getPosition()) ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        }
+        void mouseExit (const juce::MouseEvent&) override
+        {
+            hoverExpand = false;
+            repaint();
+        }
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            // (Copies: either one may delete this popover.)
+            if (expandArea().contains (e.getPosition()))
+                run (onExpand);
+            else if (closeArea().contains (e.getPosition()))
+                run (onDismiss);
+        }
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            if (key == juce::KeyPress::escapeKey)
+                return run (onDismiss);
+            if (key == juce::KeyPress::returnKey)
+                return run (onExpand);
+            return false;
+        }
+
+        /** Calls a copy: the callback may delete this popover. */
+        static bool run (const std::function<void()>& f)
+        {
+            if (f == nullptr)
+                return false;
+            const auto copy = f;
+            copy();
+            return true;
+        }
+
+        juce::Rectangle<int> expandArea() const { return { getWidth() - 96, 7, 58, 18 }; }
+        juce::Rectangle<int> closeArea() const { return { getWidth() - 32, 4, 24, 24 }; }
+        int knobCount() const noexcept { return static_cast<int> (knobs.size()); }
+        bool hasMode() const noexcept { return mode != nullptr; }
+        bool hasPresets() const noexcept { return presets != nullptr; }
+
+    private:
+        juce::String title() const
+        {
+            juce::String t = fx::typeName (id.type);
+            if (fx::capacity[static_cast<std::size_t> (id.type)] > 1)
+                t << " " << (id.slot + 1);
+            return t;
+        }
+
+        juce::String controlsKey() const
+        {
+            juce::StringArray ids;
+            for (const auto& c : quickControls (host, id))
+                ids.add (c.id);
+            return ids.joinIntoString ("|");
+        }
+
+        void build()
+        {
+            knobs.clear();
+            mode.reset();
+            presets.reset();
+            if (const auto m = quickModeId (id); m.isNotEmpty())
+                if (auto* p = host.apvts().getParameter (m))
+                {
+                    auto selector = std::make_unique<osp::plugin::ValueSelector> (*p, juce::String());
+                    selector->setRackStyle (osp::plugin::ValueSelector::RackStyle::mode);
+                    selector->setTooltip ("MODE");
+                    mode = std::move (selector);
+                    addAndMakeVisible (*mode);
+                }
+            if (! fx::isLegacy (id.type))
+            {
+                presets = std::make_unique<PresetBar> (host, id);
+                addAndMakeVisible (*presets);
+            }
+            for (const auto& c : quickControls (host, id))
+            {
+                if (host.apvts().getParameter (c.id) == nullptr)
+                    continue;
+                auto k = std::make_unique<MiniKnob> (host.apvts(), c.id, c.caption, textOf (host, c.id));
+                k->setArcColour (fxAccent (id.type));
+                k->setRackMetrics (true);
+                addAndMakeVisible (*k);
+                knobs.push_back (std::move (k));
+                if (knobs.size() == 4)
+                    break;
+            }
+            builtKey = controlsKey();
+        }
+
+        void timerCallback() override
+        {
+            // A MODE change can change which controls are the useful ones (COMPRESSOR, SHIFT).
+            if (controlsKey() != builtKey)
+            {
+                build();
+                if (auto* parent = getParentComponent())
+                    setBounds (getBounds().withSize (preferredSize().getWidth(), preferredSize().getHeight()).constrainedWithin (parent->getLocalBounds()));
+                resized();
+            }
+            if (presets != nullptr)
+                presets->repaint();   // (the "*" follows the settings)
+        }
+
+        osp::plugin::InstrumentHost& host;
+        InstanceId id;
+        std::function<void()> onExpand, onDismiss;
+        std::unique_ptr<juce::Component> mode, presets;
+        std::vector<std::unique_ptr<MiniKnob>> knobs;
+        juce::String builtKey;
+        bool hoverExpand = false;
+    };
+}
+
+std::unique_ptr<juce::Component> createFxQuickPopover (osp::plugin::InstrumentHost& host, InstanceId id, std::function<void()> expand, std::function<void()> dismiss,
+                                                      juce::Rectangle<int>& size)
+{
+    auto q = std::make_unique<QuickPopover> (host, id, std::move (expand), std::move (dismiss));
+    size = q->preferredSize();
+    return q;
+}
+
+std::unique_ptr<osp::plugin::rack::Module> createFxRack (osp::plugin::InstrumentHost& host) { return std::make_unique<FxRack> (host); }
+
+InstanceId fxRackShown() { return shownInstance; }
+
+void openFxRack (andor::shell::ShellEditor& editor, InstanceId id)
+{
+    using osp::plugin::rack::Kind;
+    switch (id.type)
+    {
+        case Type::movement: editor.setRackExpanded (Kind::movement, true); return;
+        case Type::echo: editor.setRackExpanded (Kind::echo, true); return;
+        case Type::space: editor.setRackExpanded (Kind::space, true); return;
+        case Type::drive: editor.openPopup (1); return;
+        default: break;
+    }
+    // One FX rack at a time: another effect swaps the module (the rack keeps its height).
+    shownInstance = id;
+    editor.setRackExpanded (Kind::fx, false);
+    editor.setRackExpanded (Kind::fx, true);
+}
+
+juce::String quickModeId (InstanceId id)
+{
+    switch (id.type)
+    {
+        case Type::drive: return "drive.mode";
+        case Type::echo: return "echo.type";
+        case Type::space: return "space.engine";
+        case Type::spread:
+        case Type::compressor:
+        case Type::phaser:
+        case Type::flanger:
+        case Type::shifter:
+        case Type::convolution: return pid (id, "mode");
+        default: return {};
+    }
+}
+
+std::vector<QuickControl> quickControls (osp::plugin::InstrumentHost& host, InstanceId id)
+{
+    switch (id.type)
+    {
+        case Type::drive: return { { "drive", "DRIVE" }, { "drive.tone", "TONE" }, { "drive.body", "BODY" } };
+        case Type::movement: return { { "motion", "MOVEMENT" } };
+        case Type::echo: return { { "echo", "ECHO" }, { "echo.feedback", "FEEDBACK" }, { "echo.tone", "TONE" } };
+        case Type::space: return { { "space", "SPACE" }, { "space.decay", "DECAY" }, { "space.size", "SIZE" } };
+        case Type::spread: return { { pid (id, "width"), "WIDTH" }, { pid (id, "detune"), "DETUNE" }, { pid (id, "mix"), "MIX" } };
+        case Type::compressor:
+        {
+            const int m = juce::roundToInt (value (host, id, "mode"));
+            if (m == 1)
+                return { { pid (id, "fet.input"), "INPUT" }, { pid (id, "fet.output"), "OUTPUT" }, { pid (id, "mix"), "MIX" } };
+            if (m == 2)
+                return { { pid (id, "multi.depth"), "DEPTH" }, { pid (id, "multi.time"), "TIME" }, { pid (id, "mix"), "MIX" } };
+            return { { pid (id, "threshold"), "THRESHOLD" }, { pid (id, "ratio"), "RATIO" }, { pid (id, "mix"), "MIX" } };
+        }
+        case Type::eq: return { { pid (id, "band1.gain"), "LOW" }, { pid (id, "band2.gain"), "LOW MID" }, { pid (id, "band3.gain"), "HIGH MID" }, { pid (id, "band4.gain"), "HIGH" } };
+        case Type::filter: return { { pid (id, "freq"), "FREQ" }, { pid (id, "reso"), "RESO" }, { pid (id, "mix"), "MIX" } };
+        case Type::phaser: return { { pid (id, "rate"), "RATE" }, { pid (id, "depth"), "DEPTH" }, { pid (id, "feedback"), "FEEDBACK" }, { pid (id, "mix"), "MIX" } };
+        case Type::flanger: return { { pid (id, "rate"), "RATE" }, { pid (id, "depth"), "DEPTH" }, { pid (id, "feedback"), "FEEDBACK" }, { pid (id, "mix"), "MIX" } };
+        case Type::shifter:
+            return juce::roundToInt (value (host, id, "mode")) == 0 ? std::vector<QuickControl> { { pid (id, "hz"), "SHIFT" }, { pid (id, "feedback"), "FEEDBACK" }, { pid (id, "mix"), "MIX" } }
+                                                                    : std::vector<QuickControl> { { pid (id, "blurAmount"), "AMOUNT" }, { pid (id, "blurTime"), "TIME" }, { pid (id, "mix"), "MIX" } };
+        case Type::convolution: return { { pid (id, "decay"), "DECAY" }, { pid (id, "size"), "SIZE" }, { pid (id, "mix"), "MIX" } };
+        case Type::utility: return { { pid (id, "gain"), "GAIN" }, { pid (id, "pan"), "BALANCE" }, { pid (id, "width"), "WIDTH" } };
+        default: return {};
+    }
+}
+
+} // namespace andor::analog

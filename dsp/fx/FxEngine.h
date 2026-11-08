@@ -13,6 +13,8 @@
 namespace andor::analog::fx
 {
 
+struct Impulse;
+
 /** A graph ready for the audio thread: immutable once published (ModelExchange). */
 struct CompiledGraph
 {
@@ -48,8 +50,8 @@ public:
 
     /** Message thread: the route to play (null or a CLASSIC graph: the original chain). */
     void setGraph (std::shared_ptr<const CompiledGraph> graph);
-    /** Message thread: frees graphs the audio thread no longer reads. */
-    void collectGarbage() { exchange.collectGarbage(); }
+    /** Message thread: frees graphs (and impulses) the audio thread no longer reads. */
+    void collectGarbage();
 
     /** Audio thread: the new effects' settings (taken by value; no allocation). */
     void setSettings (const Settings& settings) noexcept;
@@ -64,6 +66,12 @@ public:
 
     /** The processor of a new effect's slot (null for the original four). For meters. */
     const Processor* processor (InstanceId id) const noexcept;
+
+    /** Message thread: the impulse CONVOLUTION `slot` plays next (crossfaded in), and the one it
+        was last handed (null: none yet). Impulses are built at rate() (Impulse::make). */
+    void setImpulse (int slot, std::shared_ptr<const Impulse> impulse);
+    std::shared_ptr<const Impulse> impulse (int slot) const;
+    double rate() const noexcept { return sampleRate; }
 
 private:
     struct Buffers

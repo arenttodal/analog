@@ -1,4 +1,5 @@
 #include "FxEngine.h"
+#include "Effects.h"
 
 #include <algorithm>
 #include <cstring>
@@ -6,10 +7,28 @@
 namespace andor::analog::fx
 {
 
+namespace
+{
+    bool hasSplitter (const std::vector<Node>& chain)
+    {
+        for (const auto& n : chain)
+        {
+            if (n.kind == Node::Kind::split)
+                return true;
+            for (const auto& lane : n.lanes)
+                if (hasSplitter (lane))
+                    return true;
+        }
+        return false;
+    }
+}
+
 std::shared_ptr<const CompiledGraph> compile (const Graph& g, std::uint64_t generation)
 {
     if (! validate (g).empty())
         return {};
+    if (hasSplitter (g.chain))
+        return {};   // (the band / M-S splitters are not played yet: refused, never approximated)
     for (const auto& id : instancesOf (g))
         if (! implemented (id.type))
             return {};
@@ -35,7 +54,8 @@ void FxEngine::prepare (double rate, int maximumBlockSize)
         {
             const InstanceId id { static_cast<Type> (t), s };
             auto& p = processors[static_cast<std::size_t> (id.flatIndex())];
-            p = makeProcessor (id.type);
+            if (p == nullptr)
+                p = makeProcessor (id.type);   // (kept across prepares: a CONVOLUTION keeps its impulse)
             if (p != nullptr)
             {
                 p->prepare (rate, maxBlock);
@@ -83,6 +103,29 @@ void FxEngine::setSettings (const Settings& s) noexcept
 const Processor* FxEngine::processor (InstanceId id) const noexcept
 {
     return processors[static_cast<std::size_t> (id.flatIndex())].get();
+}
+
+void FxEngine::collectGarbage()
+{
+    exchange.collectGarbage();
+    for (int s = 0; s < capacity[static_cast<std::size_t> (Type::convolution)]; ++s)
+        if (auto* c = dynamic_cast<Convolution*> (processors[static_cast<std::size_t> (InstanceId { Type::convolution, s }.flatIndex())].get()))
+            c->collectGarbage();
+}
+
+void FxEngine::setImpulse (int slot, std::shared_ptr<const Impulse> ir)
+{
+    if (slot >= 0 && slot < capacity[static_cast<std::size_t> (Type::convolution)])
+        if (auto* c = dynamic_cast<Convolution*> (processors[static_cast<std::size_t> (InstanceId { Type::convolution, slot }.flatIndex())].get()))
+            c->setImpulse (std::move (ir));
+}
+
+std::shared_ptr<const Impulse> FxEngine::impulse (int slot) const
+{
+    if (slot >= 0 && slot < capacity[static_cast<std::size_t> (Type::convolution)])
+        if (const auto* c = dynamic_cast<const Convolution*> (processors[static_cast<std::size_t> (InstanceId { Type::convolution, slot }.flatIndex())].get()))
+            return c->impulse();
+    return {};
 }
 
 void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, int numSamples) noexcept

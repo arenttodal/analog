@@ -18,6 +18,9 @@ andor_add_instrument(ANDOR_Analog
         Source/AnalogPopovers.cpp
         Source/AnalogRacks.cpp
         Source/FxRouting.cpp
+        Source/FxParameters.cpp
+        Source/FxPresets.cpp
+        Source/FxRack.cpp
         Source/AnalogWellOverlays.cpp
         Source/SampleImport.cpp
         Source/SamplePatches.cpp

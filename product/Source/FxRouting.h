@@ -74,13 +74,20 @@ public:
     bool remove (fx::InstanceId id);
 
     juce::PopupMenu settingsMenu();
+    /** FX CHAIN presets (the gear): the route and its new effects' settings, as a file. */
+    bool saveChain (const juce::String& name);
+    bool loadChain (const juce::File& file);
     juce::Component& settingsButton() noexcept;
     juce::Component& addEffectButton() noexcept;
     /** The library popover (shown: + ADD EFFECT). */
     juce::Component* libraryPopover() const noexcept;
     void showLibrary (bool shown);
-    /** Opens an effect's editor (the original four: their racks / DRIVE's popover). */
+    /** Opens an effect's full rack (the original four: their own racks / DRIVE's popover). */
     void openEditor (fx::InstanceId id);
+    /** A tile's quick settings, anchored to it (nullopt: closes them). Interface only. */
+    void showQuick (std::optional<fx::InstanceId> id);
+    juce::Component* quickPopover() const noexcept { return quick.get(); }
+    std::optional<fx::InstanceId> quickShown() const noexcept { return quickId; }
 
 private:
     class IconButton;
@@ -90,6 +97,7 @@ private:
     void timerCallback() override;
     void layoutChain();
     juce::Rectangle<int> chainArea() const;
+    int chainClipRight() const noexcept;
     bool apply (const fx::Graph& next, const juce::String& what);
     fx::Graph route() const;
     juce::String subtitleOf (fx::InstanceId id) const;
@@ -99,12 +107,16 @@ private:
     void paintTile (juce::Graphics&, const Tile&) const;
     void paintMixer (juce::Graphics&) const;
     void showTileMenu (fx::InstanceId id);
+    void placeQuick();
+    void revealTile (fx::InstanceId id);
     std::vector<fx::InstanceId> order() const;
 
     osp::plugin::InstrumentHost& host;
     AnalogEngine& engine;
     std::unique_ptr<IconButton> gear, close, add;
     std::unique_ptr<Library> library;
+    std::unique_ptr<juce::Component> quick;
+    std::optional<fx::InstanceId> quickId;
     std::array<std::unique_ptr<juce::Slider>, 3> levels;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 3> levelAttachments;
     std::array<std::unique_ptr<juce::TextButton>, 4> footerButtons;   // <- -> PARALLEL SERIES

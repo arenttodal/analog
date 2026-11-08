@@ -1,4 +1,6 @@
 #include "FxRouting.h"
+#include "FxPresets.h"
+#include "FxRack.h"
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
 #include "OspLookAndFeel.h"
@@ -567,7 +569,51 @@ juce::PopupMenu FxRoutingView::settingsMenu()
     juce::PopupMenu m;
     const bool custom = route().custom;
     m.addItem ("Restore original", custom, false, [this] { restoreOriginal(); });
+    m.addSeparator();
+    // FX CHAIN presets: the route and its new effects' settings (never the instrument's).
+    m.addItem ("Save FX chain...", [safe = juce::Component::SafePointer<FxRoutingView> (this)] {
+        if (safe == nullptr)
+            return;
+        auto* w = new juce::AlertWindow ("Save FX chain", "A name for this chain:", juce::MessageBoxIconType::NoIcon);
+        w->addTextEditor ("name", "My chain");
+        w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result) {
+            if (result == 1 && safe != nullptr)
+                if (const auto name = juce::File::createLegalFileName (w->getTextEditorContents ("name").trim()); name.isNotEmpty())
+                    safe->saveChain (name);
+        }), true);
+    });
+    juce::PopupMenu load;
+    for (const auto& file : fxpresets::chainFolder().findChildFiles (juce::File::findFiles, false, "*.xml"))
+        load.addItem (file.getFileNameWithoutExtension(), [this, file] { loadChain (file); });
+    m.addSubMenu ("Load FX chain", load, load.getNumItems() > 0);
+    m.addItem ("Show chains folder", [] {
+        auto folder = fxpresets::chainFolder();
+        folder.createDirectory();
+        folder.revealToUser();
+    });
     return m;
+}
+
+bool FxRoutingView::saveChain (const juce::String& name)
+{
+    auto folder = fxpresets::chainFolder();
+    folder.createDirectory();
+    const auto xml = fxpresets::chainToXml (host, route(), name);
+    return xml != nullptr && xml->writeTo (folder.getChildFile (name + ".xml"));
+}
+
+bool FxRoutingView::loadChain (const juce::File& file)
+{
+    const auto xml = juce::XmlDocument::parse (file);
+    fx::Graph next;
+    if (xml == nullptr || ! fx::fromText (xml->getStringAttribute ("graph").toStdString(), next) || ! fx::validate (next).empty())
+        return false;   // (an unreadable chain changes nothing: checked before any setting moves)
+    if (! fxpresets::chainFromXml (host, *xml, next))
+        return false;
+    next.custom = true;
+    return apply (next, "Load FX chain " + file.getFileNameWithoutExtension());
 }
 
 juce::Component& FxRoutingView::settingsButton() noexcept { return *gear; }
@@ -576,6 +622,8 @@ juce::Component* FxRoutingView::libraryPopover() const noexcept { return library
 
 void FxRoutingView::showLibrary (bool shown)
 {
+    if (shown)
+        showQuick (std::nullopt);   // (one popover at a time)
     if (shown && library == nullptr)
     {
         library = std::make_unique<Library> (*this);
@@ -597,22 +645,100 @@ void FxRoutingView::showLibrary (bool shown)
 
 void FxRoutingView::openEditor (InstanceId id)
 {
-    auto* editor = findParentComponentOfClass<andor::shell::ShellEditor>();
-    if (editor == nullptr)
-        return;
-    switch (id.type)
+    if (auto* editor = findParentComponentOfClass<andor::shell::ShellEditor>())
+        openFxRack (*editor, id);
+}
+
+void FxRoutingView::showQuick (std::optional<InstanceId> id)
+{
+    if (quick != nullptr && (! id || id != quickId))
     {
-        case Type::movement: editor->setRackExpanded (osp::plugin::rack::Kind::movement, true); break;
-        case Type::echo: editor->setRackExpanded (osp::plugin::rack::Kind::echo, true); break;
-        case Type::space: editor->setRackExpanded (osp::plugin::rack::Kind::space, true); break;
-        case Type::drive: editor->openPopup (1); break;   // (DRIVE's own popover: the macro's)
-        default: break;
+        removeChildComponent (quick.get());
+        quick.reset();
+        quickId.reset();
     }
+    if (! id || quick != nullptr)
+        return;
+    const auto it = std::find_if (placed.begin(), placed.end(), [&id] (const Tile& t) { return t.id == *id; });
+    if (it == placed.end())
+        return;
+    juce::Rectangle<int> size;
+    const auto target = *id;
+    quick = createFxQuickPopover (
+        host, target,
+        [safe = juce::Component::SafePointer<FxRoutingView> (this), target] {
+            if (safe != nullptr)
+            {
+                safe->showQuick (std::nullopt);
+                safe->openEditor (target);
+            }
+        },
+        [safe = juce::Component::SafePointer<FxRoutingView> (this)] {
+            if (safe != nullptr)
+            {
+                safe->showQuick (std::nullopt);
+                safe->grabKeyboardFocus();
+            }
+        },
+        size);
+    quickId = target;
+    revealTile (target);
+    quick->setSize (size.getWidth(), size.getHeight());
+    placeQuick();
+    addAndMakeVisible (*quick);
+    quick->toFront (false);
+}
+
+void FxRoutingView::revealTile (InstanceId id)
+{
+    // A tile scrolled out of sight (a long chain) pans into view (interface only).
+    const auto it = std::find_if (placed.begin(), placed.end(), [&id] (const Tile& t) { return t.id == id; });
+    if (it == placed.end())
+        return;
+    const int left = chainArea().getX() + 12, right = chainClipRight() - 12;
+    int delta = 0;
+    if (it->bounds.getRight() > right)
+        delta = it->bounds.getRight() - right;
+    else if (it->bounds.getX() < left)
+        delta = it->bounds.getX() - left;
+    if (delta == 0)
+        return;
+    scrollX += delta;
+    layoutChain();
+    repaint();
+}
+
+void FxRoutingView::placeQuick()
+{
+    if (quick == nullptr || ! quickId)
+        return;
+    const auto it = std::find_if (placed.begin(), placed.end(), [this] (const Tile& t) { return t.id == *quickId; });
+    if (it == placed.end())
+    {
+        showQuick (std::nullopt);   // (its effect left the route)
+        return;
+    }
+    // Anchored under the tile; above it when there is no room; beside it when neither fits
+    // (never over the header's controls). Clamped to the view's edges.
+    const auto tile = it->bounds;
+    const auto room = getLocalBounds().withTrimmedTop (headerArea.getBottom() + 2).reduced (4);
+    const int w = quick->getWidth(), h = quick->getHeight();
+    auto at = juce::Rectangle<int> (tile.getCentreX() - w / 2, tile.getBottom() + 6, w, h);
+    if (at.getBottom() > room.getBottom())
+        at.setY (tile.getY() - 6 - h);
+    if (at.getY() < room.getY())
+    {
+        const bool right = tile.getRight() + 8 + w <= room.getRight();
+        at.setPosition (right ? tile.getRight() + 8 : tile.getX() - 8 - w, tile.getCentreY() - h / 2);
+    }
+    quick->setBounds (at.constrainedWithin (room));
 }
 
 void FxRoutingView::select (std::optional<InstanceId> id)
 {
     selected = id;
+    if (id)
+        revealTile (*id);
     repaint();
 }
 
@@ -677,6 +803,7 @@ void FxRoutingView::timerCallback()
     if (const auto now = signature(); now != shown)
     {
         shown = now;
+        placeQuick();   // (follows its tile; closes when the effect is removed)
         repaint();
     }
 }
@@ -715,6 +842,11 @@ void FxRoutingView::resized()
     if (library != nullptr && library->isVisible())
         showLibrary (true);
     layoutChain();
+}
+
+int FxRoutingView::chainClipRight() const noexcept
+{
+    return outputBox.getX() - 10;
 }
 
 juce::Rectangle<int> FxRoutingView::chainArea() const
@@ -826,6 +958,8 @@ void FxRoutingView::layoutChain()
 
 int FxRoutingView::tileAt (juce::Point<int> p) const
 {
+    if (p.x >= chainClipRight() || p.x <= mixerArea.getRight())
+        return -1;   // (scrolled out of sight: not there)
     for (int i = 0; i < static_cast<int> (placed.size()); ++i)
         if (placed[static_cast<std::size_t> (i)].bounds.contains (p))
             return i;
@@ -883,7 +1017,8 @@ void FxRoutingView::paint (juce::Graphics& g)
     const auto area = chainArea();
     {
         juce::Graphics::ScopedSaveState clip (g);
-        g.reduceClipRegion (juce::Rectangle<int> (mixerArea.getRight(), area.getY() - 8, outputBox.getRight() - mixerArea.getRight() + 2, area.getHeight() + 16));
+        // (A long chain scrolls under a clean edge before OUTPUT: OUTPUT is never covered.)
+        g.reduceClipRegion (juce::Rectangle<int> (mixerArea.getRight(), area.getY() - 8, chainClipRight() - mixerArea.getRight(), area.getHeight() + 16));
         const float cy = static_cast<float> (area.getCentreY());
         g.setColour (wire);
         g.fillRect (juce::Rectangle<float> (static_cast<float> (mixerArea.getRight() + 4), cy - 0.6f, static_cast<float> (outputBox.getX() - mixerArea.getRight() - 4), 1.2f));
@@ -945,7 +1080,17 @@ void FxRoutingView::paint (juce::Graphics& g)
         }
         for (const auto& t : placed)
             paintTile (g, t);
+        if (scrollX < contentWidth - (chainClipRight() - area.getX()))
+        {
+            // More chain to the right: it fades into the edge (the wheel pans it).
+            const auto fade = juce::Rectangle<float> (static_cast<float> (chainClipRight() - 28), static_cast<float> (area.getY() - 8), 28.0f, static_cast<float> (area.getHeight() + 16));
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0x00f5f0e8), fade.getX(), 0.0f, juce::Colour (0xfff5f0e8), fade.getRight(), 0.0f, false));
+            g.fillRect (fade);
+        }
     }
+    // The wire's last stretch into OUTPUT (outside the chain's clip).
+    g.setColour (wire);
+    g.fillRect (juce::Rectangle<float> (static_cast<float> (chainClipRight() - 1), static_cast<float> (area.getCentreY()) - 0.6f, static_cast<float> (outputBox.getX() - chainClipRight() + 1), 1.2f));
 
     // OUTPUT: the small terminal at the wire's end.
     g.setColour (juce::Colour (0xfffaf6ee));
@@ -959,7 +1104,8 @@ void FxRoutingView::paint (juce::Graphics& g)
     // Footer: the path in words; what stays upstream; the actions.
     g.setColour (juce::Colour (0xffe5ddd3));
     g.fillRect (footerArea.withHeight (1));
-    auto text = footerArea.withTrimmedTop (6).withTrimmedRight (240);
+    const auto firstButton = footerButtons[0]->getBounds();
+    auto text = footerArea.withTrimmedTop (6).withRight (std::min (footerArea.getRight() - 240, firstButton.getX() - 142));   // (clear of the selection's name)
     g.setColour (juce::Colour (0xff80776d));
     g.setFont (font (10.0f));
     g.drawText (summaryText(), text.removeFromTop (16), juce::Justification::centredLeft, true);
@@ -968,7 +1114,6 @@ void FxRoutingView::paint (juce::Graphics& g)
     g.drawText (juce::String::fromUTF8 ("VOICE FILTER \xc2\xb7 MORPH \xc2\xb7 DRIFT \xc2\xb7 CHORUS stay upstream"), text.removeFromTop (13), juce::Justification::centredLeft, true);
     g.setColour (juce::Colour (0xff9a9086));
     g.setFont (font (9.0f));
-    const auto firstButton = footerButtons[0]->getBounds();
     g.drawText (selected ? juce::String (fx::typeName (selected->type)) : juce::String ("Select an effect"),
                 juce::Rectangle<int> (firstButton.getX() - 130, firstButton.getY(), 122, firstButton.getHeight()), juce::Justification::centredRight, false);
 }
@@ -1120,6 +1265,8 @@ void FxRoutingView::mouseDown (const juce::MouseEvent& e)
     grabKeyboardFocus();
     if (library != nullptr && library->isVisible() && ! library->getBounds().contains (e.getPosition()))
         showLibrary (false);
+    if (quick != nullptr && tileAt (e.getPosition()) < 0)
+        showQuick (std::nullopt);   // (a click elsewhere closes the quick settings)
     const int i = tileAt (e.getPosition());
     pressed.reset();
     if (i < 0)
@@ -1156,7 +1303,7 @@ void FxRoutingView::mouseDrag (const juce::MouseEvent& e)
     repaint();
 }
 
-void FxRoutingView::mouseUp (const juce::MouseEvent&)
+void FxRoutingView::mouseUp (const juce::MouseEvent& e)
 {
     if (dragging && pressed)
     {
@@ -1170,6 +1317,8 @@ void FxRoutingView::mouseUp (const juce::MouseEvent&)
             moveTo (id, gap.path, gap.index);
         }
     }
+    else if (pressed && ! e.mods.isPopupMenu())
+        showQuick (*pressed);   // (a click: the tile's quick settings; a drag never opens them)
     dragging = false;
     dropTile = dropGap = -1;
     pressed.reset();
@@ -1179,7 +1328,10 @@ void FxRoutingView::mouseUp (const juce::MouseEvent&)
 void FxRoutingView::mouseDoubleClick (const juce::MouseEvent& e)
 {
     if (const int i = tileAt (e.getPosition()); i >= 0 && ! placed[static_cast<std::size_t> (i)].light.contains (e.getPosition()))
+    {
+        showQuick (std::nullopt);   // (the full rack instead)
         openEditor (placed[static_cast<std::size_t> (i)].id);
+    }
 }
 
 void FxRoutingView::mouseMove (const juce::MouseEvent& e)
@@ -1217,6 +1369,8 @@ bool FxRoutingView::keyPressed (const juce::KeyPress& key)
     {
         if (library != nullptr && library->isVisible())
             showLibrary (false);
+        else if (quick != nullptr)
+            showQuick (std::nullopt);
         else if (auto* editor = findParentComponentOfClass<andor::shell::ShellEditor>())
             editor->setSourceViewShown (false);
         return true;
@@ -1254,7 +1408,8 @@ bool FxRoutingView::keyPressed (const juce::KeyPress& key)
 void FxRoutingView::showTileMenu (InstanceId id)
 {
     juce::PopupMenu m;
-    m.addItem ("Edit", [this, id] { openEditor (id); });
+    m.addItem ("Quick settings", [this, id] { showQuick (id); });
+    m.addItem ("Expand", [this, id] { openEditor (id); });
     bool bypassed = false;
     for (const auto& t : placed)
         if (t.id == id)

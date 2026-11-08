@@ -144,6 +144,8 @@ TEST_CASE ("fx graph: validation - once each, the pools, lanes, depth, crossover
     split.lowHz = 200.0f;
     split.highHz = 2000.0f;
     CHECK (fx::validate (custom ({ split })).empty());
+    // Valid, but not played yet: compile refuses it (never approximated as a plain parallel).
+    CHECK (fx::compile (custom ({ split }), 1) == nullptr);
 
     // An effect without a processor in this build is not compiled (not insertable).
     for (int t = 0; t < fx::typeCount; ++t)

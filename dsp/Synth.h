@@ -118,6 +118,8 @@ public:
     void collectFxGarbage() { router.collectGarbage(); }
     bool fxCustomPlaying() const noexcept { return router.playingCustom(); }
     const fx::FxEngine& fxEngine() const noexcept { return router; }
+    /** Message thread: CONVOLUTION's impulses (FxEngine::setImpulse). */
+    fx::FxEngine& fxEngine() noexcept { return router; }
     /** A MOVEMENT lane's SHAPER playhead (0 A, 1 B), -1 when idle. */
     float shaperPhase (int lane) const noexcept { return effects.shaperPhase (lane); }
 

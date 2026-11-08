@@ -1,6 +1,7 @@
 #include "AnalogEngine.h"
 
 #include "InstrumentHost.h"
+#include "fx/Effects.h"
 #include "SampleImport.h"
 
 #include "Oscillator.h"
@@ -47,10 +48,12 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     if (state == nullptr)
         attachParameters (parameters);
     reader.attach (parameters);
+    fxReader.attach (parameters);
     synth.prepare (sampleRate, std::max (1, maximumBlockSize), oversamplingFactor);
     synth.setControlModulator (this);
     reader.snapshot (raw);
     auto patch = reader.read (raw);
+    fxReader.read (patch.fx);
     patch.effects.shaper.customSteps = shaperPattern;
     patch.movementB.shaper.customSteps = shaperPatternB;
     synth.setPatch (patch);
@@ -58,12 +61,50 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     synth.reset();
     scratch.assign (static_cast<std::size_t> (std::max (1, maximumBlockSize)), 0.0f);
     prepared = true;
+    updateConvolutionImpulses();
+    impulseTimer.engine = this;
+    impulseTimer.startTimerHz (10);
+}
+
+const andor::analog::fx::Processor* AnalogEngine::fxProcessor (andor::analog::fx::InstanceId id) const
+{
+    return prepared ? synth.fxEngine().processor (id) : nullptr;
+}
+
+std::shared_ptr<const andor::analog::fx::Impulse> AnalogEngine::convolutionImpulse (int slot) const
+{
+    return prepared ? synth.fxEngine().impulse (slot) : nullptr;
+}
+
+void AnalogEngine::updateConvolutionImpulses()
+{
+    namespace fx = andor::analog::fx;
+    if (! prepared)
+        return;
+    const std::lock_guard<std::mutex> lock (impulseMutex);
+    fx::Settings now;
+    fxReader.read (now);
+    auto& router = synth.fxEngine();
+    for (int slot = 0; slot < static_cast<int> (impulseKeys.size()); ++slot)
+    {
+        const auto& c = now.conv[static_cast<std::size_t> (slot)];
+        const ImpulseKey key { std::clamp (c.impulse, 0, fx::Impulse::factoryCount - 1), c.decaySeconds, c.size, c.reverse, c.normalize, router.rate() };
+        auto& last = impulseKeys[static_cast<std::size_t> (slot)];
+        if (key == last && router.impulse (slot) != nullptr)
+            continue;
+        last = key;
+        // (The factory impulses are designed at the rate they play at: no resampling.)
+        router.setImpulse (slot, fx::Impulse::make (fx::Impulse::factory (key.impulse, key.rate), key.rate, c, key.rate, ++impulseGeneration,
+                                                    fx::Impulse::factoryName (key.impulse)));
+    }
+    router.collectGarbage();
 }
 
 AnalogEngine::AnalogEngine (int oversampling) : oversamplingFactor (oversampling) {}
 
 AnalogEngine::~AnalogEngine()
 {
+    impulseTimer.stopTimer();
     sourceLoader.removeAllJobs (true, 30000);
     if (morphPositionParam != nullptr)
         morphPositionParam->removeListener (&morphTouch);   // (the parameters outlive the engine: the shell's member order)
@@ -298,6 +339,9 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
                 reader.moveById (raw, id, offset);
     }
     auto patch = reader.read (raw);
+    fxReader.read (patch.fx);   // (the FX library's slots)
+    if (performance.bpm > 1.0)
+        patch.fx.bpm = performance.bpm;
     patch.effects.shaper.customSteps = shaperPattern;   // MOVEMENT SHAPER's CUSTOM (the shell's)
     patch.movementB.shaper.customSteps = shaperPatternB;   // (lane B's)
     synth.setPatch (patch);

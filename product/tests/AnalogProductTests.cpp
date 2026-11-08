@@ -13,7 +13,10 @@
 #include "RackControls.h"
 #include "ParameterRack.h"
 #include "AnalogRacks.h"
+#include "FxPresets.h"
+#include "FxRack.h"
 #include "FxRouting.h"
+#include "fx/Effects.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
 #include "SampleImport.h"
@@ -5991,5 +5994,226 @@ TEST_CASE ("analog: screenshots of FX ROUTING (ANALOG_SCREENSHOT_DIR)", "[.][scr
     {
         width = w;
         shoot ("routing-" + juce::String (w) + "-classic");
+    }
+}
+
+TEST_CASE ("analog: the FX rack - every new effect opens in the one 214 px module, its quick settings expand to it; views change nothing", "[analog][fx][rack][ui]")
+{
+    namespace fx = andor::analog::fx;
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    view->setSize (1180, 330);
+    for (int t = 4; t < fx::typeCount; ++t)
+        REQUIRE (view->insertNew (static_cast<fx::Type> (t)));
+    ui.refreshNow();
+    const auto before = allParameterValues (p);
+
+    std::optional<float> height;
+    for (int t = 4; t < fx::typeCount; ++t)
+    {
+        const fx::InstanceId id { static_cast<fx::Type> (t), 0 };
+        INFO (fx::typeName (id.type));
+        view->openEditor (id);
+        ui.refreshNow();
+        CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::fx });
+        CHECK (andor::analog::fxRackShown() == id);
+        auto* module = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));
+        REQUIRE (module != nullptr);
+        CHECK (module->captions().isNotEmpty());
+        // Another effect swaps the module: the rack keeps its height.
+        if (! height)
+            height = ui.instrumentHeight();
+        CHECK (ui.instrumentHeight() == Approx (*height));
+
+        // A click's quick settings: anchored inside the view, the same parameters (2-4 knobs);
+        // Return (EXPAND) closes them and shows the rack.
+        ui.setRackExpanded (Kind::fx, false);
+        view->showQuick (id);
+        auto* quick = view->quickPopover();
+        REQUIRE (quick != nullptr);
+        CHECK (quick->isVisible());
+        CHECK (view->getLocalBounds().contains (quick->getBounds()));
+        CHECK (view->quickShown() == id);
+        int knobs = 0;
+        for (auto* c : quick->getChildren())
+            knobs += dynamic_cast<osp::plugin::MiniKnob*> (c) != nullptr ? 1 : 0;
+        CHECK (knobs >= 2);
+        CHECK (knobs <= 4);
+        CHECK (quick->keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+        CHECK (view->quickPopover() == nullptr);
+        ui.refreshNow();
+        CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::fx });
+    }
+    // Esc closes the quick settings first (the view stays).
+    view->showQuick (fx::InstanceId { fx::Type::eq, 0 });
+    REQUIRE (view->quickPopover() != nullptr);
+    view->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+    CHECK (view->quickPopover() == nullptr);
+    CHECK (ui.sourceViewShown());
+    // The original four open their own racks (DRIVE its popover), never a copy.
+    view->openEditor ({ fx::Type::space, 0 });
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::space });
+    // Opening, swapping and closing never moved a parameter.
+    CHECK (allParameterValues (p) == before);
+}
+
+TEST_CASE ("analog: FX presets - every factory preset loads and reads as itself; a change marks it; a chain round-trips", "[analog][fx][presets]")
+{
+    namespace fx = andor::analog::fx;
+    namespace fxpresets = andor::analog::fxpresets;
+    ShellProcessor p;
+    for (int t = 4; t < fx::typeCount; ++t)
+    {
+        const auto type = static_cast<fx::Type> (t);
+        const fx::InstanceId id { type, 0 };
+        INFO (fx::typeName (type));
+        const auto& list = fxpresets::factory (type);
+        CHECK (list.size() >= 3);
+        for (const auto& preset : list)
+        {
+            INFO (preset.name);
+            fxpresets::apply (p, id, preset);
+            CHECK (fxpresets::matches (p, id, preset));
+        }
+        // Loading into slot 2 (where there is one) leaves slot 1 alone.
+        if (fx::capacity[static_cast<std::size_t> (t)] > 1)
+        {
+            const auto one = fxpresets::capture (p, id, "one");
+            fxpresets::apply (p, { type, 1 }, list.front());
+            CHECK (fxpresets::matches (p, id, one));
+        }
+        // A capture is the settings: applying it elsewhere copies them.
+        const auto here = fxpresets::capture (p, id, "here");
+        fxpresets::apply (p, id, {});
+        fxpresets::apply (p, id, here);
+        CHECK (fxpresets::matches (p, id, here));
+    }
+    // ON is never a preset's.
+    setValue (p, "analog.fx.eq.1.on", 0.0f);
+    fxpresets::apply (p, { fx::Type::eq, 0 }, fxpresets::factory (fx::Type::eq).front());
+    CHECK (p.parameters.getRawParameterValue ("analog.fx.eq.1.on")->load() < 0.5f);
+
+    // A chain: the route and its new effects' settings, read back exactly.
+    auto route = fx::classicGraph();
+    route.custom = true;
+    fx::insertEffect (route, {}, 0, fx::Node::effect ({ fx::Type::compressor, 0 }));
+    fx::insertEffect (route, {}, 1, fx::Node::effect ({ fx::Type::eq, 0 }));
+    fxpresets::apply (p, { fx::Type::compressor, 0 }, fxpresets::factory (fx::Type::compressor).back());
+    setValue (p, "analog.fx.eq.1.band2.gain", 4.5f);
+    const auto comp = fxpresets::capture (p, { fx::Type::compressor, 0 }, "c");
+    const auto xml = fxpresets::chainToXml (p, route, "Test chain");
+    REQUIRE (xml != nullptr);
+    setValue (p, "analog.fx.eq.1.band2.gain", -3.0f);
+    fxpresets::apply (p, { fx::Type::compressor, 0 }, {});
+    fx::Graph read;
+    REQUIRE (fxpresets::chainFromXml (p, *xml, read));
+    CHECK (read == route);
+    CHECK (p.parameters.getRawParameterValue ("analog.fx.eq.1.band2.gain")->load() == Approx (4.5f).margin (0.01));
+    CHECK (fxpresets::matches (p, { fx::Type::compressor, 0 }, comp));
+}
+
+TEST_CASE ("analog: CONVOLUTION builds its impulse off the audio thread, follows IMPULSE and DECAY, and sounds in a CUSTOM route", "[analog][fx][conv]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const auto dry = renderShell (p, 0.6);
+    auto ir = engine.convolutionImpulse (0);
+    REQUIRE (ir != nullptr);
+    const int chosen = juce::roundToInt (p.parameters.getRawParameterValue ("analog.fx.conv.1.impulse")->load());
+    CHECK (ir->name == fx::Impulse::factoryName (chosen));
+    CHECK (ir->lengthSamples > 0);
+
+    setValue (p, "analog.fx.conv.1.impulse", static_cast<float> ((chosen + 1) % fx::Impulse::factoryCount));
+    setValue (p, "analog.fx.conv.1.decay", 0.5f);
+    engine.updateConvolutionImpulses();
+    const auto next = engine.convolutionImpulse (0);
+    REQUIRE (next != nullptr);
+    CHECK (next->name == fx::Impulse::factoryName ((chosen + 1) % fx::Impulse::factoryCount));
+    CHECK (next->lengthSamples <= static_cast<int> (0.5 * 48000.0) + 1);
+    engine.updateConvolutionImpulses();
+    CHECK (engine.convolutionImpulse (0) == next);   // (nothing changed: not rebuilt)
+
+    // In a CUSTOM route after SPACE it is heard (and CLASSIC never hears it).
+    auto route = fx::classicGraph();
+    route.custom = true;
+    fx::insertEffect (route, {}, static_cast<int> (route.chain.size()), fx::Node::effect ({ fx::Type::convolution, 0 }));
+    setValue (p, "analog.fx.conv.1.mix", 60.0f);
+    REQUIRE (engine.setFxRoute (route));
+    const auto wet = renderShell (p, 0.6);
+    CHECK (differenceRms (dry, wet) > 1.0e-4);
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < wet.getNumSamples(); ++i)
+            REQUIRE (std::isfinite (wet.getSample (ch, i)));
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    CHECK (identical (dry, renderShell (p, 0.6)));
+}
+
+TEST_CASE ("analog: screenshots of the FX racks and quick settings (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-fx-racks]")
+{
+    namespace fx = andor::analog::fx;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    renderShell (p, 0.3);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    for (int t = 4; t < fx::typeCount; ++t)
+        view->insertNew (static_cast<fx::Type> (t));
+    for (int t = 4; t < fx::typeCount; ++t)
+    {
+        const fx::InstanceId id { static_cast<fx::Type> (t), 0 };
+        const auto name = juce::String (fx::typeName (id.type)).toLowerCase().replaceCharacter (' ', '-');
+        view->openEditor (id);
+        shoot ("fx-rack-" + name);
+        if (id.type == fx::Type::compressor || id.type == fx::Type::shifter || id.type == fx::Type::eq)
+        {
+            auto* rack = ui.effectsRack().module (osp::plugin::rack::Kind::fx);
+            if (id.type == fx::Type::compressor)
+                for (const int mode : { 1, 2 })
+                {
+                    setValue (p, "analog.fx.comp.1.mode", static_cast<float> (mode));
+                    shoot ("fx-rack-" + name + "-mode" + juce::String (mode));
+                }
+            if (id.type == fx::Type::shifter)
+            {
+                setValue (p, "analog.fx.shift.1.mode", 1.0f);
+                shoot ("fx-rack-" + name + "-blur");
+            }
+            juce::ignoreUnused (rack);
+        }
+        ui.setRackExpanded (osp::plugin::rack::Kind::fx, false);
+        view->showQuick (id);
+        shoot ("fx-quick-" + name);
+        view->showQuick (std::nullopt);
+    }
+    view->openEditor ({ fx::Type::eq, 0 });
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        shoot ("fx-rack-eq-" + juce::String (w));
     }
 }

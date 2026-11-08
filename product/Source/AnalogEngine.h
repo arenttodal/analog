@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AnalogParameters.h"
+#include "FxParameters.h"
 #include "ShellEngine.h"
 #include "Synth.h"
 
@@ -101,6 +102,13 @@ public:
     andor::analog::fx::Graph fxRoute() const;
     /** Called (message thread) whenever the route changes: an edit, a session or preset. */
     std::function<void()> onFxRouteChanged;
+    /** A new effect's processor (null for the original four, or before prepare): its meters. */
+    const andor::analog::fx::Processor* fxProcessor (andor::analog::fx::InstanceId id) const;
+    /** The impulse CONVOLUTION `slot` plays (null: none yet). */
+    std::shared_ptr<const andor::analog::fx::Impulse> convolutionImpulse (int slot) const;
+    /** Builds the impulse each CONVOLUTION needs when IMPULSE, DECAY, SIZE, REVERSE, NORMALIZE or
+        the rate changed (not on the audio thread: prepare() and a 10 Hz timer call it). */
+    void updateConvolutionImpulses();
     void restoreState (const juce::XmlElement& state, const juce::File& assetFolder) override;
     /** Message thread: a definition to play (null: none), its recordings in `assetFolder`. */
     void setSampleSourceDefinition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder);
@@ -155,6 +163,23 @@ private:
 
     int oversamplingFactor;
     Synth synth;
+    andor::analog::fxparams::Reader fxReader;   ///< the FX library's slots (analog.fx.*)
+    struct ImpulseTimer final : juce::Timer
+    {
+        AnalogEngine* engine = nullptr;
+        void timerCallback() override { engine->updateConvolutionImpulses(); }
+    } impulseTimer;
+    struct ImpulseKey
+    {
+        int impulse = -1;
+        float decay = 0.0f, size = 0.0f;
+        bool reverse = false, normalize = false;
+        double rate = 0.0;
+        bool operator== (const ImpulseKey&) const = default;
+    };
+    std::mutex impulseMutex;
+    std::array<ImpulseKey, andor::analog::fx::capacity[static_cast<std::size_t> (andor::analog::fx::Type::convolution)]> impulseKeys {};
+    std::uint64_t impulseGeneration = 0;
     mutable std::mutex routeMutex;   ///< (a host may save from another thread)
     andor::analog::fx::Graph route = andor::analog::fx::classicGraph();
     std::uint64_t routeGeneration = 1;

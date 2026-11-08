@@ -62,4 +62,23 @@ build cannot play is refused (`setFxRoute` returns false; nothing changes).
 | --- | --- |
 | 0 | `[fx][legacy]` 114 frozen renders (`tests/golden/fx-baseline-renders.txt`) |
 | 1 | `[fx][graph]` saved form, validation; `[fx][route]` CLASSIC bit for bit with a route present; `[analog][fx][state]` |
+| 2 | `[analog][fx][routing][ui]` the icon beside SAVE, the view in the cards' place, drops, stacks, undo, Restore original, bypass, the library |
 | 3 | `[fx][route]` CUSTOM classic = CLASSIC (< -100 dB), other orders, ECHO -> SPACE only when wired, linear unity, bypass tails, route swaps |
+| 4 | `[analog][fx][rack][ui]` every new effect in the one FX rack (height kept), quick settings in the view, EXPAND / Esc; `[analog][fx][presets]` factory presets, slots, ON never a preset's, chain round trip |
+| 5, 7 | `analog_dsp_tests [fx][effects]` each processor measured (docs/FX_EFFECTS_LIBRARY.md); `[analog][fx][conv]` impulse built off the audio thread, follows IMPULSE / DECAY, heard in CUSTOM, CLASSIC bit for bit after |
+
+## The interface (gates 2 and 4)
+
+- A tile's click: its quick settings (FxRack's `createFxQuickPopover`), anchored to it; a
+  double-click, EXPAND or Return: its full rack (`openFxRack`: the new effects' `rack::Kind::fx`
+  module, the original four their own racks, DRIVE its popover). Esc closes the popover first.
+- A long chain pans (the wheel; a chosen tile pans into view) under a fade before OUTPUT, which
+  is never covered; scrolled-out tiles are not hit.
+- The gear: Restore original, Save FX chain, Load FX chain, Show chains folder.
+
+## Not built yet
+
+Gates 6 (BUS 1 / BUS 2 and per-card stems), 8 (splitters in the engine, latency alignment of
+parallel lanes and host latency reporting), 9 (the Advanced view), 10 (Lock FX), user impulse
+files for CONVOLUTION, and DRIVE's creative modes. Splitter nodes are in the graph grammar and
+validated, but `compile` refuses them until the engine plays them.
