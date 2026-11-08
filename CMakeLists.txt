@@ -59,6 +59,7 @@ if(OSP_BUILD_TESTS)
         tests/EnvelopeTests.cpp
         tests/VoiceTests.cpp
         tests/RenderTests.cpp
+        tests/FxBaselineTests.cpp
         tests/RealtimeTests.cpp
         tests/LiveTests.cpp
         tests/ModulationTests.cpp
