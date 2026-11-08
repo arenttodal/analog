@@ -22,6 +22,7 @@
 #include "engine/MirageEngine.h"
 #include "engine/Modulation.h"
 #include "engine/PostProcessor.h"
+#include "fx/FxEngine.h"
 #include "engine/ReimaginedStage.h"
 #include "engine/TapeFrameEngine.h"
 #include "engine/ToyboxEngine.h"
@@ -111,6 +112,12 @@ public:
     void setKeyDnaAmount (double amount) noexcept { keyDna.amount = std::clamp (amount, 0.0, 1.0); }
     /** MOVEMENT SHAPER's playhead (0..1), for its picture. */
     float shaperPhase() const noexcept { return effects.shaperPhase(); }
+
+    /** The FX route (message thread; null or CLASSIC: the original chain, bit for bit). */
+    void setFxGraph (std::shared_ptr<const fx::CompiledGraph> graph) { router.setGraph (std::move (graph)); }
+    void collectFxGarbage() { router.collectGarbage(); }
+    bool fxCustomPlaying() const noexcept { return router.playingCustom(); }
+    const fx::FxEngine& fxEngine() const noexcept { return router; }
     /** A MOVEMENT lane's SHAPER playhead (0 A, 1 B), -1 when idle. */
     float shaperPhase (int lane) const noexcept { return effects.shaperPhase (lane); }
 
@@ -523,6 +530,7 @@ private:
     std::unique_ptr<morph::LiveMorph::Shared> morphShared;   ///< MORPH's transforms and windows (every voice's)
     JunoChorus chorus;            ///< state version 4: the chorus after the voices (off: bit-exact bypass)
     osp::PostProcessor effects;
+    fx::FxEngine router;   ///< plays `effects` as they always were (CLASSIC), or the musician's route
     float dcL = 0.0f, dcR = 0.0f, dcStateL = 0.0f, dcStateR = 0.0f, dcCoef = 0.0f;
 
     std::atomic<int> sounding { 0 };

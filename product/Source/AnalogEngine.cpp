@@ -74,15 +74,62 @@ AnalogEngine::~AnalogEngine()
 
 void AnalogEngine::saveState (juce::XmlElement& state) const
 {
-    const std::lock_guard<std::mutex> lock (sourceMutex);
-    if (sourceDefinition != nullptr)
-        state.addChildElement (new juce::XmlElement (*sourceDefinition));
+    {
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        if (sourceDefinition != nullptr)
+            state.addChildElement (new juce::XmlElement (*sourceDefinition));
+    }
+    // State version 12: the FX route, only once it is CUSTOM (absent: CLASSIC, as every session
+    // and preset from before is).
+    const std::lock_guard<std::mutex> lock (routeMutex);
+    if (route.custom)
+    {
+        auto* fx = state.createNewChildElement ("FxRouting");
+        fx->setAttribute ("schema", andor::analog::fx::Graph::schema);
+        fx->setAttribute ("graph", juce::String (andor::analog::fx::toText (route)));
+    }
+}
+
+bool AnalogEngine::setFxRoute (const andor::analog::fx::Graph& next)
+{
+    std::shared_ptr<const andor::analog::fx::CompiledGraph> compiled;
+    {
+        const std::lock_guard<std::mutex> lock (routeMutex);
+        if (next.custom)
+        {
+            compiled = andor::analog::fx::compile (next, ++routeGeneration);
+            if (compiled == nullptr)
+                return false;
+        }
+        route = next;
+    }
+    synth.setFxGraph (std::move (compiled));   // (null: CLASSIC)
+    synth.collectFxGarbage();
+    if (onFxRouteChanged != nullptr)
+        onFxRouteChanged();
+    return true;
+}
+
+andor::analog::fx::Graph AnalogEngine::fxRoute() const
+{
+    const std::lock_guard<std::mutex> lock (routeMutex);
+    return route;
 }
 
 void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File& assetFolder)
 {
     const auto* definition = state.getChildByName ("SampleSource");
     setSampleSourceDefinition (definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr, assetFolder.getChildFile ("Imported"));
+    // The FX route (state version 12): absent or unreadable, CLASSIC.
+    auto saved = andor::analog::fx::classicGraph();
+    if (const auto* fx = state.getChildByName ("FxRouting"))
+    {
+        andor::analog::fx::Graph read;
+        if (andor::analog::fx::fromText (fx->getStringAttribute ("graph").toStdString(), read))
+            saved = read;
+    }
+    if (! setFxRoute (saved))
+        setFxRoute (andor::analog::fx::classicGraph());
     // State version 8: before it, an imported source played whenever it was there; now card C
     // plays it as its INSTRUMENT PATCH (a session or preset from before keeps its sound).
     if (definition != nullptr && state.getIntAttribute ("productVersion", 1) < 8)

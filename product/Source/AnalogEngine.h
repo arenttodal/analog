@@ -93,6 +93,14 @@ public:
     // element, import::makeDefinition) is kept with presets and sessions; its recordings load on
     // their own thread and reach the audio thread through an exchange, in ORGANIC's place.
     void saveState (juce::XmlElement& state) const override;
+
+    /** The FX route (docs/FX_ROUTING_IMPLEMENTATION.md). Message thread. setFxRoute compiles and
+        hands it to the audio thread; an invalid graph (or one holding an effect this build cannot
+        play) is refused - false, nothing changes. CLASSIC (custom false): the original chain. */
+    bool setFxRoute (const andor::analog::fx::Graph& route);
+    andor::analog::fx::Graph fxRoute() const;
+    /** Called (message thread) whenever the route changes: an edit, a session or preset. */
+    std::function<void()> onFxRouteChanged;
     void restoreState (const juce::XmlElement& state, const juce::File& assetFolder) override;
     /** Message thread: a definition to play (null: none), its recordings in `assetFolder`. */
     void setSampleSourceDefinition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder);
@@ -147,6 +155,9 @@ private:
 
     int oversamplingFactor;
     Synth synth;
+    mutable std::mutex routeMutex;   ///< (a host may save from another thread)
+    andor::analog::fx::Graph route = andor::analog::fx::classicGraph();
+    std::uint64_t routeGeneration = 1;
     params::Reader reader;
     osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
     osp::ShaperPattern shaperPatternB = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);  ///< MOVEMENT lane B's (audio thread)

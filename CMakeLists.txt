@@ -42,7 +42,10 @@ add_library(analog_dsp STATIC
     dsp/JunoChorus.cpp
     dsp/morph/LiveMorph.cpp
     dsp/LiveGranulator.cpp
-    dsp/Synth.cpp)
+    dsp/Synth.cpp
+    dsp/fx/FxGraph.cpp
+    dsp/fx/FxEngine.cpp
+    dsp/fx/FxProcessors.cpp)
 target_include_directories(analog_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/dsp)
 target_link_libraries(analog_dsp PUBLIC osp_dsp)
 set_target_properties(analog_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -60,6 +63,7 @@ if(OSP_BUILD_TESTS)
         tests/VoiceTests.cpp
         tests/RenderTests.cpp
         tests/FxBaselineTests.cpp
+        tests/FxGraphTests.cpp
         tests/RealtimeTests.cpp
         tests/LiveTests.cpp
         tests/ModulationTests.cpp

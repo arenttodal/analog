@@ -5753,3 +5753,70 @@ TEST_CASE ("analog: screenshots of the FILTER (FILTER, VOICE, PAIR) and MORPH ra
         ui.setArpExpanded (false);
     }
 }
+
+namespace
+{
+    const juce::XmlElement* findElement (const juce::XmlElement& root, const juce::String& name)
+    {
+        if (root.hasTagName (name))
+            return &root;
+        for (const auto* c : root.getChildIterator())
+            if (const auto* found = findElement (*c, name))
+                return found;
+        return nullptr;
+    }
+}
+
+TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, old or unreadable, CLASSIC (state 12)", "[analog][fx][state]")
+{
+    namespace fx = andor::analog::fx;
+    auto custom = fx::classicGraph();
+    custom.custom = true;
+    std::swap (custom.chain[0], custom.chain[1]);   // MOVEMENT before DRIVE
+    juce::MemoryBlock classicSession, customSession;
+    {
+        ShellProcessor p;
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        CHECK (engine.fxRoute() == fx::classicGraph());
+        p.getStateInformation (classicSession);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
+        REQUIRE (xml != nullptr);
+        CHECK (xml->getIntAttribute ("productVersion") == 12);
+        CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
+
+        // A graph this build cannot play is refused; the route stays.
+        auto refused = fx::classicGraph();
+        refused.custom = true;
+        refused.chain.push_back (refused.chain[0]);   // DRIVE twice
+        CHECK_FALSE (engine.setFxRoute (refused));
+        CHECK (engine.fxRoute() == fx::classicGraph());
+
+        int changed = 0;
+        engine.onFxRouteChanged = [&changed] { ++changed; };
+        REQUIRE (engine.setFxRoute (custom));
+        CHECK (changed == 1);
+        p.getStateInformation (customSession);
+        engine.onFxRouteChanged = nullptr;
+    }
+    {
+        ShellProcessor q;
+        q.setStateInformation (customSession.getData(), static_cast<int> (customSession.getSize()));
+        CHECK (dynamic_cast<AnalogEngine&> (q.productEngine()).fxRoute() == custom);
+        // A session or preset without a route (every one from before) brings CLASSIC back.
+        q.setStateInformation (classicSession.getData(), static_cast<int> (classicSession.getSize()));
+        CHECK (dynamic_cast<AnalogEngine&> (q.productEngine()).fxRoute() == fx::classicGraph());
+    }
+    {
+        // A state version 11 session (no route) and an unreadable route: CLASSIC.
+        auto xml = juce::AudioProcessor::getXmlFromBinary (customSession.getData(), static_cast<int> (customSession.getSize()));
+        REQUIRE (xml != nullptr);
+        auto* routing = const_cast<juce::XmlElement*> (findElement (*xml, "FxRouting"));
+        REQUIRE (routing != nullptr);
+        routing->setAttribute ("graph", "v1 custom fx nonsense.4 on");
+        juce::MemoryBlock broken;
+        juce::AudioProcessor::copyXmlToBinary (*xml, broken);
+        ShellProcessor r;
+        r.setStateInformation (broken.getData(), static_cast<int> (broken.getSize()));
+        CHECK (dynamic_cast<AnalogEngine&> (r.productEngine()).fxRoute() == fx::classicGraph());
+    }
+}

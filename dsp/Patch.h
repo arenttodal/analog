@@ -6,6 +6,7 @@
 #include "engine/Modulation.h"
 #include "engine/ReimaginedModes.h"
 #include "engine/Shaping.h"
+#include "fx/FxSettings.h"
 
 #include <algorithm>
 #include <cmath>
@@ -264,6 +265,9 @@ struct Patch
     double space = 0.10;          ///< wet 0..1
     double echo = 0.0;            ///< wet 0..1
     osp::Shaping effects;
+    /** State version 12: the FX library's effects (analog.fx.*), each slot's settings. They play
+        only where the FX route (Synth::setFxGraph) holds them: never in CLASSIC. */
+    fx::Settings fx;
 
     // State version 4: the chorus after the voices (0 OFF, 1 I, 2 II, 3 I+II), ORGANIC, MORPH.
     int chorusMode = 0;

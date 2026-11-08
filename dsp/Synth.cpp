@@ -156,6 +156,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     lfoCurve = osp::mod::compileCurve (osp::mod::defaultLfoCurve());
 
     effects.prepare (hostRate, maxBlock, 1);
+    router.prepare (hostRate, maxBlock);
     chorus.prepare (hostRate, maxBlock);
     dcCoef = static_cast<float> (1.0 - 2.0 * math::pi * 5.0 / hostRate);
     reset();
@@ -234,7 +235,9 @@ void Synth::reset() noexcept
     effects.setShaping (current.effects);
     effects.setMovementLanes (current.movementA.on, current.movementA.level, current.movementBLane.on, current.movementBLane.level, current.movementB);
     effects.setMacros (macros);
+    router.setSettings (current.fx);
     effects.reset();
+    router.reset();
     chorus.reset();
     kaleidoscopeStage.reset();
     dcL = dcR = 0.0f;
@@ -278,6 +281,7 @@ void Synth::setPatch (const Patch& patch) noexcept
     effects.setShaping (current.effects);
     effects.setMovementLanes (current.movementA.on, current.movementA.level, current.movementBLane.on, current.movementBLane.level, current.movementB);
     effects.setMacros (macros);
+    router.setSettings (current.fx);
     const auto& rs = current.reimaginedSettings;
     kaleidoscopeStage.setAmount (rs.mode == osp::ReimaginedMode::kaleidoscope ? current.reimagined : 0.0);
     kaleidoscopeStage.setShape (rs.kaleidoscope.focus, rs.kaleidoscope.spread);
@@ -2157,7 +2161,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
             }
             kaleidoscopeStage.process (left[i], right[i]);
         }
-    effects.process (left, right, numSamples);
+    router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
     const float out = math::dbToGain (current.outputDb);
     for (int i = 0; i < numSamples; ++i)
     {
