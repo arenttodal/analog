@@ -44,7 +44,7 @@ sum (nonlinear: `Filter (a + b) != Filter (a) + Filter (b)`).
 ## Frozen baselines
 
 - `tests/golden/fx-baseline-renders.txt` (`tests/FxBaselineTests.cpp`, `[fx][legacy]`): 114
-  renders - every factory sound (80) and a post-voice matrix: DRIVE's three modes at two amounts,
+  renders - every factory sound (44) and a post-voice matrix (70): DRIVE's three modes at two amounts,
   MOVEMENT's five modes alone and all 25 lane-A x lane-B pairs, ECHO's three machines x three
   stereo modes plus free time (2 s with tails), SPACE's four rooms, ABYSS, VINTAGE, BLOOM and
   frozen ABYSS (2.5 s), the full chain (also 16 voices, repeated notes, silence), the chorus
