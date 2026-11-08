@@ -106,3 +106,13 @@ Baseline for `ANDOR_APPROVED_EFFECTS_CLAUDE_IMPLEMENTATION_SPEC.md` and
 3. **ROOM / SPRING**: the spec lists six controls (no LOW CUT / HIGH CUT), but both cuts are real for every room type.
 4. **Layout families**: the spec asks for two (Standard, Dense) and a fixed 294 px PRESET; the build has three (compact / medium / dense) with the picture widening leftward, from the previous request.
 5. **BBD CLOCK**: not exposed by the DSP (see ECHO); BBD keeps AGE, as the spec allows.
+
+## Decisions (product owner, 2026-11-08)
+
+- Design references: the HTML prototypes and review PNGs will be uploaded; G1 (the ceramic
+  switch, segmented and stepped-rate components) starts from them, not from the text alone.
+- PULSE: INTENSITY · TIMING · RATE · SHAPE · STEREO · **PHASE** (PHASE kept as the sixth,
+  active when synced).
+- ROOM and SPRING keep all eight controls (LOW CUT and HIGH CUT are real for every room type).
+- Layout: the approved spec's two families (Standard, Dense) with fixed-width MODE (165) and
+  PRESET (294) replace the three-density layout.
