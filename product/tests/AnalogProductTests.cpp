@@ -10,6 +10,7 @@
 #include "CeramicSkin.h"
 #include "FactoryPatches.h"
 #include "MacroPopups.h"
+#include "RackControls.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
 #include "SampleImport.h"
@@ -3873,7 +3874,7 @@ TEST_CASE ("analog: the MOVEMENT rack shows each lane, its ON and its INTENSITY"
     setValue (p, params::movementBPrefix + "mode", 3.0f);
     setValue (p, params::movementLaneId (1, "sync"), 1.0f);
     ui.refreshNow();
-    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY TIMING CYCLE SHAPE STEREO PHASE");   // PULSE synced: CYCLE as a key
+    CHECK (osp::plugin::rackMovementCaptions (*module) == "INTENSITY TIMING RATE SHAPE STEREO PHASE");   // PULSE synced: CYCLE as a key
 }
 
 TEST_CASE ("analog: screenshots of MOVEMENT's two lanes in the rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-lanes]")
@@ -3964,7 +3965,7 @@ TEST_CASE ("analog: ECHO and SPACE expand into the rack, one module at a time, e
     CHECK (osp::plugin::rackMovementCaptions (*space) == "PRE-DELAY SIZE DECAY DAMP MOD WIDTH LOW CUT HIGH CUT");
     for (const auto& [engine, captions] : { std::pair { 1.0f, "PRE-DELAY SIZE DECAY DAMP GRAVITY RESONANCE MOD WIDTH FREEZE" },
                                             std::pair { 2.0f, "PRE-DELAY SIZE DECAY DAMP DIFFUSION MOD WIDTH ERA" },
-                                            std::pair { 3.0f, "TIME DIFFUSION DECAY DAMP SYNC SIZE MOD WIDTH" } })
+                                            std::pair { 3.0f, "TIME DIFFUSION DECAY DAMP TIMING SIZE MOD WIDTH" } })
     {
         setValue (p, "space.engine", engine);
         ui.refreshNow();
@@ -4198,9 +4199,8 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
     {
         INFO (osp::plugin::rack::name (kind));
         CHECK (slots[kind][0] == slots[Kind::movement][0]);                   // MODE: same place and size
-        CHECK (slots[kind][1].getPosition() == slots[Kind::movement][1].getPosition());   // PRESET: beside it
-        CHECK (slots[kind][1].getHeight() == slots[Kind::movement][1].getHeight());       // (its width: the layout's)
-        CHECK (slots[kind][2] == slots[Kind::movement][2]);                   // the first control: one place, one size
+        CHECK (slots[kind][1] == slots[Kind::movement][1]);                   // PRESET: beside it, fixed width
+        CHECK (slots[kind][2].getPosition() == slots[Kind::movement][2].getPosition());   // the first control: one origin
         CHECK (slots[kind][3].getRight() == slots[Kind::movement][3].getRight());   // the picture: its right edge fixed,
         CHECK (slots[kind][3].getY() == slots[Kind::movement][3].getY());           // its height the same
         CHECK (slots[kind][3].getHeight() == slots[Kind::movement][3].getHeight());
@@ -4208,7 +4208,10 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
     }
     CHECK (heights[Kind::space] <= 216.0f);   // never taller than the macro panel
     CHECK (slots[Kind::space][1].getX() > slots[Kind::space][0].getRight());   // PRESET right of MODE
-    CHECK (slots[Kind::space][1].getWidth() > 2 * slots[Kind::space][0].getWidth());   // ... and larger
+    CHECK (slots[Kind::space][0].getWidth() == 165);   // approved MODE 165 x 27
+    CHECK (slots[Kind::space][0].getHeight() == 27);
+    CHECK (slots[Kind::space][1].getWidth() == 294);   // approved PRESET 294 x 27: never stretched
+    CHECK (slots[Kind::space][1].getHeight() == 27);
 
     // SHAPER's precision editor (its magnifier): the one module that may be taller.
     ui.setRackExpanded (Kind::movement, true);
@@ -4225,7 +4228,7 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
     CHECK (ui.effectsRack().height() == Approx (heights[Kind::movement]));
 }
 
-TEST_CASE ("analog: each rack mode has its layout - compact, medium or dense - and nothing but a mode change moves it", "[analog][rack][unified][density]")
+TEST_CASE ("analog: the approved rack layout - each module's graph column fixed, the slot families, nothing moves while editing", "[analog][rack][unified][density]")
 {
     using osp::plugin::rack::Kind;
     Scratch scratch;
@@ -4238,15 +4241,16 @@ TEST_CASE ("analog: each rack mode has its layout - compact, medium or dense - a
     {
         Kind kind;
         const char* id;
-        int mode, density;
+        int mode, dense;
     };
-    // MOVEMENT DRIFT / TAPE / CHORUS: four controls (compact); PULSE, SHAPER six (medium);
-    // ECHO TAPE / BBD six (medium), ASCEND eight (dense); SPACE eight or nine (dense).
+    // MOVEMENT's five modes, ECHO TAPE / BBD (six controls: standard), ASCEND (eight: dense),
+    // SPACE (eight or nine: dense).
     const Case cases[] { { Kind::movement, "movement.mode", 0, 0 }, { Kind::movement, "movement.mode", 1, 0 }, { Kind::movement, "movement.mode", 2, 0 },
-                         { Kind::movement, "movement.mode", 3, 1 }, { Kind::movement, "movement.mode", 4, 1 }, { Kind::echo, "echo.type", 0, 1 },
-                         { Kind::echo, "echo.type", 1, 1 },         { Kind::echo, "echo.type", 2, 2 },         { Kind::space, "space.engine", 0, 2 },
-                         { Kind::space, "space.engine", 1, 2 },     { Kind::space, "space.engine", 2, 2 },     { Kind::space, "space.engine", 3, 2 } };
-    std::map<int, juce::Rectangle<int>> pictureBy;
+                         { Kind::movement, "movement.mode", 3, 0 }, { Kind::movement, "movement.mode", 4, 0 }, { Kind::echo, "echo.type", 0, 0 },
+                         { Kind::echo, "echo.type", 1, 0 },         { Kind::echo, "echo.type", 2, 1 },         { Kind::space, "space.engine", 0, 1 },
+                         { Kind::space, "space.engine", 1, 1 },     { Kind::space, "space.engine", 2, 1 },     { Kind::space, "space.engine", 3, 1 } };
+    std::map<Kind, juce::Rectangle<int>> pictureOf;
+    std::optional<int> pictureRight;
     for (const auto& c : cases)
     {
         INFO (osp::plugin::rack::name (c.kind) << " mode " << c.mode);
@@ -4255,17 +4259,27 @@ TEST_CASE ("analog: each rack mode has its layout - compact, medium or dense - a
         ui.refreshNow();
         auto* module = ui.effectsRack().module (c.kind);
         REQUIRE (module != nullptr);
-        CHECK (osp::plugin::rackDensity (*module) == c.density);
+        CHECK (osp::plugin::rackDensity (*module) == c.dense);
+        // The graph: the module's column, whatever its mode; its right edge every module's.
         const auto picture = osp::plugin::rackSlot (*module, 5);
-        if (pictureBy.count (c.density) == 0)
-            pictureBy[c.density] = picture;
-        CHECK (picture == pictureBy[c.density]);   // one picture per layout, whichever module
-        // The cells all fit before the divider, and the picture is wider with fewer controls.
-        const auto first = osp::plugin::rackSlot (*module, 4);
-        CHECK ((first.getX() + 9 * first.getWidth() <= picture.getX() || c.density < 2));
+        if (pictureOf.count (c.kind) == 0)
+            pictureOf[c.kind] = picture;
+        CHECK (picture == pictureOf[c.kind]);
+        if (! pictureRight)
+            pictureRight = picture.getRight();
+        CHECK (picture.getRight() == *pictureRight);
+        CHECK (picture.getHeight() == 160);
+        // The cells: left-aligned from one origin on the approved slot widths, all before the
+        // divider; knobs never shrink (59 px in every family).
+        const auto cells = osp::plugin::rackCellBounds (*module);
+        REQUIRE (! cells.empty());
+        CHECK (cells.front().getX() == 20);
+        CHECK (cells.back().getRight() + 17 < picture.getX() - 18);
+        for (std::size_t i = 1; i < cells.size(); ++i)
+            CHECK (cells[i].getX() - cells[i - 1].getRight() == (c.dense ? 5 : 7));
         // Presets of the mode, values, automation: nothing moves.
-        std::array<juce::Rectangle<int>, 4> before;
-        for (int s = 2; s <= 5; ++s)
+        std::array<juce::Rectangle<int>, 5> before;
+        for (int s = 2; s <= 6; ++s)
             before[static_cast<std::size_t> (s - 2)] = osp::plugin::rackSlot (*module, s);
         osp::plugin::rackPresetStep (*module, 1);
         osp::plugin::rackPresetStep (*module, 1);
@@ -4276,17 +4290,92 @@ TEST_CASE ("analog: each rack mode has its layout - compact, medium or dense - a
                     param->setValueNotifyingHost (0.37f);
         ui.refreshNow();
         CHECK (juce::roundToInt (p.parameterValue (c.id)) == c.mode);
-        for (int s = 2; s <= 5; ++s)
+        for (int s = 2; s <= 6; ++s)
         {
             INFO ("slot " << s);
             CHECK (osp::plugin::rackSlot (*module, s) == before[static_cast<std::size_t> (s - 2)]);
         }
+        CHECK (osp::plugin::rackCellBounds (*module) == osp::plugin::rackCellBounds (*module));
     }
-    REQUIRE (pictureBy.size() == 3);
-    CHECK (pictureBy[0].getRight() == pictureBy[2].getRight());
-    CHECK (pictureBy[0].getX() < pictureBy[1].getX());
-    CHECK (pictureBy[1].getX() < pictureBy[2].getX());
+    // The approved columns: MOVEMENT 57 %, ECHO 61 %, SPACE 68 % of the content: SPACE's
+    // graph the narrowest, MOVEMENT's the widest.
+    CHECK (pictureOf[Kind::movement].getX() < pictureOf[Kind::echo].getX());
+    CHECK (pictureOf[Kind::echo].getX() < pictureOf[Kind::space].getX());
+
+    // FREE <-> SYNC: one RATE / TIME knob in one place; only its domain changes.
+    for (const auto& [kind, modeId, mode, syncId, caption] :
+         { std::tuple { Kind::movement, "movement.mode", 3, params::movementLaneId (0, "sync"), "RATE" }, std::tuple { Kind::echo, "echo.type", 0, juce::String ("echo.sync"), "TIME" } })
+    {
+        INFO (osp::plugin::rack::name (kind));
+        ui.setRackExpanded (kind, true);
+        setValue (p, modeId, static_cast<float> (mode));
+        setValue (p, syncId, 0.0f);
+        ui.refreshNow();
+        auto* module = ui.effectsRack().module (kind);
+        const auto freeCells = osp::plugin::rackCellBounds (*module);
+        auto* freeKnob = dynamic_cast<osp::plugin::MiniKnob*> (osp::plugin::rackCell (*module, caption));
+        REQUIRE (freeKnob != nullptr);
+        const auto freeBounds = freeKnob->getBoundsInParent();
+        CHECK (freeKnob->slider.getInterval() < 1.0);   // continuous when free (the parameter's own fine step)
+        setValue (p, syncId, 1.0f);
+        ui.refreshNow();
+        auto* syncKnob = dynamic_cast<osp::plugin::MiniKnob*> (osp::plugin::rackCell (*module, caption));
+        REQUIRE (syncKnob != nullptr);
+        CHECK (syncKnob->getBoundsInParent() == freeBounds);
+        CHECK (osp::plugin::rackCellBounds (*module) == freeCells);
+        CHECK (syncKnob->slider.getInterval() == 1.0);   // detents when synced (the engine's note values)
+    }
     osp::plugin::setRackPresetFolderForTest ({});
+}
+
+TEST_CASE ("analog: the racks' switches are their parameters - TIMING, STEREO, FREEZE, TARGET, the lane's power", "[analog][rack][unified][switches]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rackui::VerticalSwitch;
+    using osp::plugin::rackui::SegmentedSwitch;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    // ECHO: TIMING (FREE up, SYNC down), STEREO (MONO / PING / WIDE), both following the host.
+    ui.setRackExpanded (Kind::echo, true);
+    ui.refreshNow();
+    auto* echo = ui.effectsRack().module (Kind::echo);
+    auto* timing = dynamic_cast<VerticalSwitch*> (osp::plugin::rackCell (*echo, "TIMING"));
+    auto* stereo = dynamic_cast<VerticalSwitch*> (osp::plugin::rackCell (*echo, "STEREO"));
+    REQUIRE (timing != nullptr);
+    REQUIRE (stereo != nullptr);
+    CHECK (timing->positionCount() == 2);
+    CHECK (stereo->positionCount() == 3);
+    timing->choose (0);
+    CHECK (p.parameterValue ("echo.sync") < 0.5f);
+    stereo->choose (2);
+    CHECK (juce::roundToInt (p.parameterValue ("echo.stereo")) == 2);   // Wide
+    setValue (p, "echo.stereo", 0.0f);
+    CHECK (stereo->positionIndex() == 0);   // automation moves the actuator
+    // SPACE ABYSS: FREEZE a real ON / OFF.
+    ui.setRackExpanded (Kind::space, true);
+    setValue (p, "space.engine", 1.0f);
+    ui.refreshNow();
+    auto* freeze = dynamic_cast<VerticalSwitch*> (osp::plugin::rackCell (*ui.effectsRack().module (Kind::space), "FREEZE"));
+    REQUIRE (freeze != nullptr);
+    freeze->choose (0);
+    CHECK (p.parameterValue ("space.abyss.freeze") >= 0.5f);
+    freeze->choose (1);
+    CHECK (p.parameterValue ("space.abyss.freeze") < 0.5f);
+    // MOVEMENT SHAPER: TARGET three-way segmented, not a list.
+    ui.setRackExpanded (Kind::movement, true);
+    setValue (p, "movement.mode", 4.0f);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    auto* target = dynamic_cast<SegmentedSwitch*> (osp::plugin::rackCell (*movement, "TARGET"));
+    REQUIRE (target != nullptr);
+    target->choose (0);
+    CHECK (juce::roundToInt (p.parameterValue ("movement.shaper.target")) == 0);
+    auto* rate = dynamic_cast<osp::plugin::MiniKnob*> (osp::plugin::rackCell (*movement, "RATE"));
+    REQUIRE (rate != nullptr);   // a stepped rotary, not a list or a stepper
+    CHECK (rate->slider.getInterval() == 1.0);
+    CHECK (rate->slider.getMaximum() == 5.0);   // the engine's six divisions, none invented
 }
 
 TEST_CASE ("analog: rack presets - by mode, the arrows, NAME * once edited, CUSTOM, your own, nothing else touched", "[analog][rack][unified][rackpresets]")
@@ -4410,7 +4499,7 @@ TEST_CASE ("analog: every rack's first control sits at one X, in every mode; the
                 reference = cell;
             CHECK (cell.getX() == reference->getX());           // left-aligned on one grid
             CHECK (cell.getY() == reference->getY());
-            CHECK (cell.getWidth() == reference->getWidth());   // one pitch
+            CHECK (cell.getWidth() == (osp::plugin::rackDensity (*module) == 1 ? 89 : 104));   // a knob's slot in its family
         }
     };
     check (Kind::space, "space.engine", 5);

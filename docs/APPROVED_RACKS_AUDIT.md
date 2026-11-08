@@ -116,3 +116,48 @@ Baseline for `ANDOR_APPROVED_EFFECTS_CLAUDE_IMPLEMENTATION_SPEC.md` and
 - ROOM and SPRING keep all eight controls (LOW CUT and HIGH CUT are real for every room type).
 - Layout: the approved spec's two families (Standard, Dense) with fixed-width MODE (165) and
   PRESET (294) replace the three-density layout.
+
+## Implementation (G1 – G4, FILTER and MORPH)
+
+### Shared components (OSP `shared/andor-ui`, opt-in: only the racks build them)
+
+| Component | File | Approved source | Notes |
+|---|---|---|---|
+| `rackui::VerticalSwitch` (slot) | RackControls.* | rack HTML `.vertical-track` 20 × 61, radius 11, 2 px `#c7bfb2` rim, `#18191a/#393535/#18191a` channel; `.actuator` 17 × 19, radius 9, 145° `#fffdf4 → #dad2c6 (73 %) → #b6aea4`; travel 39 px; labels 9 px | two positions: labels above / below; three: labels to the right over 75 px; click a label or the slot, drag snaps, ↑ ↓ Home End, Space / Return; named undo transaction; accessibility value by name ("Ping-Pong") |
+| `rackui::VerticalSwitch` (mini) | RackControls.* | `.miniSwitch` 16 × 26, radius 9, `#322f2d`, rim `#b3aca2`, thumb 10 × 12 `#faf6ed → #d6cfc4`, 9 px travel | header ON (MOVEMENT's lane, MORPH); "ON" word 9 px `#777069` beside it |
+| `rackui::SegmentedSwitch` | RackControls.* | `.segChoice` 27 px, radius 4, `#eee9e0`, edge `#c8bdb0`, dividers `#cfc6ba`, 10 px text; active `#ccdee4` / `#476a7d`, inset shadow | other modules: the same saturation and brightness in their hue |
+| `rackui::LaneKey` | RackControls.* | `.lane` 40 × 23, radius 4, `#eeeae3`/`#cec6bb`; active `#d9e5ea`/`#8cabbc`/`#3b5868`; LED 5 px `#6798b2` / `#b8b2a9`; 2 px apart | right-click / Shift+F10: copy, swap |
+| Stepped rate knob | `MiniKnob::setDetents` | rate study `.tickring` 2 × 5 px ticks `#aaa49a`, the chosen 3 × 7 in the module's colour | same knob, same place in FREE and SYNC; detents from the parameter's own choices |
+| Rack cell metrics | `MiniKnob::setRackMetrics`, `rackui::Cell` | `.lab` 11 px `#74716c` in 18 + 4; 59 px knob; `.readout` 13 px `#4b4945`; list 25 px at 40; segments 27 px at 42; switch band 79 px at 29 | ANDOR's own fonts (Inter) in place of the prototype's Arial |
+| MODE / option lists | `ValueSelector::setRackStyle` | `.modeChoice` 165 × 27, radius 5, `#f6f2eb`, `#d3cbbf`, 11 px; `.optionSelect` 25 px, `#f8f4ec`, 10 px | |
+| PRESET field + `···` | `RackPresetBar`, `UnifiedRack::ActionsKey` | `.preset` 294 × 27, `#eae4db`, `#d4ccbf`, 32 px arrow wells; name 11 px semibold `#607b8b`; `.secondary` `···` | name: the list; `···`: save, rename, delete, folder, MOVEMENT's lane actions |
+| Graph frame | `Visual` (detailed), `rack::GraphFrame` | `.graph` `#1c2528 → #192124`, edge `#343f43`, radius 5, 160 px | |
+
+### Geometry (module coordinates; the rack is the plugin's 1378 px rack, the approved 1392 px stage scaled 1 : 1 in reference pixels)
+
+| Item | Value |
+|---|---|
+| Content inset | 20 px each side (19 padding + 1 border) |
+| Controls' column | MOVEMENT 57 %, ECHO 61 %, SPACE 68 % of the content (per module, never per mode) |
+| Divider | column + 17 px, 1 px `#cbc4b9`; graph 18 px after it to the right inset |
+| Selector row | 39 px under the 32 px title; MODE 165 × 27 at x 20, PRESET 294 × 27 12 px after, `···` 30 × 27 12 px after |
+| Controls | 8 px under; cells 112 px high (the two-position switch's labels fit); standard slots 104 / 95 / 119, 7 px; dense (8+ controls: ECHO ASCEND, SPACE) 89 / 85 / 100, 5 px |
+| Rack height | 214 px (unchanged), SHAPER's precision editor 268 |
+
+### Deviations from the prototype (and why)
+
+- The rack keeps the plugin's 214 px height (the prototype stage is 235): the title row is 32 px (34) and the controls start 8 px under the selector row as approved.
+- SHAPER RATE's detents are the engine's six divisions (1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32), not the prototype's nine; PULSE's synced RATE uses the lane's cycle choices.
+- PULSE keeps PHASE (product owner's decision), live only while synced (dimmed in FREE, so nothing moves).
+- ROOM / SPRING keep LOW CUT and HIGH CUT (product owner's decision).
+- BBD keeps AGE (its clock follows TIME: no CLOCK parameter exists).
+- SPACE's MODE shows the engine's name (ABYSS); its variant is chosen in the MODE list's engine submenus and named by the preset (as the approved image: "ABYSS" / "Abyss Deep").
+- VINTAGE ERA (Early / Later) is a two-way segmented switch; BLOOM's SYNC is the TIMING switch (FREE / SYNC) with its TIME knob stepped when synced.
+- The PRESET field's arrows are drawn chevrons in the approved colour, not the prototype's text glyphs.
+
+### FILTER and MORPH (inline racks, for approval: not yet approved designs)
+
+- Built by the product (`ShellProduct::productRacks`, ANALOG `AnalogRacks.*`) on the shared `rack::ParameterRack` (the same cells, switches, frame), opened from the FILTER and MORPH macros' names like the others; their popovers stay the quick view and share the parameters.
+- Both are two rows tall (a documented exception: their control count), the same height on every page.
+- FILTER: pages FILTER / VOICE / PAIR (interface only; the last one is remembered). Its graph keeps one rectangle on every page: FILTER the filter model's small-signal response (LadderFilter's and OtaFilter's own equations and the high-pass positions), VOICE the AMP envelope (or GATE), PAIR a schematic with the pair's settings. POLY MOD's PITCH 1, WIDTH 1 and FILTER are three independent switches. With ENV LINK on, the filter envelope's knobs rest (dimmed) and the group says so. OTA's SLOPE is live only with OTA; CHARACTER and JUNO stay live (they also set the high-pass's curve).
+- MORPH: ON in its title row, a short status ("Load an eligible sample into C to morph") when card C is silent; MODE (IMPRINT / FUSE / WEAVE) and CARRIER (OSC 1 / OSC 2 / BOTH) as segmented switches in the selector row; MORPH TEXTURE ATTACK FORMANTS DETAIL; OUTPUT (MORPH ONLY / LAYERED), LEVEL MATCH, ROOT under them. Its graph is a concept view drawn from the settings and labelled as such: the engine publishes no analysis to the interface yet (MORPH 2.0's telemetry stage replaces it with measured spectra).
