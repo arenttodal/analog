@@ -7,6 +7,7 @@
 #include "AnalogParameters.h"
 #include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
+#include "AnalogRacks.h"
 #include "FactoryPatches.h"
 #include "KeyDnaState.h"
 #include "SamplePatches.h"
@@ -271,6 +272,10 @@ const ProductInfo& productInfo()
         p.cardArpeggiator = true;   // each card arpeggiated or holding the keys, its own pattern unlinked
         // The effects rack: MOVEMENT, ECHO and SPACE each expanded beside its macro (one at a time).
         p.rackModules = { osp::plugin::rack::Kind::movement, osp::plugin::rack::Kind::echo, osp::plugin::rack::Kind::space };
+        // FILTER and MORPH: the product's own inline racks (the same rack, the same parts),
+        // opened from their macro's name as the others (their popovers stay the quick view).
+        p.productRacks = { { andor::analog::params::tone, osp::plugin::rack::Kind::filter, andor::analog::createFilterRack },
+                           { andor::analog::params::morphPosition, osp::plugin::rack::Kind::morph, andor::analog::createMorphRack } };
         // MOVEMENT's two lanes (state version 11): A is MOVEMENT itself, B a second one.
         {
             using namespace andor::analog::params;

@@ -11,6 +11,8 @@
 #include "FactoryPatches.h"
 #include "MacroPopups.h"
 #include "RackControls.h"
+#include "ParameterRack.h"
+#include "AnalogRacks.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
 #include "SampleImport.h"
@@ -5204,4 +5206,174 @@ TEST_CASE ("analog: screenshots of every rack module in every mode, before / aft
                 shoot ("polish-" + juce::String (w) + (arp ? "-arp-" : "-") + label);
             }
         }
+}
+
+//==============================================================================
+// FILTER and MORPH as inline racks (the approved rack's parts), opened from their macros' names.
+
+TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - every page's control bound, nothing sounds different", "[analog][rack][filtermorph]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rack::ParameterRack;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    CHECK (ui.rackMacro (Kind::morph) == 0);
+    CHECK (ui.rackMacro (Kind::filter) == 2);
+    const auto before = allParameterValues (p);
+    const float closedHeight = ui.instrumentHeight();
+
+    // A double-click on FILTER's name opens its rack (no popover); one module at a time.
+    ui.toggleRackFromLabel (Kind::filter);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::filter });
+    CHECK (ui.instrumentHeight() > closedHeight);
+    auto* filter = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter));
+    REQUIRE (filter != nullptr);
+    const juce::StringArray pageCaptions { "TYPE HIGH-PASS CHARACTER SLOPE JUNO RESO ENV KEYS DRIVE ATTACK DECAY SUSTAIN RELEASE VELO",
+                                           "AMP ENV LINK VOICES UNISON DETUNE SPREAD ANALOG PHASE BIAS TRIM AMOUNT CUTOFF PITCH 1 PITCH 2 DELAY RISE WHEEL CHORUS HISS",
+                                           "SYNC RING BLEND LEVEL COLOUR FILT ENV OSC 2 PITCH 1 WIDTH 1 FILTER" };
+    const auto graph = filter->graphBounds();
+    for (int page = 0; page < 3; ++page)
+    {
+        INFO ("page " << page);
+        filter->showPage (page);
+        ui.refreshNow();
+        CHECK (filter->captions() == pageCaptions[page]);
+        CHECK (filter->graphBounds() == graph);   // one graph rectangle on every page
+        for (const auto& b : filter->cellBounds())
+            CHECK (b.getRight() < graph.getX() - 17);
+    }
+    // POLY MOD's destinations are three independent switches: any of them at once.
+    auto* pitch = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("PITCH 1"));
+    auto* width = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("WIDTH 1"));
+    auto* cutoff = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("FILTER"));
+    REQUIRE (pitch != nullptr);
+    REQUIRE (width != nullptr);
+    REQUIRE (cutoff != nullptr);
+    pitch->choose (0);
+    width->choose (0);
+    cutoff->choose (0);
+    CHECK (p.parameterValue (andor::analog::params::polyModToPitch1) >= 0.5f);
+    CHECK (p.parameterValue (andor::analog::params::polyModToWidth1) >= 0.5f);
+    CHECK (p.parameterValue (andor::analog::params::polyModToCutoff) >= 0.5f);
+    pitch->choose (1);
+    width->choose (1);
+    cutoff->choose (1);
+    // TYPE: the two-way segmented switch; SLOPE only while OTA.
+    filter->showPage (0);
+    ui.refreshNow();
+    auto* type = dynamic_cast<osp::plugin::rackui::SegmentedSwitch*> (filter->cellNamed ("TYPE"));
+    REQUIRE (type != nullptr);
+    CHECK_FALSE (filter->cellNamed ("SLOPE")->isEnabled());
+    type->choose (1);
+    ui.refreshNow();
+    CHECK (juce::roundToInt (p.parameterValue (andor::analog::params::filterModel)) == 1);
+    CHECK (filter->cellNamed ("SLOPE")->isEnabled());
+    type = dynamic_cast<osp::plugin::rackui::SegmentedSwitch*> (filter->cellNamed ("TYPE"));   // (rebuilt with the type)
+    REQUIRE (type != nullptr);
+    type->choose (0);
+    ui.refreshNow();
+
+    // MORPH: its rack replaces FILTER's; ON in its title row.
+    ui.toggleRackFromLabel (Kind::morph);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::morph });
+    auto* morph = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::morph));
+    REQUIRE (morph != nullptr);
+    CHECK (morph->captions() == "MORPH TEXTURE ATTACK FORMANTS DETAIL OUTPUT LEVEL MATCH ROOT");
+    REQUIRE (morph->headerSwitch() != nullptr);
+    CHECK (morph->cellNamed ("MODE") != nullptr);
+    CHECK (morph->cellNamed ("CARRIER") != nullptr);
+    // Card C silent in a new instrument: the short status.
+    CHECK (morph->status() == "Load an eligible sample into C to morph");
+    // Opening and closing changed no setting (the ones flipped above were set back).
+    ui.toggleRackFromLabel (Kind::morph);
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds().empty());
+    for (const auto& [id, v] : allParameterValues (p))
+    {
+        INFO (id);
+        CHECK (v == before.at (id));
+    }
+}
+
+TEST_CASE ("analog: FILTER's graph is the filter model's response - cutoff, resonance, type and high-pass move it", "[analog][rack][filtermorph]")
+{
+    using andor::analog::filtergraph::Settings;
+    using andor::analog::filtergraph::responseDb;
+    Settings s;
+    s.cutoffHz = 1000.0;
+    CHECK (responseDb (s, 20.0) == Approx (0.0).margin (0.1));               // pass band
+    CHECK (responseDb (s, 1000.0) == Approx (-12.04).margin (0.1));          // four poles: -3 dB each at fc
+    CHECK (responseDb (s, 8000.0) < responseDb (s, 4000.0) - 20.0);          // 24 dB/oct above
+    s.resonance = 0.9;
+    CHECK (responseDb (s, 1000.0) > responseDb (s, 20.0) + 10.0);            // the resonance's peak
+    s.ota = true;
+    s.twoPole = true;
+    s.resonance = 0.0;
+    CHECK (responseDb (s, 8000.0) > responseDb (Settings { 1000.0, 0.0 }, 8000.0) + 20.0);   // 12 dB slope
+    s = Settings {};
+    s.highPass = 3;   // JUNO-106 position 3: 720 Hz
+    CHECK (responseDb (s, 50.0) < -20.0);
+    s.highPass = 0;   // its bass boost
+    CHECK (responseDb (s, 30.0) > 4.0);
+}
+
+TEST_CASE ("analog: screenshots of the FILTER (FILTER, VOICE, PAIR) and MORPH racks (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-filtermorph]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rack::ParameterRack;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    setValue (p, andor::analog::params::resonance, 45.0f);
+    ui.setRackExpanded (Kind::filter, true);
+    auto* filter = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter));
+    REQUIRE (filter != nullptr);
+    const char* pages[] { "filter", "voice", "pair" };
+    for (int pg = 0; pg < 3; ++pg)
+    {
+        filter->showPage (pg);
+        shoot (juce::String ("fm-1448-") + pages[pg]);
+    }
+    filter->showPage (0);
+    setValue (p, andor::analog::params::filterModel, 1.0f);
+    shoot ("fm-1448-filter-ota");
+    setValue (p, andor::analog::params::filterModel, 0.0f);
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        shoot ("fm-" + juce::String (w) + "-filter");
+    }
+    width = 1448;
+    ui.setRackExpanded (Kind::morph, true);
+    shoot ("fm-1448-morph");
+    setValue (p, andor::analog::params::morphMethod, 2.0f);
+    setValue (p, andor::analog::params::morphPosition, 60.0f);
+    shoot ("fm-1448-morph-weave");
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        ui.setArpExpanded (true);
+        shoot ("fm-" + juce::String (w) + "-morph-arp");
+        ui.setArpExpanded (false);
+    }
 }
