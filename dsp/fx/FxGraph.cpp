@@ -1,5 +1,6 @@
 #include "FxGraph.h"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -332,6 +333,215 @@ bool fromText (const std::string& text, Graph& g)
         return false;
     g = std::move (read);
     return true;
+}
+
+//==============================================================================
+std::vector<Node>* chainAt (Graph& g, const ChainPath& path)
+{
+    auto* chain = &g.chain;
+    for (const auto& [node, lane] : path)
+    {
+        if (node < 0 || node >= static_cast<int> (chain->size()))
+            return nullptr;
+        auto& n = (*chain)[static_cast<std::size_t> (node)];
+        if (n.kind == Node::Kind::effect || lane < 0 || lane >= static_cast<int> (n.lanes.size()))
+            return nullptr;
+        chain = &n.lanes[static_cast<std::size_t> (lane)];
+    }
+    return chain;
+}
+
+namespace
+{
+    bool find (const std::vector<Node>& chain, InstanceId id, ChainPath& path, int& index)
+    {
+        for (int i = 0; i < static_cast<int> (chain.size()); ++i)
+        {
+            const auto& n = chain[static_cast<std::size_t> (i)];
+            if (n.kind == Node::Kind::effect)
+            {
+                if (n.fx == id)
+                {
+                    index = i;
+                    return true;
+                }
+                continue;
+            }
+            for (int lane = 0; lane < static_cast<int> (n.lanes.size()); ++lane)
+            {
+                path.push_back ({ i, lane });
+                if (find (n.lanes[static_cast<std::size_t> (lane)], id, path, index))
+                    return true;
+                path.pop_back();
+            }
+        }
+        return false;
+    }
+
+    /** Groups with an empty lane dissolve into their other lane (a parallel pair), and
+        splitters keep their lanes (an empty band passes its band). */
+    void tidy (std::vector<Node>& chain)
+    {
+        for (std::size_t i = 0; i < chain.size();)
+        {
+            auto& n = chain[i];
+            if (n.kind == Node::Kind::effect)
+            {
+                ++i;
+                continue;
+            }
+            for (auto& lane : n.lanes)
+                tidy (lane);
+            if (n.kind == Node::Kind::parallel)
+            {
+                const bool emptyA = n.lanes[0].empty(), emptyB = n.lanes.size() < 2 || n.lanes[1].empty();
+                if (emptyA || emptyB)
+                {
+                    auto keep = emptyA ? (n.lanes.size() > 1 ? n.lanes[1] : std::vector<Node>()) : n.lanes[0];
+                    chain.erase (chain.begin() + static_cast<std::ptrdiff_t> (i));
+                    chain.insert (chain.begin() + static_cast<std::ptrdiff_t> (i), keep.begin(), keep.end());
+                    i += keep.size();
+                    continue;
+                }
+            }
+            ++i;
+        }
+    }
+
+    bool commit (Graph& g, Graph next)
+    {
+        tidy (next.chain);
+        next.custom = true;
+        if (! validate (next).empty())
+            return false;
+        g = std::move (next);
+        return true;
+    }
+}
+
+bool locate (const Graph& g, InstanceId id, ChainPath& path, int& index)
+{
+    path.clear();
+    return find (g.chain, id, path, index);
+}
+
+bool removeEffect (Graph& g, InstanceId id)
+{
+    Graph next = g;
+    ChainPath path;
+    int index = 0;
+    if (! locate (next, id, path, index))
+        return false;
+    auto* chain = chainAt (next, path);
+    chain->erase (chain->begin() + index);
+    return commit (g, std::move (next));
+}
+
+bool insertEffect (Graph& g, const ChainPath& path, int index, Node node)
+{
+    Graph next = g;
+    auto* chain = chainAt (next, path);
+    if (chain == nullptr || index < 0 || index > static_cast<int> (chain->size()))
+        return false;
+    chain->insert (chain->begin() + index, std::move (node));
+    return commit (g, std::move (next));
+}
+
+bool moveEffect (Graph& g, InstanceId id, const ChainPath& path, int index)
+{
+    Graph next = g;
+    ChainPath from;
+    int at = 0;
+    if (! locate (next, id, from, at) || chainAt (next, path) == nullptr)
+        return false;
+    // Take it out first, then put it where the gap was (counted before the move): the target's
+    // path or index shifts when the removal was before it in the same chain or an outer one.
+    auto* source = chainAt (next, from);
+    Node node = (*source)[static_cast<std::size_t> (at)];
+    source->erase (source->begin() + at);
+    auto target = path;
+    int place = index;
+    if (from == target)
+    {
+        if (place > at)
+            --place;
+    }
+    else if (from.size() < target.size() && std::equal (from.begin(), from.end(), target.begin()) && target[from.size()].first > at)
+        --target[from.size()].first;
+    auto* chain = chainAt (next, target);
+    if (chain == nullptr || place < 0 || place > static_cast<int> (chain->size()))
+        return false;
+    chain->insert (chain->begin() + place, std::move (node));
+    return commit (g, std::move (next));
+}
+
+bool stackEffect (Graph& g, InstanceId id, InstanceId targetId)
+{
+    if (id == targetId)
+        return false;
+    Graph next = g;
+    ChainPath from, to;
+    int at = 0, target = 0;
+    if (! locate (next, id, from, at) || ! locate (next, targetId, to, target))
+        return false;
+    Node node = (*chainAt (next, from))[static_cast<std::size_t> (at)];
+    // Take it out (marking where the target is afterwards), then stack.
+    chainAt (next, from)->erase (chainAt (next, from)->begin() + at);
+    if (! locate (next, targetId, to, target))
+        return false;
+    auto* chain = chainAt (next, to);
+    if (! to.empty())
+    {
+        // Inside a pair already: after the target, in its lane.
+        chain->insert (chain->begin() + target + 1, node);
+        return commit (g, std::move (next));
+    }
+    auto pair = Node::parallel ({ (*chain)[static_cast<std::size_t> (target)] }, { node }, Law::linear);
+    (*chain)[static_cast<std::size_t> (target)] = pair;
+    return commit (g, std::move (next));
+}
+
+bool nudgeEffect (Graph& g, InstanceId id, int delta)
+{
+    Graph next = g;
+    ChainPath path;
+    int at = 0;
+    if (! locate (next, id, path, at))
+        return false;
+    auto* chain = chainAt (next, path);
+    const int to = at + (delta < 0 ? -1 : 1);
+    if (to < 0 || to >= static_cast<int> (chain->size()))
+        return false;
+    std::swap ((*chain)[static_cast<std::size_t> (at)], (*chain)[static_cast<std::size_t> (to)]);
+    return commit (g, std::move (next));
+}
+
+bool unstackEffect (Graph& g, InstanceId id)
+{
+    Graph next = g;
+    ChainPath path;
+    int at = 0;
+    if (! locate (next, id, path, at) || path.empty())
+        return false;
+    Node node = (*chainAt (next, path))[static_cast<std::size_t> (at)];
+    auto groupPath = path;
+    const int groupIndex = groupPath.back().first;
+    groupPath.pop_back();
+    chainAt (next, path)->erase (chainAt (next, path)->begin() + at);
+    auto* outer = chainAt (next, groupPath);
+    outer->insert (outer->begin() + groupIndex + 1, node);
+    return commit (g, std::move (next));
+}
+
+bool setBypassed (Graph& g, InstanceId id, bool bypassed)
+{
+    Graph next = g;
+    ChainPath path;
+    int at = 0;
+    if (! locate (next, id, path, at))
+        return false;
+    (*chainAt (next, path))[static_cast<std::size_t> (at)].bypassed = bypassed;
+    return commit (g, std::move (next));
 }
 
 } // namespace andor::analog::fx

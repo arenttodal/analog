@@ -278,3 +278,43 @@ TEST_CASE ("fx route: swapping routes while notes and tails play stays finite an
     }
     CHECK (largestStep < 0.5f);   // (no click from a switch: each one ducks through silence)
 }
+
+TEST_CASE ("fx graph: edits - move, stack, unstack, nudge, remove, bypass; each makes the route CUSTOM", "[fx][graph][edit]")
+{
+    const InstanceId drive { Type::drive, 0 }, movement { Type::movement, 0 }, echo { Type::echo, 0 }, space { Type::space, 0 };
+    auto g = fx::classicGraph();
+    // ECHO to the front (out of the pair: the pair dissolves into SPACE alone).
+    REQUIRE (fx::moveEffect (g, echo, {}, 0));
+    CHECK (g.custom);
+    CHECK (fx::toText (g) == "v1 custom fx echo.1 on fx drive.1 on fx movement.1 on fx space.1 on");
+    // SPACE between DRIVE and MOVEMENT.
+    REQUIRE (fx::moveEffect (g, space, {}, 2));
+    CHECK (fx::toText (g) == "v1 custom fx echo.1 on fx drive.1 on fx space.1 on fx movement.1 on");
+    // Stack ECHO with MOVEMENT: a linear pair in MOVEMENT's place.
+    REQUIRE (fx::stackEffect (g, echo, movement));
+    CHECK (fx::toText (g) == "v1 custom fx drive.1 on fx space.1 on par linear 2 lane 0.5 { fx movement.1 on } lane 0.5 { fx echo.1 on }");
+    // A third onto the pair goes into the target's lane, after it.
+    REQUIRE (fx::stackEffect (g, drive, echo));
+    CHECK (fx::toText (g) == "v1 custom fx space.1 on par linear 2 lane 0.5 { fx movement.1 on } lane 0.5 { fx echo.1 on fx drive.1 on }");
+    // Out again, right after the pair.
+    REQUIRE (fx::unstackEffect (g, drive));
+    CHECK (fx::toText (g) == "v1 custom fx space.1 on par linear 2 lane 0.5 { fx movement.1 on } lane 0.5 { fx echo.1 on } fx drive.1 on");
+    // Nudge DRIVE left: it swaps with the pair; the first can go no further left.
+    REQUIRE (fx::nudgeEffect (g, drive, -1));
+    CHECK (fx::toText (g) == "v1 custom fx space.1 on fx drive.1 on par linear 2 lane 0.5 { fx movement.1 on } lane 0.5 { fx echo.1 on }");
+    CHECK_FALSE (fx::nudgeEffect (g, space, -1));
+    // Moving ECHO out of its lane dissolves the pair; removing works the same way.
+    REQUIRE (fx::moveEffect (g, echo, {}, 0));
+    CHECK (fx::toText (g) == "v1 custom fx echo.1 on fx space.1 on fx drive.1 on fx movement.1 on");
+    REQUIRE (fx::removeEffect (g, drive));
+    CHECK_FALSE (fx::contains (g, drive));
+    CHECK_FALSE (fx::removeEffect (g, drive));
+    REQUIRE (fx::insertEffect (g, {}, 1, Node::effect (drive)));
+    CHECK (fx::toText (g) == "v1 custom fx echo.1 on fx drive.1 on fx space.1 on fx movement.1 on");
+    REQUIRE (fx::setBypassed (g, space, true));
+    CHECK (fx::toText (g) == "v1 custom fx echo.1 on fx drive.1 on fx space.1 off fx movement.1 on");
+    // Refused: inserting a second DRIVE; nothing changes.
+    const auto before = g;
+    CHECK_FALSE (fx::insertEffect (g, {}, 0, Node::effect (drive)));
+    CHECK (g == before);
+}

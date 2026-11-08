@@ -8,6 +8,7 @@
 #include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
 #include "AnalogRacks.h"
+#include "FxRouting.h"
 #include "FactoryPatches.h"
 #include "KeyDnaState.h"
 #include "SamplePatches.h"
@@ -307,6 +308,9 @@ const ProductInfo& productInfo()
         // INSTRUMENT PATCH's zones LINK, LOOP and FOLLOW (they do not play backwards).
         p.cardModifiersInWell = true;
         p.stableModulationTabs = true;
+        // FX ROUTING (docs/FX_ROUTING_IMPLEMENTATION.md): its icon beside SAVE, its view in the
+        // cards' place.
+        p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)
                 return 0xf;

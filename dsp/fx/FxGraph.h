@@ -112,6 +112,27 @@ std::string validate (const Graph& g);
 std::string toText (const Graph& g);
 bool fromText (const std::string& text, Graph& g);
 
+/**
+    Edits (message thread; each returns false and leaves the graph alone when it cannot apply).
+    A chain is named by its path from the top: pairs of (node index, lane index); the empty path
+    is the top chain. A group left with an empty lane dissolves into its other lane.
+*/
+using ChainPath = std::vector<std::pair<int, int>>;
+std::vector<Node>* chainAt (Graph& g, const ChainPath& path);
+/** Where an effect is: its chain and index. */
+bool locate (const Graph& g, InstanceId id, ChainPath& path, int& index);
+bool removeEffect (Graph& g, InstanceId id);
+bool insertEffect (Graph& g, const ChainPath& path, int index, Node node);
+/** Moves an effect to another place (a gap: chain and index, counted before the move). */
+bool moveEffect (Graph& g, InstanceId id, const ChainPath& path, int index);
+/** Stacks `id` with `target` (a linear parallel pair; inside a pair already: after it in its lane). */
+bool stackEffect (Graph& g, InstanceId id, InstanceId target);
+/** One place left (-1) or right (+1) in its chain. */
+bool nudgeEffect (Graph& g, InstanceId id, int delta);
+/** Out of its parallel group, into the chain right after the group. */
+bool unstackEffect (Graph& g, InstanceId id);
+bool setBypassed (Graph& g, InstanceId id, bool bypassed);
+
 constexpr int maxEffects = 16;
 constexpr int maxDepth = 4;
 

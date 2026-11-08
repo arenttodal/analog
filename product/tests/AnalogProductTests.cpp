@@ -13,6 +13,7 @@
 #include "RackControls.h"
 #include "ParameterRack.h"
 #include "AnalogRacks.h"
+#include "FxRouting.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
 #include "SampleImport.h"
@@ -5818,5 +5819,177 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         ShellProcessor r;
         r.setStateInformation (broken.getData(), static_cast<int> (broken.getSize()));
         CHECK (dynamic_cast<AnalogEngine&> (r.productEngine()).fxRoute() == fx::classicGraph());
+    }
+}
+
+TEST_CASE ("analog: FX ROUTING - the icon beside SAVE on its centre line; the view takes only the cards' place; showing it changes nothing", "[analog][fx][routing][ui]")
+{
+    namespace fx = andor::analog::fx;
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    setValue (p, "echo", 40.0f);
+    const auto before = renderShell (p, 0.6);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (1448.0f * ui.instrumentHeight() / 1448.0f));
+    ui.refreshNow();
+
+    // The icon: borderless, beside SAVE, on SAVE's centre line, 12 px from it, clear of MIX.
+    auto& icon = ui.sourceViewToggle();
+    REQUIRE (icon.isVisible());
+    juce::Component* save = nullptr;
+    juce::Component* mix = nullptr;
+    for (auto* c : icon.getParentComponent()->getChildren())
+    {
+        if (dynamic_cast<osp::plugin::SavePresetButton*> (c) != nullptr)
+            save = c;
+        if (dynamic_cast<osp::plugin::HeaderMix*> (c) != nullptr)
+            mix = c;
+    }
+    REQUIRE (save != nullptr);
+    REQUIRE (mix != nullptr);
+    CHECK (icon.getBounds().getCentreY() == save->getBounds().getCentreY());
+    CHECK (icon.getX() - save->getRight() == 12);
+    CHECK (mix->getX() >= icon.getRight() + 15);
+
+    // Opening it: the cards go, the view is in their place; macros and keyboard stay.
+    std::vector<juce::Rectangle<int>> others;
+    for (auto* c : icon.getParentComponent()->getChildren())
+        if (dynamic_cast<osp::plugin::EngineCard*> (c) == nullptr && c->isVisible())
+            others.push_back (c->getBounds());
+    icon.onClick();   // (what a click does; triggerClick posts it)
+    REQUIRE (ui.sourceViewShown());
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    CHECK (view->isVisible());
+    for (auto* c : icon.getParentComponent()->getChildren())
+        if (dynamic_cast<osp::plugin::EngineCard*> (c) != nullptr)
+            CHECK_FALSE (c->isVisible());
+    int unchanged = 0;
+    for (auto* c : icon.getParentComponent()->getChildren())
+        if (c != view && c->isVisible())
+            for (const auto& b : others)
+                unchanged += c->getBounds() == b ? 1 : 0;
+    CHECK (unchanged >= static_cast<int> (others.size()) - 1);
+
+    // CLASSIC drawn: the mixer at most a third; DRIVE, MOVEMENT, then ECHO over SPACE; one wire
+    // from the mixer to the first tile and from the last to OUTPUT.
+    CHECK (view->mixerBounds().getWidth() <= view->getWidth() / 3);
+    REQUIRE (view->tiles().size() == 4);
+    const auto& t = view->tiles();
+    CHECK (t[0].id.type == fx::Type::drive);
+    CHECK (t[1].id.type == fx::Type::movement);
+    CHECK (t[2].id.type == fx::Type::echo);
+    CHECK (t[3].id.type == fx::Type::space);
+    CHECK (t[2].stacked);
+    CHECK (t[2].bounds.getBottom() < t[3].bounds.getY());   // stacked: ECHO above SPACE
+    CHECK (t[0].bounds.getCentreY() == view->outputBounds().getCentreY());
+    CHECK (view->wireStart().getX() <= view->mixerBounds().getRight() + 6);
+    CHECK (view->statusText().startsWith ("CLASSIC"));
+
+    // Selecting, opening the library and closing the view never changed the sound.
+    view->select (t[1].id);
+    view->showLibrary (true);
+    REQUIRE (view->libraryPopover() != nullptr);
+    CHECK (view->libraryPopover()->isVisible());
+    view->showLibrary (false);
+    ui.setSourceViewShown (false);
+    CHECK_FALSE (ui.sourceViewShown());
+    CHECK (identical (before, renderShell (p, 0.6)));
+    CHECK (dynamic_cast<AnalogEngine&> (p.productEngine()).fxRoute() == fx::classicGraph());
+}
+
+TEST_CASE ("analog: FX ROUTING - a drop in a gap goes in series, on a tile stacks; undo, Restore original, bypass, the library", "[analog][fx][routing][ui]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    const fx::InstanceId drive { fx::Type::drive, 0 }, echo { fx::Type::echo, 0 }, space { fx::Type::space, 0 };
+
+    // ECHO into the first gap: series, first; CUSTOM.
+    REQUIRE (view->moveTo (echo, {}, 0));
+    CHECK (fx::toText (engine.fxRoute()) == "v1 custom fx echo.1 on fx drive.1 on fx movement.1 on fx space.1 on");
+    CHECK (view->statusText().startsWith ("CUSTOM"));
+    CHECK (view->tiles().front().id == echo);
+    // SPACE onto DRIVE: stacked.
+    REQUIRE (view->stackOn (space, drive));
+    CHECK (fx::toText (engine.fxRoute()) == "v1 custom fx echo.1 on par linear 2 lane 0.5 { fx drive.1 on } lane 0.5 { fx space.1 on } fx movement.1 on");
+    // Undo, step by step, back to CLASSIC.
+    p.undo().undo();
+    CHECK (fx::toText (engine.fxRoute()) == "v1 custom fx echo.1 on fx drive.1 on fx movement.1 on fx space.1 on");
+    p.undo().undo();
+    CHECK (engine.fxRoute() == fx::classicGraph());
+    p.undo().redo();
+    CHECK (engine.fxRoute().custom);
+    // Bypass (the original four: the route's own), then Restore original: CLASSIC, settings kept.
+    REQUIRE (view->toggleBypass (drive));
+    CHECK (fx::toText (engine.fxRoute()).find ("fx drive.1 off") != std::string::npos);
+    setValue (p, "drive", 33.0f);
+    REQUIRE (view->restoreOriginal());
+    CHECK (engine.fxRoute() == fx::classicGraph());
+    CHECK (p.parameters.getRawParameterValue ("drive")->load() == Approx (33.0f));
+    CHECK_FALSE (view->restoreOriginal());   // (CLASSIC already: nothing to restore)
+    // The library: the original four IN CHAIN; one removed, it can come back.
+    REQUIRE (view->remove (echo));
+    CHECK_FALSE (fx::contains (engine.fxRoute(), echo));
+    REQUIRE (view->insertNew (fx::Type::echo));
+    CHECK (fx::contains (engine.fxRoute(), echo));
+    CHECK_FALSE (view->insertNew (fx::Type::echo));   // (one ECHO)
+}
+
+TEST_CASE ("analog: screenshots of FX ROUTING (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-routing]")
+{
+    namespace fx = andor::analog::fx;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    setValue (p, "drive", 35.0f);
+    setValue (p, "echo", 40.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    shoot ("routing-0-sound");
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    shoot ("routing-1-classic");
+    view->moveTo ({ fx::Type::echo, 0 }, {}, 0);
+    view->select (fx::InstanceId { fx::Type::drive, 0 });
+    shoot ("routing-2-custom-echo-first");
+    view->stackOn ({ fx::Type::space, 0 }, { fx::Type::movement, 0 });
+    view->toggleBypass ({ fx::Type::drive, 0 });
+    shoot ("routing-3-custom-parallel-bypass");
+    view->showLibrary (true);
+    shoot ("routing-4-library");
+    view->showLibrary (false);
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        shoot ("routing-" + juce::String (w) + "-custom");
+    }
+    width = 1448;
+    engine.setFxRoute (fx::classicGraph());
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        shoot ("routing-" + juce::String (w) + "-classic");
     }
 }
