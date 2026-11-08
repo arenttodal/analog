@@ -88,19 +88,23 @@ namespace
     //==========================================================================
     /** FILTER's graph: what the shown page is about. FILTER: the low-pass's response (the
         engine's model linearised: no saturation, before the envelope and key tracking). VOICE:
-        the amplitude envelope (or the gate) as it is set. PAIR: what the two oscillators do to
-        each other, as a schematic with the settings' values. */
+        AMP the amplitude envelope (or the gate) as it is set; MOD LFO 1's depth on each target
+        and its fade-in, from the settings; CHARACTER no graph (nothing measured to draw), the
+        settings' status where each acts in the voice. PAIR: what the two oscillators do to each
+        other, as a schematic with the settings' values. */
     class FilterGraph final : public GraphFrame
     {
     public:
-        FilterGraph (InstrumentHost& h, std::function<int()> p) : host (h), page (std::move (p)) {}
+        FilterGraph (InstrumentHost& h, std::function<int()> p, std::function<int()> s) : host (h), page (std::move (p)), sub (std::move (s)) {}
         void refresh() override
         {
-            juce::String sig (page());
+            juce::String sig (page() * 16 + sub());
             for (const auto& id : { params::tone, params::resonance, params::filterModel, params::otaCharacter, params::otaSlope, params::otaHpf, params::junoVariant,
                                     params::vcaMode, juce::String ("attack"), juce::String ("decay"), juce::String ("sustainLevel"), juce::String ("release"),
                                     params::polyphony, params::unison, params::sync, params::ringMix, params::blend, params::polyModEnv, params::polyModOsc2,
-                                    params::polyModToPitch1, params::polyModToWidth1, params::polyModToCutoff, params::noise, params::noiseColor, params::envDepth })
+                                    params::polyModToPitch1, params::polyModToWidth1, params::polyModToCutoff, params::noise, params::noiseColor, params::envDepth,
+                                    params::motion, params::lfoCutoff, params::lfoPitch1, params::lfoPitch2, params::lfoDelay, params::lfoRise, params::lfoWheel,
+                                    params::analogAmount, params::phaseMode, params::driveBias, params::driveTrim, params::chorusMode, params::chorusNoise })
                 sig << "|" << juce::String (host.parameterValue (id), 3);
             if (sig != shown)
             {
@@ -115,7 +119,14 @@ namespace
             const auto colour = design::colour::macroOnDark (design::colour::Macro::character);
             switch (page())
             {
-                case 1: paintVoice (g, area, colour); break;
+                case 1:
+                    if (sub() == 1)
+                        paintMod (g, area, colour);
+                    else if (sub() == 2)
+                        paintCharacter (g, area, colour);
+                    else
+                        paintVoice (g, area, colour);
+                    break;
                 case 2: paintPair (g, area, colour); break;
                 default: paintFilter (g, area, colour); break;
             }
@@ -320,8 +331,144 @@ namespace
             g.drawText ("a schematic of the pair's links, with their settings", area.reduced (10.0f, 4.0f).withTop (area.getBottom() - 12.0f), juce::Justification::centredLeft, false);
         }
 
+        void paintMod (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            // LFO 1 as the engine applies it: each target swings by AMOUNT x its depth (the wheel,
+            // when linked, brings in the rest up to the full depth); DELAY then RISE fade it in.
+            using namespace params;
+            const float amount = juce::jlimit (0.0f, 1.0f, 0.01f * plain (host, motion));
+            const bool wheel = plain (host, lfoWheel) >= 0.5f;
+            auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (30.0f).withTrimmedBottom (24.0f);
+            auto fade = body.removeFromRight (0.36f * body.getWidth());
+            body.removeFromRight (18.0f);
+            struct Row
+            {
+                const juce::String& id;
+                const char* name;
+                float range;   // the parameter's span either way (st)
+            };
+            const Row rows[] { { lfoCutoff, "CUTOFF", 48.0f }, { lfoPitch1, "PITCH 1", 12.0f }, { lfoPitch2, "PITCH 2", 12.0f } };
+            const float rowH = body.getHeight() / 3.0f;
+            g.setFont (graphFont (9.0f));
+            for (int i = 0; i < 3; ++i)
+            {
+                auto r = body.withHeight (rowH).translated (0.0f, rowH * static_cast<float> (i));
+                const auto label = r.removeFromLeft (48.0f), value = r.removeFromRight (52.0f);
+                const auto track = r.withSizeKeepingCentre (r.getWidth() - 8.0f, 8.0f);
+                const float setting = plain (host, rows[i].id), now = amount * setting;
+                const float half = 0.5f * track.getWidth(), cx = track.getCentreX();
+                g.setColour (graphGrid.withAlpha (0.14f));
+                g.fillRoundedRectangle (track, 2.0f);
+                g.setColour (graphGrid.withAlpha (0.5f));
+                g.fillRect (juce::Rectangle<float> (cx - 0.5f, track.getY() - 3.0f, 1.0f, track.getHeight() + 6.0f));
+                auto span = [&] (float st) {
+                    const float w = half * juce::jlimit (-1.0f, 1.0f, st / rows[i].range);
+                    return juce::Rectangle<float> (std::min (cx, cx + w), track.getY(), std::abs (w), track.getHeight());
+                };
+                if (wheel && std::abs (setting) > std::abs (now))
+                {
+                    g.setColour (colour.withAlpha (0.55f));
+                    g.drawRoundedRectangle (span (setting).reduced (0.5f), 2.0f, 1.0f);
+                }
+                g.setColour (colour.withAlpha (now != 0.0f ? 0.9f : 0.0f));
+                g.fillRoundedRectangle (span (now), 2.0f);
+                const bool any = std::abs (setting) > 1.0e-3f;
+                g.setColour (graphText.withAlpha (any ? 1.0f : 0.55f));
+                g.drawText (rows[i].name, label, juce::Justification::centredLeft, false);
+                g.drawText (any ? (now >= 0.0f ? "+" : "") + juce::String (now, std::abs (now) < 10.0f ? 2 : 1) + " st" : juce::String ("off"), value, juce::Justification::centredRight, false);
+            }
+            // The fade-in: silent for DELAY, then up over RISE (time to scale).
+            const float delay = std::max (0.0f, plain (host, lfoDelay)), rise = std::max (0.0f, plain (host, lfoRise));
+            const float span = std::max (0.5f, 1.3f * (delay + rise));
+            auto plot = fade.withTrimmedTop (14.0f).withTrimmedBottom (12.0f);
+            auto xOf = [&] (float t) { return plot.getX() + plot.getWidth() * std::min (1.0f, t / span); };
+            g.setColour (graphGrid.withAlpha (0.3f));
+            g.fillRect (juce::Rectangle<float> (plot.getX(), plot.getBottom(), plot.getWidth(), 1.0f));
+            juce::Path p;
+            p.startNewSubPath (plot.getX(), plot.getBottom());
+            p.lineTo (xOf (delay), plot.getBottom());
+            p.lineTo (xOf (delay + rise), plot.getY());
+            p.lineTo (plot.getRight(), plot.getY());
+            juce::Path fill (p);
+            fill.lineTo (plot.getRight(), plot.getBottom());
+            fill.closeSubPath();
+            g.setColour (colour.withAlpha (0.12f));
+            g.fillPath (fill);
+            g.setColour (colour);
+            g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
+            g.setFont (graphFont (8.5f));
+            g.setColour (graphText);
+            g.drawText ("FADE-IN", fade.withHeight (12.0f), juce::Justification::centredLeft, false);
+            auto seconds = [] (float t) { return juce::String (t, t < 1.0f ? 2 : 1) + " s"; };
+            g.setColour (graphFoot);
+            g.drawText ("DELAY " + seconds (delay) + juce::String::fromUTF8 (" \xc2\xb7 RISE ") + seconds (rise), fade.withTop (fade.getBottom() - 11.0f),
+                        juce::Justification::centredLeft, false);
+            g.setFont (graphFont (10.0f));
+            g.setColour (graphText);
+            g.drawText (juce::String::fromUTF8 ("LFO 1 \xc2\xb7 AMOUNT ") + juce::String (juce::roundToInt (100.0f * amount)) + " %", area.reduced (10.0f, 7.0f).withHeight (14.0f),
+                        juce::Justification::centredLeft, false);
+            g.drawText (wheel ? "WHEEL LINKED" : "WHEEL OFF", area.reduced (10.0f, 7.0f).withHeight (14.0f), juce::Justification::centredRight, false);
+            g.setFont (graphFont (8.5f));
+            g.setColour (graphFoot.withAlpha (0.8f));
+            g.drawText (wheel ? "solid: the swing now (AMOUNT x depth) - outline: with the wheel up" : "the swing on each target: AMOUNT x its depth",
+                        area.reduced (10.0f, 4.0f).withTop (area.getBottom() - 12.0f), juce::Justification::centredLeft, false);
+        }
+
+        void paintCharacter (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            // Nothing here is measured, so no graph: where each setting acts in the voice, and
+            // its value (the chorus quiet while off).
+            using namespace params;
+            auto text = [this] (const juce::String& id) { return textOf (host, id) (plain (host, id)).toUpperCase().replace ("DB", "dB"); };
+            const bool chorus = choice (host, chorusMode) > 0;
+            struct Stage
+            {
+                const char* title;
+                juce::StringArray lines;
+                bool active;
+            };
+            const Stage stages[] { { "VOICE", { "ANALOG " + text (analogAmount), "PHASE " + text (phaseMode) }, true },
+                                   { "FILTER DRIVE", { "BIAS " + text (driveBias), "TRIM " + text (driveTrim) }, true },
+                                   { "CHORUS", { chorus ? text (chorusMode) : juce::String ("OFF"), "HISS " + text (chorusNoise) }, chorus } };
+            auto row = area.reduced (14.0f, 0.0f).withTrimmedTop (34.0f).withTrimmedBottom (30.0f);
+            const float arrow = 18.0f, w = (row.getWidth() - 2.0f * arrow) / 3.0f;
+            for (int i = 0; i < 3; ++i)
+            {
+                const auto& st = stages[i];
+                const auto box = juce::Rectangle<float> (row.getX() + static_cast<float> (i) * (w + arrow), row.getY(), w, row.getHeight());
+                g.setColour (colour.withAlpha (st.active ? 0.1f : 0.03f));
+                g.fillRoundedRectangle (box, 4.0f);
+                g.setColour (colour.withAlpha (st.active ? 0.6f : 0.25f));
+                g.drawRoundedRectangle (box.reduced (0.5f), 4.0f, 1.0f);
+                g.setFont (graphFont (9.0f));
+                g.setColour (graphText.withAlpha (st.active ? 1.0f : 0.5f));
+                g.drawText (st.title, box.reduced (8.0f, 6.0f).withHeight (12.0f), juce::Justification::centredLeft, false);
+                g.setFont (graphFont (9.5f));
+                g.setColour ((st.active ? juce::Colour (0xffd5e0e3) : graphText.withAlpha (0.5f)));
+                for (int l = 0; l < st.lines.size(); ++l)
+                    g.drawText (st.lines[l], box.reduced (8.0f, 0.0f).withY (box.getY() + 30.0f + 16.0f * static_cast<float> (l)).withHeight (14.0f),
+                                juce::Justification::centredLeft, true);
+                if (i < 2)
+                {
+                    const float y = box.getCentreY(), x0 = box.getRight() + 4.0f, x1 = box.getRight() + arrow - 4.0f;
+                    g.setColour (graphGrid.withAlpha (0.8f));
+                    g.fillRect (juce::Rectangle<float> (x0, y - 0.5f, x1 - x0 - 3.0f, 1.0f));
+                    juce::Path head;
+                    head.addTriangle (x1, y, x1 - 4.0f, y - 3.0f, x1 - 4.0f, y + 3.0f);
+                    g.fillPath (head);
+                }
+            }
+            g.setFont (graphFont (10.0f));
+            g.setColour (graphText);
+            g.drawText ("CHARACTER", area.reduced (10.0f, 7.0f).withHeight (14.0f), juce::Justification::centredLeft, false);
+            g.setFont (graphFont (8.5f));
+            g.setColour (graphFoot.withAlpha (0.8f));
+            g.drawText ("where each setting acts in the voice, as set (nothing measured)", area.reduced (10.0f, 4.0f).withTop (area.getBottom() - 12.0f),
+                        juce::Justification::centredLeft, false);
+        }
+
         InstrumentHost& host;
-        std::function<int()> page;
+        std::function<int()> page, sub;
         juce::String shown;
     };
 
@@ -335,30 +482,43 @@ namespace
         {
             setPages ({ "FILTER", "VOICE", "PAIR" }, &filterPageShown);
             setSubPages (1, { "AMP", "MOD", "CHARACTER" }, &voicePageShown);
-            setGraph (std::make_unique<FilterGraph> (h, [this] { return page(); }));
+            setGraph (std::make_unique<FilterGraph> (h, [this] { return page(); }, [this] { return subPage(); }));
         }
 
     protected:
-        int buildKey() const override { return choice (host, params::filterModel) * 2 + (plain (host, params::envLink) >= 0.5f ? 1 : 0); }
+        int buildKey() const override
+        {
+            // FILTER's row follows the model, the high-pass (on or off), the voicing and the
+            // envelope link; the other pages, nothing.
+            if (page() != 0)
+                return 0;
+            return choice (host, params::filterModel) * 8 + (choice (host, params::otaHpf) > 0 ? 4 : 0) + choice (host, params::otaCharacter) * 2
+                 + (plain (host, params::envLink) >= 0.5f ? 1 : 0);
+        }
         void build (int p) override
         {
             using namespace params;
             const rackui::Position on { "ON", "On", 1.0f }, off { "OFF", "Off", 0.0f };
             if (p == 0)
             {
-                // The filter: what it is in the selector row (type, high-pass, the OTA's voicing,
-                // which also sets the high-pass's curve), then one row: RESO ENV KEYS DRIVE and
-                // its envelope (resting while ENV LINK lets the AMP envelope shape it).
+                // The filter: what it is in the selector row, only what the chosen model uses -
+                // TYPE; the OTA's SLOPE; the VOICING (the OTA's, and the high-pass's curve) and
+                // which JUNO, whenever either acts; the high-pass - then one row: RESO ENV KEYS
+                // DRIVE and the envelope (resting while ENV LINK lets the AMP envelope shape it).
                 const bool ota = choice (host, filterModel) == 1, linked = plain (host, envLink) >= 0.5f;
+                const bool highPass = choice (host, otaHpf) > 0, jupiter = choice (host, otaCharacter) == 1;
                 selectorSegment (filterModel, "TYPE", { { "LADDER", "Ladder", 0.0f }, { "OTA", "OTA", 1.0f } }, 104,
                                  "The low-pass: the original four-pole LADDER, or the OTA family (after the Juno and Jupiter-8)");
+                if (ota)
+                    selectorSegment (otaSlope, "SLOPE", { { "24 dB", "24 dB", 0.0f }, { "12 dB", "12 dB", 1.0f } }, 88,
+                                     "The slope: four poles, or the Jupiter-8's two-pole tap (resonance stays)");
+                if (ota || highPass)
+                    selectorSegment (otaCharacter, "VOICING", { { "JUNO", "Juno", 0.0f }, { "JUPITER", "Jupiter", 1.0f } }, 108,
+                                     ota ? "The OTA's voicing and the high-pass's curve: JUNO smoother, JUPITER brighter and more resonant"
+                                         : "The high-pass's curve: the Juno's (as JUNO sets) or the Jupiter-8's");
+                if ((ota || highPass) && ! jupiter)
+                    selectorList (junoVariant, "JUNO", 60, "Which Juno: its high-pass positions (106: a bass boost) and the OTA's calibration");
                 selectorList (otaHpf, "HPF", 60, "The high-pass before the filter: off, or its positions (Juno-106: 0 bass boost, 1 flat, 2 and 3 cut; the others: 0 flat, 1-3 cut)");
-                selectorSegment (otaCharacter, "OTA", { { "JUNO", "Juno", 0.0f }, { "JUPITER", "Jupiter", 1.0f } }, 108,
-                                 "The OTA's voicing and the high-pass's curve: JUNO smoother, JUPITER brighter and more resonant");
-                auto& slope = selectorSegment (otaSlope, {}, { { "24 dB", "24 dB", 0.0f }, { "12 dB", "12 dB", 1.0f } }, 88,
-                                               ota ? "The slope: four poles, or the Jupiter-8's two-pole tap (resonance stays)" : "The slope acts on the OTA filter: set TYPE to OTA");
-                slope.setEnabled (ota);
-                selectorList (junoVariant, "JUNO", 60, "Which Juno: its high-pass positions (106: a bass boost) and the OTA's calibration");
                 knob (resonance, "RESO", textOf (host, resonance));
                 knob (envDepth, "ENV", textOf (host, envDepth));
                 knob (keyTrack, "KEYS", textOf (host, keyTrack));
@@ -415,8 +575,9 @@ namespace
             else
             {
                 // The pair: sync, ring, blend; Poly Mod's sources and its three destinations
-                // (each its own switch: any of them at once); the noise (its colour above).
-                selectorSegment (noiseColor, "NOISE", { { "WHITE", "White", 0.0f }, { "JUNO", "Juno", 1.0f } }, 112, "The noise's colour: white, or the Juno's darker hiss");
+                // (each its own switch: any of them at once); the noise, its colour over it.
+                selectorSegment (noiseColor, "COLOR", { { "WHITE", "White", 0.0f }, { "JUNO", "Juno", 1.0f } }, 104, "The noise's colour: white, or the Juno's darker hiss",
+                                 "NOISE");
                 switchCell (sync, "SYNC", { on, off }, "Hard sync: oscillator 2 restarts oscillator 1 every cycle (tune oscillator 1 up for the classic sweep)");
                 knob (ringMix, "RING", textOf (host, ringMix));
                 knob (blend, "BLEND", textOf (host, blend));
@@ -435,7 +596,9 @@ namespace
     //==========================================================================
     /** MORPH's graph: a concept view of the method at the MORPH position, drawn from the
         settings alone (the engine does not publish its analysis to the interface yet), and
-        labelled as such: the carrier's harmonics (cool), card C's (copper), the result. */
+        labelled as such: the carrier's harmonics (cool), card C's (copper), the result. With
+        nothing in card C to morph with, it is the module's empty state instead: what to do, and
+        the engine's own words for why. */
     class MorphGraph final : public GraphFrame
     {
     public:
@@ -466,6 +629,24 @@ namespace
             const float formants = plain (host, params::morphFormants);   // semitones
             const float texture = 0.01f * plain (host, params::morphTexture);
             const auto plot = area.reduced (16.0f, 0.0f).withTrimmedTop (30.0f).withTrimmedBottom (26.0f);
+            static const char* methods[] { "IMPRINT", "FUSE", "WEAVE" };
+            const auto title = juce::String (methods[std::clamp (method, 0, 2)]) + juce::String::fromUTF8 (" \xc2\xb7 MORPH ") + juce::String (juce::roundToInt (100.0f * p)) + " %";
+            if (silent)
+            {
+                g.setFont (graphFont (10.0f));
+                g.setColour (graphText.withAlpha (0.45f));
+                g.drawText (title, area.reduced (10.0f, 7.0f).withHeight (14.0f), juce::Justification::centredLeft, false);
+                g.setColour (graphGrid.withAlpha (0.25f));
+                g.fillRect (juce::Rectangle<float> (plot.getX(), plot.getBottom(), plot.getWidth(), 1.0f));
+                const auto message = area.reduced (28.0f, 0.0f).withSizeKeepingCentre (area.getWidth() - 56.0f, 52.0f);
+                g.setFont (graphFont (11.0f));
+                g.setColour (juce::Colour (0xffd5e0e3));
+                g.drawText ("Load an eligible sample into C to morph", message.withHeight (16.0f), juce::Justification::centred, false);
+                g.setFont (graphFont (9.0f));
+                g.setColour (graphFoot);
+                g.drawFittedText (host.engineStatus ("morph"), message.withTrimmedTop (22.0f).toNearestInt(), juce::Justification::centredTop, 2, 1.0f);
+                return;
+            }
             const int shownPartials = std::min (partials, 32);
             const float slot = plot.getWidth() / static_cast<float> (shownPartials);
             // Two illustrative spectra: the carrier's (1/n) and card C's (a formant hump,
@@ -503,7 +684,7 @@ namespace
                 g.fillRect (juce::Rectangle<float> (x - 0.32f * slot, yOf (a), 0.2f * slot, plot.getBottom() - yOf (a)));
                 g.setColour (copper.withAlpha (0.18f));
                 g.fillRect (juce::Rectangle<float> (x + 0.12f * slot, yOf (b), 0.2f * slot, plot.getBottom() - yOf (b)));
-                g.setColour (rc.withAlpha (on && ! silent ? 0.95f : 0.4f));
+                g.setColour (rc.withAlpha (on ? 0.95f : 0.4f));
                 g.fillRect (juce::Rectangle<float> (x - 0.08f * slot, yOf (result), 0.16f * slot + 1.0f, plot.getBottom() - yOf (result)));
             }
             // TEXTURE: the residual's share, as a faint floor.
@@ -513,17 +694,14 @@ namespace
             g.fillRect (juce::Rectangle<float> (plot.getX(), plot.getBottom(), plot.getWidth(), 1.0f));
             g.setFont (graphFont (10.0f));
             g.setColour (graphText);
-            static const char* methods[] { "IMPRINT", "FUSE", "WEAVE" };
-            g.drawText (juce::String (methods[std::clamp (method, 0, 2)]) + juce::String::fromUTF8 (" \xc2\xb7 MORPH ") + juce::String (juce::roundToInt (100.0f * p)) + " %",
-                        area.reduced (10.0f, 7.0f).withHeight (14.0f), juce::Justification::centredLeft, false);
+            g.drawText (title, area.reduced (10.0f, 7.0f).withHeight (14.0f), juce::Justification::centredLeft, false);
             g.setColour (cool);
             g.drawText ("OSC", area.reduced (10.0f, 7.0f).withHeight (14.0f).withTrimmedRight (40.0f), juce::Justification::centredRight, false);
             g.setColour (copper);
             g.drawText ("C", area.reduced (10.0f, 7.0f).withHeight (14.0f), juce::Justification::centredRight, false);
             g.setFont (graphFont (8.5f));
             g.setColour (graphFoot.withAlpha (0.85f));
-            g.drawText (silent ? "card C is silent: the oscillators play as they are"
-                               : (on ? "concept view from the settings - not an analysis of the sound" : "MORPH is off: the sources play as they are"),
+            g.drawText (on ? "concept view from the settings - not an analysis of the sound" : "MORPH is off: the sources play as they are",
                         area.reduced (10.0f, 4.0f).withTop (area.getBottom() - 12.0f), juce::Justification::centredLeft, false);
         }
 
@@ -539,16 +717,16 @@ namespace
         {
             using namespace params;
             setHeaderSwitch (morphEnabled, "ON", "MORPH: the oscillators and card C become one sound (at 0 % the oscillators, at 100 % card C, between them a fusion)");
-            headerStatus = [&h] { return h.engineStatus ("morph").isEmpty() ? juce::String() : juce::String ("Load an eligible sample into C to morph"); };
             setGraph (std::make_unique<MorphGraph> (h));
         }
 
     protected:
         void build (int) override
         {
-            // METHOD and CARRIER in the selector row; the five knobs in one row, then the
-            // output's compact controls after a quiet divider. (MORPH 2.0's controls will take
-            // pages - MORPH / IDENTITY / MOTION - never a taller rack.)
+            // METHOD and CARRIER in the selector row; the five knobs that shape the morph in one
+            // row; then, a rank lower (lighter captions and values, its own caption), the setup:
+            // what comes out, the level match, card C's root. (MORPH 2.0's controls will take
+            // pages - MORPH / IDENTITY / MOTION - once they exist, never a taller rack.)
             using namespace params;
             selectorSegment (morphMethod, "METHOD", { { "IMPRINT", "Imprint", 0.0f }, { "FUSE", "Fuse", 1.0f }, { "WEAVE", "Weave", 2.0f } }, 210,
                              "IMPRINT: card C's envelope on the oscillators. FUSE: their partials and pitch blended. WEAVE: their partials interleaved");
@@ -556,12 +734,13 @@ namespace
                              "The analog side: oscillator 1, oscillator 2, or the pair as levelled");
             knob (morphPosition, "MORPH", textOf (host, morphPosition));
             knob (morphTexture, "TEXTURE", textOf (host, morphTexture));
-            knob (morphAttack, "ATTACK", textOf (host, morphAttack));
+            knob (morphAttack, "ATTACK", textOf (host, morphAttack))
+                .slider.setTooltip ("How much of card C's own attack (its onset transient) the morph keeps - not an envelope time");
             knob (morphFormants, "FORMANTS", textOf (host, morphFormants));
             knob (morphDetail, "DETAIL", textOf (host, morphDetail));
-            group ({});
-            segmentCell (morphOutput, "OUTPUT", { { "MORPH ONLY", "Morph only", 0.0f }, { "LAYERED", "Layered", 1.0f } },
-                         "MORPH ONLY: the morph replaces the oscillators and card C. LAYERED: it joins them", rackui::Slot::twoKnobs);
+            group ("SETUP", true);
+            switchCell (morphOutput, "OUTPUT", { { "MORPH", "Morph only", 0.0f }, { "LAYERED", "Layered", 1.0f } },
+                        "MORPH ONLY: the morph replaces the oscillators and card C. LAYERED: it joins them");
             switchCell (morphLevelMatch, "LEVEL MATCH", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } }, "Holds the loudness steady between the oscillators' and card C's");
             knob (organicRoot, "ROOT", [] (double v) {
                 const int note = juce::roundToInt (v);

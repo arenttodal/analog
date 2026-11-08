@@ -5258,15 +5258,51 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
         for (const auto& b : filter->cellBounds())
             CHECK (b.getRight() < graph.getX() - 17);
     }
-    // FILTER's selectors are in its selector row; PAIR's noise colour too.
+    // FILTER's selector row: only the settings the chosen model uses, after the page words.
+    using andor::analog::params::filterModel;
+    using andor::analog::params::otaCharacter;
+    using andor::analog::params::otaHpf;
     filter->showPage (0);
     ui.refreshNow();
-    for (const char* name : { "TYPE", "HPF", "OTA", "JUNO" })
-        CHECK (filter->cellNamed (name) != nullptr);
-    // POLY MOD's destinations are three independent switches: any of them at once.
+    auto shown = [&] {
+        juce::StringArray names;
+        for (const char* name : { "TYPE", "SLOPE", "VOICING", "JUNO", "HPF" })
+            if (auto* c = filter->cellNamed (name))
+            {
+                names.add (name);
+                CHECK (c->getX() > 160);   // (right of FILTER VOICE PAIR and its rule)
+                CHECK (c->getBottom() < filter->cellBounds().front().getY());
+            }
+        return names.joinIntoString (" ");
+    };
+    const auto savedModel = p.parameterValue (filterModel), savedHpf = p.parameterValue (otaHpf), savedVoicing = p.parameterValue (otaCharacter);
+    setValue (p, filterModel, 0.0f);
+    setValue (p, otaHpf, 0.0f);
+    ui.refreshNow();
+    CHECK (shown() == "TYPE HPF");   // the ladder, no high-pass: nothing else acts
+    setValue (p, otaHpf, 2.0f);
+    ui.refreshNow();
+    CHECK (shown() == "TYPE VOICING JUNO HPF");   // the high-pass's curve: the voicing's and the Juno's
+    setValue (p, filterModel, 1.0f);
+    ui.refreshNow();
+    CHECK (shown() == "TYPE SLOPE VOICING JUNO HPF");
+    setValue (p, otaCharacter, 1.0f);
+    ui.refreshNow();
+    CHECK (shown() == "TYPE SLOPE VOICING HPF");   // JUPITER: no Juno to choose
+    setValue (p, filterModel, savedModel);
+    setValue (p, otaHpf, savedHpf);
+    setValue (p, otaCharacter, savedVoicing);
+    ui.refreshNow();
+    // POLY MOD's destinations are three independent switches: any of them at once. The noise's
+    // colour sits over the NOISE knob, not in the navigation.
     filter->showPage (2);
     ui.refreshNow();
-    CHECK (filter->cellNamed ("NOISE") != nullptr);
+    auto* noise = filter->cellNamed ("NOISE");
+    auto* colour = filter->cellNamed ("COLOR");
+    REQUIRE (noise != nullptr);
+    REQUIRE (colour != nullptr);
+    CHECK (std::abs (colour->getBounds().getCentreX() - noise->getBounds().getCentreX()) < 30);
+    CHECK (colour->getBottom() < noise->getY());
     auto* pitch = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("PITCH 1"));
     auto* width = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("WIDTH 1"));
     auto* cutoff = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("FILTER"));
@@ -5306,7 +5342,26 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
     REQUIRE (morph->headerSwitch() != nullptr);
     CHECK (morph->cellNamed ("METHOD") != nullptr);
     CHECK (morph->cellNamed ("CARRIER") != nullptr);
-    CHECK (morph->status() == "Load an eligible sample into C to morph");   // card C silent
+    CHECK (morph->status().isEmpty());   // (card C silent: the graph's empty state says so, not the header)
+    // The setup a rank below the five that shape the morph: quieter captions and values.
+    for (const char* name : { "MORPH", "TEXTURE", "ATTACK", "FORMANTS", "DETAIL" })
+    {
+        auto* k = dynamic_cast<osp::plugin::MiniKnob*> (morph->cellNamed (name));
+        REQUIRE (k != nullptr);
+        CHECK_FALSE (k->isQuiet());
+    }
+    for (const char* name : { "OUTPUT", "LEVEL MATCH" })
+    {
+        auto* key = morph->cellNamed (name);
+        REQUIRE (key != nullptr);
+        CHECK (dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (key) != nullptr);
+        auto* cell = dynamic_cast<osp::plugin::rackui::Cell*> (key->getParentComponent());
+        REQUIRE (cell != nullptr);
+        CHECK (cell->isQuiet());
+    }
+    auto* root = dynamic_cast<osp::plugin::MiniKnob*> (morph->cellNamed ("ROOT"));
+    REQUIRE (root != nullptr);
+    CHECK (root->isQuiet());
     ui.toggleRackFromLabel (Kind::morph);
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds().empty());
@@ -5471,6 +5526,14 @@ TEST_CASE ("analog: screenshots of the racks with their guide lines (ANALOG_SCRE
     REQUIRE (filter != nullptr);
     filter->showPage (0);
     both ("rack-filter-filter");
+    // The OTA (its slope, voicing and Juno shown), and the ladder with the high-pass on (the
+    // voicing and Juno shown for the high-pass's curve, no slope).
+    setValue (p, andor::analog::params::filterModel, 1.0f);
+    both ("rack-filter-filter-ota");
+    setValue (p, andor::analog::params::filterModel, 0.0f);
+    setValue (p, andor::analog::params::otaHpf, 3.0f);
+    both ("rack-filter-filter-ladder-hpf");
+    setValue (p, andor::analog::params::otaHpf, 0.0f);
     filter->showPage (1);
     const char* subs[] { "amp", "mod", "character" };
     for (int s = 0; s < 3; ++s)
@@ -5478,10 +5541,24 @@ TEST_CASE ("analog: screenshots of the racks with their guide lines (ANALOG_SCRE
         filter->showSubPage (s);
         both (juce::String ("rack-filter-voice-") + subs[s]);
     }
+    // MOD with LFO 1 at work: its depths, the wheel's share, the fade-in; CHARACTER's chorus on.
+    filter->showSubPage (1);
+    setValue (p, andor::analog::params::motion, 40.0f);
+    setValue (p, andor::analog::params::lfoCutoff, 24.0f);
+    setValue (p, andor::analog::params::lfoPitch1, -3.0f);
+    setValue (p, andor::analog::params::lfoDelay, 0.4f);
+    setValue (p, andor::analog::params::lfoRise, 1.2f);
+    setValue (p, andor::analog::params::lfoWheel, 1.0f);
+    both ("rack-filter-voice-mod-set");
+    filter->showSubPage (2);
+    setValue (p, andor::analog::params::chorusMode, 2.0f);
+    both ("rack-filter-voice-character-chorus");
     filter->showPage (2);
     both ("rack-filter-pair");
     ui.setRackExpanded (Kind::morph, true);
     both ("rack-morph");
+    setValue (p, andor::analog::params::hybridType, 1.0f);   // card C an oscillator: MORPH has a source
+    both ("rack-morph-source");
     // The narrowest and widest: the whole window, ARP open.
     ui.setArpExpanded (true);
     for (const int w : { 869, 1810 })

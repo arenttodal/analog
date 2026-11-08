@@ -186,3 +186,54 @@ Baseline for `ANDOR_APPROVED_EFFECTS_CLAUDE_IMPLEMENTATION_SPEC.md` and
 - Tests: `analog: every rack and page on the same lines ...` (every control of every module,
   mode and page on one centreline; one rack top and bottom; one instrument height),
   `[screenshots-guides]` (the ten views with their guide lines; 869 and 1810 px windows).
+
+## Refinement (2026-11-08): the racks' hierarchy
+
+What each rank of FILTER and MORPH is, told apart at a glance, on the same 214 px rack and lines:
+
+- **Navigation** (shared `rack::ParameterRack`): the pages (FILTER / VOICE / PAIR) are the
+  primary words - 11 px medium, the shown one dark with a 2 px underline in the module's
+  colour. VOICE's sub-pages (AMP / MOD / CHARACTER) are a rank below - 10 px regular, lighter in
+  both states, a 1 px underline in the same place. A short quiet rule separates the pages from
+  the sub-pages, and the navigation from the page's contextual settings (fields, not words).
+  The cells below are the sound's controls.
+- **Groups**: a captioned group (ENVELOPE, LFO 1, POLY MOD, SETUP) has a hairline from its
+  caption to its end, beside the quiet divider between groups, so what belongs together reads
+  without moving a control off the grid. A *quiet* group (`group (caption, true)`) is
+  configuration, not shaping: its captions and values a step lighter (`rackui::palette::
+  quietCaption / quietValue`, opt-in on `MiniKnob` and `rackui::Cell`).
+- **FILTER page**: only the settings the chosen model uses, in a fixed order - TYPE; SLOPE
+  (OTA only); VOICING and JUNO whenever they act (the OTA's voicing, and the high-pass's curve:
+  so with OTA, or with the ladder while HPF is on; JUNO not with JUPITER); HPF. A rebuild
+  happens only when the model, HPF on/off, the voicing or ENV LINK changes (not on values).
+  RESO ENV KEYS DRIVE | the ENVELOPE group (ATTACK … VELO), its caption and hairline.
+- **VOICE**: AMP's graph is the AMP envelope (or the gate). MOD's graph is LFO 1 as the engine
+  applies it, from the parameters: each target's swing now (AMOUNT × its depth, bipolar bars
+  in st), with the wheel linked an outline to the full depth the wheel brings in, and the
+  fade-in (DELAY, then RISE) to time scale. CHARACTER has nothing measured to draw, so no
+  graph: a restrained status of where each setting acts in the voice (VOICE: ANALOG, PHASE ->
+  FILTER DRIVE: BIAS, TRIM -> CHORUS: mode, HISS; the chorus quiet while off).
+- **PAIR**: the signal-flow schematic stays. The noise's COLOR (WHITE / JUNO) is no longer in
+  the navigation strip: it sits over the NOISE knob it belongs to (`selectorSegment (…, over)`).
+- **MORPH**: METHOD and CARRIER, the two selector groups at the top; MORPH TEXTURE ATTACK
+  FORMANTS DETAIL the primary row; then the SETUP group, quiet: OUTPUT (a two-position switch,
+  MORPH / LAYERED - no longer a stretched 215 px segment), LEVEL MATCH, ROOT. The header holds
+  only the title and ON: card C's eligibility is the graph's empty state ("Load an eligible
+  sample into C to morph", with the engine's own reason under it) instead of the concept view.
+  ATTACK's tooltip says it is card C's onset kept, not an envelope time (MORPH 2.0's contour
+  ATTACK / RELEASE will be separate). IDENTITY / MOTION pages are not shown: they do not exist
+  yet.
+- No DSP, parameter ID, automation or state change. OSP's own racks and popovers do not use
+  these paths (`ParameterRack` is built only from a product's `productRacks`; the quiet styling
+  is opt-in), so OSP stays pixel-identical.
+- Screens: `[screenshots-guides]` now also renders FILTER with OTA and with the ladder's
+  high-pass on, MOD with LFO 1 set, CHARACTER with the chorus on, and MORPH with a source.
+
+### Remaining hierarchy notes (for review)
+
+- PAIR's COLOR sits in the selector row's band over the NOISE knob (the row's only free space
+  at 214 px); it reads as NOISE's, but it is still a field in the top band, not inside the cell.
+- MOD's bars use each parameter's full span (CUTOFF ±48 st, PITCH ±12 st), so small depths
+  draw short; the values beside them carry the precision.
+- MORPH's spectral view remains a labelled concept view until MORPH 2.0 publishes measured
+  spectra.
