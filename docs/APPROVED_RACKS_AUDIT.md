@@ -161,3 +161,28 @@ Baseline for `ANDOR_APPROVED_EFFECTS_CLAUDE_IMPLEMENTATION_SPEC.md` and
 - Both are two rows tall (a documented exception: their control count), the same height on every page.
 - FILTER: pages FILTER / VOICE / PAIR (interface only; the last one is remembered). Its graph keeps one rectangle on every page: FILTER the filter model's small-signal response (LadderFilter's and OtaFilter's own equations and the high-pass positions), VOICE the AMP envelope (or GATE), PAIR a schematic with the pair's settings. POLY MOD's PITCH 1, WIDTH 1 and FILTER are three independent switches. With ENV LINK on, the filter envelope's knobs rest (dimmed) and the group says so. OTA's SLOPE is live only with OTA; CHARACTER and JUNO stay live (they also set the high-pass's curve).
 - MORPH: ON in its title row, a short status ("Load an eligible sample into C to morph") when card C is silent; MODE (IMPRINT / FUSE / WEAVE) and CARRIER (OSC 1 / OSC 2 / BOTH) as segmented switches in the selector row; MORPH TEXTURE ATTACK FORMANTS DETAIL; OUTPUT (MORPH ONLY / LAYERED), LEVEL MATCH, ROOT under them. Its graph is a concept view drawn from the settings and labelled as such: the engine publishes no analysis to the interface yet (MORPH 2.0's telemetry stage replaces it with measured spectra).
+
+
+## Correction (2026-11-08): one rack height, one set of lines
+
+- Every rack - MOVEMENT, ECHO, SPACE, FILTER (every page and sub-page) and MORPH - is the
+  standard 214 px rack at 1448 px (title 32, body 172, the 10 px foot), with the same title,
+  selector row, horizontal inset and graph (160 px). No page enlarges the rack; the keyboard
+  never moves when pages change (tested).
+- One set of cell lines for every control (`rackui::captionHeight` 18, `controlCentre` 59,
+  `valueTop` 92, from the cell's top): a knob's centre, a vertical switch's TRACK centre (its
+  two labels above and below it; its three labels beside it on their detents), a segmented or
+  list key's centre all sit on the centreline. Fixed in the shared `rackui::Cell` and
+  `MiniKnob::setRackMetrics`, not per instance. (The knob is 6.5 px lower than the prototype's
+  so the two-position switch's upper label clears the caption.)
+- FILTER: its type, high-pass and OTA voicing in the selector row; RESO ENV KEYS DRIVE and the
+  envelope in one row. VOICE has sub-pages AMP (ENV / GATE, ENV LINK, VOICES, UNISON, DETUNE,
+  SPREAD), MOD (LFO 1's AMOUNT CUTOFF PITCH 1 PITCH 2 DELAY RISE, WHEEL), CHARACTER (ANALOG,
+  PHASE, BIAS, TRIM, CHORUS, HISS). PAIR: SYNC RING BLEND, POLY MOD's FILT ENV, OSC 2 and its
+  three destination switches, NOISE level; the noise colour in the selector row.
+- MORPH: METHOD and CARRIER in the selector row; MORPH TEXTURE ATTACK FORMANTS DETAIL in one row
+  with OUTPUT, LEVEL MATCH and ROOT after a quiet divider. MORPH 2.0's controls will take pages
+  (MORPH / IDENTITY / MOTION), never a taller rack.
+- Tests: `analog: every rack and page on the same lines ...` (every control of every module,
+  mode and page on one centreline; one rack top and bottom; one instrument height),
+  `[screenshots-guides]` (the ten views with their guide lines; 869 and 1810 px windows).

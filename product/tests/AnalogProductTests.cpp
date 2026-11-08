@@ -5222,30 +5222,51 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
     CHECK (ui.rackMacro (Kind::morph) == 0);
     CHECK (ui.rackMacro (Kind::filter) == 2);
     const auto before = allParameterValues (p);
-    const float closedHeight = ui.instrumentHeight();
+    ui.setRackExpanded (Kind::movement, true);
+    ui.refreshNow();
+    const float standardHeight = ui.instrumentHeight();
 
-    // A double-click on FILTER's name opens its rack (no popover); one module at a time.
+    // A double-click on FILTER's name opens its rack (no popover); one module at a time; the
+    // standard rack's height on every page and sub-page.
     ui.toggleRackFromLabel (Kind::filter);
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::filter });
-    CHECK (ui.instrumentHeight() > closedHeight);
     auto* filter = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter));
     REQUIRE (filter != nullptr);
-    const juce::StringArray pageCaptions { "TYPE HIGH-PASS CHARACTER SLOPE JUNO RESO ENV KEYS DRIVE ATTACK DECAY SUSTAIN RELEASE VELO",
-                                           "AMP ENV LINK VOICES UNISON DETUNE SPREAD ANALOG PHASE BIAS TRIM AMOUNT CUTOFF PITCH 1 PITCH 2 DELAY RISE WHEEL CHORUS HISS",
-                                           "SYNC RING BLEND LEVEL COLOUR FILT ENV OSC 2 PITCH 1 WIDTH 1 FILTER" };
-    const auto graph = filter->graphBounds();
-    for (int page = 0; page < 3; ++page)
+    struct View
     {
-        INFO ("page " << page);
-        filter->showPage (page);
+        int page, sub;
+        const char* captions;
+    };
+    const View views[] { { 0, 0, "RESO ENV KEYS DRIVE ATTACK DECAY SUSTAIN RELEASE VELO" },
+                         { 1, 0, "AMP ENV LINK VOICES UNISON DETUNE SPREAD" },
+                         { 1, 1, "AMOUNT CUTOFF PITCH 1 PITCH 2 DELAY RISE WHEEL" },
+                         { 1, 2, "ANALOG PHASE BIAS TRIM CHORUS HISS" },
+                         { 2, 0, "SYNC RING BLEND FILT ENV OSC 2 PITCH 1 WIDTH 1 FILTER NOISE" } };
+    const auto graph = filter->graphBounds();
+    for (const auto& v : views)
+    {
+        INFO ("page " << v.page << "." << v.sub);
+        filter->showPage (v.page);
+        filter->showSubPage (v.sub);
         ui.refreshNow();
-        CHECK (filter->captions() == pageCaptions[page]);
+        CHECK (filter->page() == v.page);
+        CHECK (filter->subPage() == v.sub);
+        CHECK (filter->captions() == v.captions);
         CHECK (filter->graphBounds() == graph);   // one graph rectangle on every page
+        CHECK (ui.instrumentHeight() == standardHeight);
         for (const auto& b : filter->cellBounds())
             CHECK (b.getRight() < graph.getX() - 17);
     }
+    // FILTER's selectors are in its selector row; PAIR's noise colour too.
+    filter->showPage (0);
+    ui.refreshNow();
+    for (const char* name : { "TYPE", "HPF", "OTA", "JUNO" })
+        CHECK (filter->cellNamed (name) != nullptr);
     // POLY MOD's destinations are three independent switches: any of them at once.
+    filter->showPage (2);
+    ui.refreshNow();
+    CHECK (filter->cellNamed ("NOISE") != nullptr);
     auto* pitch = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("PITCH 1"));
     auto* width = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("WIDTH 1"));
     auto* cutoff = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("FILTER"));
@@ -5261,34 +5282,31 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
     pitch->choose (1);
     width->choose (1);
     cutoff->choose (1);
-    // TYPE: the two-way segmented switch; SLOPE only while OTA.
+    // TYPE: the two-way segmented switch; the slope only while OTA.
     filter->showPage (0);
     ui.refreshNow();
     auto* type = dynamic_cast<osp::plugin::rackui::SegmentedSwitch*> (filter->cellNamed ("TYPE"));
     REQUIRE (type != nullptr);
-    CHECK_FALSE (filter->cellNamed ("SLOPE")->isEnabled());
     type->choose (1);
     ui.refreshNow();
     CHECK (juce::roundToInt (p.parameterValue (andor::analog::params::filterModel)) == 1);
-    CHECK (filter->cellNamed ("SLOPE")->isEnabled());
     type = dynamic_cast<osp::plugin::rackui::SegmentedSwitch*> (filter->cellNamed ("TYPE"));   // (rebuilt with the type)
     REQUIRE (type != nullptr);
     type->choose (0);
     ui.refreshNow();
 
-    // MORPH: its rack replaces FILTER's; ON in its title row.
+    // MORPH: its rack replaces FILTER's; ON in its title row; one row; the standard height.
     ui.toggleRackFromLabel (Kind::morph);
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::morph });
+    CHECK (ui.instrumentHeight() == standardHeight);
     auto* morph = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::morph));
     REQUIRE (morph != nullptr);
     CHECK (morph->captions() == "MORPH TEXTURE ATTACK FORMANTS DETAIL OUTPUT LEVEL MATCH ROOT");
     REQUIRE (morph->headerSwitch() != nullptr);
-    CHECK (morph->cellNamed ("MODE") != nullptr);
+    CHECK (morph->cellNamed ("METHOD") != nullptr);
     CHECK (morph->cellNamed ("CARRIER") != nullptr);
-    // Card C silent in a new instrument: the short status.
-    CHECK (morph->status() == "Load an eligible sample into C to morph");
-    // Opening and closing changed no setting (the ones flipped above were set back).
+    CHECK (morph->status() == "Load an eligible sample into C to morph");   // card C silent
     ui.toggleRackFromLabel (Kind::morph);
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds().empty());
@@ -5296,6 +5314,191 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
     {
         INFO (id);
         CHECK (v == before.at (id));
+    }
+}
+
+namespace
+{
+    /** Where a rack cell's control sits: a knob's centre, a vertical switch's TRACK centre, a
+        segmented or list key's centre (editor coordinates). */
+    float controlCentreOf (juce::Component& editor, juce::Component& cellControl)
+    {
+        if (auto* k = dynamic_cast<osp::plugin::MiniKnob*> (&cellControl))
+            return editor.getLocalArea (k, k->slider.getBounds()).toFloat().getCentreY();
+        if (auto* v = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (&cellControl))
+            return editor.getLocalArea (v, v->trackBounds()).getCentreY();
+        return editor.getLocalArea (&cellControl, cellControl.getLocalBounds()).toFloat().getCentreY();
+    }
+}
+
+TEST_CASE ("analog: every rack and page on the same lines - one height, one control centreline, the keyboard still", "[analog][rack][rackgeometry]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rack::ParameterRack;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.setRackExpanded (Kind::movement, true);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.refreshNow();
+    const float height = ui.instrumentHeight();
+    std::optional<float> centreline, rackTop, rackBottom;
+    int checked = 0;
+    auto check = [&] (const juce::String& what) {
+        INFO (what);
+        ui.refreshNow();
+        CHECK (ui.instrumentHeight() == height);   // the keyboard never moves
+        auto& rack = ui.effectsRack();
+        const auto bounds = editor->getLocalArea (&rack, rack.getLocalBounds()).toFloat();
+        if (! rackTop)
+        {
+            rackTop = bounds.getY();
+            rackBottom = bounds.getBottom();
+        }
+        CHECK (bounds.getY() == *rackTop);
+        CHECK (bounds.getBottom() == *rackBottom);
+        auto* module = rack.module (rack.shownKinds().front());
+        REQUIRE (module != nullptr);
+        std::vector<juce::Component*> controls;
+        for (auto* child : module->getChildren())
+            if (auto* k = dynamic_cast<osp::plugin::MiniKnob*> (child); k != nullptr && k->isVisible())
+                controls.push_back (k);
+            else if (auto* c = dynamic_cast<osp::plugin::rackui::Cell*> (child); c != nullptr && c->isVisible())
+                controls.push_back (&c->key());
+        REQUIRE (! controls.empty());
+        for (auto* c : controls)
+        {
+            const float y = controlCentreOf (*editor, *c);
+            if (! centreline)
+                centreline = y;
+            CHECK (y == Catch::Approx (*centreline).margin (0.51));   // one centreline, whatever the control
+            ++checked;
+        }
+    };
+    ui.setRackExpanded (Kind::movement, true);
+    for (int m = 0; m < 5; ++m)
+    {
+        setValue (p, "movement.mode", static_cast<float> (m));
+        check ("MOVEMENT " + juce::String (m));
+    }
+    ui.setRackExpanded (Kind::echo, true);
+    for (int m = 0; m < 3; ++m)
+    {
+        setValue (p, "echo.type", static_cast<float> (m));
+        check ("ECHO " + juce::String (m));
+    }
+    ui.setRackExpanded (Kind::space, true);
+    for (int m = 0; m < 4; ++m)
+    {
+        setValue (p, "space.engine", static_cast<float> (m));
+        check ("SPACE " + juce::String (m));
+    }
+    ui.setRackExpanded (Kind::filter, true);
+    auto* filter = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter));
+    REQUIRE (filter != nullptr);
+    for (const auto& [page, sub] : { std::pair { 0, 0 }, std::pair { 1, 0 }, std::pair { 1, 1 }, std::pair { 1, 2 }, std::pair { 2, 0 } })
+    {
+        filter->showPage (page);
+        filter->showSubPage (sub);
+        check ("FILTER " + juce::String (page) + "." + juce::String (sub));
+    }
+    ui.setRackExpanded (Kind::morph, true);
+    check ("MORPH");
+    CHECK (checked > 80);
+}
+
+TEST_CASE ("analog: screenshots of the racks with their guide lines (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-guides]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rack::ParameterRack;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    setValue (p, andor::analog::params::resonance, 45.0f);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name, bool guides) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        auto& rack = ui.effectsRack();
+        const auto r = editor->getLocalArea (&rack, rack.getLocalBounds()).toFloat();
+        auto image = editor->createComponentSnapshot (r.getSmallestIntegerContainer().expanded (0, 6), true, 1.0f);
+        if (guides)
+        {
+            // The rack's lines: top, header text, selector row, captions, control centres, values,
+            // bottom (from the shared metrics, in this rack's coordinates).
+            juce::Graphics g (image);
+            auto* module = rack.module (rack.shownKinds().front());
+            const float y0 = 6.0f, cells = y0 + static_cast<float> (module->titleOffset() + 39 + 8);
+            const float lines[] { y0, y0 + 0.5f * static_cast<float> (module->titleOffset()) + 2.0f, y0 + static_cast<float> (module->titleOffset()) + 19.5f,
+                                  cells + 0.5f * osp::plugin::rackui::captionHeight, cells + osp::plugin::rackui::controlCentre, cells + osp::plugin::rackui::valueTop + 9.0f,
+                                  y0 + r.getHeight() - 1.0f };
+            const juce::Colour colours[] { juce::Colours::red, juce::Colours::orange, juce::Colours::magenta, juce::Colours::blue, juce::Colours::green,
+                                           juce::Colours::darkcyan, juce::Colours::red };
+            for (int i = 0; i < 7; ++i)
+            {
+                g.setColour (colours[i].withAlpha (0.55f));
+                g.fillRect (juce::Rectangle<float> (0.0f, lines[i], static_cast<float> (image.getWidth()), 1.0f));
+            }
+        }
+        const auto file = out.getChildFile (name + (guides ? "-guides" : "") + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto both = [&] (const juce::String& name) {
+        shoot (name, false);
+        shoot (name, true);
+    };
+    ui.setRackExpanded (Kind::movement, true);
+    setValue (p, "movement.mode", 4.0f);
+    both ("rack-movement-shaper");
+    ui.setRackExpanded (Kind::echo, true);
+    setValue (p, "echo.type", 2.0f);
+    both ("rack-echo-ascend");
+    ui.setRackExpanded (Kind::space, true);
+    setValue (p, "space.engine", 0.0f);
+    both ("rack-space-hall");
+    setValue (p, "space.engine", 1.0f);
+    both ("rack-space-abyss");
+    ui.setRackExpanded (Kind::filter, true);
+    auto* filter = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter));
+    REQUIRE (filter != nullptr);
+    filter->showPage (0);
+    both ("rack-filter-filter");
+    filter->showPage (1);
+    const char* subs[] { "amp", "mod", "character" };
+    for (int s = 0; s < 3; ++s)
+    {
+        filter->showSubPage (s);
+        both (juce::String ("rack-filter-voice-") + subs[s]);
+    }
+    filter->showPage (2);
+    both ("rack-filter-pair");
+    ui.setRackExpanded (Kind::morph, true);
+    both ("rack-morph");
+    // The narrowest and widest: the whole window, ARP open.
+    ui.setArpExpanded (true);
+    for (const int w : { 869, 1810 })
+    {
+        width = w;
+        for (const auto kind : { Kind::filter, Kind::morph, Kind::echo })
+        {
+            ui.setRackExpanded (kind, true);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            ui.refreshNow();
+            ui.effectsRack().settle();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile ("window-" + juce::String (w) + "-" + osp::plugin::rack::name (kind).toLowerCase() + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        }
     }
 }
 

@@ -252,11 +252,12 @@ namespace
         void paintPair (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
         {
             // A schematic (not an analysis): the two oscillators, what links them, their values.
-            auto inner = area.reduced (16.0f, 0.0f).withTrimmedTop (30.0f).withTrimmedBottom (20.0f);
-            auto readouts = inner.removeFromBottom (58.0f);
-            inner.removeFromBottom (8.0f);
-            const float bw = std::min (96.0f, 0.34f * inner.getWidth()), bh = 28.0f;
-            const juce::Rectangle<float> osc1 (inner.getX() + 22.0f, inner.getY() + 2.0f, bw, bh), osc2 (inner.getX() + 22.0f, inner.getBottom() - bh - 2.0f, bw, bh);
+            // The schematic on the left, the values on the right (the graph is 160 px high).
+            auto inner = area.reduced (14.0f, 0.0f).withTrimmedTop (28.0f).withTrimmedBottom (20.0f);
+            auto readouts = inner.removeFromRight (0.46f * inner.getWidth());
+            inner.removeFromRight (10.0f);
+            const float bw = std::min (64.0f, 0.36f * inner.getWidth()), bh = 24.0f;
+            const juce::Rectangle<float> osc1 (inner.getX(), inner.getY() + 2.0f, bw, bh), osc2 (inner.getX(), inner.getBottom() - bh - 2.0f, bw, bh);
             const juce::Rectangle<float> mix (inner.getRight() - bw, inner.getCentreY() - 0.5f * bh, bw, bh);
             auto box = [&g] (juce::Rectangle<float> b, const juce::String& text, juce::Colour c) {
                 g.setColour (c.withAlpha (0.16f));
@@ -302,15 +303,16 @@ namespace
                 to.add ("WIDTH 1");
             if (plain (host, params::polyModToCutoff) >= 0.5f)
                 to.add ("FILTER");
-            const juce::String dot = juce::String::fromUTF8 ("  \xc2\xb7  ");
-            const juce::StringArray lines { "RING " + pct (params::ringMix) + dot + "BLEND " + pct (params::blend),
-                                            "POLY MOD " + pct (params::polyModEnv) + " ENV, " + pct (params::polyModOsc2) + " OSC 2" + juce::String::fromUTF8 (" \xe2\x86\x92 ")
-                                                + (to.isEmpty() ? juce::String ("none") : to.joinIntoString (", ")),
-                                            "NOISE " + pct (params::noise) + dot + (choice (host, params::noiseColor) == 1 ? "JUNO" : "WHITE") };
-            g.setFont (graphFont (9.5f));
+            const juce::StringArray lines { "RING " + pct (params::ringMix) + "   BLEND " + pct (params::blend),
+                                            "POLY MOD  ENV " + pct (params::polyModEnv) + "  OSC 2 " + pct (params::polyModOsc2),
+                                            juce::String::fromUTF8 ("\xe2\x86\x92 ") + (to.isEmpty() ? juce::String ("no destination") : to.joinIntoString (", ")),
+                                            "NOISE " + pct (params::noise) + "  " + (choice (host, params::noiseColor) == 1 ? "JUNO" : "WHITE") };
+            g.setFont (graphFont (9.0f));
             g.setColour (graphText);
+            const float step = std::min (18.0f, readouts.getHeight() / 4.0f);
             for (int i = 0; i < lines.size(); ++i)
-                g.drawText (lines[i], readouts.withHeight (16.0f).translated (0.0f, 18.0f * static_cast<float> (i) + 4.0f), juce::Justification::centredLeft, true);
+                g.drawText (lines[i], readouts.withHeight (step).translated (0.0f, step * static_cast<float> (i) + 0.5f * (readouts.getHeight() - 4.0f * step)),
+                            juce::Justification::centredLeft, true);
             g.setFont (graphFont (10.0f));
             g.drawText ("OSC 1 + OSC 2", area.reduced (10.0f, 7.0f).withHeight (14.0f), juce::Justification::centredLeft, false);
             g.setFont (graphFont (8.5f));
@@ -324,14 +326,15 @@ namespace
     };
 
     //==========================================================================
-    int filterPageShown = 0;   // (interface only: the last page looked at)
+    int filterPageShown = 0, voicePageShown = 0;   // (interface only: the last pages looked at)
 
     class FilterRack final : public ParameterRack
     {
     public:
-        explicit FilterRack (InstrumentHost& h) : ParameterRack (h, "FILTER", design::colour::macro (design::colour::Macro::character), 0.74f, 2)
+        explicit FilterRack (InstrumentHost& h) : ParameterRack (h, "FILTER", design::colour::macro (design::colour::Macro::character), 0.68f)
         {
             setPages ({ "FILTER", "VOICE", "PAIR" }, &filterPageShown);
+            setSubPages (1, { "AMP", "MOD", "CHARACTER" }, &voicePageShown);
             setGraph (std::make_unique<FilterGraph> (h, [this] { return page(); }));
         }
 
@@ -340,92 +343,91 @@ namespace
         void build (int p) override
         {
             using namespace params;
+            const rackui::Position on { "ON", "On", 1.0f }, off { "OFF", "Off", 0.0f };
             if (p == 0)
             {
-                // The filter: its type and high-pass, the OTA's voicing (which also sets the
-                // high-pass's curve); then the four main knobs and its envelope.
+                // The filter: what it is in the selector row (type, high-pass, the OTA's voicing,
+                // which also sets the high-pass's curve), then one row: RESO ENV KEYS DRIVE and
+                // its envelope (resting while ENV LINK lets the AMP envelope shape it).
                 const bool ota = choice (host, filterModel) == 1, linked = plain (host, envLink) >= 0.5f;
-                group ({});
-                segmentCell (filterModel, "TYPE", { { "LADDER", "Ladder", 0.0f }, { "OTA", "OTA", 1.0f } },
-                             "The low-pass: the original four-pole LADDER, or the OTA family (after the Juno and Jupiter-8)");
-                listCell (otaHpf, "HIGH-PASS", "The high-pass before the filter: off, or its positions (Juno-106: 0 bass boost, 1 flat, 2 and 3 cut; the others: 0 flat, 1-3 cut)");
-                group ("VOICING");
-                segmentCell (otaCharacter, "CHARACTER", { { "JUNO", "Juno", 0.0f }, { "JUPITER", "Jupiter", 1.0f } },
-                             "The OTA's voicing and the high-pass's curve: JUNO smoother, JUPITER brighter and more resonant");
-                auto& slope = segmentCell (otaSlope, "SLOPE", { { "24 dB", "24 dB", 0.0f }, { "12 dB", "12 dB", 1.0f } },
-                                           ota ? "The slope: four poles, or the Jupiter-8's two-pole tap (resonance stays)" : "The slope acts on the OTA filter: set TYPE to OTA");
+                selectorSegment (filterModel, "TYPE", { { "LADDER", "Ladder", 0.0f }, { "OTA", "OTA", 1.0f } }, 104,
+                                 "The low-pass: the original four-pole LADDER, or the OTA family (after the Juno and Jupiter-8)");
+                selectorList (otaHpf, "HPF", 60, "The high-pass before the filter: off, or its positions (Juno-106: 0 bass boost, 1 flat, 2 and 3 cut; the others: 0 flat, 1-3 cut)");
+                selectorSegment (otaCharacter, "OTA", { { "JUNO", "Juno", 0.0f }, { "JUPITER", "Jupiter", 1.0f } }, 108,
+                                 "The OTA's voicing and the high-pass's curve: JUNO smoother, JUPITER brighter and more resonant");
+                auto& slope = selectorSegment (otaSlope, {}, { { "24 dB", "24 dB", 0.0f }, { "12 dB", "12 dB", 1.0f } }, 88,
+                                               ota ? "The slope: four poles, or the Jupiter-8's two-pole tap (resonance stays)" : "The slope acts on the OTA filter: set TYPE to OTA");
                 slope.setEnabled (ota);
-                listCell (junoVariant, "JUNO", "Which Juno: its high-pass positions (106: a bass boost) and the OTA's calibration");
-                row();
-                group ({});
+                selectorList (junoVariant, "JUNO", 60, "Which Juno: its high-pass positions (106: a bass boost) and the OTA's calibration");
                 knob (resonance, "RESO", textOf (host, resonance));
                 knob (envDepth, "ENV", textOf (host, envDepth));
                 knob (keyTrack, "KEYS", textOf (host, keyTrack));
                 knob (filterDrive, "DRIVE", textOf (host, filterDrive));
-                group (linked ? juce::String::fromUTF8 ("ENVELOPE \xc2\xb7 ENV LINK: THE AMP ENVELOPE SHAPES IT") : juce::String ("ENVELOPE"));
+                group (linked ? juce::String::fromUTF8 ("ENVELOPE \xc2\xb7 LINKED: THE AMP ENVELOPE SHAPES IT") : juce::String ("ENVELOPE"));
                 for (const auto& [id, caption] : { std::pair { filterAttack, "ATTACK" }, std::pair { filterDecay, "DECAY" }, std::pair { filterSustain, "SUSTAIN" },
                                                    std::pair { filterRelease, "RELEASE" } })
                 {
                     auto& k = knob (id, caption, textOf (host, id));
-                    k.setEnabled (! linked);   // (resting while ENV LINK lets the AMP envelope shape the filter)
+                    k.setEnabled (! linked);
                     k.setAlpha (linked ? 0.45f : 1.0f);
                 }
                 knob (velocityToFilter, "VELO", textOf (host, velocityToFilter));
             }
             else if (p == 1)
             {
-                // The voice: the amplifier, the voices, the analog character; LFO 1's depths
-                // and the chorus under them.
-                group ("AMPLIFIER");
-                segmentCell (vcaMode, "AMP", { { "ENV", "Envelope", 0.0f }, { "GATE", "Gate", 1.0f } },
-                             "The amplitude: its envelope (AMP), or a gate that opens and closes with the key");
-                switchCell (envLink, "ENV LINK", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } },
-                            "One envelope for both, as on a Juno-106: the AMP envelope shapes the filter too");
-                group ("VOICES");
-                steppedKnob (polyphony, "VOICES", textOf (host, polyphony));
-                switchCell (unison, "UNISON", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } }, "Every voice on one note, detuned: a thick mono sound");
-                knob (unisonDetune, "DETUNE", textOf (host, unisonDetune));
-                knob (spread, "SPREAD", textOf (host, spread));
-                group ("CHARACTER");
-                knob (analogAmount, "ANALOG", textOf (host, analogAmount));
-                segmentCell (phaseMode, "PHASE", { { "FREE", "Free", 0.0f }, { "RESET", "Reset", 1.0f } },
-                             "Oscillators free-running (each note starts anywhere) or restarted at every note");
-                knob (driveBias, "BIAS", textOf (host, driveBias));
-                knob (driveTrim, "TRIM", textOf (host, driveTrim));
-                row();
-                group ("LFO 1  (its shape and rate: the modulation panel)");
-                knob (motion, "AMOUNT", textOf (host, motion));
-                knob (lfoCutoff, "CUTOFF", textOf (host, lfoCutoff));
-                knob (lfoPitch1, "PITCH 1", textOf (host, lfoPitch1));
-                knob (lfoPitch2, "PITCH 2", textOf (host, lfoPitch2));
-                knob (lfoDelay, "DELAY", textOf (host, lfoDelay));
-                knob (lfoRise, "RISE", textOf (host, lfoRise));
-                switchCell (lfoWheel, "WHEEL", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } },
-                            "The mod wheel brings in the rest of these depths (the classic link). Off: the wheel moves only what you route it to");
-                group ({});
-                segmentCell (chorusMode, "CHORUS", { { "OFF", "Off", 0.0f }, { "I", "I", 1.0f }, { "II", "II", 2.0f }, { "I+II", "I and II", 3.0f } },
-                             "A Juno-style bucket-brigade chorus on the whole sound");
-                switchCell (chorusNoise, "HISS", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } }, "The chorus' own faint hiss");
+                switch (subPage())
+                {
+                    case 0:   // AMP: the amplifier, the envelope link, the voices
+                        segmentCell (vcaMode, "AMP", { { "ENV", "Envelope", 0.0f }, { "GATE", "Gate", 1.0f } },
+                                     "The amplitude: its envelope (AMP), or a gate that opens and closes with the key");
+                        switchCell (envLink, "ENV LINK", { on, off }, "One envelope for both, as on a Juno-106: the AMP envelope shapes the filter too");
+                        group ({});
+                        steppedKnob (polyphony, "VOICES", textOf (host, polyphony));
+                        switchCell (unison, "UNISON", { on, off }, "Every voice on one note, detuned: a thick mono sound");
+                        knob (unisonDetune, "DETUNE", textOf (host, unisonDetune));
+                        knob (spread, "SPREAD", textOf (host, spread));
+                        break;
+                    case 1:   // MOD: LFO 1's depths (its shape and rate: the modulation panel)
+                        group ("LFO 1");
+                        knob (motion, "AMOUNT", textOf (host, motion));
+                        knob (lfoCutoff, "CUTOFF", textOf (host, lfoCutoff));
+                        knob (lfoPitch1, "PITCH 1", textOf (host, lfoPitch1));
+                        knob (lfoPitch2, "PITCH 2", textOf (host, lfoPitch2));
+                        knob (lfoDelay, "DELAY", textOf (host, lfoDelay));
+                        knob (lfoRise, "RISE", textOf (host, lfoRise));
+                        group ({});
+                        switchCell (lfoWheel, "WHEEL", { on, off },
+                                    "The mod wheel brings in the rest of these depths (the classic link). Off: the wheel moves only what you route it to");
+                        break;
+                    default:   // CHARACTER: the analog character, phase, bias, trim; the chorus and its hiss
+                        knob (analogAmount, "ANALOG", textOf (host, analogAmount));
+                        segmentCell (phaseMode, "PHASE", { { "FREE", "Free", 0.0f }, { "RESET", "Reset", 1.0f } },
+                                     "Oscillators free-running (each note starts anywhere) or restarted at every note");
+                        knob (driveBias, "BIAS", textOf (host, driveBias));
+                        knob (driveTrim, "TRIM", textOf (host, driveTrim));
+                        group ({});
+                        segmentCell (chorusMode, "CHORUS", { { "OFF", "Off", 0.0f }, { "I", "I", 1.0f }, { "II", "II", 2.0f }, { "I+II", "I and II", 3.0f } },
+                                     "A Juno-style bucket-brigade chorus on the whole sound");
+                        switchCell (chorusNoise, "HISS", { on, off }, "The chorus' own faint hiss");
+                        break;
+                }
             }
             else
             {
-                // The pair: what the two oscillators do together; Poly Mod's sources and its
-                // three destinations (each its own switch: any of them at once).
-                group ("OSC 1 + OSC 2");
-                switchCell (sync, "SYNC", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } },
-                            "Hard sync: oscillator 2 restarts oscillator 1 every cycle (tune oscillator 1 up for the classic sweep)");
+                // The pair: sync, ring, blend; Poly Mod's sources and its three destinations
+                // (each its own switch: any of them at once); the noise (its colour above).
+                selectorSegment (noiseColor, "NOISE", { { "WHITE", "White", 0.0f }, { "JUNO", "Juno", 1.0f } }, 112, "The noise's colour: white, or the Juno's darker hiss");
+                switchCell (sync, "SYNC", { on, off }, "Hard sync: oscillator 2 restarts oscillator 1 every cycle (tune oscillator 1 up for the classic sweep)");
                 knob (ringMix, "RING", textOf (host, ringMix));
                 knob (blend, "BLEND", textOf (host, blend));
-                group ("NOISE  (mixed with the oscillators)");
-                knob (noise, "LEVEL", textOf (host, noise));
-                segmentCell (noiseColor, "COLOUR", { { "WHITE", "White", 0.0f }, { "JUNO", "Juno", 1.0f } }, "The noise's colour: white, or the Juno's darker hiss");
-                row();
-                group ("POLY MOD  (filter envelope and OSC 2, to:)");
+                group ("POLY MOD");
                 knob (polyModEnv, "FILT ENV", textOf (host, polyModEnv));
                 knob (polyModOsc2, "OSC 2", textOf (host, polyModOsc2));
-                switchCell (polyModToPitch1, "PITCH 1", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } }, "Poly Mod moves oscillator 1's pitch (FM with oscillator 2, sweeps with the envelope)");
-                switchCell (polyModToWidth1, "WIDTH 1", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } }, "Poly Mod moves oscillator 1's pulse width");
-                switchCell (polyModToCutoff, "FILTER", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } }, "Poly Mod moves the filter's cutoff");
+                switchCell (polyModToPitch1, "PITCH 1", { on, off }, "Poly Mod moves oscillator 1's pitch (FM with oscillator 2, sweeps with the envelope)");
+                switchCell (polyModToWidth1, "WIDTH 1", { on, off }, "Poly Mod moves oscillator 1's pulse width");
+                switchCell (polyModToCutoff, "FILTER", { on, off }, "Poly Mod moves the filter's cutoff");
+                group ({});
+                knob (noise, "NOISE", textOf (host, noise));
             }
         }
     };
@@ -533,28 +535,31 @@ namespace
     class MorphRack final : public ParameterRack
     {
     public:
-        explicit MorphRack (InstrumentHost& h) : ParameterRack (h, "MORPH", design::colour::macro (design::colour::Macro::life), 0.57f, 2)
+        explicit MorphRack (InstrumentHost& h) : ParameterRack (h, "MORPH", design::colour::macro (design::colour::Macro::life), 0.68f)
         {
             using namespace params;
             setHeaderSwitch (morphEnabled, "ON", "MORPH: the oscillators and card C become one sound (at 0 % the oscillators, at 100 % card C, between them a fusion)");
             headerStatus = [&h] { return h.engineStatus ("morph").isEmpty() ? juce::String() : juce::String ("Load an eligible sample into C to morph"); };
-            selectorSegment (morphMethod, "MODE", { { "IMPRINT", "Imprint", 0.0f }, { "FUSE", "Fuse", 1.0f }, { "WEAVE", "Weave", 2.0f } }, 210,
-                             "IMPRINT: card C's envelope on the oscillators. FUSE: their partials and pitch blended. WEAVE: their partials interleaved");
-            selectorSegment (morphCarrier, "CARRIER", { { "OSC 1", "Oscillator 1", 0.0f }, { "OSC 2", "Oscillator 2", 1.0f }, { "BOTH", "Both", 2.0f } }, 180,
-                             "The analog side: oscillator 1, oscillator 2, or the pair as levelled");
             setGraph (std::make_unique<MorphGraph> (h));
         }
 
     protected:
         void build (int) override
         {
+            // METHOD and CARRIER in the selector row; the five knobs in one row, then the
+            // output's compact controls after a quiet divider. (MORPH 2.0's controls will take
+            // pages - MORPH / IDENTITY / MOTION - never a taller rack.)
             using namespace params;
+            selectorSegment (morphMethod, "METHOD", { { "IMPRINT", "Imprint", 0.0f }, { "FUSE", "Fuse", 1.0f }, { "WEAVE", "Weave", 2.0f } }, 210,
+                             "IMPRINT: card C's envelope on the oscillators. FUSE: their partials and pitch blended. WEAVE: their partials interleaved");
+            selectorSegment (morphCarrier, "CARRIER", { { "OSC 1", "Oscillator 1", 0.0f }, { "OSC 2", "Oscillator 2", 1.0f }, { "BOTH", "Both", 2.0f } }, 180,
+                             "The analog side: oscillator 1, oscillator 2, or the pair as levelled");
             knob (morphPosition, "MORPH", textOf (host, morphPosition));
             knob (morphTexture, "TEXTURE", textOf (host, morphTexture));
             knob (morphAttack, "ATTACK", textOf (host, morphAttack));
             knob (morphFormants, "FORMANTS", textOf (host, morphFormants));
             knob (morphDetail, "DETAIL", textOf (host, morphDetail));
-            row();
+            group ({});
             segmentCell (morphOutput, "OUTPUT", { { "MORPH ONLY", "Morph only", 0.0f }, { "LAYERED", "Layered", 1.0f } },
                          "MORPH ONLY: the morph replaces the oscillators and card C. LAYERED: it joins them", rackui::Slot::twoKnobs);
             switchCell (morphLevelMatch, "LEVEL MATCH", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } }, "Holds the loudness steady between the oscillators' and card C's");
