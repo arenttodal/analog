@@ -197,9 +197,9 @@ What each rank of FILTER and MORPH is, told apart at a glance, on the same 214 p
   both states, a 1 px underline in the same place. A short quiet rule separates the pages from
   the sub-pages, and the navigation from the page's contextual settings (fields, not words).
   The cells below are the sound's controls.
-- **Groups**: a captioned group (ENVELOPE, LFO 1, POLY MOD, SETUP) has a hairline from its
-  caption to its end, beside the quiet divider between groups, so what belongs together reads
-  without moving a control off the grid. A *quiet* group (`group (caption, true)`) is
+- **Groups**: a captioned group (POLY MOD) has a small caption over its first cell, beside the
+  quiet divider between groups (the hairline this pass first added was removed in the final
+  polish, below). A *quiet* group (`group (caption, true)`) is
   configuration, not shaping: its captions and values a step lighter (`rackui::palette::
   quietCaption / quietValue`, opt-in on `MiniKnob` and `rackui::Cell`).
 - **FILTER page**: only the settings the chosen model uses, in a fixed order - TYPE; SLOPE
@@ -237,3 +237,75 @@ What each rank of FILTER and MORPH is, told apart at a glance, on the same 214 p
   draw short; the values beside them carry the precision.
 - MORPH's spectral view remains a labelled concept view until MORPH 2.0 publishes measured
   spectra.
+
+## Final polish (2026-11-08): FILTER and MORPH to the approved racks' finish
+
+One type scale and one set of lines with ECHO and SPACE; no new controls, pages or features.
+
+### Typography (shared: `rack::ParameterRack`, `rackui::Cell`, `MiniKnob`; graphs: the approved ECHO graph's)
+
+| Rank | Style |
+| --- | --- |
+| Rack title | the shared module title (unchanged) |
+| Primary navigation (FILTER / VOICE / PAIR) | 11 px medium, tracking 0.06; rest #8a847b, shown #3e3d3a + 2 px underline in the module colour |
+| Secondary navigation (AMP / MOD / CHARACTER) | 10 px medium, tracking 0.06; rest #9a948b, shown #4b4945 + 1 px underline; 28 px from the pages, no border |
+| Contextual selector captions (TYPE, METHOD, NOISE COLOR) | 9.5 px medium, tracking 0.06, #74716c (`ParameterRack::selectorCaptionFont`); 6 px to the field, 14 px between selectors; one quiet rule after the navigation |
+| Selector fields | the approved 27 px segmented switch / list (unchanged) |
+| Cell captions and values | the approved rack cell's (11 px caption, value under the control); a quiet group's a step lighter |
+| Group caption | 9 px medium, tracking 0.08, #8c857b (quiet #9a948b), over the group's first cell, no rule |
+| Graph metadata (top and foot lines) | 10 px regular, tracking 0.02, #c2c7c5 at 85 % (ECHO's) |
+| Graph labels (axes, row names) | 9.5 px medium, tracking 0.06, #9aa09e at 80 % (ECHO's L / R) |
+| Graph lines | grid white 5 %, axes white 7 % (ECHO's) |
+
+### Changes
+
+- **Grid**: groups are 28 px apart (`ParameterRack::groupGap`, the divider centred), so FILTER |
+  ENVELOPE, PAIR | POLY MOD | NOISE and CHARACTER's two groups read as sections; one slot family
+  per page; every control on the shared lines (unchanged). A two-position switch's component
+  now spans its cell (`rackui::Cell`), so a longer label ("MORPH ONLY") is not cut; its track
+  and labels stay centred (ECHO and SPACE draw the same pixels).
+- **FILTER**: selectors a touch wider (TYPE 112, SLOPE 96, VOICING 120, JUNO and HPF 64) and
+  closer together; the ENVELOPE caption removed (it crowded the OTA's selectors): the gap and
+  divider separate the sections, and with ENV LINK on the graph's foot says the AMP envelope
+  shapes the filter (the four knobs rest, dimmed, with a tooltip).
+- **AMP**: one section, no divider (ENV / GATE, ENV LINK, VOICES, UNISON, DETUNE, SPREAD).
+  The graph marks the envelope's stage boundaries faintly.
+- **MOD**: one row, WHEEL its last control at the standard spacing (no divider, no caption).
+  The graph: rows with readable names (9.5 px), a centre line and half-depth ticks on each
+  track, active rows bright and inactive ones ("off") faint, values in the metadata type, the
+  fade-in beside a quiet guide with DELAY and RISE under it, and the wheel's legend (NOW /
+  WITH THE WHEEL UP) only when it is linked.
+- **CHARACTER**: ANALOG PHASE BIAS TRIM | CHORUS HISS. The boxes diagram is gone. The graph now
+  draws two curves computed from the engine's own equations and figures, nothing measured:
+  the ladder's drive stage `u = tanh (2^(4 DRIVE) x + 0.6 BIAS) - tanh (0.6 BIAS)` (with the
+  stage's gain alone as a faint line; `filtergraph::driveCurve`, tested), and the chorus' two
+  BBD taps sweeping in opposite phase from `JunoChorus::spec` (I 0.513 Hz, II 0.863 Hz,
+  1.65-5.35 ms triangles; I+II 8.3 Hz, 3.3-3.7 ms sine). ANALOG and PHASE are metadata (the
+  engine's drift is per-voice private state: no curve is drawn for it). With the OTA, BIAS
+  rests (dimmed, tooltip) and the curve gives way to "the OTA saturates in its own stages".
+- **PAIR**: PAIR | POLY MOD (captioned) | NOISE; the colour selector is captioned NOISE COLOR
+  and sits over the NOISE knob's column. Graph: inactive SYNC brighter (45 %), the readouts as
+  name / value columns.
+- **MORPH**: METHOD 246 px and CARRIER 216 px (the same 27 px fields); the five knobs as
+  they were; the setup group quiet and uncaptioned after the divider, OUTPUT's MORPH ONLY /
+  LAYERED readable. Empty state: a 12 px line and the engine's reason at 10 px; no spectrum.
+  With a source: harmonic numbers under the axis, a legend (carrier: OSC 1 / OSC 2 / OSC 1+2,
+  cool; CARD C, copper), the foot "concept view from the settings · not a measurement".
+- `[screenshots-final]` renders the twelve review views (ECHO ASCEND and SPACE HALL as the
+  references; FILTER LADDER and OTA; AMP; MOD zero and set; CHARACTER chorus off and on; PAIR;
+  MORPH without and with a source) at 1448, 869 and 1810 px.
+
+### Unchanged
+
+DSP, parameter IDs, automation, presets and state (no parameter or serialisation change; the
+graphs read parameters only). OSP's own racks and popovers do not build `ParameterRack`; the
+switch's wider component paints identical pixels in ECHO and SPACE (`[rackcontrols]`,
+`[design-capture]`, the visual regressions).
+
+### For the product owner
+
+- CHARACTER shows no curve for ANALOG or PHASE: the engine's drift is per-voice state that the
+  interface cannot read without new engine telemetry. Adding it would be a feature (a later
+  stage), so the page names their values instead.
+- BIAS acts only on the LADDER; the knob now rests with the OTA. Hiding it instead (as FILTER's
+  selectors hide what does not apply) would change the CHARACTER row by model: say if wanted.

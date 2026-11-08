@@ -5298,10 +5298,12 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
     filter->showPage (2);
     ui.refreshNow();
     auto* noise = filter->cellNamed ("NOISE");
-    auto* colour = filter->cellNamed ("COLOR");
+    auto* colour = filter->cellNamed ("NOISE COLOR");
     REQUIRE (noise != nullptr);
     REQUIRE (colour != nullptr);
-    CHECK (std::abs (colour->getBounds().getCentreX() - noise->getBounds().getCentreX()) < 30);
+    CHECK (colour->getX() < noise->getBounds().getCentreX());   // (its caption and field over the knob's column)
+    CHECK (colour->getRight() > noise->getBounds().getCentreX());
+    CHECK (colour->getX() > filter->cellNamed ("FILTER")->getRight());
     CHECK (colour->getBottom() < noise->getY());
     auto* pitch = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("PITCH 1"));
     auto* width = dynamic_cast<osp::plugin::rackui::VerticalSwitch*> (filter->cellNamed ("WIDTH 1"));
@@ -5579,6 +5581,84 @@ TEST_CASE ("analog: screenshots of the racks with their guide lines (ANALOG_SCRE
     }
 }
 
+TEST_CASE ("analog: the review screens of FILTER and MORPH at 1448, 869 and 1810 px, with ECHO and SPACE (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-final]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rack::ParameterRack;
+    namespace ap = andor::analog::params;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    setValue (p, ap::resonance, 45.0f);
+    struct View
+    {
+        const char* name;
+        std::function<void()> set;
+    };
+    ParameterRack* filter = nullptr;
+    auto openFilter = [&] (int page, int sub) {
+        ui.setRackExpanded (Kind::filter, true);
+        filter = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter));
+        REQUIRE (filter != nullptr);
+        filter->showPage (page);
+        filter->showSubPage (sub);
+    };
+    const View views[] {
+        { "echo-ascend", [&] { ui.setRackExpanded (Kind::echo, true); setValue (p, "echo.type", 2.0f); } },
+        { "space-hall", [&] { ui.setRackExpanded (Kind::space, true); setValue (p, "space.engine", 0.0f); } },
+        { "filter-ladder", [&] { setValue (p, ap::filterModel, 0.0f); openFilter (0, 0); } },
+        { "filter-ota", [&] { setValue (p, ap::filterModel, 1.0f); openFilter (0, 0); } },
+        { "voice-amp", [&] { setValue (p, ap::filterModel, 0.0f); openFilter (1, 0); } },
+        { "voice-mod-zero", [&] {
+             for (const auto& id : { ap::lfoCutoff, ap::lfoPitch1, ap::lfoPitch2, ap::lfoDelay, ap::lfoRise })
+                 setValue (p, id, 0.0f);
+             setValue (p, ap::lfoWheel, 0.0f);
+             openFilter (1, 1);
+         } },
+        { "voice-mod-set", [&] {
+             setValue (p, ap::motion, 40.0f);
+             setValue (p, ap::lfoCutoff, 24.0f);
+             setValue (p, ap::lfoPitch1, -3.0f);
+             setValue (p, ap::lfoPitch2, 0.4f);
+             setValue (p, ap::lfoDelay, 0.4f);
+             setValue (p, ap::lfoRise, 1.2f);
+             setValue (p, ap::lfoWheel, 1.0f);
+             openFilter (1, 1);
+         } },
+        { "voice-character-off", [&] { setValue (p, ap::chorusMode, 0.0f); openFilter (1, 2); } },
+        { "voice-character-chorus", [&] {
+             setValue (p, ap::chorusMode, 2.0f);
+             setValue (p, ap::chorusNoise, 1.0f);
+             setValue (p, ap::filterDrive, 40.0f);
+             setValue (p, ap::driveBias, 50.0f);
+             openFilter (1, 2);
+         } },
+        { "pair", [&] { setValue (p, ap::polyModToPitch1, 1.0f); setValue (p, ap::polyModEnv, 30.0f); openFilter (2, 0); } },
+        { "morph-no-source", [&] { setValue (p, ap::hybridType, 0.0f); ui.setRackExpanded (Kind::morph, true); } },
+        { "morph-source", [&] { setValue (p, ap::hybridType, 1.0f); ui.setRackExpanded (Kind::morph, true); } },
+    };
+    for (const int width : { 1448, 869, 1810 })
+        for (const auto& v : views)
+        {
+            v.set();
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            ui.refreshNow();
+            ui.effectsRack().settle();
+            auto& rack = ui.effectsRack();
+            const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+            const auto image = editor->createComponentSnapshot (r.expanded (0, 6).getIntersection (editor->getLocalBounds()), true, 1.0f);   // (real size)
+            const auto file = out.getChildFile (juce::String (width) + "-" + v.name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        }
+}
+
 TEST_CASE ("analog: FILTER's graph is the filter model's response - cutoff, resonance, type and high-pass move it", "[analog][rack][filtermorph]")
 {
     using andor::analog::filtergraph::Settings;
@@ -5599,6 +5679,22 @@ TEST_CASE ("analog: FILTER's graph is the filter model's response - cutoff, reso
     CHECK (responseDb (s, 50.0) < -20.0);
     s.highPass = 0;   // its bass boost
     CHECK (responseDb (s, 30.0) > 4.0);
+}
+
+TEST_CASE ("analog: CHARACTER's drive curve is the ladder's drive stage - DRIVE's gain, BIAS's DC removed", "[analog][rack][filtermorph]")
+{
+    using andor::analog::filtergraph::driveCurve;
+    const auto plainCurve = driveCurve (0.0, 0.0);
+    CHECK (plainCurve.gain == Approx (1.0));
+    for (const double x : { -1.0, -0.3, 0.0, 0.5, 1.0 })
+        CHECK (plainCurve.at (x) == Approx (std::tanh (x)));
+    const auto driven = driveCurve (0.5, 0.0);
+    CHECK (driven.gain == Approx (4.0));                       // 2^(4 x 0.5), as the synth sets it
+    CHECK (driven.at (1.0) == Approx (std::tanh (4.0)));
+    const auto biased = driveCurve (0.0, 1.0);
+    CHECK (biased.bias == Approx (0.6));                       // 0.6 x BIAS
+    CHECK (biased.at (0.0) == Approx (0.0).margin (1.0e-12));  // its DC removed
+    CHECK (std::abs (biased.at (1.0)) < std::abs (biased.at (-1.0)));   // asymmetric: even harmonics
 }
 
 TEST_CASE ("analog: screenshots of the FILTER (FILTER, VOICE, PAIR) and MORPH racks (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-filtermorph]")

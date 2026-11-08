@@ -8,7 +8,7 @@ namespace andor::analog
 /** FILTER's inline rack (macro FILTER: cutoff): its three pages FILTER, VOICE and PAIR, the
     controls the FILTER popover has, on the approved rack's parts, with a computed graph. */
 std::unique_ptr<osp::plugin::rack::Module> createFilterRack (osp::plugin::InstrumentHost& host);
-/** MORPH's inline rack (macro MORPH): ON, MODE, CARRIER, its five knobs and its output row. */
+/** MORPH's inline rack (macro MORPH): ON, METHOD, CARRIER, its five knobs and its setup. */
 std::unique_ptr<osp::plugin::rack::Module> createMorphRack (osp::plugin::InstrumentHost& host);
 
 namespace filtergraph
@@ -25,6 +25,16 @@ namespace filtergraph
         int junoVariant = 2;    ///< 0 JUNO-6, 1 JUNO-60, 2 JUNO-106
     };
     double responseDb (const Settings& s, double hz) noexcept;
+
+    /** The ladder's drive stage as LadderFilter applies it (its feedback aside): the input
+        times the drive's gain, plus the bias, through the saturator, the bias's DC removed:
+        u = tanh (gain x + bias) - tanh (bias). DRIVE and BIAS 0..1, as the parameters / 100. */
+    struct DriveCurve
+    {
+        double gain = 1.0, bias = 0.0;
+        double at (double x) const noexcept;
+    };
+    DriveCurve driveCurve (double drive, double bias) noexcept;
 }
 
 } // namespace andor::analog
