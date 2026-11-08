@@ -1,4 +1,4 @@
-#include "FxProcessor.h"
+#include "Effects.h"
 
 namespace andor::analog::fx
 {
@@ -7,7 +7,16 @@ std::unique_ptr<Processor> makeProcessor (Type type)
 {
     switch (type)
     {
-        default: return {};   // (the new effects arrive gate by gate: docs/FX_ROUTING_IMPLEMENTATION.md)
+        case Type::spread: return std::make_unique<StereoSpread>();
+        case Type::compressor: return std::make_unique<Compressor>();
+        case Type::eq: return std::make_unique<Equalizer>();
+        case Type::filter: return std::make_unique<FxFilter>();
+        case Type::phaser: return std::make_unique<Phaser>();
+        case Type::flanger: return std::make_unique<Flanger>();
+        case Type::shifter: return std::make_unique<FrequencyShifter>();
+        case Type::convolution: return std::make_unique<Convolution>();
+        case Type::utility: return std::make_unique<Utility>();
+        default: return {};   // (the original four are the instrument's own: PostProcessor)
     }
 }
 

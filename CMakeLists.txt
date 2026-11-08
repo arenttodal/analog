@@ -45,7 +45,11 @@ add_library(analog_dsp STATIC
     dsp/Synth.cpp
     dsp/fx/FxGraph.cpp
     dsp/fx/FxEngine.cpp
-    dsp/fx/FxProcessors.cpp)
+    dsp/fx/FxProcessors.cpp
+    dsp/fx/FxTone.cpp
+    dsp/fx/FxDynamics.cpp
+    dsp/fx/FxModulation.cpp
+    dsp/fx/FxSpectral.cpp)
 target_include_directories(analog_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/dsp)
 target_link_libraries(analog_dsp PUBLIC osp_dsp)
 set_target_properties(analog_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -64,6 +68,7 @@ if(OSP_BUILD_TESTS)
         tests/RenderTests.cpp
         tests/FxBaselineTests.cpp
         tests/FxGraphTests.cpp
+        tests/FxEffectTests.cpp
         tests/RealtimeTests.cpp
         tests/LiveTests.cpp
         tests/ModulationTests.cpp
