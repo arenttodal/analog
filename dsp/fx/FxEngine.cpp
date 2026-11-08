@@ -89,8 +89,13 @@ void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, i
 {
     if (const auto* next = exchange.takePending(); next != nullptr && next != current)
     {
-        if (current == nullptr && (! next->graph.custom || ! played))
-            current = next;   // (the first route before any sound, or CLASSIC: nothing to duck)
+        const bool sameSound = current == nullptr ? ! next->graph.custom : (! current->graph.custom && ! next->graph.custom) || current->graph == next->graph;
+        if (sameSound || ! played)
+        {
+            current = next;   // (CLASSIC again, the same route, or nothing played yet: nothing to duck)
+            waiting = nullptr;
+            ducking = false;
+        }
         else
         {
             waiting = next;
