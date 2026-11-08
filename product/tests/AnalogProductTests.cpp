@@ -6026,6 +6026,19 @@ TEST_CASE ("analog: the FX rack - every new effect opens in the one 214 px modul
         auto* module = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));
         REQUIRE (module != nullptr);
         CHECK (module->captions().isNotEmpty());
+        // The hardware faceplate: power key on the effect's ON, the preset browser and the
+        // overflow key in the rail; every cell between the stripes and the graph's bezel.
+        CHECK (module->hasFaceplate());
+        REQUIRE (module->powerKey() != nullptr);
+        CHECK (module->railComponent() != nullptr);
+        CHECK (module->overflowKey() != nullptr);
+        for (const auto& b : module->cellBounds())
+        {
+            CHECK (b.getX() >= module->contentLeft());
+            CHECK (b.getRight() <= module->graphBounds().getX() - 4);
+            CHECK (b.getBottom() <= module->chassisBounds().getBottom());
+        }
+        CHECK (module->chassisBounds().contains (module->graphBounds().expanded (4)));
         // Another effect swaps the module: the rack keeps its height.
         if (! height)
             height = ui.instrumentHeight();
@@ -6062,6 +6075,20 @@ TEST_CASE ("analog: the FX rack - every new effect opens in the one 214 px modul
     CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::space });
     // Opening, swapping and closing never moved a parameter.
     CHECK (allParameterValues (p) == before);
+
+    // The power key is the effect's ON (a named gesture each way, as every rack switch).
+    view->openEditor ({ fx::Type::compressor, 0 });
+    ui.refreshNow();
+    auto* comp = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));
+    REQUIRE (comp != nullptr);
+    REQUIRE (comp->powerKey() != nullptr);
+    CHECK (comp->powerKey()->isOn());
+    comp->powerKey()->toggle();
+    CHECK (p.parameters.getRawParameterValue ("analog.fx.comp.1.on")->load() < 0.5f);
+    CHECK_FALSE (comp->powerKey()->isOn());
+    comp->powerKey()->toggle();
+    CHECK (p.parameters.getRawParameterValue ("analog.fx.comp.1.on")->load() > 0.5f);
+    CHECK (comp->powerKey()->isOn());
 }
 
 TEST_CASE ("analog: FX presets - every factory preset loads and reads as itself; a change marks it; a chain round-trips", "[analog][fx][presets]")
@@ -6183,12 +6210,21 @@ TEST_CASE ("analog: screenshots of the FX racks and quick settings (ANALOG_SCREE
     REQUIRE (view != nullptr);
     for (int t = 4; t < fx::typeCount; ++t)
         view->insertNew (static_cast<fx::Type> (t));
+    // Play the phrase through the chain: the meters and live graphs show what was heard.
+    renderShell (p, 0.5);
     for (int t = 4; t < fx::typeCount; ++t)
     {
         const fx::InstanceId id { static_cast<fx::Type> (t), 0 };
         const auto name = juce::String (fx::typeName (id.type)).toLowerCase().replaceCharacter (' ', '-');
         view->openEditor (id);
         shoot ("fx-rack-" + name);
+        if (id.type == fx::Type::compressor || id.type == fx::Type::spread)
+            for (const int w : { 869, 1810 })
+            {
+                width = w;
+                shoot ("fx-rack-" + name + "-" + juce::String (w));
+                width = 1448;
+            }
         if (id.type == fx::Type::compressor || id.type == fx::Type::shifter || id.type == fx::Type::eq)
         {
             auto* rack = ui.effectsRack().module (osp::plugin::rack::Kind::fx);

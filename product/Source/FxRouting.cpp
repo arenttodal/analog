@@ -64,21 +64,22 @@ namespace
 
 juce::Colour fxAccent (Type type)
 {
+    // The V2 family hues (docs/FX_RACK_V2_AUDIT.md): a tile's edge, a rack's arcs and enamel.
     switch (type)
     {
-        case Type::drive: return juce::Colour (0xffc77f50);
-        case Type::movement: return juce::Colour (0xff819aaf);
-        case Type::echo: return juce::Colour (0xff7baba7);
-        case Type::space: return juce::Colour (0xffab95b2);
-        case Type::spread: return juce::Colour (0xff879f8c);
-        case Type::compressor: return juce::Colour (0xffb0905f);
-        case Type::eq: return juce::Colour (0xff8f9f7c);
-        case Type::filter: return juce::Colour (0xffa68a6c);
-        case Type::phaser: return juce::Colour (0xff8d98b8);
-        case Type::flanger: return juce::Colour (0xff7d9fb0);
-        case Type::shifter: return juce::Colour (0xffa08cb0);
-        case Type::convolution: return juce::Colour (0xff9a9488);
-        case Type::utility: return juce::Colour (0xff8e9a96);
+        case Type::drive: return juce::Colour (0xffae6847);
+        case Type::movement: return juce::Colour (0xff759aae);
+        case Type::echo: return juce::Colour (0xff468f87);
+        case Type::space: return juce::Colour (0xff9582a4);
+        case Type::spread: return juce::Colour (0xff65a9b5);
+        case Type::compressor: return juce::Colour (0xff77836b);
+        case Type::eq: return juce::Colour (0xffa18a55);
+        case Type::filter: return juce::Colour (0xff688a77);
+        case Type::phaser: return juce::Colour (0xff777ca3);
+        case Type::flanger: return juce::Colour (0xff7295a2);
+        case Type::shifter: return juce::Colour (0xff807b9a);
+        case Type::convolution: return juce::Colour (0xff847b61);
+        case Type::utility: return juce::Colour (0xff8c8d8a);
         default: return juce::Colour (0xff9a9488);
     }
 }

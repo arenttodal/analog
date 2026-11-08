@@ -103,6 +103,13 @@ void Compressor::set (const Settings& s, int slot) noexcept
 
 void Compressor::processWet (float* left, float* right, int n) noexcept
 {
+    // The input's peak level (dB), held and falling 12 dB/s: the graph's operating point.
+    float peak = 0.0f;
+    for (int i = 0; i < n; ++i)
+        peak = std::max ({ peak, std::abs (left[i]), std::abs (right[i]) });
+    const float peakDb = peak > 1.0e-6f ? 20.0f * std::log10 (peak) : -120.0f;
+    const float held = inputDb.load (std::memory_order_relaxed);
+    inputDb.store (peakDb > held ? peakDb : held - 12.0f * static_cast<float> (n) / static_cast<float> (rate), std::memory_order_relaxed);
     switch (mode)
     {
         case CompSettings::fet: processFet (left, right, n); break;

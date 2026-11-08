@@ -26,6 +26,7 @@ namespace
 
 void StereoSpread::prepareEffect()
 {
+    scopeOn = true;   // (its rack draws a goniometer)
     for (auto& l : hyperLine)
         l.prepare (static_cast<int> ((hyperWindowSeconds + hyperMinDelay + 0.01) * rate));
     for (auto& l : dimLine)

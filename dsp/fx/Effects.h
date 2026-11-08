@@ -18,9 +18,33 @@ namespace andor::analog::fx
     insert: its effect, then its MIX (the dry signal delayed by its latency, so dry and wet line
     up) and OUTPUT, both glided. Meters for the graphs are atomics (read on the message thread).
 */
+/** The last few hundred output samples (L, R), decimated, for a goniometer (lock-free:
+    the audio thread writes, the interface reads; a torn pair only moves one dot). */
+struct ScopeTap
+{
+    static constexpr int size = 256;
+    std::array<std::atomic<float>, size> l {}, r {};
+    std::atomic<int> head { 0 };
+    int every = 6, count = 0;
+    void push (float a, float b) noexcept
+    {
+        if (++count < every)
+            return;
+        count = 0;
+        const int h = head.load (std::memory_order_relaxed);
+        l[static_cast<std::size_t> (h)].store (a, std::memory_order_relaxed);
+        r[static_cast<std::size_t> (h)].store (b, std::memory_order_relaxed);
+        head.store ((h + 1) % size, std::memory_order_release);
+    }
+};
+
 class InsertBase : public Processor
 {
 public:
+    /** Opt-in (SPREAD, UTILITY): the effect's output, for the rack's goniometer. */
+    ScopeTap scope;
+    bool scopeOn = false;
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void process (float* left, float* right, int numSamples) noexcept final;
     /** The effect's state cleared; MIX and OUTPUT at their settings (no glide from nothing). */
@@ -120,6 +144,8 @@ public:
     /** Gain reduction now (dB, >= 0) - CLEAN / FET: one value; MULTIBAND: per band, and the
         upward gain per band (dB, >= 0). */
     std::atomic<float> reductionDb { 0.0f };
+    /** The input's peak level, held and falling 12 dB/s (dB; the graph's operating point). */
+    std::atomic<float> inputDb { -120.0f };
     std::array<std::atomic<float>, 3> bandReductionDb {}, bandBoostDb {};
     /** CLEAN's static curve: output level for an input level (dB) - the graph. */
     static float cleanCurveDb (const CompSettings& s, float inputDb) noexcept;

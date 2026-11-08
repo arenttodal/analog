@@ -79,6 +79,9 @@ void InsertBase::process (float* left, float* right, int numSamples) noexcept
         const bool unityOut = ! outGlide.moving() && outGlide.value == 1.0f;
         if (full && unityOut)
         {
+            if (scopeOn)
+                for (int i = 0; i < n; ++i)
+                    scope.push (l[i], r[i]);
             done += n;
             continue;   // (MIX 100 %, OUTPUT 0 dB: the effect's own output, untouched)
         }
@@ -90,6 +93,8 @@ void InsertBase::process (float* left, float* right, int numSamples) noexcept
             const float wr = full ? r[i] : dryR[k] + m * (r[i] - dryR[k]);
             l[i] = g * wl;
             r[i] = g * wr;
+            if (scopeOn)
+                scope.push (l[i], r[i]);
         }
         done += n;
     }
@@ -101,6 +106,7 @@ void InsertBase::process (float* left, float* right, int numSamples) noexcept
 
 void Utility::prepareEffect()
 {
+    scopeOn = true;   // (its rack draws a goniometer)
     for (auto* g : { &gain, &panL, &panR, &width })
         g->prepare (rate, 0.02);
 }

@@ -22,6 +22,7 @@ using osp::plugin::rack::ParameterRack;
 
 namespace
 {
+    ParameterRack::Faceplate faceplateFor (Type type);
     InstanceId shownInstance { Type::eq, 0 };
     std::array<int, fx::totalInstances()> fxPageMemory {};
     std::array<juce::String, fx::totalInstances()> presetNames;
@@ -132,9 +133,14 @@ namespace
             if (const auto* p = live())
             {
                 if (const auto* c = dynamic_cast<const fx::Compressor*> (p))
-                    sig << c->reductionDb.load() << c->bandReductionDb[0].load() << c->bandBoostDb[1].load() << c->bandReductionDb[2].load();
+                {
+                    // The gain-reduction history (one point a refresh, ~4 s): what it did.
+                    grHistory[static_cast<std::size_t> (grHead)] = c->reductionDb.load();
+                    grHead = (grHead + 1) % static_cast<int> (grHistory.size());
+                    sig << c->reductionDb.load() << c->inputDb.load() << c->bandReductionDb[0].load() << c->bandBoostDb[1].load() << c->bandReductionDb[2].load() << grHead;
+                }
                 if (const auto* s = dynamic_cast<const fx::StereoSpread*> (p))
-                    sig << s->correlation.load();
+                    sig << s->correlation.load() << s->scope.head.load();
                 if (const auto* u = dynamic_cast<const fx::Utility*> (p))
                     sig << u->meterL.load() << u->meterR.load();
                 if (const auto* ph = dynamic_cast<const fx::Phaser*> (p))
@@ -186,7 +192,7 @@ namespace
         void paintGraph (juce::Graphics& g, juce::Rectangle<float> area) override
         {
             reader.read (settings);
-            const auto colour = fxAccent (id.type).brighter (0.35f);
+            const auto colour = faceplateFor (id.type).glow;   // (the faceplate's glow on its glass)
             plot.r = area.reduced (14.0f, 0.0f).withTrimmedTop (24.0f).withTrimmedBottom (32.0f);
             switch (id.type)
             {
@@ -282,11 +288,38 @@ namespace
                 foot (g, area, "gain reduction above, upward gain below (live)");
                 return;
             }
-            // CLEAN: the static curve; FET: its fixed reference and ratio. A live GR meter.
-            auto curveArea = body.withTrimmedRight (50.0f);
-            const auto box = curveArea.withSizeKeepingCentre (std::min (curveArea.getWidth(), curveArea.getHeight() * 1.6f), curveArea.getHeight());
+            // Left: the gain reduction it applied over the last seconds (live). Right: the
+            // transfer curve (CLEAN's static curve; FET's fixed reference and ratio) with where
+            // the input is now on it.
+            auto history = body.removeFromLeft (body.getWidth() * 0.46f).reduced (0.0f, 2.0f);
+            body.removeFromLeft (16.0f);
+            {
+                auto plotArea = history.withTrimmedLeft (22.0f).withTrimmedBottom (14.0f);
+                g.setColour (grid);
+                for (const float d : { 6.0f, 12.0f, 18.0f })
+                    g.fillRect (plotArea.withHeight (1.0f).withY (plotArea.getY() + plotArea.getHeight() * d / 24.0f));
+                for (const float d : { 0.0f, 12.0f, 24.0f })
+                    small (g, d == 0.0f ? juce::String ("0") : "-" + juce::String (juce::roundToInt (d)),
+                           juce::Rectangle<float> (history.getX(), plotArea.getY() + plotArea.getHeight() * d / 24.0f - 6.0f, 18.0f, 12.0f), juce::Justification::centredRight, 0.8f);
+                juce::Path fill;
+                const int count = static_cast<int> (grHistory.size());
+                fill.startNewSubPath (plotArea.getX(), plotArea.getY());
+                for (int i = 0; i < count; ++i)
+                {
+                    const float v = std::clamp (grHistory[static_cast<std::size_t> ((grHead + i) % count)], 0.0f, 24.0f);
+                    fill.lineTo (plotArea.getX() + plotArea.getWidth() * static_cast<float> (i) / static_cast<float> (count - 1), plotArea.getY() + plotArea.getHeight() * v / 24.0f);
+                }
+                fill.lineTo (plotArea.getRight(), plotArea.getY());
+                fill.closeSubPath();
+                g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.65f), 0.0f, plotArea.getY(), colour.withAlpha (0.12f), 0.0f, plotArea.getBottom(), false));
+                g.fillPath (fill);
+                small (g, "GAIN REDUCTION", history.withY (history.getBottom() - 12.0f).withHeight (12.0f).withTrimmedLeft (22.0f), juce::Justification::centredLeft, 0.85f);
+            }
+            auto box = body.withTrimmedBottom (14.0f).withTrimmedLeft (18.0f);
+            box = box.withSizeKeepingCentre (std::min (box.getWidth(), box.getHeight() * 1.25f), box.getHeight());
             auto xy = [&] (float inDb, float outDb) {
-                return juce::Point<float> (box.getX() + box.getWidth() * (inDb + 60.0f) / 60.0f, box.getBottom() - box.getHeight() * (std::clamp (outDb, -60.0f, 0.0f) + 60.0f) / 60.0f);
+                return juce::Point<float> (box.getX() + box.getWidth() * (std::clamp (inDb, -60.0f, 0.0f) + 60.0f) / 60.0f,
+                                           box.getBottom() - box.getHeight() * (std::clamp (outDb, -60.0f, 0.0f) + 60.0f) / 60.0f);
             };
             g.setColour (grid);
             for (const float d : { -48.0f, -36.0f, -24.0f, -12.0f })
@@ -294,37 +327,41 @@ namespace
                 g.fillRect (juce::Rectangle<float> (xy (d, d).x - 0.5f, box.getY(), 1.0f, box.getHeight()));
                 g.fillRect (juce::Rectangle<float> (box.getX(), xy (d, d).y - 0.5f, box.getWidth(), 1.0f));
             }
-            g.setColour (axis);
-            g.drawLine (juce::Line<float> (xy (-60.0f, -60.0f), xy (0.0f, 0.0f)), 1.0f);
+            g.setColour (axis.withMultipliedAlpha (2.0f));
+            g.drawRect (box, 1.0f);
+            const float dashes[] { 3.0f, 3.0f };
+            g.drawDashedLine (juce::Line<float> (xy (-60.0f, -60.0f), xy (0.0f, 0.0f)), dashes, 2, 1.0f);
+            auto transfer = [&s] (float in) {
+                if (s.mode == fx::CompSettings::clean)
+                    return fx::Compressor::cleanCurveDb (s, in) + s.makeupDb;
+                constexpr std::array<float, 5> ratios { 4.0f, 8.0f, 12.0f, 20.0f, 40.0f };
+                const float drive = in + s.fetInputDb, ratio = ratios[static_cast<std::size_t> (std::clamp (s.fetRatio, 0, 4))];
+                const float over = drive + 18.0f;
+                return (s.fetColorOnly || over <= 0.0f ? drive : drive - (1.0f - 1.0f / ratio) * over) + s.fetOutputDb;
+            };
             juce::Path p;
             for (int i = 0; i <= 120; ++i)
             {
                 const float in = -60.0f + 0.5f * static_cast<float> (i);
-                float out = in;
-                if (s.mode == fx::CompSettings::clean)
-                    out = fx::Compressor::cleanCurveDb (s, in) + s.makeupDb;
-                else
-                {
-                    constexpr std::array<float, 5> ratios { 4.0f, 8.0f, 12.0f, 20.0f, 40.0f };
-                    const float drive = in + s.fetInputDb, ratio = ratios[static_cast<std::size_t> (std::clamp (s.fetRatio, 0, 4))];
-                    const float over = drive + 18.0f;
-                    out = (s.fetColorOnly || over <= 0.0f ? drive : drive - (1.0f - 1.0f / ratio) * over) + s.fetOutputDb;
-                }
-                const auto pt = xy (in, out);
+                const auto pt = xy (in, transfer (in));
                 i == 0 ? p.startNewSubPath (pt) : p.lineTo (pt);
             }
+            g.setColour (colour.withAlpha (0.25f));
+            g.strokePath (p, juce::PathStrokeType (4.0f));
             g.setColour (colour);
             g.strokePath (p, juce::PathStrokeType (1.6f));
-            // The meter.
-            auto meter = body.removeFromRight (34.0f).withTrimmedTop (4.0f);
-            g.setColour (axis);
-            g.fillRoundedRectangle (meter.withWidth (8.0f), 2.0f);
-            const float h = meter.getHeight() * std::min (1.0f, gr / 24.0f);
-            g.setColour (juce::Colour (0xffc99470));
-            g.fillRoundedRectangle (meter.withWidth (8.0f).withHeight (h), 2.0f);
-            small (g, "GR", meter.withX (meter.getX() + 10.0f).withHeight (12.0f), juce::Justification::centredLeft);
+            if (c != nullptr)
+                if (const float in = c->inputDb.load(); in > -60.0f)
+                {
+                    const auto dot = xy (in, transfer (in));
+                    g.setColour (colour.withAlpha (0.3f));
+                    g.fillEllipse (juce::Rectangle<float> (13.0f, 13.0f).withCentre (dot));
+                    g.setColour (colour.brighter (0.3f));
+                    g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (dot));
+                }
+            for (const float d : { -48.0f, -24.0f, 0.0f })
+                small (g, juce::String (juce::roundToInt (d)), juce::Rectangle<float> (xy (d, d).x - 14.0f, box.getBottom() + 1.0f, 28.0f, 12.0f), juce::Justification::centred, 0.8f);
             header (g, area, s.mode == fx::CompSettings::clean ? "CLEAN" : "FET 76", "GR " + juce::String (gr, 1) + " dB");
-            foot (g, area, s.mode == fx::CompSettings::clean ? "static curve: in -60 .. 0 dB" : "input drives a fixed reference: more INPUT, more reduction");
         }
 
         void paintSpread (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
@@ -332,25 +369,53 @@ namespace
             const auto& s = settings.spread[static_cast<std::size_t> (id.slot)];
             const auto* sp = dynamic_cast<const fx::StereoSpread*> (live());
             auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (26.0f).withTrimmedBottom (22.0f);
-            // The voices' pitches (from the settings) across the stereo field.
             constexpr std::array<int, 4> counts { 2, 4, 6, 8 };
             const int voices = counts[static_cast<std::size_t> (std::clamp (s.voices, 0, 3))];
-            auto field = body.removeFromTop (body.getHeight() * 0.6f);
-            g.setColour (axis);
-            g.fillRect (field.withHeight (1.0f).withY (field.getCentreY()));
-            g.fillRect (juce::Rectangle<float> (field.getCentreX() - 0.5f, field.getY(), 1.0f, field.getHeight()));
+            // A goniometer of what it plays (mid up, side across; measured, decimated), and the
+            // voices it spreads (from the settings) along its horizon.
+            auto field = body.removeFromTop (body.getHeight() * 0.68f);
+            const auto c = field.getCentre();
+            const float rx = field.getWidth() * 0.46f, ry = field.getHeight() * 0.48f;
+            g.setColour (grid);
+            for (const float k : { 0.35f, 0.7f, 1.0f })
+                g.drawEllipse (juce::Rectangle<float> (2.0f * rx * k, 2.0f * ry * k).withCentre (c), 1.0f);
+            g.setColour (axis.withMultipliedAlpha (1.6f));
+            g.fillRect (juce::Rectangle<float> (field.getX(), c.y - 0.5f, field.getWidth(), 1.0f));
+            g.fillRect (juce::Rectangle<float> (c.x - 0.5f, field.getY(), 1.0f, field.getHeight()));
             small (g, "L", field.withWidth (12.0f), juce::Justification::centredLeft);
             small (g, "R", field.withX (field.getRight() - 12.0f).withWidth (12.0f), juce::Justification::centredRight);
+            small (g, "M", juce::Rectangle<float> (c.x + 3.0f, field.getY(), 12.0f, 12.0f), juce::Justification::centredLeft);
+            small (g, "S", juce::Rectangle<float> (c.x + 3.0f, field.getBottom() - 12.0f, 12.0f, 12.0f), juce::Justification::centredLeft);
+            if (sp != nullptr)
+            {
+                std::array<juce::Point<float>, fx::ScopeTap::size> pts;
+                float peak = 1.0e-4f;
+                for (int i = 0; i < fx::ScopeTap::size; ++i)
+                {
+                    const float l = sp->scope.l[static_cast<std::size_t> (i)].load (std::memory_order_relaxed);
+                    const float r = sp->scope.r[static_cast<std::size_t> (i)].load (std::memory_order_relaxed);
+                    pts[static_cast<std::size_t> (i)] = { (r - l) * 0.70710678f, (l + r) * 0.70710678f };
+                    peak = std::max ({ peak, std::abs (l), std::abs (r) });
+                }
+                const float k = 0.92f / (peak * 1.41421356f);
+                for (const auto& q : pts)
+                {
+                    const juce::Point<float> at (c.x + q.x * k * rx, c.y - q.y * k * ry);
+                    g.setColour (colour.withAlpha (0.16f));
+                    g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (at));
+                    g.setColour (colour.withAlpha (0.75f));
+                    g.fillEllipse (juce::Rectangle<float> (1.8f, 1.8f).withCentre (at));
+                }
+            }
             if (s.mode != fx::SpreadSettings::dimension)
                 for (int v = 0; v < voices; ++v)
                 {
                     const float spread = voices > 1 ? 2.0f * static_cast<float> (v) / static_cast<float> (voices - 1) - 1.0f : 0.0f;
-                    const float side = (v % 2 == 0 ? -1.0f : 1.0f) * (0.35f + 0.65f * std::abs (spread)) * std::min (1.0f, s.width);
-                    const float cents = s.detuneCents * spread;
-                    const juce::Point<float> c (field.getCentreX() + 0.45f * field.getWidth() * side, field.getCentreY() - 0.45f * field.getHeight() * cents / 60.0f);
-                    g.setColour (colour);
-                    g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (c));
+                    const juce::Point<float> at (c.x + rx * 0.98f * spread * std::min (1.0f, s.width), field.getBottom() + 4.0f);
+                    g.setColour (colour.withAlpha (0.8f));
+                    g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre (at));
                 }
+            body.removeFromTop (6.0f);
             // Measured: correlation and side level.
             const float corr = sp != nullptr ? sp->correlation.load() : 1.0f;
             auto meter = body.withTrimmedTop (8.0f).withHeight (8.0f);
@@ -500,6 +565,8 @@ namespace
         fxparams::Reader reader;
         fx::Settings settings;
         FreqPlot plot;
+        std::array<float, 120> grHistory {};
+        int grHead = 0;
         juce::String shown;
         int dragging = -1;
     };
@@ -557,7 +624,51 @@ namespace
                 menu();
         }
 
+        /** The overflow key's menu: save, delete, the folder, back to the defaults. */
+        void showActions (juce::Component& target)
+        {
+            juce::PopupMenu m;
+            addActions (m);
+            m.addSeparator();
+            m.addItem ("Reset to defaults", [this] { load ({}); presetNames[static_cast<std::size_t> (id.flatIndex())] = {}; repaint(); });
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+        }
+
     private:
+        void addActions (juce::PopupMenu& m)
+        {
+            const auto mine = fxpresets::user (id.type);
+            m.addItem ("Save as...", [safe = juce::Component::SafePointer<PresetBar> (this)] {
+                if (safe == nullptr)
+                    return;
+                auto* w = new juce::AlertWindow ("Save FX preset", "A name for these settings:", juce::MessageBoxIconType::NoIcon);
+                w->addTextEditor ("name", safe->current() == "Default" ? juce::String ("My ") + fx::typeName (safe->id.type) : safe->current());
+                w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result) {
+                    if (result == 1 && safe != nullptr)
+                        if (const auto name = w->getTextEditorContents ("name").trim(); name.isNotEmpty())
+                        {
+                            fxpresets::saveUser (safe->id.type, fxpresets::capture (safe->host, safe->id, name));
+                            presetNames[static_cast<std::size_t> (safe->id.flatIndex())] = name;
+                            safe->repaint();
+                        }
+                }), true);
+            });
+            bool isUser = false;
+            for (const auto& p : mine)
+                isUser = isUser || p.name == current();
+            m.addItem ("Delete " + current(), isUser, false, [this] {
+                fxpresets::removeUser (id.type, current());
+                presetNames[static_cast<std::size_t> (id.flatIndex())] = {};
+                repaint();
+            });
+            m.addItem ("Show presets folder", [this] {
+                auto folder = fxpresets::userFolder (id.type);
+                folder.createDirectory();
+                folder.revealToUser();
+            });
+        }
         std::vector<fxpresets::Preset> all() const
         {
             auto list = fxpresets::factory (id.type);
@@ -597,36 +708,7 @@ namespace
                     m.addItem (p.name, true, p.name == current(), [this, p] { load (p); });
             }
             m.addSeparator();
-            m.addItem ("Save as...", [safe = juce::Component::SafePointer<PresetBar> (this)] {
-                if (safe == nullptr)
-                    return;
-                auto* w = new juce::AlertWindow ("Save FX preset", "A name for these settings:", juce::MessageBoxIconType::NoIcon);
-                w->addTextEditor ("name", safe->current() == "Default" ? juce::String ("My ") + fx::typeName (safe->id.type) : safe->current());
-                w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
-                w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-                w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result) {
-                    if (result == 1 && safe != nullptr)
-                        if (const auto name = w->getTextEditorContents ("name").trim(); name.isNotEmpty())
-                        {
-                            fxpresets::saveUser (safe->id.type, fxpresets::capture (safe->host, safe->id, name));
-                            presetNames[static_cast<std::size_t> (safe->id.flatIndex())] = name;
-                            safe->repaint();
-                        }
-                }), true);
-            });
-            bool isUser = false;
-            for (const auto& p : mine)
-                isUser = isUser || p.name == current();
-            m.addItem ("Delete " + current(), isUser, false, [this] {
-                fxpresets::removeUser (id.type, current());
-                presetNames[static_cast<std::size_t> (id.flatIndex())] = {};
-                repaint();
-            });
-            m.addItem ("Show presets folder", [this] {
-                auto folder = fxpresets::userFolder (id.type);
-                folder.createDirectory();
-                folder.revealToUser();
-            });
+            addActions (m);
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
         }
 
@@ -635,6 +717,95 @@ namespace
     };
 
     //==========================================================================
+    /** Each effect's faceplate (docs/FX_EFFECTS_LIBRARY.md): its enamel, stripes, glow and glass,
+        tuned to the approved V2 renders; interface only. */
+    ParameterRack::Faceplate faceplateFor (Type type)
+    {
+        ParameterRack::Faceplate f;
+        const auto a = fxAccent (type);
+        f.enamel = a.darker (0.55f);
+        f.glow = a.brighter (0.7f);
+        f.stripes = { a, a.brighter (0.55f), juce::Colour (0xffd9a14a) };
+        switch (type)
+        {
+            case Type::compressor:
+                f.enamel = juce::Colour (0xff4f5b47);
+                f.stripes = { juce::Colour (0xffd8962f), juce::Colour (0xffe6c27c), juce::Colour (0xff69785d) };
+                f.glow = juce::Colour (0xfff2a73c);
+                f.glassTop = juce::Colour (0xff1f2a22);
+                f.glassBottom = juce::Colour (0xff161f19);
+                f.subtitle = "DYNAMICS PROCESSOR";
+                break;
+            case Type::spread:
+                f.enamel = juce::Colour (0xff2e6c72);
+                f.stripes = { juce::Colour (0xff3f8f97), juce::Colour (0xff8cc5c9), juce::Colour (0xffd3e3df) };
+                f.glow = juce::Colour (0xff7fe1e9);
+                f.glassTop = juce::Colour (0xff15292c);
+                f.glassBottom = juce::Colour (0xff0f1f21);
+                f.subtitle = "STEREO IMAGING / WIDENING";
+                break;
+            case Type::eq:
+                f.enamel = juce::Colour (0xff6e5c33);
+                f.stripes = { juce::Colour (0xffb8963f), juce::Colour (0xffe1c785), juce::Colour (0xff7f8a6a) };
+                f.glow = juce::Colour (0xfff3c768);
+                f.glassTop = juce::Colour (0xff24221b);
+                f.glassBottom = juce::Colour (0xff1a1914);
+                f.subtitle = "PARAMETRIC EQUALIZER";
+                break;
+            case Type::filter:
+                f.enamel = juce::Colour (0xff3d5a4a);
+                f.stripes = { juce::Colour (0xff5d8a73), juce::Colour (0xffa9c7b2), juce::Colour (0xffd9a14a) };
+                f.glow = juce::Colour (0xff9fe0b8);
+                f.glassTop = juce::Colour (0xff18261f);
+                f.glassBottom = juce::Colour (0xff111c16);
+                f.subtitle = "FILTER PROCESSOR";
+                break;
+            case Type::phaser:
+                f.enamel = juce::Colour (0xff474b72);
+                f.stripes = { juce::Colour (0xff6f74a3), juce::Colour (0xffadb0d3), juce::Colour (0xffd3a25a) };
+                f.glow = juce::Colour (0xffb7bcff);
+                f.glassTop = juce::Colour (0xff1b1d2b);
+                f.glassBottom = juce::Colour (0xff14151f);
+                f.subtitle = "ALL-PASS PHASE MACHINE";
+                break;
+            case Type::flanger:
+                f.enamel = juce::Colour (0xff3f5c69);
+                f.stripes = { juce::Colour (0xff6f94a3), juce::Colour (0xffadc7d0), juce::Colour (0xffcfd7d8) };
+                f.glow = juce::Colour (0xffa9dcef);
+                f.glassTop = juce::Colour (0xff182329);
+                f.glassBottom = juce::Colour (0xff11191d);
+                f.subtitle = "COMB MODULATOR";
+                break;
+            case Type::shifter:
+                f.enamel = juce::Colour (0xff514c6b);
+                f.stripes = { juce::Colour (0xff807b9a), juce::Colour (0xffb7b0d0), juce::Colour (0xffd6a65d) };
+                f.glow = juce::Colour (0xffd2c4ff);
+                f.glassTop = juce::Colour (0xff1e1c27);
+                f.glassBottom = juce::Colour (0xff16141d);
+                f.subtitle = "FREQUENCY OFFSET / BLUR";
+                break;
+            case Type::convolution:
+                f.enamel = juce::Colour (0xff4f4936);
+                f.stripes = { juce::Colour (0xff847b61), juce::Colour (0xffc2b693), juce::Colour (0xff4d6a5a) };
+                f.glow = juce::Colour (0xffeed59b);
+                f.glassTop = juce::Colour (0xff22201a);
+                f.glassBottom = juce::Colour (0xff191813);
+                f.subtitle = "IMPULSE CABINET";
+                break;
+            case Type::utility:
+                f.enamel = juce::Colour (0xff4c4d4b);
+                f.stripes = { juce::Colour (0xff8c8d8a), juce::Colour (0xffc4c4c0), juce::Colour (0xffdedcd6) };
+                f.glow = juce::Colour (0xffe6efe9);
+                f.glassTop = juce::Colour (0xff1d2120);
+                f.glassBottom = juce::Colour (0xff161918);
+                f.subtitle = "METER BRIDGE";
+                break;
+            default:
+                break;
+        }
+        return f;
+    }
+
     class FxRack final : public ParameterRack
     {
     public:
@@ -650,6 +821,12 @@ namespace
             else
                 setPages ({ "MAIN", "DETAIL" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
             setGraph (std::make_unique<FxGraph> (h, id));
+            // The hardware faceplate: the preset browser and the overflow key in the rail.
+            setFaceplate (faceplateFor (id.type));
+            auto bar = std::make_unique<PresetBar> (h, id);
+            presets = bar.get();
+            setRailComponent (std::move (bar), 230);
+            setOverflow ([this] (juce::Component& key) { presets->showActions (key); });
         }
 
     protected:
@@ -672,13 +849,11 @@ namespace
             auto stepped = [this] (const char* name, const char* caption) -> MiniKnob& { return steppedKnob (pid (id, name), caption, textOf (host, pid (id, name))); };
             auto sw = [this, on, off] (const char* name, const char* caption, const char* tip) { switchCell (pid (id, name), caption, { on, off }, tip); };
             auto mode = [this] (std::vector<P> positions, int width, const char* tip) { selectorSegment (pid (id, "mode"), "MODE", std::move (positions), width, tip); };
-            auto preset = [this] { selectorComponent (std::make_unique<PresetBar> (host, id), "PRESET", 230); };
             const int m = juce::roundToInt (value (host, id, "mode"));
             switch (id.type)
             {
                 case Type::spread:
                     mode ({ { "HYPER", "Hyper", 0 }, { "DIMENSION", "Dimension", 1 }, { "BOTH", "Both", 2 } }, 240, "HYPER: detuned voices; DIMENSION: a short ensemble; BOTH: one then the other");
-                    preset();
                     if (page == 0)
                     {
                         k ("width", "WIDTH");
@@ -700,7 +875,6 @@ namespace
                     break;
                 case Type::compressor:
                     mode ({ { "CLEAN", "Clean", 0 }, { "FET 76", "FET 76", 1 }, { "MULTIBAND", "Multiband", 2 } }, 260, "CLEAN: transparent; FET 76: fast feedback colour; MULTIBAND: three bands, up and down");
-                    preset();
                     if (m == 0)
                     {
                         if (page == 0)
@@ -767,7 +941,6 @@ namespace
                     }
                     break;
                 case Type::eq:
-                    preset();
                     if (page < 4)
                     {
                         const auto band = "band" + std::to_string (page + 1);
@@ -793,7 +966,6 @@ namespace
                     }
                     break;
                 case Type::filter:
-                    preset();
                     if (page == 0)
                     {
                         listCell (pid (id, "type"), "TYPE", "The filter's response");
@@ -818,7 +990,6 @@ namespace
                         mode ({ { "CLASSIC", "Classic", 0 }, { "DEEP", "Deep", 1 } }, 180, "CLASSIC; DEEP: more stages and feedback, a wider sweep");
                     else
                         mode ({ { "CLASSIC", "Classic", 0 }, { "THRU-ZERO", "Through-zero", 1 } }, 200, "THROUGH-ZERO: the sweep passes the dry (6 ms latency)");
-                    preset();
                     const bool sync = value (host, id, "sync") >= 0.5f;
                     if (page == 0)
                     {
@@ -852,7 +1023,6 @@ namespace
                 }
                 case Type::shifter:
                     mode ({ { "SHIFT", "Shift", 0 }, { "BLUR", "Blur", 1 } }, 160, "SHIFT: every partial by the same Hz; BLUR: a spectral smear");
-                    preset();
                     if (page == 0 && m == 0)
                     {
                         k ("hz", "SHIFT");
@@ -873,7 +1043,6 @@ namespace
                 case Type::convolution:
                     mode ({ { "REALISTIC", "Realistic", 0 }, { "CREATIVE", "Creative", 1 } }, 200, "REALISTIC: the impulse as it is; CREATIVE: reverse and size freely");
                     selectorList (pid (id, "impulse"), "IR", 140, "The impulse response it plays");
-                    preset();
                     if (page == 0)
                     {
                         k ("predelay", "PRE-DELAY");
@@ -892,7 +1061,6 @@ namespace
                     }
                     break;
                 case Type::utility:
-                    preset();
                     if (page == 0)
                     {
                         k ("gain", "GAIN");
@@ -919,6 +1087,7 @@ namespace
 
     private:
         InstanceId id;
+        PresetBar* presets = nullptr;
     };
 }
 
