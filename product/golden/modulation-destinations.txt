@@ -1,0 +1,87 @@
+75 analog.blend "BLEND" voice
+76 analog.tone "FILTER" voice
+77 analog.resonance "RESONANCE" voice
+78 analog.envDepth "FILTER ENV AMOUNT" voice
+79 analog.keyTrack "KEY TRACK" voice
+80 analog.velocityToFilter "VEL TO FILTER" voice
+81 analog.filterDrive "FILTER DRIVE" voice
+82 analog.drive.trim "FILTER TRIM" voice
+83 analog.filterEnv.attack "FILTER ATTACK" voice
+84 analog.filterEnv.decay "FILTER DECAY" voice
+85 analog.filterEnv.sustain "FILTER SUSTAIN" voice
+86 analog.filterEnv.release "FILTER RELEASE" voice
+87 analog.osc1.coarse "OSC 1 SEMI" voice
+88 analog.osc1.width "OSC 1 WIDTH" voice
+89 analog.osc1.level "OSC 1 LEVEL" voice
+90 analog.osc2.coarse "OSC 2 SEMI" voice
+91 analog.osc2.fine "OSC 2 FINE" voice
+92 analog.osc2.width "OSC 2 WIDTH" voice
+93 analog.osc2.level "OSC 2 LEVEL" voice
+94 analog.noise "NOISE" voice
+95 analog.polyMod.env "POLY MOD ENV" voice
+96 analog.polyMod.osc2 "POLY MOD OSC 2" voice
+97 analog.motion "LFO AMOUNT" voice
+98 analog.lfo.pitch1 "LFO OSC 1 PITCH" voice
+99 analog.lfo.pitch2 "LFO OSC 2 PITCH" voice
+100 analog.lfo.width1 "LFO OSC 1 PW" voice
+101 analog.lfo.width2 "LFO OSC 2 PW" voice
+102 analog.lfo.cutoff "LFO CUTOFF" voice
+103 analog.analog "ANALOG" voice
+104 velocityRange "VELOCITY RANGE" voice
+105 layerA.granular.tune "GRAIN TUNE" voice
+106 analog.drive.bias "FILTER BIAS" global
+107 analog.unison.detune "UNISON DETUNE" global
+108 analog.spread "STEREO SPREAD" global
+109 glide "GLIDE" global
+110 fineTune "FINE TUNE" global
+111 gain "VOLUME" global
+112 drive.tone "DRIVE TONE" global
+113 drive.body "DRIVE BODY" global
+114 movement.drift.speed "DRIFT SPEED" global
+115 movement.drift.pitch "DRIFT PITCH" global
+116 movement.drift.tone "DRIFT TONE" global
+117 movement.tape.wow "TAPE WOW" global
+118 movement.tape.flutter "TAPE FLUTTER" global
+119 movement.tape.wear "TAPE WEAR" global
+120 movement.chorus.rate "CHORUS RATE" global
+121 movement.chorus.width "CHORUS WIDTH" global
+122 movement.chorus.stereo "CHORUS STEREO" global
+123 movement.pulse.rate "PULSE RATE" global
+124 movement.pulse.shape "PULSE SHAPE" global
+125 movement.pulse.stereo "PULSE STEREO" global
+126 movement.shaper.smooth "SHAPER SMOOTH" global
+127 space.decay "SPACE DECAY" global
+128 space.preDelay "SPACE PRE-DELAY" global
+129 space.size "SPACE SIZE" global
+130 space.damping "SPACE DAMPING" global
+131 space.modulation "SPACE MODULATION" global
+132 space.width "SPACE WIDTH" global
+133 space.lowCut "SPACE LOW CUT" global
+134 space.highCut "SPACE HIGH CUT" global
+135 echo.time "ECHO TIME" global
+136 echo.feedback "ECHO FEEDBACK" global
+137 echo.tone "ECHO TONE" global
+138 echo.age "ECHO AGE" global
+139 layerA.reimagined.kaleidoscope.focus "KALEIDOSCOPE FOCUS" global
+140 layerA.reimagined.kaleidoscope.spread "KALEIDOSCOPE SPREAD" global
+141 layerA.reimagined.tapeFrame.age "TAPE FRAME AGE" global
+142 layerA.reimagined.tapeFrame.stability "TAPE FRAME STABILITY" global
+143 layerA.reimagined.toybox.motion "TOYBOX MOTION" global
+144 layerA.reimagined.toybox.digital "TOYBOX DIGITAL" global
+145 layerA.reimagined.mirage.clock "MIRAGE CLOCK" global
+146 layerA.reimagined.mirage.filter "MIRAGE FILTER" global
+147 analog.osc1.dco.subLevel "OSC 1 SUB" voice
+148 analog.osc2.dco.subLevel "OSC 2 SUB" voice
+149 analog.osc1.dco.pwmDepth "OSC 1 PWM DEPTH" voice
+150 analog.osc2.dco.pwmDepth "OSC 2 PWM DEPTH" voice
+151 analog.osc1.wide.shape "OSC 1 SHAPE" voice
+152 analog.osc2.wide.shape "OSC 2 SHAPE" voice
+153 analog.osc1.wide.spread "OSC 1 SPREAD" voice
+154 analog.osc2.wide.spread "OSC 2 SPREAD" voice
+155 analog.osc.pair.ringMix "RING MOD" voice
+156 analog.morph.position "MORPH" voice
+157 analog.morph.texture "MORPH TEXTURE" voice
+158 analog.morph.attack "MORPH ATTACK" voice
+159 analog.morph.formants "MORPH FORMANTS" voice
+160 analog.morph.detail "MORPH DETAIL" voice
+161 layerC.granular.tune "GRAIN TUNE B" voice

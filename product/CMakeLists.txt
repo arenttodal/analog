@@ -10,7 +10,7 @@ andor_add_instrument(ANDOR_Analog
     SLUG analog
     PLUGIN_CODE Aanl
     BUNDLE_ID com.osp.andoranalog
-    VERSION 0.1.0
+    VERSION ${ANALOG_VERSION}
     SOURCES
         Source/Product.cpp
         Source/AnalogEngine.cpp
