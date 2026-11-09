@@ -7518,3 +7518,164 @@ TEST_CASE ("analog: a DAW may automate exactly the parameters the engine reads",
     CHECK (automatable > 500);
     WARN ("host parameters: " << automatable << " automatable, " << hidden << " not offered for automation");
 }
+
+TEST_CASE ("analog: the modulation destinations keep their places (sessions store the index)", "[analog][host][golden]")
+{
+    // A route's destination is saved as its index in the choice list: ANDOR OSP's own, then
+    // ANALOG's in this order. Inserting or reordering one would re-route saved modulation.
+    juce::StringArray lines;
+    const auto& dests = andor::shell::productInfo().modulationDestinations;
+    for (std::size_t k = 0; k < dests.size(); ++k)
+        lines.add (juce::String (osp::mod::hostDestCount + static_cast<int> (k)) + " " + juce::String (dests[k].id) + " \""
+                   + juce::String (dests[k].name) + "\" " + (dests[k].owner == osp::mod::Owner::global ? "global" : "voice"));
+    const auto listing = lines.joinIntoString ("\n") + "\n";
+    const auto golden = productSourceDir().getChildFile ("golden/modulation-destinations.txt");
+    if (updatingGoldens())
+        REQUIRE (golden.replaceWithText (listing, false, false, "\n"));
+    REQUIRE (golden.existsAsFile());
+    const auto expected = juce::StringArray::fromLines (golden.loadFileAsString().trimEnd());
+    // Appending is allowed (a new destination at the end); nothing before it may change.
+    REQUIRE (lines.size() >= expected.size());
+    for (int i = 0; i < expected.size(); ++i)
+    {
+        INFO ("destination " << i);
+        CHECK (lines[i] == expected[i]);
+    }
+}
+
+namespace
+{
+    /** 16 windows' RMS of a render (both channels): a sound's shape, platform-tolerant. */
+    std::vector<double> contourOf (const juce::AudioBuffer<float>& b)
+    {
+        std::vector<double> c;
+        const int n = b.getNumSamples(), w = n / 16;
+        for (int i = 0; i < 16; ++i)
+        {
+            double s = 0.0;
+            for (int ch = 0; ch < b.getNumChannels(); ++ch)
+                for (int k = i * w; k < (i + 1) * w; ++k)
+                    s += static_cast<double> (b.getSample (ch, k)) * b.getSample (ch, k);
+            c.push_back (std::sqrt (s / std::max (1, w * b.getNumChannels())));
+        }
+        return c;
+    }
+
+    juce::String valuesOf (ShellProcessor& p)
+    {
+        juce::StringArray lines;
+        for (auto* base : p.getParameters())
+            if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (base))
+                lines.add (param->getParameterID() + " " + juce::String (param->getValue(), 6));
+        return lines.joinIntoString ("\n") + "\n";
+    }
+
+    const juce::File fixtureDir() { return productSourceDir().getChildFile ("tests/fixtures/state-1.0"); }
+
+    /** The sessions a 1.0 customer can have: a fresh instance, one factory sound per category,
+        a modulated one (routes, the arpeggiator, KEY DNA) and a CUSTOM FX route. */
+    std::vector<std::pair<juce::String, std::function<void (ShellProcessor&)>>> fixtureSessions()
+    {
+        std::vector<std::pair<juce::String, std::function<void (ShellProcessor&)>>> list;
+        list.emplace_back ("default", [] (ShellProcessor&) {});
+        std::set<std::string> categories;
+        for (const auto& f : factoryPatches())
+            if (categories.insert (f.category).second)
+            {
+                const juce::String name (f.name);
+                list.emplace_back ("factory-" + juce::String (f.category).toLowerCase(), [name] (ShellProcessor& p) {
+                    for (const auto& e : p.presetList())
+                        if (e.name == name)
+                            p.openPresetEntry (e);
+                });
+            }
+        list.emplace_back ("modulated", [] (ShellProcessor& p) {
+            const auto toneChoice = static_cast<float> (osp::mod::hostDestCount + 1);
+            setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "source"), 1.0f);
+            setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "dest"), toneChoice);
+            setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "depth"), 40.0f);
+            setValue (p, "mod.lfo1.rate", 3.0f);
+            setValue (p, "arp.enabled", 1.0f);
+            setValue (p, "arp.rate", 3.0f);
+            osp::keydna::Settings dna;
+            dna.enabled = true;
+            dna[osp::keydna::Param::position].variation = 0.5;
+            p.setKeyDnaSettings (0, dna, "KEY DNA", false);
+        });
+        list.emplace_back ("fx-custom", [] (ShellProcessor& p) {
+            namespace fx = andor::analog::fx;
+            auto route = fx::classicGraph();
+            route.custom = true;
+            std::swap (route.chain[0], route.chain[1]);
+            route.chain.push_back (fx::Node::effect ({ fx::Type::retro, 0 }));
+            REQUIRE (dynamic_cast<AnalogEngine&> (p.productEngine()).setFxRoute (route));
+            setValue (p, "space", 40.0f);
+        });
+        return list;
+    }
+
+    juce::AudioBuffer<float> renderLoaded (const juce::MemoryBlock& state)
+    {
+        ShellProcessor q;
+        q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+        q.pollLoads();
+        return renderShell (q, 1.0);
+    }
+}
+
+TEST_CASE ("analog: write the 1.0 session fixtures (run once, by hand, for a release)", "[.analog-write-fixtures]")
+{
+    fixtureDir().createDirectory();
+    for (const auto& [name, make] : fixtureSessions())
+    {
+        ShellProcessor p;
+        make (p);
+        p.pollLoads();
+        juce::MemoryBlock state;
+        p.getStateInformation (state);
+        REQUIRE (fixtureDir().getChildFile (name + ".state").replaceWithData (state.getData(), state.getSize()));
+        ShellProcessor q;
+        q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+        REQUIRE (fixtureDir().getChildFile (name + ".values.txt").replaceWithText (valuesOf (q), false, false, "\n"));
+        juce::StringArray contour;
+        for (const double v : contourOf (renderLoaded (state)))
+            contour.add (juce::String (v, 8));
+        REQUIRE (fixtureDir().getChildFile (name + ".contour.txt").replaceWithText (contour.joinIntoString ("\n") + "\n", false, false, "\n"));
+    }
+}
+
+TEST_CASE ("analog: projects saved by 1.0 open with the same settings and the same sound", "[analog][state][fixtures]")
+{
+    // Real state saved by the 1.0 build (tests/fixtures/state-1.0, written by the hidden test
+    // above), not state made by today's build: a change in how sessions are read shows here.
+    const auto sessions = fixtureSessions();
+    REQUIRE (fixtureDir().isDirectory());
+    for (const auto& [name, make] : sessions)
+    {
+        INFO (name);
+        juce::MemoryBlock state;
+        REQUIRE (fixtureDir().getChildFile (name + ".state").loadFileAsData (state));
+        ShellProcessor q;
+        q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+        // Every parameter as saved (a parameter appended later must be absent from the file:
+        // then it rests at its default, which is what the listing holds for it).
+        const auto expected = juce::StringArray::fromLines (fixtureDir().getChildFile (name + ".values.txt").loadFileAsString().trimEnd());
+        const auto actual = juce::StringArray::fromLines (valuesOf (q).trimEnd());
+        REQUIRE (actual.size() >= expected.size());
+        for (int i = 0; i < expected.size(); ++i)
+        {
+            INFO (expected[i]);
+            CHECK (actual[i].upToFirstOccurrenceOf (" ", false, false) == expected[i].upToFirstOccurrenceOf (" ", false, false));
+            CHECK (actual[i].fromFirstOccurrenceOf (" ", false, false).getDoubleValue()
+                   == Approx (expected[i].fromFirstOccurrenceOf (" ", false, false).getDoubleValue()).margin (2.0e-6));
+        }
+        if (name == "fx-custom")
+            CHECK (dynamic_cast<AnalogEngine&> (q.productEngine()).fxRoute().custom);
+        // The same sound (16 windows' loudness within 0.5 %: platform-tolerant).
+        const auto contour = contourOf (renderLoaded (state));
+        const auto wanted = juce::StringArray::fromLines (fixtureDir().getChildFile (name + ".contour.txt").loadFileAsString().trimEnd());
+        REQUIRE (wanted.size() == static_cast<int> (contour.size()));
+        for (std::size_t i = 0; i < contour.size(); ++i)
+            CHECK (contour[i] == Approx (wanted[static_cast<int> (i)].getDoubleValue()).epsilon (0.005).margin (1.0e-6));
+    }
+}
