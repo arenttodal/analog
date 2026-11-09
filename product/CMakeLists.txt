@@ -16,7 +16,16 @@ andor_add_instrument(ANDOR_Analog
         Source/AnalogEngine.cpp
         Source/AnalogParameters.cpp
         Source/AnalogPopovers.cpp
-        Source/AnalogOscillatorWorkbench.cpp
+        Source/AnalogRacks.cpp
+        Source/FxRouting.cpp
+        Source/FxParameters.cpp
+        Source/FxPresets.cpp
+        Source/FxRack.cpp
+        Source/AnalogWellOverlays.cpp
+        Source/SampleImport.cpp
+        Source/SamplePatches.cpp
+        Source/KontaktImport.cpp
+        Source/SampleSourceUI.cpp
     # A synthesizer, not a sampler: hosts file it with the instruments that synthesize.
     VST3_CATEGORIES Instrument Synth)
 target_link_libraries(ANDOR_Analog PUBLIC analog_dsp)

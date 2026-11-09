@@ -1,3 +1,13 @@
+analog.arp.link v27 bool "Arp Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.arp.cardA v27 bool "Arp Card A" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.arp.cardB v27 bool "Arp Card B" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.arp.cardC v27 bool "Arp Card C" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.arp.cardB.pattern v27 choice "Arp Card B Pattern" label="" range=0.0000..17.0000/1.0000 skew=1.00000 default=0.0000 steps=18 texts=UP|DOWN & UP|RANDOM ONCE [UP|DOWN|UP/DOWN|PLAYED|RANDOM|CHORD|DOWN/UP|UP & DOWN|DOWN & UP|CONVERGE|DIVERGE|CON & DIVERGE|PINKY UP|PINKY UP/DOWN|THUMB UP|THUMB UP/DOWN|RANDOM OTHER|RANDOM ONCE]
+analog.arp.cardB.rate v27 choice "Arp Card B Rate" label="" range=0.0000..9.0000/1.0000 skew=1.00000 default=1.0000 steps=10 texts=1/4|1/4D|1/16T [1/4|1/8|1/16|1/32|1/4D|1/8D|1/16D|1/4T|1/8T|1/16T]
+analog.arp.cardB.octaves v27 int "Arp Card B Octaves" label="" range=1.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=4 texts=1|2|4
+analog.arp.cardC.pattern v27 choice "Arp Card C Pattern" label="" range=0.0000..17.0000/1.0000 skew=1.00000 default=0.0000 steps=18 texts=UP|DOWN & UP|RANDOM ONCE [UP|DOWN|UP/DOWN|PLAYED|RANDOM|CHORD|DOWN/UP|UP & DOWN|DOWN & UP|CONVERGE|DIVERGE|CON & DIVERGE|PINKY UP|PINKY UP/DOWN|THUMB UP|THUMB UP/DOWN|RANDOM OTHER|RANDOM ONCE]
+analog.arp.cardC.rate v27 choice "Arp Card C Rate" label="" range=0.0000..9.0000/1.0000 skew=1.00000 default=1.0000 steps=10 texts=1/4|1/4D|1/16T [1/4|1/8|1/16|1/32|1/4D|1/8D|1/16D|1/4T|1/8T|1/16T]
+analog.arp.cardC.octaves v27 int "Arp Card C Octaves" label="" range=1.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=4 texts=1|2|4
 analog.blend v1 float "Blend" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.tone v1 float "Filter" label="%" range=0.0000..100.0000/0.0100 skew=1.00000 default=62.0000 steps=2147483647 texts=20 Hz|600 Hz|18.0 kHz
 analog.motion v1 float "LFO Amount" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
@@ -89,9 +99,9 @@ analog.juno.chorusNoise v4 bool "Chorus Noise" label="" range=0.0000..1.0000/1.0
 analog.osc1.enabled v4 bool "Osc 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.osc2.enabled v4 bool "Osc 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.organic.root v4 int "Organic Root" label="" range=-1.0000..127.0000/1.0000 skew=1.00000 default=-1.0000 steps=129 texts=Auto|D#4|G9
-analog.morph.enabled v4 bool "Morph On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.morph.position v4 float "Morph" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
-analog.morph.method v4 choice "Morph Method" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Imprint|Fuse|Weave [Imprint|Fuse|Weave]
+analog.morph.enabled v4 bool "Morph On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.morph.position v4 float "Morph" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.method v4 choice "Morph Method" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=Imprint|Fuse|Weave [Imprint|Fuse|Weave]
 analog.morph.carrier v4 choice "Morph Carrier" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Osc 1|Osc 2|Both [Osc 1|Osc 2|Both]
 analog.morph.texture v4 float "Morph Texture" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.morph.attack v4 float "Morph Attack" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
@@ -99,3 +109,436 @@ analog.morph.formants v4 float "Morph Formants" label="st" range=-12.0000..12.00
 analog.morph.detail v4 float "Morph Detail" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.morph.levelMatch v4 bool "Morph Level Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.morph.output v4 choice "Morph Output" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Morph Only|Morph Only|Layered [Morph Only|Layered]
+analog.osc1.fine v8 float "Osc 1 Fine" label="ct" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 ct|0 ct|+100 ct
+analog.hybrid.type v8 choice "Hybrid Type" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=Sample|Noise|Instrument Patch [Sample|Oscillator|Noise|Instrument Patch]
+analog.osc3.model v8 choice "Osc 3 Model" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Classic|DCO|Wide [Classic|DCO|Wide]
+analog.osc3.wave v8 choice "Osc 3 Wave" label="" range=0.0000..6.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=Saw|Saw+Tri|All [Saw|Triangle|Pulse|Saw+Tri|Saw+Pulse|Tri+Pulse|All]
+analog.osc3.octave v8 int "Osc 3 Octave" label="oct" range=-2.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=-2 oct|0 oct|+2 oct
+analog.osc3.coarse v8 int "Osc 3 Coarse" label="st" range=-12.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=25 texts=-12 st|0 st|+12 st
+analog.osc3.fine v8 float "Osc 3 Fine" label="ct" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 ct|0 ct|+100 ct
+analog.osc3.width v8 float "Osc 3 Pulse Width" label="%" range=2.0000..98.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=2 %|50 %|98 %
+analog.lfo.width3 v8 float "LFO to Osc 3 Width" label="%" range=-45.0000..45.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-45 %|0 %|+45 %
+analog.osc3.dco.saw v8 bool "Osc 3 DCO Saw" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.osc3.dco.pulse v8 bool "Osc 3 DCO Pulse" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.osc3.dco.subLevel v8 float "Osc 3 DCO Sub" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc3.dco.pwmSource v8 choice "Osc 3 DCO PWM Source" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Manual|LFO|Env [Manual|LFO|Env]
+analog.osc3.dco.pwmDepth v8 float "Osc 3 DCO PWM Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc3.wide.wave v8 choice "Osc 3 Wide Wave" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Saw|Triangle|Super Saw [Saw|Pulse|Triangle|Square|Super Saw]
+analog.osc3.wide.shape v8 float "Osc 3 Wide Shape" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.osc3.wide.spread v8 float "Osc 3 Super Saw Spread" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.noise.color v8 choice "Hybrid Noise Color" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=White|White|Juno [White|Juno]
+analog.hybrid.noise.tone v8 float "Hybrid Noise Tone" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.noise.movement v8 float "Hybrid Noise Movement" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.octave v8 int "Hybrid Octave" label="oct" range=-3.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=-3 oct|0 oct|+3 oct
+analog.hybrid.fine v8 float "Hybrid Fine" label="ct" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 ct|0 ct|+100 ct
+analog.osc2.velo v8 float "Osc 2 Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.velo v8 float "Hybrid Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid.noise.keys v8 float "Hybrid Noise Keys" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.lfo.wheel v10 bool "LFO Mod Wheel" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.a.on v11 bool "Movement A On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.movement.a.level v11 float "Movement A Intensity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.a.sync v11 bool "Movement A Pulse Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.a.pulse.division v11 choice "Movement A Pulse Cycle" label="" range=0.0000..8.0000/1.0000 skew=1.00000 default=4.0000 steps=9 texts=1/16|1/4|4 bars [1/16|1/8T|1/8|1/4T|1/4|1/2|1 bar|2 bars|4 bars]
+analog.movement.a.phase v11 float "Movement A Phase" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.on v11 bool "Movement B On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.b.level v11 float "Movement B Intensity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.sync v11 bool "Movement B Pulse Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.b.pulse.division v11 choice "Movement B Pulse Cycle" label="" range=0.0000..8.0000/1.0000 skew=1.00000 default=4.0000 steps=9 texts=1/16|1/4|4 bars [1/16|1/8T|1/8|1/4T|1/4|1/2|1 bar|2 bars|4 bars]
+analog.movement.b.phase v11 float "Movement B Phase" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.mode v11 choice "Movement B Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Drift|Chorus|Shaper [Drift|Tape|Chorus|Pulse|Shaper]
+analog.movement.b.drift.speed v11 float "Movement B Drift Speed" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=70.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.drift.pitch v11 float "Movement B Drift Pitch" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=25.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.drift.tone v11 float "Movement B Drift Tone" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=40.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.tape.wow v11 float "Movement B Tape Wow" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.tape.flutter v11 float "Movement B Tape Flutter" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.tape.wear v11 float "Movement B Tape Wear" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.chorus.rate v11 float "Movement B Chorus Rate" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=45.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.chorus.width v11 float "Movement B Chorus Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.chorus.stereo v11 float "Movement B Chorus Stereo" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.pulse.rate v11 float "Movement B Pulse Rate" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=55.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.pulse.shape v11 float "Movement B Pulse Shape" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.pulse.stereo v11 float "Movement B Pulse Stereo" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.shaper.pattern v11 choice "Movement B Shaper Pattern" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=3.0000 steps=12 texts=PULSE|EUCLID 5|MACHINE [PULSE|OFFBEAT|BREATH|THREE|FIVE|EUCLID 3|EUCLID 5|CASCADE|RISE|BROKEN|SCATTER|MACHINE]
+analog.movement.b.shaper.rate v11 choice "Movement B Shaper Rate" label="" range=0.0000..5.0000/1.0000 skew=1.00000 default=3.0000 steps=6 texts=1/4|1/8T|1/32 [1/4|1/8|1/8T|1/16|1/16T|1/32]
+analog.movement.b.shaper.target v11 choice "Movement B Shaper Target" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Vol|Filter|Both [Vol|Filter|Both]
+analog.movement.b.shaper.smooth v11 float "Movement B Shaper Smooth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.b.shaper.custom v11 bool "Movement B Shaper Custom" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.spread.1.on v28 bool "FX STEREO SPREAD 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.spread.1.mix v28 float "FX STEREO SPREAD 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.spread.1.output v28 float "FX STEREO SPREAD 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.spread.1.mode v28 choice "FX STEREO SPREAD 1 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Hyper|Dimension|Both [Hyper|Dimension|Both]
+analog.fx.spread.1.width v28 float "FX STEREO SPREAD 1 Width" label="%" range=0.0000..200.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|100 %|200 %
+analog.fx.spread.1.voices v28 choice "FX STEREO SPREAD 1 Hyper Voices" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=1.0000 steps=4 texts=2|6|8 [2|4|6|8]
+analog.fx.spread.1.detune v28 float "FX STEREO SPREAD 1 Detune" label="cents" range=0.0000..60.0000/0.0000 skew=1.00000 default=8.0000 steps=2147483647 texts=0.0 ct|30.0 ct|60.0 ct
+analog.fx.spread.1.hyperRate v28 float "FX STEREO SPREAD 1 Hyper Rate" label="Hz" range=0.0300..5.0000/0.0000 skew=0.29390 default=0.3000 steps=2147483647 texts=0.03 Hz|0.50 Hz|5.00 Hz
+analog.fx.spread.1.dimSize v28 float "FX STEREO SPREAD 1 Dimension Size" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=42.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.spread.1.dimRate v28 float "FX STEREO SPREAD 1 Dimension Rate" label="Hz" range=0.0300..3.0000/0.0000 skew=0.33279 default=0.3500 steps=2147483647 texts=0.03 Hz|0.40 Hz|3.00 Hz
+analog.fx.spread.1.dimAmount v28 float "FX STEREO SPREAD 1 Dimension Amount" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.spread.1.lowMono v28 bool "FX STEREO SPREAD 1 Low Mono" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.spread.1.lowMonoHz v28 float "FX STEREO SPREAD 1 Low Mono Frequency" label="Hz" range=50.0000..400.0000/0.0000 skew=0.55329 default=130.0000 steps=2147483647 texts=50 Hz|150 Hz|400 Hz
+analog.fx.spread.2.on v28 bool "FX STEREO SPREAD 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.spread.2.mix v28 float "FX STEREO SPREAD 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.spread.2.output v28 float "FX STEREO SPREAD 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.spread.2.mode v28 choice "FX STEREO SPREAD 2 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Hyper|Dimension|Both [Hyper|Dimension|Both]
+analog.fx.spread.2.width v28 float "FX STEREO SPREAD 2 Width" label="%" range=0.0000..200.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|100 %|200 %
+analog.fx.spread.2.voices v28 choice "FX STEREO SPREAD 2 Hyper Voices" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=1.0000 steps=4 texts=2|6|8 [2|4|6|8]
+analog.fx.spread.2.detune v28 float "FX STEREO SPREAD 2 Detune" label="cents" range=0.0000..60.0000/0.0000 skew=1.00000 default=8.0000 steps=2147483647 texts=0.0 ct|30.0 ct|60.0 ct
+analog.fx.spread.2.hyperRate v28 float "FX STEREO SPREAD 2 Hyper Rate" label="Hz" range=0.0300..5.0000/0.0000 skew=0.29390 default=0.3000 steps=2147483647 texts=0.03 Hz|0.50 Hz|5.00 Hz
+analog.fx.spread.2.dimSize v28 float "FX STEREO SPREAD 2 Dimension Size" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=42.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.spread.2.dimRate v28 float "FX STEREO SPREAD 2 Dimension Rate" label="Hz" range=0.0300..3.0000/0.0000 skew=0.33279 default=0.3500 steps=2147483647 texts=0.03 Hz|0.40 Hz|3.00 Hz
+analog.fx.spread.2.dimAmount v28 float "FX STEREO SPREAD 2 Dimension Amount" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=35.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.spread.2.lowMono v28 bool "FX STEREO SPREAD 2 Low Mono" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.spread.2.lowMonoHz v28 float "FX STEREO SPREAD 2 Low Mono Frequency" label="Hz" range=50.0000..400.0000/0.0000 skew=0.55329 default=130.0000 steps=2147483647 texts=50 Hz|150 Hz|400 Hz
+analog.fx.comp.1.on v28 bool "FX COMPRESSOR 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.comp.1.mix v28 float "FX COMPRESSOR 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.1.output v28 float "FX COMPRESSOR 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.comp.1.mode v28 choice "FX COMPRESSOR 1 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Clean|FET 76|Multiband [Clean|FET 76|Multiband]
+analog.fx.comp.1.threshold v28 float "FX COMPRESSOR 1 Threshold" label="dB" range=-60.0000..0.0000/0.0000 skew=41.24133 default=-18.0000 steps=2147483647 texts=-60.0 dB|-1.0 dB|0.0 dB
+analog.fx.comp.1.ratio v28 float "FX COMPRESSOR 1 Ratio" label="x" range=1.0000..20.0000/0.0000 skew=0.37552 default=3.0000 steps=2147483647 texts=1.0:1|4.0:1|20:1
+analog.fx.comp.1.attack v28 float "FX COMPRESSOR 1 Attack" label="ms" range=0.1000..100.0000/0.0000 skew=0.29985 default=10.0000 steps=2147483647 texts=0.1 ms|10 ms|100 ms
+analog.fx.comp.1.release v28 float "FX COMPRESSOR 1 Release" label="ms" range=10.0000..1500.0000/0.0000 skew=0.33656 default=180.0000 steps=2147483647 texts=10 ms|200 ms|1.50 s
+analog.fx.comp.1.knee v28 float "FX COMPRESSOR 1 Knee" label="dB" range=0.0000..18.0000/0.0000 skew=1.00000 default=6.0000 steps=2147483647 texts=0.0 dB|+9.0 dB|+18.0 dB
+analog.fx.comp.1.makeup v28 float "FX COMPRESSOR 1 Makeup" label="dB" range=-12.0000..24.0000/0.0000 skew=0.58463 default=-0.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.1.detector v28 choice "FX COMPRESSOR 1 Detector" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=RMS|RMS|Peak [RMS|Peak]
+analog.fx.comp.1.link v28 float "FX COMPRESSOR 1 Stereo Link" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.1.sidechain v28 float "FX COMPRESSOR 1 Sidechain HP" label="Hz" range=20.0000..400.0000/0.0000 skew=0.37552 default=20.0000 steps=2147483647 texts=20 Hz|80 Hz|400 Hz
+analog.fx.comp.1.autoMakeup v28 bool "FX COMPRESSOR 1 Auto Makeup" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.comp.1.fet.input v28 float "FX COMPRESSOR 1 FET Input" label="dB" range=-12.0000..48.0000/0.0000 skew=0.40859 default=12.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+48.0 dB
+analog.fx.comp.1.fet.output v28 float "FX COMPRESSOR 1 FET Output" label="dB" range=-36.0000..18.0000/0.0000 skew=1.59845 default=-12.0000 steps=2147483647 texts=-36.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.1.fet.attack v28 float "FX COMPRESSOR 1 FET Attack" label="us" range=20.0000..800.0000/0.0000 skew=0.38685 default=200.0000 steps=2147483647 texts=20 µs|150 µs|800 µs
+analog.fx.comp.1.fet.release v28 float "FX COMPRESSOR 1 FET Release" label="ms" range=50.0000..1100.0000/0.0000 skew=0.48300 default=300.0000 steps=2147483647 texts=50 ms|300 ms|1.10 s
+analog.fx.comp.1.fet.ratio v28 choice "FX COMPRESSOR 1 FET Ratio" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=4:1|12:1|ALL [4:1|8:1|12:1|20:1|ALL]
+analog.fx.comp.1.fet.color v28 float "FX COMPRESSOR 1 FET Color" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.1.fet.link v28 bool "FX COMPRESSOR 1 FET Stereo Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.comp.1.fet.colorOnly v28 bool "FX COMPRESSOR 1 FET Color Only" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.comp.1.multi.depth v28 float "FX COMPRESSOR 1 Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.1.multi.time v28 float "FX COMPRESSOR 1 Time" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.1.multi.tone v28 float "FX COMPRESSOR 1 Tone" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.1.multi.threshold v28 float "FX COMPRESSOR 1 Band Threshold" label="dB" range=-60.0000..0.0000/0.0000 skew=41.24133 default=-24.0000 steps=2147483647 texts=-60.0 dB|-1.0 dB|0.0 dB
+analog.fx.comp.1.multi.down v28 float "FX COMPRESSOR 1 Down Ratio" label="x" range=1.0000..32.0000/0.0000 skew=0.29680 default=4.0000 steps=2147483647 texts=1.0:1|4.0:1|32:1
+analog.fx.comp.1.multi.up v28 float "FX COMPRESSOR 1 Up Ratio" label="x" range=1.0000..8.0000/0.0000 skew=0.35621 default=1.5000 steps=2147483647 texts=1.0:1|2.0:1|8.0:1
+analog.fx.comp.1.multi.attack v28 float "FX COMPRESSOR 1 Band Attack" label="ms" range=0.1000..100.0000/0.0000 skew=0.29985 default=10.0000 steps=2147483647 texts=0.1 ms|10 ms|100 ms
+analog.fx.comp.1.multi.release v28 float "FX COMPRESSOR 1 Band Release" label="ms" range=10.0000..1500.0000/0.0000 skew=0.33656 default=120.0000 steps=2147483647 texts=10 ms|200 ms|1.50 s
+analog.fx.comp.1.multi.low v28 float "FX COMPRESSOR 1 Low Crossover" label="Hz" range=50.0000..800.0000/0.0000 skew=0.43068 default=120.0000 steps=2147483647 texts=50 Hz|200 Hz|800 Hz
+analog.fx.comp.1.multi.high v28 float "FX COMPRESSOR 1 High Crossover" label="Hz" range=800.0000..10000.0000/0.0000 skew=0.41049 default=2500.0000 steps=2147483647 texts=800 Hz|2.50 kHz|10.0 kHz
+analog.fx.comp.1.multi.lowGain v28 float "FX COMPRESSOR 1 Low Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.1.multi.lowOffset v28 float "FX COMPRESSOR 1 Low Threshold Offset" label="dB" range=-24.0000..24.0000/0.0000 skew=0.94215 default=0.0000 steps=2147483647 texts=-24.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.1.multi.midGain v28 float "FX COMPRESSOR 1 Mid Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.1.multi.midOffset v28 float "FX COMPRESSOR 1 Mid Threshold Offset" label="dB" range=-24.0000..24.0000/0.0000 skew=0.94215 default=0.0000 steps=2147483647 texts=-24.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.1.multi.highGain v28 float "FX COMPRESSOR 1 High Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.1.multi.highOffset v28 float "FX COMPRESSOR 1 High Threshold Offset" label="dB" range=-24.0000..24.0000/0.0000 skew=0.94215 default=0.0000 steps=2147483647 texts=-24.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.1.multi.deadband v28 float "FX COMPRESSOR 1 Deadband" label="dB" range=0.0000..24.0000/0.0000 skew=1.00000 default=3.0000 steps=2147483647 texts=0.0 dB|+12.0 dB|+24.0 dB
+analog.fx.comp.1.multi.match v28 bool "FX COMPRESSOR 1 Loudness Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.comp.2.on v28 bool "FX COMPRESSOR 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.comp.2.mix v28 float "FX COMPRESSOR 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.2.output v28 float "FX COMPRESSOR 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.comp.2.mode v28 choice "FX COMPRESSOR 2 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Clean|FET 76|Multiband [Clean|FET 76|Multiband]
+analog.fx.comp.2.threshold v28 float "FX COMPRESSOR 2 Threshold" label="dB" range=-60.0000..0.0000/0.0000 skew=41.24133 default=-18.0000 steps=2147483647 texts=-60.0 dB|-1.0 dB|0.0 dB
+analog.fx.comp.2.ratio v28 float "FX COMPRESSOR 2 Ratio" label="x" range=1.0000..20.0000/0.0000 skew=0.37552 default=3.0000 steps=2147483647 texts=1.0:1|4.0:1|20:1
+analog.fx.comp.2.attack v28 float "FX COMPRESSOR 2 Attack" label="ms" range=0.1000..100.0000/0.0000 skew=0.29985 default=10.0000 steps=2147483647 texts=0.1 ms|10 ms|100 ms
+analog.fx.comp.2.release v28 float "FX COMPRESSOR 2 Release" label="ms" range=10.0000..1500.0000/0.0000 skew=0.33656 default=180.0000 steps=2147483647 texts=10 ms|200 ms|1.50 s
+analog.fx.comp.2.knee v28 float "FX COMPRESSOR 2 Knee" label="dB" range=0.0000..18.0000/0.0000 skew=1.00000 default=6.0000 steps=2147483647 texts=0.0 dB|+9.0 dB|+18.0 dB
+analog.fx.comp.2.makeup v28 float "FX COMPRESSOR 2 Makeup" label="dB" range=-12.0000..24.0000/0.0000 skew=0.58463 default=-0.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.2.detector v28 choice "FX COMPRESSOR 2 Detector" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=RMS|RMS|Peak [RMS|Peak]
+analog.fx.comp.2.link v28 float "FX COMPRESSOR 2 Stereo Link" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.2.sidechain v28 float "FX COMPRESSOR 2 Sidechain HP" label="Hz" range=20.0000..400.0000/0.0000 skew=0.37552 default=20.0000 steps=2147483647 texts=20 Hz|80 Hz|400 Hz
+analog.fx.comp.2.autoMakeup v28 bool "FX COMPRESSOR 2 Auto Makeup" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.comp.2.fet.input v28 float "FX COMPRESSOR 2 FET Input" label="dB" range=-12.0000..48.0000/0.0000 skew=0.40859 default=12.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+48.0 dB
+analog.fx.comp.2.fet.output v28 float "FX COMPRESSOR 2 FET Output" label="dB" range=-36.0000..18.0000/0.0000 skew=1.59845 default=-12.0000 steps=2147483647 texts=-36.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.2.fet.attack v28 float "FX COMPRESSOR 2 FET Attack" label="us" range=20.0000..800.0000/0.0000 skew=0.38685 default=200.0000 steps=2147483647 texts=20 µs|150 µs|800 µs
+analog.fx.comp.2.fet.release v28 float "FX COMPRESSOR 2 FET Release" label="ms" range=50.0000..1100.0000/0.0000 skew=0.48300 default=300.0000 steps=2147483647 texts=50 ms|300 ms|1.10 s
+analog.fx.comp.2.fet.ratio v28 choice "FX COMPRESSOR 2 FET Ratio" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=4:1|12:1|ALL [4:1|8:1|12:1|20:1|ALL]
+analog.fx.comp.2.fet.color v28 float "FX COMPRESSOR 2 FET Color" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.2.fet.link v28 bool "FX COMPRESSOR 2 FET Stereo Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.comp.2.fet.colorOnly v28 bool "FX COMPRESSOR 2 FET Color Only" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.comp.2.multi.depth v28 float "FX COMPRESSOR 2 Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.2.multi.time v28 float "FX COMPRESSOR 2 Time" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.2.multi.tone v28 float "FX COMPRESSOR 2 Tone" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.comp.2.multi.threshold v28 float "FX COMPRESSOR 2 Band Threshold" label="dB" range=-60.0000..0.0000/0.0000 skew=41.24133 default=-24.0000 steps=2147483647 texts=-60.0 dB|-1.0 dB|0.0 dB
+analog.fx.comp.2.multi.down v28 float "FX COMPRESSOR 2 Down Ratio" label="x" range=1.0000..32.0000/0.0000 skew=0.29680 default=4.0000 steps=2147483647 texts=1.0:1|4.0:1|32:1
+analog.fx.comp.2.multi.up v28 float "FX COMPRESSOR 2 Up Ratio" label="x" range=1.0000..8.0000/0.0000 skew=0.35621 default=1.5000 steps=2147483647 texts=1.0:1|2.0:1|8.0:1
+analog.fx.comp.2.multi.attack v28 float "FX COMPRESSOR 2 Band Attack" label="ms" range=0.1000..100.0000/0.0000 skew=0.29985 default=10.0000 steps=2147483647 texts=0.1 ms|10 ms|100 ms
+analog.fx.comp.2.multi.release v28 float "FX COMPRESSOR 2 Band Release" label="ms" range=10.0000..1500.0000/0.0000 skew=0.33656 default=120.0000 steps=2147483647 texts=10 ms|200 ms|1.50 s
+analog.fx.comp.2.multi.low v28 float "FX COMPRESSOR 2 Low Crossover" label="Hz" range=50.0000..800.0000/0.0000 skew=0.43068 default=120.0000 steps=2147483647 texts=50 Hz|200 Hz|800 Hz
+analog.fx.comp.2.multi.high v28 float "FX COMPRESSOR 2 High Crossover" label="Hz" range=800.0000..10000.0000/0.0000 skew=0.41049 default=2500.0000 steps=2147483647 texts=800 Hz|2.50 kHz|10.0 kHz
+analog.fx.comp.2.multi.lowGain v28 float "FX COMPRESSOR 2 Low Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.2.multi.lowOffset v28 float "FX COMPRESSOR 2 Low Threshold Offset" label="dB" range=-24.0000..24.0000/0.0000 skew=0.94215 default=0.0000 steps=2147483647 texts=-24.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.2.multi.midGain v28 float "FX COMPRESSOR 2 Mid Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.2.multi.midOffset v28 float "FX COMPRESSOR 2 Mid Threshold Offset" label="dB" range=-24.0000..24.0000/0.0000 skew=0.94215 default=0.0000 steps=2147483647 texts=-24.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.2.multi.highGain v28 float "FX COMPRESSOR 2 High Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.comp.2.multi.highOffset v28 float "FX COMPRESSOR 2 High Threshold Offset" label="dB" range=-24.0000..24.0000/0.0000 skew=0.94215 default=0.0000 steps=2147483647 texts=-24.0 dB|-1.0 dB|+24.0 dB
+analog.fx.comp.2.multi.deadband v28 float "FX COMPRESSOR 2 Deadband" label="dB" range=0.0000..24.0000/0.0000 skew=1.00000 default=3.0000 steps=2147483647 texts=0.0 dB|+12.0 dB|+24.0 dB
+analog.fx.comp.2.multi.match v28 bool "FX COMPRESSOR 2 Loudness Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.on v28 bool "FX EQUALIZER 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.mix v28 float "FX EQUALIZER 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.eq.1.output v28 float "FX EQUALIZER 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.eq.1.band1.on v28 bool "FX EQUALIZER 1 Band 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.band1.type v28 choice "FX EQUALIZER 1 Band 1 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.1.band1.freq v28 float "FX EQUALIZER 1 Band 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=100.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.1.band1.gain v28 float "FX EQUALIZER 1 Band 1 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.1.band1.q v28 float "FX EQUALIZER 1 Band 1 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.1.band2.on v28 bool "FX EQUALIZER 1 Band 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.band2.type v28 choice "FX EQUALIZER 1 Band 2 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.1.band2.freq v28 float "FX EQUALIZER 1 Band 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=349.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.1.band2.gain v28 float "FX EQUALIZER 1 Band 2 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.1.band2.q v28 float "FX EQUALIZER 1 Band 2 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.1.band3.on v28 bool "FX EQUALIZER 1 Band 3 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.band3.type v28 choice "FX EQUALIZER 1 Band 3 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.1.band3.freq v28 float "FX EQUALIZER 1 Band 3 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=2500.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.1.band3.gain v28 float "FX EQUALIZER 1 Band 3 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.1.band3.q v28 float "FX EQUALIZER 1 Band 3 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.1.band4.on v28 bool "FX EQUALIZER 1 Band 4 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.band4.type v28 choice "FX EQUALIZER 1 Band 4 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=2.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.1.band4.freq v28 float "FX EQUALIZER 1 Band 4 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=7999.9995 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.1.band4.gain v28 float "FX EQUALIZER 1 Band 4 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.1.band4.q v28 float "FX EQUALIZER 1 Band 4 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.1.hp.on v28 bool "FX EQUALIZER 1 High Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.hp.freq v28 float "FX EQUALIZER 1 High Pass Frequency" label="Hz" range=20.0000..500.0000/0.0000 skew=0.33333 default=30.0000 steps=2147483647 texts=20 Hz|80 Hz|500 Hz
+analog.fx.eq.1.hp.steep v28 bool "FX EQUALIZER 1 High Pass 24 dB" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.lp.on v28 bool "FX EQUALIZER 1 Low Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.eq.1.lp.freq v28 float "FX EQUALIZER 1 Low Pass Frequency" label="Hz" range=1000.0000..20000.0000/0.0000 skew=0.51921 default=18000.0000 steps=2147483647 texts=1.00 kHz|6.00 kHz|20.0 kHz
+analog.fx.eq.1.lp.steep v28 bool "FX EQUALIZER 1 Low Pass 24 dB" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.on v28 bool "FX EQUALIZER 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.mix v28 float "FX EQUALIZER 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.eq.2.output v28 float "FX EQUALIZER 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.eq.2.band1.on v28 bool "FX EQUALIZER 2 Band 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.band1.type v28 choice "FX EQUALIZER 2 Band 1 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.2.band1.freq v28 float "FX EQUALIZER 2 Band 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=100.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.2.band1.gain v28 float "FX EQUALIZER 2 Band 1 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.2.band1.q v28 float "FX EQUALIZER 2 Band 1 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.2.band2.on v28 bool "FX EQUALIZER 2 Band 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.band2.type v28 choice "FX EQUALIZER 2 Band 2 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.2.band2.freq v28 float "FX EQUALIZER 2 Band 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=349.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.2.band2.gain v28 float "FX EQUALIZER 2 Band 2 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.2.band2.q v28 float "FX EQUALIZER 2 Band 2 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.2.band3.on v28 bool "FX EQUALIZER 2 Band 3 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.band3.type v28 choice "FX EQUALIZER 2 Band 3 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.2.band3.freq v28 float "FX EQUALIZER 2 Band 3 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=2500.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.2.band3.gain v28 float "FX EQUALIZER 2 Band 3 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.2.band3.q v28 float "FX EQUALIZER 2 Band 3 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.2.band4.on v28 bool "FX EQUALIZER 2 Band 4 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.band4.type v28 choice "FX EQUALIZER 2 Band 4 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=2.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
+analog.fx.eq.2.band4.freq v28 float "FX EQUALIZER 2 Band 4 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=7999.9995 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.eq.2.band4.gain v28 float "FX EQUALIZER 2 Band 4 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.eq.2.band4.q v28 float "FX EQUALIZER 2 Band 4 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
+analog.fx.eq.2.hp.on v28 bool "FX EQUALIZER 2 High Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.hp.freq v28 float "FX EQUALIZER 2 High Pass Frequency" label="Hz" range=20.0000..500.0000/0.0000 skew=0.33333 default=30.0000 steps=2147483647 texts=20 Hz|80 Hz|500 Hz
+analog.fx.eq.2.hp.steep v28 bool "FX EQUALIZER 2 High Pass 24 dB" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.lp.on v28 bool "FX EQUALIZER 2 Low Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.eq.2.lp.freq v28 float "FX EQUALIZER 2 Low Pass Frequency" label="Hz" range=1000.0000..20000.0000/0.0000 skew=0.51921 default=18000.0000 steps=2147483647 texts=1.00 kHz|6.00 kHz|20.0 kHz
+analog.fx.eq.2.lp.steep v28 bool "FX EQUALIZER 2 Low Pass 24 dB" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.filter.1.on v28 bool "FX FX FILTER 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.filter.1.mix v28 float "FX FX FILTER 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.filter.1.output v28 float "FX FX FILTER 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.filter.1.type v28 choice "FX FX FILTER 1 Type" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=0.0000 steps=12 texts=LP 12|All-pass|Formant III [LP 12|LP 24|HP 12|HP 24|BP 12|Notch|All-pass|Comb +|Comb -|Formant I|Formant II|Formant III]
+analog.fx.filter.1.freq v28 float "FX FX FILTER 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=999.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.filter.1.reso v28 float "FX FX FILTER 1 Resonance" label="%" range=0.0000..95.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|48 %|95 %
+analog.fx.filter.1.drive v28 float "FX FX FILTER 1 Drive" label="dB" range=0.0000..24.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0.0 dB|+12.0 dB|+24.0 dB
+analog.fx.filter.1.pan v28 float "FX FX FILTER 1 Pan" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.filter.1.combDamp v28 float "FX FX FILTER 1 Comb Damping" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.filter.1.formantShift v28 float "FX FX FILTER 1 Formant Shift" label="st" range=-12.0000..12.0000/0.0000 skew=0.88847 default=0.0000 steps=2147483647 texts=-12.0 st|-1.0 st|+12.0 st
+analog.fx.filter.2.on v28 bool "FX FX FILTER 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.filter.2.mix v28 float "FX FX FILTER 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.filter.2.output v28 float "FX FX FILTER 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.filter.2.type v28 choice "FX FX FILTER 2 Type" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=0.0000 steps=12 texts=LP 12|All-pass|Formant III [LP 12|LP 24|HP 12|HP 24|BP 12|Notch|All-pass|Comb +|Comb -|Formant I|Formant II|Formant III]
+analog.fx.filter.2.freq v28 float "FX FX FILTER 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=999.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
+analog.fx.filter.2.reso v28 float "FX FX FILTER 2 Resonance" label="%" range=0.0000..95.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|48 %|95 %
+analog.fx.filter.2.drive v28 float "FX FX FILTER 2 Drive" label="dB" range=0.0000..24.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0.0 dB|+12.0 dB|+24.0 dB
+analog.fx.filter.2.pan v28 float "FX FX FILTER 2 Pan" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.filter.2.combDamp v28 float "FX FX FILTER 2 Comb Damping" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.filter.2.formantShift v28 float "FX FX FILTER 2 Formant Shift" label="st" range=-12.0000..12.0000/0.0000 skew=0.88847 default=0.0000 steps=2147483647 texts=-12.0 st|-1.0 st|+12.0 st
+analog.fx.phaser.1.on v28 bool "FX PHASER 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.phaser.1.mix v28 float "FX PHASER 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.phaser.1.output v28 float "FX PHASER 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.phaser.1.mode v28 choice "FX PHASER 1 Mode" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Classic|Classic|Deep [Classic|Deep]
+analog.fx.phaser.1.rate v28 float "FX PHASER 1 Rate" label="Hz" range=0.0300..10.0000/0.0000 skew=0.27066 default=0.5000 steps=2147483647 texts=0.03 Hz|0.80 Hz|10 Hz
+analog.fx.phaser.1.sync v28 bool "FX PHASER 1 Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.phaser.1.division v28 choice "FX PHASER 1 Division" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=4.0000 steps=12 texts=4 BARS|1/8|1/32 [4 BARS|2 BARS|1 BAR|1/2|1/4|1/8D|1/8|1/4T|1/16D|1/16|1/8T|1/32]
+analog.fx.phaser.1.depth v28 float "FX PHASER 1 Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.phaser.1.center v28 float "FX PHASER 1 Center" label="Hz" range=80.0000..8000.0000/0.0000 skew=0.28906 default=799.9999 steps=2147483647 texts=80 Hz|800 Hz|8.00 kHz
+analog.fx.phaser.1.feedback v28 float "FX PHASER 1 Feedback" label="%" range=-85.0000..85.0000/0.0000 skew=0.98321 default=35.0000 steps=2147483647 texts=-85 %|-1 %|85 %
+analog.fx.phaser.1.stages v28 choice "FX PHASER 1 Stages" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=5 texts=2|6|12 [2|4|6|8|12]
+analog.fx.phaser.1.stereo v28 float "FX PHASER 1 Stereo" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=90.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.phaser.2.on v28 bool "FX PHASER 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.phaser.2.mix v28 float "FX PHASER 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.phaser.2.output v28 float "FX PHASER 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.phaser.2.mode v28 choice "FX PHASER 2 Mode" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Classic|Classic|Deep [Classic|Deep]
+analog.fx.phaser.2.rate v28 float "FX PHASER 2 Rate" label="Hz" range=0.0300..10.0000/0.0000 skew=0.27066 default=0.5000 steps=2147483647 texts=0.03 Hz|0.80 Hz|10 Hz
+analog.fx.phaser.2.sync v28 bool "FX PHASER 2 Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.phaser.2.division v28 choice "FX PHASER 2 Division" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=4.0000 steps=12 texts=4 BARS|1/8|1/32 [4 BARS|2 BARS|1 BAR|1/2|1/4|1/8D|1/8|1/4T|1/16D|1/16|1/8T|1/32]
+analog.fx.phaser.2.depth v28 float "FX PHASER 2 Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.phaser.2.center v28 float "FX PHASER 2 Center" label="Hz" range=80.0000..8000.0000/0.0000 skew=0.28906 default=799.9999 steps=2147483647 texts=80 Hz|800 Hz|8.00 kHz
+analog.fx.phaser.2.feedback v28 float "FX PHASER 2 Feedback" label="%" range=-85.0000..85.0000/0.0000 skew=0.98321 default=35.0000 steps=2147483647 texts=-85 %|-1 %|85 %
+analog.fx.phaser.2.stages v28 choice "FX PHASER 2 Stages" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=5 texts=2|6|12 [2|4|6|8|12]
+analog.fx.phaser.2.stereo v28 float "FX PHASER 2 Stereo" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=90.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.flanger.1.on v28 bool "FX FLANGER 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.flanger.1.mix v28 float "FX FLANGER 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.flanger.1.output v28 float "FX FLANGER 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.flanger.1.mode v28 choice "FX FLANGER 1 Mode" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Classic|Classic|Through-Zero [Classic|Through-Zero]
+analog.fx.flanger.1.rate v28 float "FX FLANGER 1 Rate" label="Hz" range=0.0300..10.0000/0.0000 skew=0.27066 default=0.2500 steps=2147483647 texts=0.03 Hz|0.80 Hz|10 Hz
+analog.fx.flanger.1.sync v28 bool "FX FLANGER 1 Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.flanger.1.division v28 choice "FX FLANGER 1 Division" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=6.0000 steps=12 texts=4 BARS|1/8|1/32 [4 BARS|2 BARS|1 BAR|1/2|1/4|1/8D|1/8|1/4T|1/16D|1/16|1/8T|1/32]
+analog.fx.flanger.1.depth v28 float "FX FLANGER 1 Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.flanger.1.delay v28 float "FX FLANGER 1 Delay" label="ms" range=0.2000..12.0000/0.0000 skew=0.42389 default=2.0000 steps=2147483647 texts=0.2 ms|2.5 ms|12 ms
+analog.fx.flanger.1.feedback v28 float "FX FLANGER 1 Feedback" label="%" range=-92.0000..92.0000/0.0000 skew=0.98448 default=40.0000 steps=2147483647 texts=-92 %|-1 %|92 %
+analog.fx.flanger.1.stereo v28 float "FX FLANGER 1 Stereo" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=90.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.flanger.1.width v28 float "FX FLANGER 1 Width" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.flanger.2.on v28 bool "FX FLANGER 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.flanger.2.mix v28 float "FX FLANGER 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.flanger.2.output v28 float "FX FLANGER 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.flanger.2.mode v28 choice "FX FLANGER 2 Mode" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Classic|Classic|Through-Zero [Classic|Through-Zero]
+analog.fx.flanger.2.rate v28 float "FX FLANGER 2 Rate" label="Hz" range=0.0300..10.0000/0.0000 skew=0.27066 default=0.2500 steps=2147483647 texts=0.03 Hz|0.80 Hz|10 Hz
+analog.fx.flanger.2.sync v28 bool "FX FLANGER 2 Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.flanger.2.division v28 choice "FX FLANGER 2 Division" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=6.0000 steps=12 texts=4 BARS|1/8|1/32 [4 BARS|2 BARS|1 BAR|1/2|1/4|1/8D|1/8|1/4T|1/16D|1/16|1/8T|1/32]
+analog.fx.flanger.2.depth v28 float "FX FLANGER 2 Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.flanger.2.delay v28 float "FX FLANGER 2 Delay" label="ms" range=0.2000..12.0000/0.0000 skew=0.42389 default=2.0000 steps=2147483647 texts=0.2 ms|2.5 ms|12 ms
+analog.fx.flanger.2.feedback v28 float "FX FLANGER 2 Feedback" label="%" range=-92.0000..92.0000/0.0000 skew=0.98448 default=40.0000 steps=2147483647 texts=-92 %|-1 %|92 %
+analog.fx.flanger.2.stereo v28 float "FX FLANGER 2 Stereo" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=90.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.flanger.2.width v28 float "FX FLANGER 2 Width" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.shift.1.on v28 bool "FX FREQ SHIFTER On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.shift.1.mix v28 float "FX FREQ SHIFTER Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.shift.1.output v28 float "FX FREQ SHIFTER Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.shift.1.mode v28 choice "FX FREQ SHIFTER Mode" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Shift|Shift|Blur [Shift|Blur]
+analog.fx.shift.1.hz v28 float "FX FREQ SHIFTER Shift" label="Hz" range=0.0000..2000.0000/0.0000 skew=0.26760 default=100.0000 steps=2147483647 texts=0.00 Hz|150 Hz|2.00 kHz
+analog.fx.shift.1.direction v28 choice "FX FREQ SHIFTER Direction" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Up|Up|Down [Up|Down]
+analog.fx.shift.1.width v28 float "FX FREQ SHIFTER Width" label="%" range=0.0000..200.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|100 %|200 %
+analog.fx.shift.1.feedback v28 float "FX FREQ SHIFTER Feedback" label="%" range=0.0000..80.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|40 %|80 %
+analog.fx.shift.1.blurAmount v28 float "FX FREQ SHIFTER Blur Amount" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.shift.1.blurTime v28 float "FX FREQ SHIFTER Blur Time" label="ms" range=10.0000..500.0000/0.0000 skew=0.46398 default=120.0000 steps=2147483647 texts=10 ms|120 ms|500 ms
+analog.fx.conv.1.on v28 bool "FX CONVOLUTION On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.conv.1.mix v28 float "FX CONVOLUTION Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=30.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.conv.1.output v28 float "FX CONVOLUTION Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.conv.1.mode v28 choice "FX CONVOLUTION Mode" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Realistic|Realistic|Creative [Realistic|Creative]
+analog.fx.conv.1.impulse v28 choice "FX CONVOLUTION Impulse" label="" range=0.0000..5.0000/1.0000 skew=1.00000 default=1.0000 steps=6 texts=Small Room|Plate|Body Resonator [Small Room|Wood Hall|Plate|Spring Tank|Stone Nave|Body Resonator]
+analog.fx.conv.1.predelay v28 float "FX CONVOLUTION Pre-delay" label="ms" range=0.0000..250.0000/0.0000 skew=0.37824 default=0.0000 steps=2147483647 texts=0.0 ms|40 ms|250 ms
+analog.fx.conv.1.decay v28 float "FX CONVOLUTION Decay" label="s" range=0.1000..20.0000/0.0000 skew=0.29510 default=4.0000 steps=2147483647 texts=0.10 s|2.00 s|20.0 s
+analog.fx.conv.1.size v28 float "FX CONVOLUTION Size" label="%" range=50.0000..200.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=50 %|125 %|200 %
+analog.fx.conv.1.lowCut v28 float "FX CONVOLUTION Low Cut" label="Hz" range=20.0000..2000.0000/0.0000 skew=0.25452 default=20.0000 steps=2147483647 texts=20 Hz|150 Hz|2.00 kHz
+analog.fx.conv.1.highCut v28 float "FX CONVOLUTION High Cut" label="Hz" range=1000.0000..20000.0000/0.0000 skew=0.51921 default=20000.0000 steps=2147483647 texts=1.00 kHz|6.00 kHz|20.0 kHz
+analog.fx.conv.1.width v28 float "FX CONVOLUTION Width" label="%" range=0.0000..200.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|100 %|200 %
+analog.fx.conv.1.normalize v28 bool "FX CONVOLUTION Normalize" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.conv.1.reverse v28 bool "FX CONVOLUTION Reverse" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.1.on v28 bool "FX UTILITY 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.utility.1.mix v28 float "FX UTILITY 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.utility.1.output v28 float "FX UTILITY 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.utility.1.gain v28 float "FX UTILITY 1 Gain" label="dB" range=-36.0000..24.0000/0.0000 skew=1.28600 default=0.0000 steps=2147483647 texts=-36.0 dB|-1.0 dB|+24.0 dB
+analog.fx.utility.1.pan v28 float "FX UTILITY 1 Balance" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.utility.1.width v28 float "FX UTILITY 1 Width" label="%" range=0.0000..200.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|100 %|200 %
+analog.fx.utility.1.invertL v28 bool "FX UTILITY 1 Invert Left" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.1.invertR v28 bool "FX UTILITY 1 Invert Right" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.1.monoBass v28 bool "FX UTILITY 1 Mono Bass" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.1.monoBassHz v28 float "FX UTILITY 1 Mono Bass Frequency" label="Hz" range=40.0000..400.0000/0.0000 skew=0.58463 default=130.0000 steps=2147483647 texts=40 Hz|150 Hz|400 Hz
+analog.fx.utility.1.hp.on v28 bool "FX UTILITY 1 High Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.1.hp.freq v28 float "FX UTILITY 1 High Pass Frequency" label="Hz" range=20.0000..200.0000/0.0000 skew=0.46085 default=30.0000 steps=2147483647 texts=20 Hz|60 Hz|200 Hz
+analog.fx.utility.1.lp.on v28 bool "FX UTILITY 1 Low Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.1.lp.freq v28 float "FX UTILITY 1 Low Pass Frequency" label="Hz" range=2000.0000..20000.0000/0.0000 skew=0.63093 default=18000.0000 steps=2147483647 texts=2.00 kHz|8.00 kHz|20.0 kHz
+analog.fx.utility.2.on v28 bool "FX UTILITY 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.utility.2.mix v28 float "FX UTILITY 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.utility.2.output v28 float "FX UTILITY 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.utility.2.gain v28 float "FX UTILITY 2 Gain" label="dB" range=-36.0000..24.0000/0.0000 skew=1.28600 default=0.0000 steps=2147483647 texts=-36.0 dB|-1.0 dB|+24.0 dB
+analog.fx.utility.2.pan v28 float "FX UTILITY 2 Balance" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.utility.2.width v28 float "FX UTILITY 2 Width" label="%" range=0.0000..200.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|100 %|200 %
+analog.fx.utility.2.invertL v28 bool "FX UTILITY 2 Invert Left" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.2.invertR v28 bool "FX UTILITY 2 Invert Right" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.2.monoBass v28 bool "FX UTILITY 2 Mono Bass" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.2.monoBassHz v28 float "FX UTILITY 2 Mono Bass Frequency" label="Hz" range=40.0000..400.0000/0.0000 skew=0.58463 default=130.0000 steps=2147483647 texts=40 Hz|150 Hz|400 Hz
+analog.fx.utility.2.hp.on v28 bool "FX UTILITY 2 High Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.2.hp.freq v28 float "FX UTILITY 2 High Pass Frequency" label="Hz" range=20.0000..200.0000/0.0000 skew=0.46085 default=30.0000 steps=2147483647 texts=20 Hz|60 Hz|200 Hz
+analog.fx.utility.2.lp.on v28 bool "FX UTILITY 2 Low Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.utility.2.lp.freq v28 float "FX UTILITY 2 Low Pass Frequency" label="Hz" range=2000.0000..20000.0000/0.0000 skew=0.63093 default=18000.0000 steps=2147483647 texts=2.00 kHz|8.00 kHz|20.0 kHz
+analog.fx.retro.1.on v29 bool "FX RETRO 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.mix v29 float "FX RETRO 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=65.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.output v29 float "FX RETRO 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.1.mode v29 choice "FX RETRO 1 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Tape|Vinyl|Digital [Tape|Vinyl|Digital]
+analog.fx.retro.1.tape.model v29 choice "FX RETRO 1 Tape Model" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Cassette|Cassette|Studio Reel [Cassette|Studio Reel]
+analog.fx.retro.1.vinyl.rpm v29 choice "FX RETRO 1 Vinyl Speed" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=33⅓|45|78 [33⅓|45|78]
+analog.fx.retro.1.digital.era v29 choice "FX RETRO 1 Digital Type" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=80s|90s|Codec [80s|90s|Codec]
+analog.fx.retro.1.character v29 float "FX RETRO 1 Character" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=40.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.wear v29 float "FX RETRO 1 Wear" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=25.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.input v29 float "FX RETRO 1 Input" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.retro.1.tone v29 float "FX RETRO 1 Tone" label="dB" range=-12.0000..12.0000/0.0000 skew=0.88847 default=0.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.1.saturation v29 float "FX RETRO 1 Saturation" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.preserve v29 choice "FX RETRO 1 Preserve" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=Low|Neutral|High [Low|Neutral|High]
+analog.fx.retro.1.wow.depth v29 float "FX RETRO 1 Wow Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.wow.rate v29 float "FX RETRO 1 Wow Rate" label="Hz" range=0.1000..3.0000/0.0000 skew=0.39431 default=0.5500 steps=2147483647 texts=0.10 Hz|0.60 Hz|3.00 Hz
+analog.fx.retro.1.flutter.depth v29 float "FX RETRO 1 Flutter Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=7.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.flutter.rate v29 float "FX RETRO 1 Flutter Rate" label="Hz" range=3.0000..20.0000/0.0000 skew=0.47905 default=6.0000 steps=2147483647 texts=3.00 Hz|7.00 Hz|20 Hz
+analog.fx.retro.1.transport.random v29 float "FX RETRO 1 Transport Random" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.stereo.phase v29 float "FX RETRO 1 Stereo Phase" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.retro.1.noise.type v29 choice "FX RETRO 1 Noise Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Auto|Vinyl|Digital [Auto|Tape Hiss|Vinyl|Room|Digital]
+analog.fx.retro.1.noise.level v29 float "FX RETRO 1 Noise Level" label="dB" range=-96.0000..-24.0000/0.0000 skew=1.00000 default=-96.0000 steps=2147483647 texts=-96.0 dB|-60.0 dB|-24.0 dB
+analog.fx.retro.1.noise.follow v29 float "FX RETRO 1 Noise Follow" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.noise.automute v29 bool "FX RETRO 1 Noise Auto Mute" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.crackle v29 float "FX RETRO 1 Crackle" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.pops v29 float "FX RETRO 1 Pops" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.dropout.rate v29 float "FX RETRO 1 Dropout Rate" label="/s" range=0.0000..12.0000/0.0000 skew=0.38685 default=0.0000 steps=2147483647 texts=0.0 /s|2.0 /s|12 /s
+analog.fx.retro.1.dropout.depth v29 float "FX RETRO 1 Dropout Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.dropout.length v29 float "FX RETRO 1 Dropout Length" label="ms" range=2.0000..250.0000/0.0000 skew=0.31778 default=25.0000 steps=2147483647 texts=2.0 ms|30 ms|250 ms
+analog.fx.retro.1.bandwidth.low v29 float "FX RETRO 1 Low Edge" label="Hz" range=20.0000..800.0000/0.0000 skew=0.33744 default=20.0000 steps=2147483647 texts=20 Hz|120 Hz|800 Hz
+analog.fx.retro.1.bandwidth.high v29 float "FX RETRO 1 High Edge" label="Hz" range=2000.0000..20000.0000/0.0000 skew=0.54113 default=18000.0000 steps=2147483647 texts=2.00 kHz|7.00 kHz|20.0 kHz
+analog.fx.retro.1.head.bump v29 float "FX RETRO 1 Head Bump" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.compress.amount v29 float "FX RETRO 1 Compress" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.compress.attack v29 float "FX RETRO 1 Compress Attack" label="x" range=0.2500..4.0000/0.0000 skew=0.43068 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|4.0 ×
+analog.fx.retro.1.compress.release v29 float "FX RETRO 1 Compress Release" label="x" range=0.2500..8.0000/0.0000 skew=0.29680 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|8.0 ×
+analog.fx.retro.1.compress.link v29 bool "FX RETRO 1 Compress Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.compress.tilt v29 float "FX RETRO 1 Sidechain Tilt" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.retro.1.digital.bits v29 float "FX RETRO 1 Bits" label="bit" range=4.0000..16.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=4.0 bit|10.0 bit|16.0 bit
+analog.fx.retro.1.digital.rate v29 float "FX RETRO 1 Rate" label="kHz" range=4.0000..48.0000/0.0000 skew=0.53348 default=24.0000 steps=2147483647 texts=4.0 kHz|16 kHz|48 kHz
+analog.fx.retro.1.digital.alias v29 choice "FX RETRO 1 Alias" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Clean|Clean|Hard [Clean|Hard]
+analog.fx.retro.1.digital.mod v29 float "FX RETRO 1 Motion" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.loss v29 float "FX RETRO 1 Loss" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.speed v29 float "FX RETRO 1 Speed" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.mode v29 choice "FX RETRO 1 Codec Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Standard|Repeat|Combined [Standard|Drop|Repeat|Jitter|Combined]
+analog.fx.retro.1.codec.artifactOnly v29 bool "FX RETRO 1 Artifact Only" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.codec.stereo v29 choice "FX RETRO 1 Codec Stereo" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Stereo|Joint|Mono [Stereo|Joint|Mono]
+analog.fx.retro.1.codec.artifact v29 float "FX RETRO 1 Artifact" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.ambience v29 float "FX RETRO 1 Artifact Ambience" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.seed v29 float "FX RETRO 1 Seed" label="#" range=0.0000..999.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0|500|999
+analog.fx.retro.2.on v29 bool "FX RETRO 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.mix v29 float "FX RETRO 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=65.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.output v29 float "FX RETRO 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.2.mode v29 choice "FX RETRO 2 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Tape|Vinyl|Digital [Tape|Vinyl|Digital]
+analog.fx.retro.2.tape.model v29 choice "FX RETRO 2 Tape Model" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Cassette|Cassette|Studio Reel [Cassette|Studio Reel]
+analog.fx.retro.2.vinyl.rpm v29 choice "FX RETRO 2 Vinyl Speed" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=33⅓|45|78 [33⅓|45|78]
+analog.fx.retro.2.digital.era v29 choice "FX RETRO 2 Digital Type" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=80s|90s|Codec [80s|90s|Codec]
+analog.fx.retro.2.character v29 float "FX RETRO 2 Character" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=40.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.wear v29 float "FX RETRO 2 Wear" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=25.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.input v29 float "FX RETRO 2 Input" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.retro.2.tone v29 float "FX RETRO 2 Tone" label="dB" range=-12.0000..12.0000/0.0000 skew=0.88847 default=0.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.2.saturation v29 float "FX RETRO 2 Saturation" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.preserve v29 choice "FX RETRO 2 Preserve" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=Low|Neutral|High [Low|Neutral|High]
+analog.fx.retro.2.wow.depth v29 float "FX RETRO 2 Wow Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.wow.rate v29 float "FX RETRO 2 Wow Rate" label="Hz" range=0.1000..3.0000/0.0000 skew=0.39431 default=0.5500 steps=2147483647 texts=0.10 Hz|0.60 Hz|3.00 Hz
+analog.fx.retro.2.flutter.depth v29 float "FX RETRO 2 Flutter Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=7.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.flutter.rate v29 float "FX RETRO 2 Flutter Rate" label="Hz" range=3.0000..20.0000/0.0000 skew=0.47905 default=6.0000 steps=2147483647 texts=3.00 Hz|7.00 Hz|20 Hz
+analog.fx.retro.2.transport.random v29 float "FX RETRO 2 Transport Random" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.stereo.phase v29 float "FX RETRO 2 Stereo Phase" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.retro.2.noise.type v29 choice "FX RETRO 2 Noise Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Auto|Vinyl|Digital [Auto|Tape Hiss|Vinyl|Room|Digital]
+analog.fx.retro.2.noise.level v29 float "FX RETRO 2 Noise Level" label="dB" range=-96.0000..-24.0000/0.0000 skew=1.00000 default=-96.0000 steps=2147483647 texts=-96.0 dB|-60.0 dB|-24.0 dB
+analog.fx.retro.2.noise.follow v29 float "FX RETRO 2 Noise Follow" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.noise.automute v29 bool "FX RETRO 2 Noise Auto Mute" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.crackle v29 float "FX RETRO 2 Crackle" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.pops v29 float "FX RETRO 2 Pops" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.dropout.rate v29 float "FX RETRO 2 Dropout Rate" label="/s" range=0.0000..12.0000/0.0000 skew=0.38685 default=0.0000 steps=2147483647 texts=0.0 /s|2.0 /s|12 /s
+analog.fx.retro.2.dropout.depth v29 float "FX RETRO 2 Dropout Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.dropout.length v29 float "FX RETRO 2 Dropout Length" label="ms" range=2.0000..250.0000/0.0000 skew=0.31778 default=25.0000 steps=2147483647 texts=2.0 ms|30 ms|250 ms
+analog.fx.retro.2.bandwidth.low v29 float "FX RETRO 2 Low Edge" label="Hz" range=20.0000..800.0000/0.0000 skew=0.33744 default=20.0000 steps=2147483647 texts=20 Hz|120 Hz|800 Hz
+analog.fx.retro.2.bandwidth.high v29 float "FX RETRO 2 High Edge" label="Hz" range=2000.0000..20000.0000/0.0000 skew=0.54113 default=18000.0000 steps=2147483647 texts=2.00 kHz|7.00 kHz|20.0 kHz
+analog.fx.retro.2.head.bump v29 float "FX RETRO 2 Head Bump" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.compress.amount v29 float "FX RETRO 2 Compress" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.compress.attack v29 float "FX RETRO 2 Compress Attack" label="x" range=0.2500..4.0000/0.0000 skew=0.43068 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|4.0 ×
+analog.fx.retro.2.compress.release v29 float "FX RETRO 2 Compress Release" label="x" range=0.2500..8.0000/0.0000 skew=0.29680 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|8.0 ×
+analog.fx.retro.2.compress.link v29 bool "FX RETRO 2 Compress Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.compress.tilt v29 float "FX RETRO 2 Sidechain Tilt" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.retro.2.digital.bits v29 float "FX RETRO 2 Bits" label="bit" range=4.0000..16.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=4.0 bit|10.0 bit|16.0 bit
+analog.fx.retro.2.digital.rate v29 float "FX RETRO 2 Rate" label="kHz" range=4.0000..48.0000/0.0000 skew=0.53348 default=24.0000 steps=2147483647 texts=4.0 kHz|16 kHz|48 kHz
+analog.fx.retro.2.digital.alias v29 choice "FX RETRO 2 Alias" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Clean|Clean|Hard [Clean|Hard]
+analog.fx.retro.2.digital.mod v29 float "FX RETRO 2 Motion" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.loss v29 float "FX RETRO 2 Loss" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.speed v29 float "FX RETRO 2 Speed" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.mode v29 choice "FX RETRO 2 Codec Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Standard|Repeat|Combined [Standard|Drop|Repeat|Jitter|Combined]
+analog.fx.retro.2.codec.artifactOnly v29 bool "FX RETRO 2 Artifact Only" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.codec.stereo v29 choice "FX RETRO 2 Codec Stereo" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Stereo|Joint|Mono [Stereo|Joint|Mono]
+analog.fx.retro.2.codec.artifact v29 float "FX RETRO 2 Artifact" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.ambience v29 float "FX RETRO 2 Artifact Ambience" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.seed v29 float "FX RETRO 2 Seed" label="#" range=0.0000..999.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0|500|999

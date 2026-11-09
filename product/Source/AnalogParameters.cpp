@@ -1,6 +1,7 @@
 #include "AnalogParameters.h"
 
 #include "AnalogMath.h"
+#include "InstrumentHost.h"
 
 #include "engine/Shaping.h"
 
@@ -52,9 +53,55 @@ namespace
         iOrganicSolo, iGeneratorSolo,
         // State version 5: ANDOR OSP's A/B blend, the oscillators against ORGANIC.
         iLayerBlend,
+        // Each card's EQ and DAMPEN (ANDOR OSP's own layerA/B.eq.* and .dampen.*, in its
+        // order: InstrumentHost::eqParameterNames, dampenParameterNames), before the filter.
+        iEqA, iEqALast = iEqA + 18, iEqB, iEqBLast = iEqB + 18,
+        iDampenA, iDampenALast = iDampenA + 4, iDampenB, iDampenBLast = iDampenB + 4,
+        iKeyDnaCardAmount,
+        // State version 8: three engines. Card B (OSC 2) is the shell's layer C: its M / S, EQ
+        // and DAMPEN; OSC 1's own fine tune; the hybrid's type, OSC 3, NOISE.
+        iOsc2Mute, iOsc2Solo,
+        iEqC, iEqCLast = iEqC + 18,
+        iDampenC, iDampenCLast = iDampenC + 4,
+        iOsc1Fine, iHybridType,
+        iOsc3Model, iOsc3Wave, iOsc3Octave, iOsc3Coarse, iOsc3Fine, iOsc3Width, iLfoWidth3,
+        iOsc3DcoSaw, iOsc3DcoPulse, iOsc3DcoSub, iOsc3DcoPwmSource, iOsc3DcoPwmDepth,
+        iOsc3WideWave, iOsc3WideShape, iOsc3WideSpread,
+        iHybridNoiseColor, iHybridNoiseTone, iHybridNoiseMovement,
+        iHybridOctave, iHybridFine, iOsc2Velo, iHybridVelo, iHybridNoiseKeys,
+        // Card B's own REGULAR / GRANULAR and grains (the shell's layer C settings).
+        iSourceMode2, iGrainPosition2, iGrainSize2, iGrainDensity2, iGrainTune2, iGrainSpread2,
+        // SPACE's ABYSS engine (ANDOR OSP's space.engine and space.abyss.*).
+        iSpaceEngine, iAbyssGravity, iAbyssFreeze, iAbyssResonance,
+        // ... VINTAGE's and BLOOM's (space.vintage.*, space.bloom.*).
+        iVintageVariant, iVintageEra, iVintageDiffusion, iBloomVariant, iBloomSync, iBloomDivision, iBloomTime, iBloomDiffusion,
+        iAbyssVariant,
+        // ECHO's ASCEND (echo.ascend.*).
+        iEchoInterval, iEchoMotion,
+        // State version 10: the mod wheel's link to LFO 1's depths.
+        iLfoWheel,
+        // State version 11: MOVEMENT's lanes (A's own five, then B's five and its settings).
+        iMoveAOn, iMoveALevel, iMoveASync, iMoveADivision, iMoveAPhase,
+        iMoveBOn, iMoveBLevel, iMoveBSync, iMoveBDivision, iMoveBPhase,
+        iMoveBMode, iMoveBDriftSpeed, iMoveBDriftPitch, iMoveBDriftTone, iMoveBTapeWow, iMoveBTapeFlutter, iMoveBTapeWear,
+        iMoveBChorusRate, iMoveBChorusWidth, iMoveBChorusStereo, iMoveBPulseRate, iMoveBPulseShape, iMoveBPulseStereo,
+        iMoveBShaperPattern, iMoveBShaperRate, iMoveBShaperTarget, iMoveBShaperSmooth, iMoveBShaperCustom,
         count
     };
 
+    const juce::StringArray& ids();
+}
+
+const juce::StringArray& movementSettingNames()
+{
+    static const juce::StringArray names { "mode", "drift.speed", "drift.pitch", "drift.tone", "tape.wow", "tape.flutter", "tape.wear",
+                                           "chorus.rate", "chorus.width", "chorus.stereo", "pulse.rate", "pulse.shape", "pulse.stereo",
+                                           "shaper.pattern", "shaper.rate", "shaper.target", "shaper.smooth", "shaper.custom" };
+    return names;
+}
+
+namespace
+{
     const juce::StringArray& ids()
     {
         static const juce::StringArray list {
@@ -99,8 +146,46 @@ namespace
             "layerB.solo", "layerA.solo",
             "ab.blend",
         };
-        jassert (list.size() == count);
-        return list;
+        static const juce::StringArray withCards = [] {
+            auto l = list;
+            for (const int layer : { 0, 1 })
+                for (const auto& name : osp::plugin::InstrumentHost::eqParameterNames())
+                    l.add (osp::plugin::InstrumentHost::eqParameterId (layer, name));
+            for (const int layer : { 0, 1 })
+                for (const auto& name : osp::plugin::InstrumentHost::dampenParameterNames())
+                    l.add (osp::plugin::InstrumentHost::dampenParameterId (layer, name));
+            // KEY DNA (state version 6): ANDOR OSP's own, its editor's settings in the shell's
+            // state and its AMOUNT this host parameter.
+            l.add (osp::plugin::InstrumentHost::keyDnaAmountId (0));
+            // State version 8.
+            l.add ("layerC.mute");
+            l.add ("layerC.solo");
+            for (const auto& name : osp::plugin::InstrumentHost::eqParameterNames())
+                l.add (osp::plugin::InstrumentHost::eqParameterId (2, name));
+            for (const auto& name : osp::plugin::InstrumentHost::dampenParameterNames())
+                l.add (osp::plugin::InstrumentHost::dampenParameterId (2, name));
+            for (const auto& id : { osc1Fine, hybridType, osc3Model, osc3Wave, osc3Octave, osc3Coarse, osc3Fine, osc3Width, lfoWidth3,
+                                    osc3DcoSaw, osc3DcoPulse, osc3DcoSub, osc3DcoPwmSource, osc3DcoPwmDepth, osc3WideWave, osc3WideShape,
+                                    osc3WideSpread, hybridNoiseColor, hybridNoiseTone, hybridNoiseMovement,
+                                    hybridOctave, hybridFine, osc2Velo, hybridVelo, hybridNoiseKeys })
+                l.add (id);
+            for (const char* name : { "sourceMode", "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
+                l.add (osp::plugin::InstrumentHost::layerParameterId (2, name));
+            for (const char* id : { "space.engine", "space.abyss.gravity", "space.abyss.freeze", "space.abyss.resonance",
+                                    "space.vintage.variant", "space.vintage.era", "space.vintage.diffusion", "space.bloom.variant",
+                                    "space.bloom.sync", "space.bloom.division", "space.bloom.time", "space.bloom.diffusion",
+                                    "space.abyss.variant", "echo.ascend.interval", "echo.ascend.motion" })
+                l.add (id);
+            l.add (lfoWheel);
+            for (const int lane : { 0, 1 })
+                for (const char* name : { "on", "level", "sync", "pulse.division", "phase" })
+                    l.add (movementLaneId (lane, name));
+            for (const auto& name : movementSettingNames())
+                l.add (movementBPrefix + name);
+            return l;
+        }();
+        jassert (withCards.size() == count);
+        return withCards;
     }
 
     // Value texts.
@@ -132,6 +217,17 @@ namespace
     }
 }
 
+const juce::StringArray& version8Ids()
+{
+    static const juce::StringArray list = [] {
+        juce::StringArray l;
+        for (int i = iOsc1Fine; i < count; ++i)
+            l.add (ids()[i]);
+        return l;
+    }();
+    return list;
+}
+
 const juce::StringArray& version4Ids()
 {
     static const juce::StringArray list = [] {
@@ -151,6 +247,10 @@ const juce::StringArray& engineParameterIds()
         static const juce::StringArray notPlayedYet = [] {
             juce::StringArray n;
             n.add ("layerB.pan");   // (each voice is one mono signal through its filter: ORGANIC takes its place)
+            // KEY DNA before state version 6 (ANDOR OSP's editor plays it now; these stay,
+            // frozen, for older sessions' migration).
+            for (const auto& id : { keyDna, keyDnaAmount, keyDnaIndividuality, keyDnaPosition, keyDnaSize, keyDnaDensity, keyDnaSpread, keyDnaTune })
+                n.add (id);
             return n;
         }();
         juce::StringArray l;
@@ -162,6 +262,7 @@ const juce::StringArray& engineParameterIds()
         l.add ("midi.modWheel");
         // ANDOR OSP's arpeggiator: the shell plays it in front of the synth.
         l.add ("arp.*");
+        l.add ("analog.arp.*");   // the per-card arpeggiator (the shell's, in ANALOG's namespace)
         // ANDOR OSP's modulation: LFO 2, ENV 1 and 2, VEL and NOTE, the 16 routes.
         l.add ("mod.*");
         return l;
@@ -364,7 +465,9 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                                                return juce::MidiMessage::getMidiNoteName (v, true, true, 4);
                                                            })));
     const auto& m = d.morph;
-    onOff4 (morphEnabled, "Morph On", m.enabled);
+    // State version 9: MORPH is on in a new instrument (it acts whenever card C sounds); the
+    // synth's own neutral patch (the tests' reference) keeps it off.
+    onOff4 (morphEnabled, "Morph On", true);
     percent4 (morphPosition, "Morph", m.position);
     choice4 (morphMethod, "Morph Method", { "Imprint", "Fuse", "Weave" }, static_cast<int> (m.method));
     choice4 (morphCarrier, "Morph Carrier", { "Osc 1", "Osc 2", "Both" }, static_cast<int> (m.carrier));
@@ -374,6 +477,108 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent4 (morphDetail, "Morph Detail", m.detail);
     onOff4 (morphLevelMatch, "Morph Level Match", m.levelMatch);
     choice4 (morphOutput, "Morph Output", { "Morph Only", "Layered" }, static_cast<int> (m.output));
+    // State version 8: three engines (appended; the shell's layerC.* exist already).
+    auto v8 = [] (const juce::String& name) { return juce::ParameterID { name, 8 }; };
+    auto percent8 = [&] (const juce::String& name, const char* title, double value) {
+        layout.add (std::make_unique<Float> (v8 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+                                             Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    auto choice8 = [&] (const juce::String& name, const char* title, juce::StringArray items, int value) {
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v8 (name), title, items, value));
+    };
+    auto onOff8 = [&] (const juce::String& name, const char* title, bool value) {
+        layout.add (std::make_unique<juce::AudioParameterBool> (v8 (name), title, value));
+    };
+    auto integer8 = [&] (const juce::String& name, const char* title, int lo, int hi, int value, const char* unit) {
+        layout.add (std::make_unique<juce::AudioParameterInt> (v8 (name), title, lo, hi, value,
+                                                               juce::AudioParameterIntAttributes().withLabel (unit).withStringFromValueFunction ([unit] (int v, int) {
+                                                                   return (v > 0 ? "+" : "") + juce::String (v) + " " + unit;
+                                                               })));
+    };
+    auto bipolar8 = [&] (const juce::String& name, const char* title, float range, double value, const char* unit, int decimals) {
+        layout.add (std::make_unique<Float> (v8 (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
+                                             Attributes().withLabel (unit).withStringFromValueFunction ([unit, decimals] (float v, int) {
+                                                 return signedText (v, unit, decimals);
+                                             })));
+    };
+    bipolar8 (osc1Fine, "Osc 1 Fine", 100.0f, d.osc1FineCents, "ct", 0);
+    choice8 (hybridType, "Hybrid Type", { "Sample", "Oscillator", "Noise", "Instrument Patch" }, static_cast<int> (d.hybridType));
+    choice8 (osc3Model, "Osc 3 Model", models, static_cast<int> (d.osc3Model));
+    choice8 (osc3Wave, "Osc 3 Wave", { "Saw", "Triangle", "Pulse", "Saw+Tri", "Saw+Pulse", "Tri+Pulse", "All" }, static_cast<int> (d.osc3Wave));
+    integer8 (osc3Octave, "Osc 3 Octave", -2, 2, d.osc3Octave, "oct");
+    integer8 (osc3Coarse, "Osc 3 Coarse", -12, 12, static_cast<int> (d.osc3Coarse), "st");
+    bipolar8 (osc3Fine, "Osc 3 Fine", 100.0f, d.osc3FineCents, "ct", 0);
+    layout.add (std::make_unique<Float> (v8 (osc3Width), "Osc 3 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc3Width),
+                                         Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    bipolar8 (lfoWidth3, "LFO to Osc 3 Width", 45.0f, 100.0 * d.lfoWidth3, "%", 0);
+    onOff8 (osc3DcoSaw, "Osc 3 DCO Saw", d.dco3.saw);
+    onOff8 (osc3DcoPulse, "Osc 3 DCO Pulse", d.dco3.pulse);
+    percent8 (osc3DcoSub, "Osc 3 DCO Sub", d.dco3.subLevel);
+    choice8 (osc3DcoPwmSource, "Osc 3 DCO PWM Source", pwmSources, static_cast<int> (d.dco3.pwmSource));
+    percent8 (osc3DcoPwmDepth, "Osc 3 DCO PWM Depth", d.dco3.pwmDepth);
+    choice8 (osc3WideWave, "Osc 3 Wide Wave", wideWaves, static_cast<int> (d.wide3.wave));
+    percent8 (osc3WideShape, "Osc 3 Wide Shape", d.wide3.shape);
+    percent8 (osc3WideSpread, "Osc 3 Super Saw Spread", d.wide3.spread);
+    choice8 (hybridNoiseColor, "Hybrid Noise Color", { "White", "Juno" }, static_cast<int> (d.hybridNoiseColor));
+    percent8 (hybridNoiseTone, "Hybrid Noise Tone", d.hybridNoiseTone);
+    percent8 (hybridNoiseMovement, "Hybrid Noise Movement", d.hybridNoiseMovement);
+    integer8 (hybridOctave, "Hybrid Octave", -3, 3, d.hybridOctave, "oct");
+    bipolar8 (hybridFine, "Hybrid Fine", 100.0f, d.hybridFineCents, "ct", 0);
+    percent8 (osc2Velo, "Osc 2 Velocity", d.osc2Velo);
+    percent8 (hybridVelo, "Hybrid Velocity", d.hybridVelo);
+    percent8 (hybridNoiseKeys, "Hybrid Noise Keys", d.hybridNoiseKeys);
+    // State version 10: the mod wheel to LFO 1's depths, off in a new instrument.
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { lfoWheel, 10 }, "LFO Mod Wheel", d.wheelToLfo));
+
+    // State version 11: MOVEMENT's lanes. Lane A on at 100 % and lane B off: every session
+    // from before plays exactly as it did.
+    auto v11 = [] (const juce::String& name) { return juce::ParameterID { name, 11 }; };
+    auto percent11 = [&] (const juce::String& name, const juce::String& title, double value) {
+        layout.add (std::make_unique<Float> (v11 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+                                             Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    juce::StringArray cycles;
+    for (int i = 0; i < osp::shaping::pulseDivisionCount; ++i)
+        cycles.add (osp::shaping::pulseDivisionName (i));
+    for (const int lane : { 0, 1 })
+    {
+        const auto& lanePatch = lane == 0 ? d.movementA : d.movementBLane;
+        const auto& laneShaping = lane == 0 ? d.effects : d.movementB;
+        const juce::String name = lane == 0 ? "Movement A " : "Movement B ";
+        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (movementLaneId (lane, "on")), name + "On", lanePatch.on));
+        percent11 (movementLaneId (lane, "level"), name + "Intensity", lanePatch.level);
+        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (movementLaneId (lane, "sync")), name + "Pulse Sync", laneShaping.pulseSync));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (movementLaneId (lane, "pulse.division")), name + "Pulse Cycle", cycles, laneShaping.pulseDivision));
+        percent11 (movementLaneId (lane, "phase"), name + "Phase", laneShaping.movementPhase);
+    }
+    {
+        const auto& b = d.movementB;
+        auto id = [] (const char* n) { return movementBPrefix + n; };
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("mode")), "Movement B Mode", juce::StringArray { "Drift", "Tape", "Chorus", "Pulse", "Shaper" },
+                                                                  static_cast<int> (b.movementMode)));
+        percent11 (id ("drift.speed"), "Movement B Drift Speed", b.driftSpeed);
+        percent11 (id ("drift.pitch"), "Movement B Drift Pitch", b.driftPitch);
+        percent11 (id ("drift.tone"), "Movement B Drift Tone", b.driftTone);
+        percent11 (id ("tape.wow"), "Movement B Tape Wow", b.tapeWow);
+        percent11 (id ("tape.flutter"), "Movement B Tape Flutter", b.tapeFlutter);
+        percent11 (id ("tape.wear"), "Movement B Tape Wear", b.tapeWear);
+        percent11 (id ("chorus.rate"), "Movement B Chorus Rate", b.chorusRate);
+        percent11 (id ("chorus.width"), "Movement B Chorus Width", b.chorusWidth);
+        percent11 (id ("chorus.stereo"), "Movement B Chorus Stereo", b.chorusStereo);
+        percent11 (id ("pulse.rate"), "Movement B Pulse Rate", b.pulseRate);
+        percent11 (id ("pulse.shape"), "Movement B Pulse Shape", b.pulseShape);
+        percent11 (id ("pulse.stereo"), "Movement B Pulse Stereo", b.pulseStereo);
+        juce::StringArray patterns;
+        for (int i = 0; i < osp::RhythmicShaper::patternCount; ++i)
+            patterns.add (osp::RhythmicShaper::patternName (i));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.pattern")), "Movement B Shaper Pattern", patterns, b.shaper.pattern));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.rate")), "Movement B Shaper Rate",
+                                                                  juce::StringArray { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" }, static_cast<int> (b.shaper.rate)));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.target")), "Movement B Shaper Target", juce::StringArray { "Vol", "Filter", "Both" },
+                                                                  static_cast<int> (b.shaper.target)));
+        percent11 (id ("shaper.smooth"), "Movement B Shaper Smooth", b.shaper.smooth);
+        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (id ("shaper.custom")), "Movement B Shaper Custom", b.shaper.custom));
+    }
 }
 
 //==============================================================================
@@ -415,6 +620,7 @@ namespace
             case iAnalog: p.analogAmount = 0.01 * v; break;
             case iFilterDrive: p.filterDrive = 0.01 * v; break;
             case iGrainTune: p.grains.tuneSemitones = v; break;
+            case iGrainTune2: p.grains2.tuneSemitones = v; break;
             case iOsc1DcoSub: p.dco1.subLevel = 0.01 * v; break;
             case iOsc2DcoSub: p.dco2.subLevel = 0.01 * v; break;
             case iOsc1DcoPwmDepth: p.dco1.pwmDepth = 0.01 * v; break;
@@ -485,6 +691,9 @@ namespace
             { iRingMix, "RING MOD", O::voice },
             { iMorphPosition, "MORPH", O::voice }, { iMorphTexture, "MORPH TEXTURE", O::voice }, { iMorphAttack, "MORPH ATTACK", O::voice },
             { iMorphFormants, "MORPH FORMANTS", O::voice }, { iMorphDetail, "MORPH DETAIL", O::voice },
+            // State version 8 (appended): card B's own grains (its POS, SIZE, DENS and SPREAD are
+            // ANDOR OSP's layer C destinations).
+            { iGrainTune2, "GRAIN TUNE B", O::voice },
         };
         return list;
     }
@@ -549,7 +758,7 @@ void Reader::moveIndex (Values& raw, int index, double offset) const noexcept
 
 void Reader::moveById (Values& raw, const char* id, double offset) const noexcept
 {
-    // (Four IDs, compared on the audio thread without allocating.)
+    // (A few IDs, compared on the audio thread without allocating.)
     for (int i = 0; i < count && ranges.size() == static_cast<std::size_t> (count); ++i)
         if (ids()[i] == id)
         {
@@ -590,6 +799,53 @@ Patch Reader::readWith (const float* raw) const noexcept
     auto v = [&at] (int i) { return static_cast<double> (at (i)); };
     auto on = [&at] (int i) { return at (i) >= 0.5f; };
     auto index = [&at] (int i, int n) { return std::clamp (juce::roundToInt (at (i)), 0, n - 1); };
+    // Each card's EQ and DAMPEN (ANDOR OSP's parameters, read as ANDOR OSP reads them; the
+    // DAMPEN curves are the shell's, the synth's own).
+    auto cardEq = [&at] (int first) {
+        std::array<float, 19> e {};
+        for (std::size_t i = 0; i < e.size(); ++i)
+            e[i] = at (first + static_cast<int> (i));
+        return osp::plugin::InstrumentHost::eqFromValues (e);
+    };
+    p.eqA = cardEq (iEqA);
+    p.eqB = cardEq (iEqB);
+    auto cardDampen = [&] (int first, osp::dampen::Settings& d) {
+        d.enabled = on (first);
+        d.mode = static_cast<osp::dampen::Mode> (index (first + 1, 2));
+        d.amount = 0.01 * v (first + 2);
+        d.shelfHz = v (first + 3);
+        d.minCutoffHz = v (first + 4);
+    };
+    cardDampen (iDampenA, p.dampenA);
+    cardDampen (iDampenB, p.dampenB);
+    // State version 8: card B (OSC 2) is the shell's layer C.
+    p.eqC = cardEq (iEqC);
+    cardDampen (iDampenC, p.dampenC);
+    p.osc1FineCents = v (iOsc1Fine);
+    p.hybridType = static_cast<HybridType> (index (iHybridType, 4));
+    p.osc3Model = static_cast<OscModel> (index (iOsc3Model, 3));
+    p.osc3Wave = static_cast<Osc2Wave> (index (iOsc3Wave, 7));
+    p.osc3Octave = juce::roundToInt (v (iOsc3Octave));
+    p.osc3Coarse = std::round (v (iOsc3Coarse));
+    p.osc3FineCents = v (iOsc3Fine);
+    p.osc3Width = 0.01 * v (iOsc3Width);
+    p.lfoWidth3 = 0.01 * v (iLfoWidth3);
+    p.dco3.saw = on (iOsc3DcoSaw);
+    p.dco3.pulse = on (iOsc3DcoPulse);
+    p.dco3.subLevel = 0.01 * v (iOsc3DcoSub);
+    p.dco3.pwmSource = static_cast<PwmSource> (index (iOsc3DcoPwmSource, 3));
+    p.dco3.pwmDepth = 0.01 * v (iOsc3DcoPwmDepth);
+    p.wide3.wave = static_cast<WideWave> (index (iOsc3WideWave, 5));
+    p.wide3.shape = 0.01 * v (iOsc3WideShape);
+    p.wide3.spread = 0.01 * v (iOsc3WideSpread);
+    p.hybridNoiseColor = static_cast<NoiseColor> (index (iHybridNoiseColor, 2));
+    p.hybridNoiseTone = 0.01 * v (iHybridNoiseTone);
+    p.hybridNoiseMovement = 0.01 * v (iHybridNoiseMovement);
+    p.hybridOctave = juce::roundToInt (v (iHybridOctave));
+    p.hybridFineCents = v (iHybridFine);
+    p.osc2Velo = 0.01 * v (iOsc2Velo);
+    p.hybridVelo = 0.01 * v (iHybridVelo);
+    p.hybridNoiseKeys = 0.01 * v (iHybridNoiseKeys);
     p.blend = 0.01 * v (iBlend);
     p.tone = 0.01 * v (iTone);
     p.lfoAmount = 0.01 * v (iMotion);
@@ -663,7 +919,23 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.spaceWidth = 0.01 * v (iSpaceWidth);
     s.spaceLowCutHz = v (iSpaceLowCut);
     s.spaceHighCutHz = v (iSpaceHighCut);
-    s.echoType = static_cast<osp::EchoType> (index (iEchoType, 2));
+    s.spaceEngine = static_cast<osp::SpaceEngine> (index (iSpaceEngine, 4));
+    s.abyssGravity = 0.01 * v (iAbyssGravity);
+    s.abyssFreeze = on (iAbyssFreeze);
+    s.abyssResonance = 0.01 * v (iAbyssResonance);
+    s.vintageVariant = static_cast<osp::VintageVariant> (index (iVintageVariant, 4));
+    s.vintageEra = static_cast<osp::VintageEra> (index (iVintageEra, 2));
+    s.vintageDiffusion = 0.01 * v (iVintageDiffusion);
+    s.bloomVariant = static_cast<osp::BloomVariant> (index (iBloomVariant, 4));
+    s.bloomSync = on (iBloomSync);
+    s.bloomDivision = index (iBloomDivision, osp::shaping::echoDivisionCount);
+    s.bloomTimeMs = v (iBloomTime);
+    s.bloomDiffusion = 0.01 * v (iBloomDiffusion);
+    s.abyssVariant = static_cast<osp::AbyssVariant> (index (iAbyssVariant, 4));
+    s.echoType = static_cast<osp::EchoType> (index (iEchoType, 3));
+    s.echoInterval = static_cast<osp::AscendInterval> (index (iEchoInterval, 4));
+    s.echoMotion = static_cast<osp::AscendMotion> (index (iEchoMotion, 3));
+    p.wheelToLfo = on (iLfoWheel);
     s.echoSync = on (iEchoSync);
     s.echoDivision = index (iEchoDivision, osp::shaping::echoDivisionCount);
     s.echoTimeMs = v (iEchoTime);
@@ -696,6 +968,36 @@ Patch Reader::readWith (const float* raw) const noexcept
     s.shaper.target = static_cast<osp::ShaperTarget> (index (iShaperTarget, 3));
     s.shaper.smooth = 0.01 * v (iShaperSmooth);
     s.shaper.custom = on (iShaperCustom);
+    // State version 11: the lanes.
+    p.movementA = { on (iMoveAOn), 0.01 * v (iMoveALevel) };
+    s.pulseSync = on (iMoveASync);
+    s.pulseDivision = index (iMoveADivision, osp::shaping::pulseDivisionCount);
+    s.movementPhase = 0.01 * v (iMoveAPhase);
+    p.movementBLane = { on (iMoveBOn), 0.01 * v (iMoveBLevel) };
+    {
+        auto& b = p.movementB;
+        b.pulseSync = on (iMoveBSync);
+        b.pulseDivision = index (iMoveBDivision, osp::shaping::pulseDivisionCount);
+        b.movementPhase = 0.01 * v (iMoveBPhase);
+        b.movementMode = static_cast<osp::MovementMode> (index (iMoveBMode, 5));
+        b.driftSpeed = 0.01 * v (iMoveBDriftSpeed);
+        b.driftPitch = 0.01 * v (iMoveBDriftPitch);
+        b.driftTone = 0.01 * v (iMoveBDriftTone);
+        b.tapeWow = 0.01 * v (iMoveBTapeWow);
+        b.tapeFlutter = 0.01 * v (iMoveBTapeFlutter);
+        b.tapeWear = 0.01 * v (iMoveBTapeWear);
+        b.chorusRate = 0.01 * v (iMoveBChorusRate);
+        b.chorusWidth = 0.01 * v (iMoveBChorusWidth);
+        b.chorusStereo = 0.01 * v (iMoveBChorusStereo);
+        b.pulseRate = 0.01 * v (iMoveBPulseRate);
+        b.pulseShape = 0.01 * v (iMoveBPulseShape);
+        b.pulseStereo = 0.01 * v (iMoveBPulseStereo);
+        b.shaper.pattern = index (iMoveBShaperPattern, osp::RhythmicShaper::patternCount);
+        b.shaper.rate = static_cast<osp::ShaperRate> (index (iMoveBShaperRate, 6));
+        b.shaper.target = static_cast<osp::ShaperTarget> (index (iMoveBShaperTarget, 3));
+        b.shaper.smooth = 0.01 * v (iMoveBShaperSmooth);
+        b.shaper.custom = on (iMoveBShaperCustom);
+    }
     p.reimagined = 0.01 * v (iReimagined);
     auto& r = p.reimaginedSettings;
     r.mode = osp::reimagined::modeFromIndex (index (iReimaginedMode, osp::reimaginedModeCount));
@@ -709,6 +1011,12 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.grains.density = v (iGrainDensity);
     p.grains.tuneSemitones = v (iGrainTune);
     p.grains.spread = 0.01 * v (iGrainSpread);
+    p.granular2 = on (iSourceMode2);
+    p.grains2.position = 0.01 * v (iGrainPosition2);
+    p.grains2.sizeSeconds = 0.001 * v (iGrainSize2);
+    p.grains2.density = v (iGrainDensity2);
+    p.grains2.tuneSemitones = v (iGrainTune2);
+    p.grains2.spread = 0.01 * v (iGrainSpread2);
     auto& lfo = p.lfo;
     lfo.shape = static_cast<osp::mod::LfoShape> (index (iLfoShape, osp::mod::lfoShapeCount));
     lfo.rateHz = v (iLfoRate);
@@ -759,10 +1067,16 @@ Patch Reader::readWith (const float* raw) const noexcept
     o.loop = on (iOrganicLoop);
     o.follow = on (iOrganicFollow);
     o.reverse = on (iOrganicReverse);
-    const bool soloA = on (iGeneratorSolo), soloB = on (iOrganicSolo);
-    o.heard = ! on (iOrganicMute) && ! (soloA && ! soloB);
-    if (soloB && ! soloA)
-        p.mute = true;
+    // Each card's M / S (state version 8: A OSC 1, B OSC 2 (layer C), C the hybrid (layer B)):
+    // a solo anywhere leaves only the soloed cards heard, as ANDOR OSP's layers. The noise
+    // mixer goes with OSC 1 (card A's part). p.mute: the whole analog side silent (both
+    // oscillators), the legacy fast path.
+    const bool soloA = on (iGeneratorSolo), soloB = on (iOrganicSolo), soloC = on (iOsc2Solo);
+    const bool anySolo = soloA || soloB || soloC;
+    p.osc1Heard = anySolo ? soloA : ! on (iMute);
+    p.osc2Heard = anySolo ? soloC : ! on (iOsc2Mute);
+    o.heard = anySolo ? soloB : ! on (iOrganicMute);
+    p.mute = ! p.osc1Heard && ! p.osc2Heard;
     o.blend = std::clamp (v (iLayerBlend), 0.0, 1.0);
     auto& m = p.morph;
     m.enabled = on (iMorphEnabled);
@@ -776,6 +1090,11 @@ Patch Reader::readWith (const float* raw) const noexcept
     m.levelMatch = on (iMorphLevelMatch);
     m.output = static_cast<MorphOutput> (index (iMorphOutput, 2));
     return p;
+}
+
+double Reader::keyDnaCardAmount() const noexcept
+{
+    return values.size() == static_cast<std::size_t> (count) ? 0.01 * value (iKeyDnaCardAmount) : 1.0;
 }
 
 osp::keydna::Settings Reader::keyDna (std::uint32_t seed) const noexcept
@@ -876,7 +1195,54 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iSpaceWidth, 100.0 * s.spaceWidth);
     put (iSpaceLowCut, s.spaceLowCutHz);
     put (iSpaceHighCut, s.spaceHighCutHz);
+    put (iSpaceEngine, static_cast<int> (s.spaceEngine));
+    put (iAbyssGravity, 100.0 * s.abyssGravity);
+    put (iAbyssFreeze, s.abyssFreeze ? 1.0 : 0.0);
+    put (iAbyssResonance, 100.0 * s.abyssResonance);
+    put (iVintageVariant, static_cast<int> (s.vintageVariant));
+    put (iVintageEra, static_cast<int> (s.vintageEra));
+    put (iVintageDiffusion, 100.0 * s.vintageDiffusion);
+    put (iBloomVariant, static_cast<int> (s.bloomVariant));
+    put (iBloomSync, s.bloomSync ? 1.0 : 0.0);
+    put (iBloomDivision, s.bloomDivision);
+    put (iBloomTime, s.bloomTimeMs);
+    put (iBloomDiffusion, 100.0 * s.bloomDiffusion);
+    put (iAbyssVariant, static_cast<int> (s.abyssVariant));
     put (iEchoType, static_cast<int> (s.echoType));
+    put (iEchoInterval, static_cast<int> (s.echoInterval));
+    put (iEchoMotion, static_cast<int> (s.echoMotion));
+    put (iLfoWheel, p.wheelToLfo ? 1.0 : 0.0);
+    put (iMoveAOn, p.movementA.on ? 1.0 : 0.0);
+    put (iMoveALevel, 100.0 * p.movementA.level);
+    put (iMoveASync, s.pulseSync ? 1.0 : 0.0);
+    put (iMoveADivision, s.pulseDivision);
+    put (iMoveAPhase, 100.0 * s.movementPhase);
+    {
+        const auto& b = p.movementB;
+        put (iMoveBOn, p.movementBLane.on ? 1.0 : 0.0);
+        put (iMoveBLevel, 100.0 * p.movementBLane.level);
+        put (iMoveBSync, b.pulseSync ? 1.0 : 0.0);
+        put (iMoveBDivision, b.pulseDivision);
+        put (iMoveBPhase, 100.0 * b.movementPhase);
+        put (iMoveBMode, static_cast<int> (b.movementMode));
+        put (iMoveBDriftSpeed, 100.0 * b.driftSpeed);
+        put (iMoveBDriftPitch, 100.0 * b.driftPitch);
+        put (iMoveBDriftTone, 100.0 * b.driftTone);
+        put (iMoveBTapeWow, 100.0 * b.tapeWow);
+        put (iMoveBTapeFlutter, 100.0 * b.tapeFlutter);
+        put (iMoveBTapeWear, 100.0 * b.tapeWear);
+        put (iMoveBChorusRate, 100.0 * b.chorusRate);
+        put (iMoveBChorusWidth, 100.0 * b.chorusWidth);
+        put (iMoveBChorusStereo, 100.0 * b.chorusStereo);
+        put (iMoveBPulseRate, 100.0 * b.pulseRate);
+        put (iMoveBPulseShape, 100.0 * b.pulseShape);
+        put (iMoveBPulseStereo, 100.0 * b.pulseStereo);
+        put (iMoveBShaperPattern, b.shaper.pattern);
+        put (iMoveBShaperRate, static_cast<int> (b.shaper.rate));
+        put (iMoveBShaperTarget, static_cast<int> (b.shaper.target));
+        put (iMoveBShaperSmooth, 100.0 * b.shaper.smooth);
+        put (iMoveBShaperCustom, b.shaper.custom ? 1.0 : 0.0);
+    }
     put (iEchoSync, s.echoSync ? 1.0 : 0.0);
     put (iEchoDivision, s.echoDivision);
     put (iEchoTime, s.echoTimeMs);
@@ -927,6 +1293,12 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iGrainDensity, p.grains.density);
     put (iGrainTune, p.grains.tuneSemitones);
     put (iGrainSpread, 100.0 * p.grains.spread);
+    put (iSourceMode2, p.granular2 ? 1.0 : 0.0);
+    put (iGrainPosition2, 100.0 * p.grains2.position);
+    put (iGrainSize2, 1000.0 * p.grains2.sizeSeconds);
+    put (iGrainDensity2, p.grains2.density);
+    put (iGrainTune2, p.grains2.tuneSemitones);
+    put (iGrainSpread2, 100.0 * p.grains2.spread);
     put (iLfoShape, static_cast<int> (p.lfo.shape));
     put (iLfoRate, p.lfo.rateHz);
     put (iLfoSync, p.lfo.sync ? 1.0 : 0.0);
@@ -980,6 +1352,32 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iMorphDetail, 100.0 * mo.detail);
     put (iMorphLevelMatch, mo.levelMatch ? 1.0 : 0.0);
     put (iMorphOutput, static_cast<int> (mo.output));
+    // State version 8.
+    put (iOsc1Fine, p.osc1FineCents);
+    put (iHybridType, static_cast<int> (p.hybridType));
+    put (iOsc3Model, static_cast<int> (p.osc3Model));
+    put (iOsc3Wave, static_cast<int> (p.osc3Wave));
+    put (iOsc3Octave, p.osc3Octave);
+    put (iOsc3Coarse, p.osc3Coarse);
+    put (iOsc3Fine, p.osc3FineCents);
+    put (iOsc3Width, 100.0 * p.osc3Width);
+    put (iLfoWidth3, 100.0 * p.lfoWidth3);
+    put (iOsc3DcoSaw, p.dco3.saw ? 1.0 : 0.0);
+    put (iOsc3DcoPulse, p.dco3.pulse ? 1.0 : 0.0);
+    put (iOsc3DcoSub, 100.0 * p.dco3.subLevel);
+    put (iOsc3DcoPwmSource, static_cast<int> (p.dco3.pwmSource));
+    put (iOsc3DcoPwmDepth, 100.0 * p.dco3.pwmDepth);
+    put (iOsc3WideWave, static_cast<int> (p.wide3.wave));
+    put (iOsc3WideShape, 100.0 * p.wide3.shape);
+    put (iOsc3WideSpread, 100.0 * p.wide3.spread);
+    put (iHybridNoiseColor, static_cast<int> (p.hybridNoiseColor));
+    put (iHybridNoiseTone, 100.0 * p.hybridNoiseTone);
+    put (iHybridNoiseMovement, 100.0 * p.hybridNoiseMovement);
+    put (iHybridOctave, p.hybridOctave);
+    put (iHybridFine, p.hybridFineCents);
+    put (iOsc2Velo, 100.0 * p.osc2Velo);
+    put (iHybridVelo, 100.0 * p.hybridVelo);
+    put (iHybridNoiseKeys, 100.0 * p.hybridNoiseKeys);
     return m;
 }
 

@@ -4,11 +4,14 @@
 #include "TestUtil.h"
 
 #include "FactoryPatches.h"
-#include "morph/MorphAnalyzer.h"
+#include "fx/Effects.h"
+#include "fx/FxProcessor.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <cmath>
+#include <memory>
 #include <cstdlib>
 #include <new>
 
@@ -236,7 +239,7 @@ TEST_CASE ("realtime: ORGANIC (notes, loops, a recording replaced while it plays
     CHECK (allocations.load() == 0);
 }
 
-TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position moving) never allocates", "[realtime][morph]")
+TEST_CASE ("realtime: MORPH (live: IMPRINT, FUSE, WEAVE, every carrier and card C type, the position moving) never allocates", "[realtime][morph]")
 {
     osp::AudioData audio;
     audio.sampleRate = 48000.0;
@@ -249,7 +252,6 @@ TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position m
     audio.channels = { x };
     auto model = std::make_shared<osp::InstrumentModel>();
     model->original.source = std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
-    const auto profile = andor::analog::morph::analyse (x.data(), static_cast<std::int64_t> (x.size()), 48000.0);
     Synth synth;
     synth.prepare (48000.0, 512, 4);
     Patch p;
@@ -257,7 +259,6 @@ TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position m
     synth.setPatch (p);
     synth.reset();
     synth.setOrganic (model.get());
-    synth.setMorphProfile (&profile, model.get());
     std::vector<float> left (512), right (512);
     counting = true;
     for (int block = 0; block < 180; ++block)
@@ -268,6 +269,7 @@ TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position m
         p.morph.position = (block % 30) / 29.0;
         p.morph.formants = (block % 11) - 5.0;
         p.morph.detail = (block % 13) / 12.0;
+        p.hybridType = static_cast<HybridType> (block / 60 % 3);   // the recording, OSC 3, NOISE
         synth.setPatch (p);
         const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (40 + block % 36), 100 };
         const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (40 + (block + 30) % 36), 0 };
@@ -275,6 +277,149 @@ TEST_CASE ("realtime: MORPH (IMPRINT, FUSE, WEAVE, every carrier, the position m
         synth.render (left.data(), right.data(), 256);
         synth.handleMidi (noteOff, 3);
         synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: an imported sample source (zones, loops, swaps) never allocates", "[realtime][samplesource]")
+{
+    auto tone = [] (double hz, double rate) {
+        osp::AudioData audio;
+        audio.sampleRate = rate;
+        std::vector<float> x (static_cast<std::size_t> (rate));
+        for (std::size_t i = 0; i < x.size(); ++i)
+            x[i] = static_cast<float> (0.4 * std::sin (6.283185307 * hz * static_cast<double> (i) / rate));
+        audio.channels = { x, x };
+        return std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
+    };
+    SampleSource a, b;
+    for (int i = 0; i < 6; ++i)
+    {
+        SampleZone z;
+        z.audio = tone (110.0 * (i + 1), i % 2 == 0 ? 44100.0 : 48000.0);
+        z.keyLo = 30 + 8 * i;
+        z.keyHi = 50 + 8 * i;   // (overlapping)
+        z.root = 40 + 8 * i;
+        z.loop.on = i % 3 != 0;
+        z.loop.alternating = i % 3 == 2;
+        z.loop.start = 4000.0;
+        z.loop.length = 20000.0;
+        z.loop.crossfade = 3000.0;
+        a.zones.push_back (z);
+    }
+    b.zones = { a.zones[1], a.zones[4] };
+    auto patch = measurementPatch();
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    synth.setPatch (patch);
+    synth.setSampleSource (&a);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 300; ++block)
+    {
+        if (block % 50 == 25)
+            synth.setSampleSource (block % 100 == 25 ? &b : &a);
+        patch.organic.loop = block % 80 < 60;
+        synth.setPatch (patch);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (30 + block % 60), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (30 + (block + 30) % 60), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: three engines (each card's EQ and M / S, OSC 3, NOISE, the hybrid's type switching) never allocate", "[realtime][threeengines]")
+{
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    Patch p;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    osp::eq::Settings bell;
+    bell.enabled = true;
+    bell.bands[static_cast<std::size_t> (osp::eq::Band::bell)].enabled = true;
+    bell.bands[static_cast<std::size_t> (osp::eq::Band::bell)].gainDb = 9.0;
+    counting = true;
+    for (int block = 0; block < 240; ++block)
+    {
+        p.hybridType = static_cast<HybridType> (block / 10 % 3);   // SAMPLE (none), OSC 3, NOISE
+        p.osc3Model = static_cast<OscModel> (block / 7 % 3);
+        p.wide3.wave = static_cast<WideWave> (block / 5 % 5);
+        p.dco3.pwmSource = static_cast<PwmSource> (block % 3);
+        p.dco3.pwmDepth = 0.4;
+        p.hybridNoiseColor = static_cast<NoiseColor> (block / 13 % 2);
+        p.hybridNoiseTone = (block % 9) / 9.0;
+        p.hybridNoiseMovement = 0.6;
+        p.eqA = block % 30 < 15 ? bell : osp::eq::Settings();
+        p.eqC = block % 20 < 10 ? bell : osp::eq::Settings();
+        p.dampenC.enabled = block % 40 < 20;
+        p.dampenC.amount = 0.5;
+        p.osc1Heard = block % 17 != 0;
+        p.osc2Heard = block % 23 != 0;
+        p.osc1FineCents = (block % 11) - 5.0;
+        p.ringMix = block % 40 < 20 ? 0.4 : 0.0;
+        synth.setPatch (p);
+        const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t noteOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 40) % 48), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: every new effect - RETRO in each personality, switched mid-stream - never allocates", "[realtime][fx][retro]")
+{
+    namespace fx = andor::analog::fx;
+    fx::Settings settings;
+    std::vector<std::unique_ptr<fx::Processor>> processors;
+    for (int t = 4; t < fx::typeCount; ++t)
+        if (auto proc = fx::makeProcessor (static_cast<fx::Type> (t)))
+        {
+            proc->prepare (48000.0, 512);
+            proc->set (settings, 0);
+            proc->reset();
+            processors.push_back (std::move (proc));
+        }
+    REQUIRE (processors.size() >= 10);
+    std::vector<float> l (512), r (512);
+    auto& retro = settings.retro[0];
+    retro.noiseDb = -50.0f;
+    retro.crackle = retro.pops = 0.6f;
+    retro.dropoutRate = 6.0f;
+    retro.dropoutDepth = 0.8f;
+    retro.compAmount = 0.5f;
+    retro.codecAmbience = 0.5f;
+    retro.digitalMotion = 1.0f;
+    counting = true;
+    for (int block = 0; block < 400; ++block)
+    {
+        // The personality every 40 blocks (TAPE, VINYL, 80s, 90s, CODEC and its packet modes).
+        const int which = (block / 40) % 8;
+        retro.mode = which < 2 ? which : fx::RetroSettings::digital;
+        retro.era = which < 2 ? fx::RetroSettings::nineties : std::min (2, which - 2);
+        retro.codecMode = std::max (0, which - 4);
+        retro.aliasHard = (block / 20) % 2 == 1;
+        const int n = 1 + (block * 37) % 512;
+        for (auto& proc : processors)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                l[static_cast<std::size_t> (i)] = 0.3f * std::sin (0.031f * static_cast<float> (block * 512 + i));
+                r[static_cast<std::size_t> (i)] = l[static_cast<std::size_t> (i)];
+            }
+            proc->set (settings, 0);
+            proc->process (l.data(), r.data(), n);
+        }
     }
     counting = false;
     CHECK (allocations.load() == 0);

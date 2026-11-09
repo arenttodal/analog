@@ -44,12 +44,14 @@ namespace
     }
 
     /** Every factory sound starts from INIT with the first version's LFO (TRIANGLE at 4 Hz:
-        what the mod wheel brings in), so each sounds as it did. */
+        what WHEEL brings in), so each sounds as it did. MORPH is on (half way, FUSE), as in a
+        new instrument: it acts as soon as card C sounds. */
     Patch base()
     {
         Patch p;
         p.lfo.shape = osp::mod::LfoShape::triangle;
         p.lfo.rateHz = 4.0;
+        p.morph.enabled = true;
         return p;
     }
 
@@ -488,6 +490,8 @@ namespace
             ampEnv (p, 0.6, 1.5, 0.9, 2.2);
             p.granular = true;
             p.grains = { 0.45, 0.28, 22.0, 0.0, 0.6 };
+            p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
+            p.grains2 = p.grains;
             p.reimagined = 0.45;
             p.lfoAmount = 0.35;
             p.lfo.rateHz = 0.3;
@@ -524,6 +528,8 @@ namespace
             ampEnv (p, 0.004, 1.6, 0.5, 0.8);
             p.granular = true;
             p.grains = { 0.2, 0.18, 18.0, 0.0, 0.15 };
+            p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
+            p.grains2 = p.grains;
             p.reimagined = 0.6;
             p.reimaginedSettings.mode = osp::ReimaginedMode::tapeFrame;
             p.reimaginedSettings.tapeFrame = { 0.5, 0.4, osp::TapeFrameLength::classic };
@@ -650,6 +656,8 @@ namespace
             ampEnv (p, 0.9, 1.5, 0.9, 3.0);
             p.granular = true;
             p.grains = { 0.85, 0.4, 12.0, 12.0, 0.3 };
+            p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
+            p.grains2 = p.grains;
             p.reimagined = 0.3;
             p.levelDb = -4.0;
             room (p, 0.55, SpaceType::hall, 6.0);
@@ -722,8 +730,9 @@ namespace
             p.tone = hz (700.0);
             p.resonance = 0.15;
             p.envDepthSemitones = 34.0;
+            ampEnv (p, 0.09, 0.6, 0.45, 0.3);
             filterEnv (p, 0.09, 0.6, 0.45, 0.3);
-            p.envLink = true;   // one envelope for both, as a 106
+            p.envLink = true;   // one envelope for both, as a 106: AMP's (the one on screen)
             p.chorusMode = 1;
             room (p, 0.25, SpaceType::room, 1.8);
             add ("Brass Section 106", "Brass", p, chord);

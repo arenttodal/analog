@@ -1,5 +1,9 @@
 #include "AnalogEngine.h"
 
+#include "InstrumentHost.h"
+#include "fx/Effects.h"
+#include "SampleImport.h"
+
 #include "Oscillator.h"
 
 namespace andor::analog
@@ -13,182 +17,307 @@ andor::shell::Engine::Description AnalogEngine::describe() const
     return d;
 }
 
+void AnalogEngine::attachParameters (juce::AudioProcessorValueTreeState& parameters)
+{
+    state = &parameters;
+    hybridTypeValue = parameters.getRawParameterValue (params::hybridType);
+    if (morphPositionParam == nullptr)
+    {
+        morphTouch.enabled = parameters.getParameter (params::morphEnabled);
+        morphPositionParam = parameters.getParameter (params::morphPosition);
+        if (morphPositionParam != nullptr)
+            morphPositionParam->addListener (&morphTouch);
+    }
+}
+
+HybridType AnalogEngine::hybridType() const noexcept
+{
+    return static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+}
+
+void AnalogEngine::setHybridType (HybridType type)
+{
+    if (state == nullptr)
+        return;
+    if (auto* p = state->getParameter (params::hybridType))
+        p->setValueNotifyingHost (p->convertTo0to1 (static_cast<float> (type)));
+}
+
 void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters)
 {
+    if (state == nullptr)
+        attachParameters (parameters);
     reader.attach (parameters);
+    fxReader.attach (parameters);
     synth.prepare (sampleRate, std::max (1, maximumBlockSize), oversamplingFactor);
     synth.setControlModulator (this);
     reader.snapshot (raw);
     auto patch = reader.read (raw);
+    fxReader.read (patch.fx);
     patch.effects.shaper.customSteps = shaperPattern;
+    patch.movementB.shaper.customSteps = shaperPatternB;
     synth.setPatch (patch);
-    synth.setKeyDna (reader.keyDna (patch.seed));
+    synth.setKeyDnaAmount (reader.keyDnaCardAmount());
     synth.reset();
     scratch.assign (static_cast<std::size_t> (std::max (1, maximumBlockSize)), 0.0f);
     prepared = true;
+    updateConvolutionImpulses();
+    impulseTimer.engine = this;
+    impulseTimer.startTimerHz (10);
 }
 
-//==============================================================================
-// MORPH's analysis thread.
-
-class AnalogEngine::Analyser final : public juce::Thread
+const andor::analog::fx::Processor* AnalogEngine::fxProcessor (andor::analog::fx::InstanceId id) const
 {
-public:
-    explicit Analyser (AnalogEngine& e) : juce::Thread ("ANDOR Analog morph analysis"), engine (e) { startThread (juce::Thread::Priority::low); }
-    ~Analyser() override
-    {
-        cancelling = true;
-        signalThreadShouldExit();
-        notify();
-        stopThread (10000);
-    }
+    return prepared ? synth.fxEngine().processor (id) : nullptr;
+}
 
-    void request (std::shared_ptr<const osp::plugin::LoadedInstrument> source)
-    {
-        {
-            const std::lock_guard<std::mutex> lock (mutex);
-            wanted = std::move (source);
-            hasRequest = true;
-            state = wanted != nullptr ? "Analysing ORGANIC's recording for MORPH" : "Load a recording onto ORGANIC to morph";
-        }
-        cancelling = true;   // (a newer recording: the one being analysed is not needed)
-        notify();
-    }
+std::shared_ptr<const andor::analog::fx::Impulse> AnalogEngine::convolutionImpulse (int slot) const
+{
+    return prepared ? synth.fxEngine().impulse (slot) : nullptr;
+}
 
-    juce::String status() const
+void AnalogEngine::updateConvolutionImpulses()
+{
+    namespace fx = andor::analog::fx;
+    if (! prepared)
+        return;
+    const std::lock_guard<std::mutex> lock (impulseMutex);
+    fx::Settings now;
+    fxReader.read (now);
+    auto& router = synth.fxEngine();
+    for (int slot = 0; slot < static_cast<int> (impulseKeys.size()); ++slot)
     {
-        const std::lock_guard<std::mutex> lock (mutex);
-        return state;
+        const auto& c = now.conv[static_cast<std::size_t> (slot)];
+        const ImpulseKey key { std::clamp (c.impulse, 0, fx::Impulse::factoryCount - 1), c.decaySeconds, c.size, c.reverse, c.normalize, router.rate() };
+        auto& last = impulseKeys[static_cast<std::size_t> (slot)];
+        if (key == last && router.impulse (slot) != nullptr)
+            continue;
+        last = key;
+        // (The factory impulses are designed at the rate they play at: no resampling.)
+        router.setImpulse (slot, fx::Impulse::make (fx::Impulse::factory (key.impulse, key.rate), key.rate, c, key.rate, ++impulseGeneration,
+                                                    fx::Impulse::factoryName (key.impulse)));
     }
-
-    void run() override
-    {
-        while (! threadShouldExit())
-        {
-            std::shared_ptr<const osp::plugin::LoadedInstrument> source;
-            {
-                const std::lock_guard<std::mutex> lock (mutex);
-                if (hasRequest)
-                {
-                    source = wanted;
-                    hasRequest = false;
-                    cancelling = false;
-                }
-            }
-            if (source != nullptr && source->model != nullptr && source->model->isValid())
-                analyse (source);
-            else if (source == nullptr)
-                collect();
-            wait (250);
-            collect();
-        }
-    }
-
-private:
-    void analyse (const std::shared_ptr<const osp::plugin::LoadedInstrument>& source)
-    {
-        auto box = std::make_shared<ProfileBox>();
-        box->model = source->model.get();
-        box->source = source;
-        const auto key = source->contentHash;
-        std::shared_ptr<const ProfileBox> cached;
-        {
-            const std::lock_guard<std::mutex> lock (mutex);
-            for (const auto& [k, p] : cache)
-                if (k == key && ! key.empty())
-                    cached = p;
-        }
-        if (cached != nullptr)
-            box->profile = cached->profile;
-        else
-        {
-            // The recording as ANDOR OSP prepared it, summed to mono (as the voices play it).
-            const auto& src = *source->model->original.source;
-            std::vector<float> mono (static_cast<std::size_t> (src.numFrames()), 0.0f);
-            for (int ch = 0; ch < src.numChannels(); ++ch)
-            {
-                const float* d = src.channelData (ch);   // (the first frame: the padding is before it)
-                for (std::size_t i = 0; i < mono.size(); ++i)
-                    mono[i] += d[i] / static_cast<float> (src.numChannels());
-            }
-            box->profile = morph::analyse (mono.data(), static_cast<std::int64_t> (mono.size()), src.sampleRate(), {}, &cancelling);
-            if (cancelling.load())
-                return;
-        }
-        std::shared_ptr<const ProfileBox> published = box;
-        {
-            const std::lock_guard<std::mutex> lock (mutex);
-            if (! key.empty() && cached == nullptr)
-            {
-                cache.emplace_back (key, published);
-                if (cache.size() > 4)
-                    cache.erase (cache.begin());
-            }
-            boxes.push_back (published);
-            state = box->profile.kind == morph::MorphProfile::Kind::pitched
-                        ? juce::String()
-                        : "MORPH needs a pitched recording: " + juce::String (box->profile.status) + " (the sources play as they are)";
-        }
-        engine.pending.store (published.get(), std::memory_order_release);
-    }
-
-    /** Frees the profiles the audio thread no longer reads (never the newest, never the one in use). */
-    void collect()
-    {
-        const std::lock_guard<std::mutex> lock (mutex);
-        const auto* used = engine.inUse.load (std::memory_order_acquire);
-        const auto* next = engine.pending.load (std::memory_order_acquire);
-        for (std::size_t i = 0; i + 1 < boxes.size();)
-        {
-            if (boxes[i].get() != used && boxes[i].get() != next)
-                boxes.erase (boxes.begin() + static_cast<long> (i));
-            else
-                ++i;
-        }
-    }
-
-    AnalogEngine& engine;
-    mutable std::mutex mutex;
-    std::shared_ptr<const osp::plugin::LoadedInstrument> wanted;
-    bool hasRequest = false;
-    std::atomic<bool> cancelling { false };
-    juce::String state = "Load a recording onto ORGANIC to morph";
-    std::vector<std::shared_ptr<const ProfileBox>> boxes;
-    std::vector<std::pair<std::string, std::shared_ptr<const ProfileBox>>> cache;
-};
+    router.collectGarbage();
+}
 
 AnalogEngine::AnalogEngine (int oversampling) : oversamplingFactor (oversampling) {}
 
 AnalogEngine::~AnalogEngine()
 {
-    analyser.reset();   // (before the synth that may read a profile goes)
+    impulseTimer.stopTimer();
+    sourceLoader.removeAllJobs (true, 30000);
+    if (morphPositionParam != nullptr)
+        morphPositionParam->removeListener (&morphTouch);   // (the parameters outlive the engine: the shell's member order)
+}
+
+//==============================================================================
+// The imported sample source.
+
+void AnalogEngine::saveState (juce::XmlElement& state) const
+{
+    {
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        if (sourceDefinition != nullptr)
+            state.addChildElement (new juce::XmlElement (*sourceDefinition));
+    }
+    // State version 12: the FX route, only once it is CUSTOM (absent: CLASSIC, as every session
+    // and preset from before is).
+    const std::lock_guard<std::mutex> lock (routeMutex);
+    if (route.custom)
+    {
+        auto* fx = state.createNewChildElement ("FxRouting");
+        fx->setAttribute ("schema", andor::analog::fx::Graph::schema);
+        fx->setAttribute ("graph", juce::String (andor::analog::fx::toText (route)));
+    }
+}
+
+bool AnalogEngine::setFxRoute (const andor::analog::fx::Graph& next)
+{
+    std::shared_ptr<const andor::analog::fx::CompiledGraph> compiled;
+    {
+        const std::lock_guard<std::mutex> lock (routeMutex);
+        if (next.custom)
+        {
+            compiled = andor::analog::fx::compile (next, ++routeGeneration);
+            if (compiled == nullptr)
+                return false;
+        }
+        route = next;
+    }
+    synth.setFxGraph (std::move (compiled));   // (null: CLASSIC)
+    synth.collectFxGarbage();
+    if (onFxRouteChanged != nullptr)
+        onFxRouteChanged();
+    return true;
+}
+
+andor::analog::fx::Graph AnalogEngine::fxRoute() const
+{
+    const std::lock_guard<std::mutex> lock (routeMutex);
+    return route;
+}
+
+void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File& assetFolder)
+{
+    const auto* definition = state.getChildByName ("SampleSource");
+    setSampleSourceDefinition (definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr, assetFolder.getChildFile ("Imported"));
+    // The FX route (state version 12): absent or unreadable, CLASSIC.
+    auto saved = andor::analog::fx::classicGraph();
+    if (const auto* fx = state.getChildByName ("FxRouting"))
+    {
+        andor::analog::fx::Graph read;
+        if (andor::analog::fx::fromText (fx->getStringAttribute ("graph").toStdString(), read))
+            saved = read;
+    }
+    if (! setFxRoute (saved))
+        setFxRoute (andor::analog::fx::classicGraph());
+    // State version 8: before it, an imported source played whenever it was there; now card C
+    // plays it as its INSTRUMENT PATCH (a session or preset from before keeps its sound).
+    if (definition != nullptr && state.getIntAttribute ("productVersion", 1) < 8)
+        setHybridType (HybridType::instrumentPatch);
+}
+
+void AnalogEngine::setSampleSourceDefinition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder)
+{
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        const bool same = (definition == nullptr && sourceDefinition == nullptr)
+                          || (definition != nullptr && sourceDefinition != nullptr && definition->isEquivalentTo (sourceDefinition.get(), false));
+        if (same && ! (sourceState.loaded && (! sourceState.missing.isEmpty() || ! sourceState.unreadable.isEmpty())))
+            return;   // (the same one, already loading or loaded complete: nothing to do)
+        sourceDefinition = definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr;
+        generation = ++sourceGeneration;
+        sourceState = {};
+        sourceLoaded.reset();
+        if (sourceDefinition != nullptr)
+        {
+            sourceState.name = sourceDefinition->getStringAttribute ("name");
+            sourceState.loading = true;
+        }
+    }
+    if (definition == nullptr)
+    {
+        // None: an empty source (the synth plays ORGANIC's recording, or nothing).
+        auto none = std::make_shared<LoadedSource>();
+        none->generation = generation;
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        sourceExchange.publish (std::move (none));
+        sourceExchange.collectGarbage();
+        return;
+    }
+    sourceLoader.addJob ([this, d = std::make_shared<juce::XmlElement> (*definition), assetFolder, generation] {
+        loadSampleSource (std::make_unique<juce::XmlElement> (*d), assetFolder, generation);
+    });
+}
+
+void AnalogEngine::loadSampleSource (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation)
+{
+    auto result = import::loadDefinition (*definition, assetFolder);
+    auto loaded = std::make_shared<LoadedSource>();
+    loaded->generation = generation;
+    loaded->source = result.source;
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    if (generation != sourceGeneration)
+        return;   // (another definition was asked for meanwhile)
+    sourceState.loading = false;
+    sourceState.loaded = true;
+    sourceState.missing = result.missing;
+    sourceState.unreadable = result.unreadable;
+    sourceState.zones = result.zones;
+    sourceLoaded = result.source;
+    sourceExchange.publish (std::move (loaded));
+    sourceExchange.collectGarbage();
+}
+
+std::unique_ptr<juce::XmlElement> AnalogEngine::sampleSourceDefinition() const
+{
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    return sourceDefinition != nullptr ? std::make_unique<juce::XmlElement> (*sourceDefinition) : nullptr;
+}
+
+AnalogEngine::SampleSourceState AnalogEngine::sampleSourceState() const
+{
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    return sourceState;
+}
+
+bool AnalogEngine::waitForSampleSource (int timeoutMs) const
+{
+    const auto until = juce::Time::getMillisecondCounter() + static_cast<juce::uint32> (timeoutMs);
+    while (juce::Time::getMillisecondCounter() < until)
+    {
+        {
+            const std::lock_guard<std::mutex> lock (sourceMutex);
+            if (! sourceState.loading)
+                return true;
+        }
+        juce::Thread::sleep (5);
+    }
+    return false;
 }
 
 void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin::LoadedInstrument> source)
 {
     if (layer != 1)
         return;
-    if (analyser == nullptr)
-        analyser = std::make_unique<Analyser> (*this);
-    analyser->request (std::move (source));
+    recordingPublished.store (source != nullptr);
+    if (source != nullptr)
+        setHybridType (HybridType::sample);   // (a recording dropped on card C plays: an imported source stays, dormant)
 }
 
 juce::String AnalogEngine::status (const juce::String& topic) const
 {
+    if (topic == "sample")
+    {
+        // The imported source in words (empty: none, or playing complete).
+        const auto st = sampleSourceState();
+        if (st.loading)
+            return "Loading " + st.name + juce::String::fromUTF8 ("\xe2\x80\xa6");
+        if (! st.missing.isEmpty() || ! st.unreadable.isEmpty())
+            return st.name + ": " + juce::String (st.missing.size() + st.unreadable.size()) + " of " + juce::String (st.zones)
+                   + " recordings missing - relink to play them";
+        return {};
+    }
     if (topic != "morph")
         return {};
-    return analyser != nullptr ? analyser->status() : juce::String ("Load a recording onto ORGANIC to morph");
+    // MORPH hears card C live: it acts whenever C sounds (a recording, OSC 3, NOISE or an
+    // instrument patch's zones); only a silent card C leaves it nothing to fuse.
+    switch (hybridType())
+    {
+        case HybridType::oscillator:
+        case HybridType::noise: return {};
+        case HybridType::instrumentPatch: return sampleSourceState().loaded ? juce::String() : juce::String ("Card C has no instrument patch loaded: nothing to morph with");
+        case HybridType::sample: break;
+    }
+    return recordingPublished.load() ? juce::String() : juce::String ("Card C is silent: load a recording (or choose OSC 3, NOISE or an instrument patch) to morph");
 }
 
 void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept
 {
-    // MORPH: a profile finished on the analysis thread (it describes the model it names: the
-    // synth uses it only while that model plays).
-    if (const auto* box = pending.exchange (nullptr, std::memory_order_acq_rel))
+    // The imported sample source: a newly loaded one replaces the old (the synth stops reading
+    // the old before this returns; it is freed on the message side once newer ones are in use).
+    if (const auto* next = sourceExchange.takePending())
+        sourcePlaying = next;
+    // Card C plays only its selected type: the recording as a SAMPLE, the imported zones as an
+    // INSTRUMENT PATCH (OSC 3 and NOISE are the voices' own). The others stay loaded, silent.
     {
-        synth.setMorphProfile (&box->profile, box->model);
-        inUse.store (box, std::memory_order_release);
+        const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+        const auto* recording = type == HybridType::sample ? shellRecording : nullptr;
+        const SampleSource* zones = type == HybridType::instrumentPatch && sourcePlaying != nullptr ? sourcePlaying->source.get() : nullptr;
+        if (recording != recordingApplied)
+        {
+            synth.setOrganic (recording);
+            recordingApplied = recording;
+        }
+        if (zones != zonesApplied)
+        {
+            synth.setSampleSource (zones);
+            zonesApplied = zones;
+        }
     }
+    if (sourcePlaying != nullptr)
+        sourceExchange.publishOldestInUse (sourcePlaying->generation);
     const int total = buffer.getNumSamples();
     if (! prepared || total <= 0 || buffer.getNumChannels() == 0)
         return;
@@ -202,14 +331,21 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             if (const auto d = osp::mod::productDest (k); osp::mod::destInfo (d).owner == osp::mod::Owner::global && synth.sharedOffset (d, offset))
                 reader.move (raw, k, offset);
         using D = osp::mod::Dest;
-        for (const auto& [dest, id] : { std::pair<D, const char*> { D::drive, "drive" }, { D::movement, "motion" }, { D::space, "space" }, { D::echo, "echo" } })
+        // ... and the header's MIX (ANDOR OSP's MIX destination): the A/B mix between the
+        // oscillators and ORGANIC (the layer gains ramp towards it: a moving source is click-free).
+        for (const auto& [dest, id] : { std::pair<D, const char*> { D::drive, "drive" }, { D::movement, "motion" }, { D::space, "space" }, { D::echo, "echo" },
+                                        { D::mixPosition, "ab.blend" } })
             if (synth.sharedOffset (dest, offset))
                 reader.moveById (raw, id, offset);
     }
     auto patch = reader.read (raw);
+    fxReader.read (patch.fx);   // (the FX library's slots)
+    if (performance.bpm > 1.0)
+        patch.fx.bpm = performance.bpm;
     patch.effects.shaper.customSteps = shaperPattern;   // MOVEMENT SHAPER's CUSTOM (the shell's)
+    patch.movementB.shaper.customSteps = shaperPatternB;   // (lane B's)
     synth.setPatch (patch);
-    synth.setKeyDna (reader.keyDna (patch.seed));       // recomputed only when it changes
+    synth.setKeyDnaAmount (reader.keyDnaCardAmount());  // (the profile is the shell's: setKeyDnaTable)
     osp::HostTiming timing;
     timing.valid = performance.hasPosition;
     timing.playing = performance.playing;
@@ -322,21 +458,39 @@ void AnalogEngine::publishGrains() noexcept
 {
     using Snapshot = osp::InstrumentEngine::GrainSnapshot;
     std::array<LiveGranulator::GrainDot, Snapshot::capacity> dots;
-    const int n = synth.collectGrains (dots.data(), Snapshot::capacity);
-    for (int i = 0; i < n; ++i)
+    // Each oscillator card's own grains (A: OSC 1, B: OSC 2; state version 8).
+    for (int card = 0; card < 2; ++card)
+    {
+        auto& snapshot = card == 0 ? grains : grains2;
+        const int n = synth.collectGrains (card, dots.data(), Snapshot::capacity);
+        for (int i = 0; i < n; ++i)
+        {
+            const auto k = static_cast<std::size_t> (i);
+            snapshot.position[k].store (dots[k].position, std::memory_order_relaxed);
+            snapshot.level[k].store (dots[k].level, std::memory_order_relaxed);
+            snapshot.lane[k].store (dots[k].lane, std::memory_order_relaxed);
+        }
+        snapshot.count.store (n, std::memory_order_release);
+    }
+
+    // Card B (ORGANIC): one read head per voice playing the recording.
+    std::array<float, Snapshot::playheadCapacity> where {}, level {};
+    const int heads = synth.collectPlayheads (where.data(), level.data(), Snapshot::playheadCapacity);
+    for (int i = 0; i < heads; ++i)
     {
         const auto k = static_cast<std::size_t> (i);
-        grains.position[k].store (dots[k].position, std::memory_order_relaxed);
-        grains.level[k].store (dots[k].level, std::memory_order_relaxed);
-        grains.lane[k].store (dots[k].lane, std::memory_order_relaxed);
+        organicHeads.playheadPosition[k].store (where[k], std::memory_order_relaxed);
+        organicHeads.playheadLevel[k].store (level[k], std::memory_order_relaxed);
     }
-    grains.count.store (n, std::memory_order_release);
+    organicHeads.playheads.store (heads, std::memory_order_release);
 }
 
 void AnalogEngine::setModulationCurve (int index, const osp::mod::Curve& curve) noexcept
 {
     if (index == 0)
         synth.setLfoCurve (curve);   // LFO 1's CUSTOM shape (the synth's one LFO)
+    else if (index >= osp::plugin::InstrumentHost::dampenCurveIndex (0) && index <= osp::plugin::InstrumentHost::dampenCurveIndex (2))
+        synth.setDampenCurve (index - osp::plugin::InstrumentHost::dampenCurveIndex (0), curve);   // each card's DAMPEN over the keys (layer C: OSC 2)
 }
 
 juce::String AnalogEngine::reimaginedModeUnavailable (int, int mode) const
@@ -346,12 +500,178 @@ juce::String AnalogEngine::reimaginedModeUnavailable (int, int mode) const
     return mode == static_cast<int> (osp::ReimaginedMode::mosaic) ? juce::String ("NEEDS A RECORDING: PLAYS UNCHANGED") : juce::String();
 }
 
-bool AnalogEngine::sourcePicture (int, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
+juce::String AnalogEngine::engineSourceName (int layer) const
 {
+    if (layer != 1)
+        return {};
+    switch (hybridType())
+    {
+        case HybridType::oscillator: return "OSC 3";
+        case HybridType::noise: return "NOISE";
+        case HybridType::sample: return recordingPublished.load() ? juce::String() : juce::String ("HYBRID");   // (empty: its stand-in)
+        case HybridType::instrumentPatch: break;
+    }
+    const std::lock_guard<std::mutex> lock (sourceMutex);
+    if (sourceDefinition == nullptr)
+        return "INSTRUMENT PATCH";   // (none chosen yet: the card says so; its well offers the sounds)
+    const auto collection = sourceDefinition->getStringAttribute ("collection");
+    const auto name = sourceDefinition->getStringAttribute ("name");
+    return collection.isNotEmpty() ? collection + juce::String::fromUTF8 (" \xc2\xb7 ") + name : name;
+}
+
+juce::String AnalogEngine::engineSourcePlaceholder (int layer) const
+{
+    if (layer != 1)
+        return {};
+    if (hybridType() == HybridType::sample && ! recordingPublished.load())
+        return "ADD SAMPLE\nDROP OR BROWSE";
+    if (hybridType() == HybridType::instrumentPatch)
+    {
+        const std::lock_guard<std::mutex> lock (sourceMutex);
+        if (sourceDefinition == nullptr)
+            return "CHOOSE A SOUND\nSOUNDS, OR IMPORT A KONTAKT PATCH";
+    }
+    return {};
+}
+
+void AnalogEngine::removeEngineSource (int layer)
+{
+    if (layer != 1)
+        return;
+    if (hybridType() == HybridType::instrumentPatch)
+        setSampleSourceDefinition (nullptr, {});
+    setHybridType (HybridType::sample);   // (card C back to its SAMPLE: a recording, or the empty card)
+}
+
+bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
+{
+    if (layer == 1 && engineSourcePlaceholder (1).isNotEmpty())
+    {
+        // A stand-in: a recording's outline in general (swells, a long tail), drawn faint.
+        cycle.resize (256);
+        for (std::size_t i = 0; i < cycle.size(); ++i)
+        {
+            const double t = static_cast<double> (i) / 255.0;
+            const double envelope = std::sin (math::pi * std::pow (t, 0.6)) * (0.55 + 0.45 * std::sin (7.0 * t + 1.0));
+            cycle[i] = static_cast<float> ((i % 2 == 0 ? 1.0 : -1.0) * envelope * (0.7 + 0.3 * std::sin (37.0 * t)));
+        }
+        return true;
+    }
+    if (layer == 1 && hybridType() != HybridType::instrumentPatch)
+    {
+        // OSC 3 alone (OSC 2's picture with OSC 3's settings), or NOISE's.
+        params::Reader r;
+        r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));
+        auto p = r.read();
+        if (p.hybridType == HybridType::noise)
+        {
+            cycle = noisePictureOf (p);
+            return true;
+        }
+        p.osc2Model = p.osc3Model;
+        p.osc2Wave = p.osc3Wave;
+        p.dco2 = p.dco3;
+        p.wide2 = p.wide3;
+        p.osc2Width = p.osc3Width;
+        p.osc2Octave = p.osc3Octave;
+        p.osc2Coarse = p.osc3Coarse;
+        cycle = oscillatorPictureOf (p, 2);
+        return true;
+    }
+    if (layer == 1)
+    {
+        // The imported source at a glance: its longest recording's outline (its peaks, drawn as
+        // a waveform), not a period (it is a recording, not an oscillator).
+        std::shared_ptr<const SampleSource> source;
+        {
+            const std::lock_guard<std::mutex> lock (sourceMutex);
+            source = sourceLoaded;
+        }
+        cycle.clear();
+        if (source == nullptr)
+            return true;
+        const osp::PlaybackSource* longest = nullptr;
+        for (const auto& z : source->zones)
+            if (z.audio != nullptr && (longest == nullptr || z.audio->numFrames() > longest->numFrames()))
+                longest = z.audio.get();
+        if (longest == nullptr)
+            return true;
+        constexpr int points = 256;
+        const auto frames = longest->numFrames();
+        for (int i = 0; i < points; ++i)
+        {
+            float peak = 0.0f;
+            const auto a = frames * i / points, b = std::max (a + 1, frames * (i + 1) / points);
+            for (auto f = a; f < b; f += std::max<std::int64_t> (1, (b - a) / 64))
+                for (int ch = 0; ch < longest->numChannels(); ++ch)
+                    peak = std::max (peak, std::abs (longest->channelData (ch)[f]));
+            cycle.push_back (i % 2 == 0 ? peak : -peak);
+        }
+        // (Shown full height: the outline's shape, not its loudness.)
+        float top = 1.0e-6f;
+        for (const float v : cycle)
+            top = std::max (top, std::abs (v));
+        for (auto& v : cycle)
+            v /= top;
+        return true;
+    }
     params::Reader r;
     r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));   // reads only
-    cycle = pictureOf (r.read());
+    // Three engines: each oscillator's card pictures that oscillator alone.
+    cycle = oscillatorPictureOf (r.read(), layer == 2 ? 2 : 1);
     return true;
+}
+
+std::vector<float> AnalogEngine::noisePictureOf (const Patch& p, int points)
+{
+    // A fixed seeded stretch of the noise, through its COLOR and TONE (what the card shows; the
+    // voices play their own sequences).
+    osp::Prng noise (0x484eu);
+    const double rate = 48000.0;
+    const double toneHz = 200.0 * std::pow (90.0, std::clamp (p.hybridNoiseTone, 0.0, 1.0));
+    const float coef = p.hybridNoiseTone >= 0.999 ? 1.0f : static_cast<float> (1.0 - std::exp (-2.0 * math::pi * toneHz / rate));
+    const float colourCoef = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * 5000.0 / rate));
+    float colour = 0.0f, tone = 0.0f, top = 1.0e-6f;
+    std::vector<float> cycle (static_cast<std::size_t> (std::max (2, points)));
+    for (auto& v : cycle)
+    {
+        float n = static_cast<float> (noise.bipolar());
+        if (p.hybridNoiseColor == NoiseColor::juno)
+        {
+            colour += colourCoef * (n - colour);
+            n = colour * 1.36f;
+        }
+        tone += coef * (n - tone);
+        v = tone;
+        top = std::max (top, std::abs (v));
+    }
+    for (auto& v : cycle)
+        v /= top;
+    return cycle;
+}
+
+std::vector<float> AnalogEngine::oscillatorPictureOf (Patch p, int slot, int points)
+{
+    p.blend = 0.5;
+    p.ringMix = 0.0;
+    if (slot == 1)
+    {
+        p.osc1Enabled = true;
+        p.osc1Level = 1.0;
+        p.osc2Enabled = false;
+    }
+    else
+    {
+        p.osc2Enabled = true;
+        p.osc2Level = 1.0;
+        p.osc2LowFrequency = false;
+        p.osc1Enabled = false;
+        p.sync = false;
+        p.osc1Octave = p.osc2Octave;
+        p.osc1Coarse = p.osc2Coarse;
+        p.osc2FineCents = 0.0;
+    }
+    return pictureOf (p, points);
 }
 
 std::vector<float> AnalogEngine::pictureOf (const Patch& p, int points)

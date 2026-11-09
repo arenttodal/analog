@@ -26,7 +26,7 @@ jobs:
 
   plugin-macos:
     # The plugin as it ships (universal), its tests, ANDOR OSP's suite, and auval.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:

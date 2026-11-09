@@ -79,6 +79,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     oversampling = oversamplingFactor >= 4 ? 4 : (oversamplingFactor >= 2 ? 2 : 1);
     internalRate = hostRate * oversampling;
     maxBlock = std::max (1, maximumBlockSize);
+    if (morphShared == nullptr)
+        morphShared = std::make_unique<morph::LiveMorph::Shared>();
 
     const auto internalBlock = static_cast<std::size_t> (maxBlock * oversampling);
     mixL.assign (internalBlock, 0.0f);
@@ -119,12 +121,19 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.env.setSampleRate (internalRate);
         v.recording.prepare (recordLength);
         v.granulator.prepare (internalRate);
+        v.recording2.prepare (recordLength);
+        v.granulator2.prepare (internalRate);
         v.tapeFrame.prepare (internalRate);
         v.toybox.prepare (internalRate);
         v.mirage.prepare (internalRate);
         v.highPass.prepare (internalRate);
         v.organic.prepare (internalRate);
-        v.morph.prepare (internalRate, oversampling);
+        for (auto& z : v.zones)
+            z.prepare (internalRate);
+        v.eqA.prepare (internalRate);
+        v.eqB.prepare (internalRate);
+        v.eqC.prepare (internalRate);
+        v.morph.prepare (internalRate, oversampling, morphShared.get());
     }
     // The mode engines' "recording" on a live voice: only its length, rate and root are read.
     auto standIn = [] (double rate, double seconds) {
@@ -147,6 +156,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     lfoCurve = osp::mod::compileCurve (osp::mod::defaultLfoCurve());
 
     effects.prepare (hostRate, maxBlock, 1);
+    router.prepare (hostRate, maxBlock);
     chorus.prepare (hostRate, maxBlock);
     dcCoef = static_cast<float> (1.0 - 2.0 * math::pi * 5.0 / hostRate);
     reset();
@@ -194,10 +204,15 @@ void Synth::reset() noexcept
         v.outGain = 0.0f;
         v.recording.restart();
         v.granulator.stop();
+        v.recording2.restart();
+        v.granulator2.stop();
         v.modeEngine = nullptr;
         v.modeFactor = 1.0;
         v.grainMix = current.granular ? 1.0f : 0.0f;
-        v.driftNow = v.driftFrom = v.driftTo = {};
+        v.grainMix2 = current.granular2 ? 1.0f : 0.0f;
+        v.partB = v.partC = 0.0f;
+        v.driftNow = v.driftFrom = v.driftTo = v.driftOut = {};
+        v.driftB.now = v.driftB.from = v.driftB.to = {};
         v.mod = {};
         v.modulated = false;
         v.panMod = 0.0f;
@@ -218,8 +233,11 @@ void Synth::reset() noexcept
     macros.space = current.space;
     macros.echo = current.echo;
     effects.setShaping (current.effects);
+    effects.setMovementLanes (current.movementA.on, current.movementA.level, current.movementBLane.on, current.movementBLane.level, current.movementB);
     effects.setMacros (macros);
+    router.setSettings (current.fx);
     effects.reset();
+    router.reset();
     chorus.reset();
     kaleidoscopeStage.reset();
     dcL = dcR = 0.0f;
@@ -261,7 +279,9 @@ void Synth::setPatch (const Patch& patch) noexcept
     macros.space = std::clamp (current.space, 0.0, 1.0);
     macros.echo = std::clamp (current.echo, 0.0, 1.0);
     effects.setShaping (current.effects);
+    effects.setMovementLanes (current.movementA.on, current.movementA.level, current.movementBLane.on, current.movementBLane.level, current.movementB);
     effects.setMacros (macros);
+    router.setSettings (current.fx);
     const auto& rs = current.reimaginedSettings;
     kaleidoscopeStage.setAmount (rs.mode == osp::ReimaginedMode::kaleidoscope ? current.reimagined : 0.0);
     kaleidoscopeStage.setShape (rs.kaleidoscope.focus, rs.kaleidoscope.spread);
@@ -272,6 +292,11 @@ void Synth::setLfoCurve (const osp::mod::Curve& curve) noexcept
     lfoCurve = osp::mod::compileCurve (curve);
     modSettings.lfoCurve[0] = lfoCurve;
     rebuildModulation();
+}
+
+void Synth::setDampenCurve (int layer, const osp::mod::Curve& curve) noexcept
+{
+    dampenCurves[static_cast<std::size_t> (std::clamp (layer, 0, 2))] = osp::mod::compileCurve (curve);
 }
 
 void Synth::setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept
@@ -313,14 +338,31 @@ const osp::mod::VoiceState* Synth::newestModulation() const noexcept
     return newest != nullptr ? &newest->mod : nullptr;
 }
 
-int Synth::collectGrains (LiveGranulator::GrainDot* out, int max) const noexcept
+int Synth::collectGrains (int card, LiveGranulator::GrainDot* out, int max) const noexcept
 {
-    if (! current.granular)
+    if (! (card == 1 ? current.granular2 : current.granular))
         return 0;
     int n = 0;
     for (const auto& v : voices)
         if (v.active && n < max)
-            n += v.granulator.collect (v.recording, out + n, max - n);
+            n += card == 1 ? v.granulator2.collect (v.recording2, out + n, max - n) : v.granulator.collect (v.recording, out + n, max - n);
+    return n;
+}
+
+int Synth::collectPlayheads (float* where, float* level, int max) const noexcept
+{
+    int n = 0;
+    for (const auto& v : voices)
+    {
+        if (n >= max)
+            break;
+        if (! v.active || ! v.organicOn)
+            continue;
+        if (! (v.organic.playhead (where[n]) || (v.zoneCount > 0 && v.zones[0].playhead (where[n]))))
+            continue;
+        level[n] = std::clamp (v.amp.value(), 0.0f, 1.0f);
+        ++n;
+    }
     return n;
 }
 
@@ -333,6 +375,7 @@ void Synth::setKeyDna (const osp::keydna::Settings& settings) noexcept
     keyDna = settings;
     if (! same)
         keyDnaTable.compute (keyDna);
+    keyDnaInUse = &keyDnaTable;
 }
 
 void Synth::setTransport (const osp::HostTiming& t) noexcept
@@ -477,6 +520,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         effects.noteStarted();
     v.channel = channel;
     v.note = note;
+    v.cards = cardsFor (channel);
     v.velocity = std::clamp (velocity, 0.0f, 1.0f);
     v.order = ++noteCounter;
     v.seed = osp::Prng::deriveSeed (current.seed, v.order, static_cast<std::uint64_t> (note));
@@ -502,7 +546,12 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         // State version 4: the models' extras from the note's seed (SUPER SAW's side phases
         // start spread, as free-running oscillators would be), the filters from rest.
         osp::Prng sidePhases (osp::Prng::deriveSeed (v.seed, 0x5353u, 0));
-        for (auto* x : { &v.extra1, &v.extra2 })
+        v.line3.reset();
+        v.phase3 = 0.0;
+        v.hybridColour = v.hybridTone = 0.0f;
+        v.hybridMove = v.hybridMoveTarget = 1.0f;
+        v.hybridMoveCountdown = 0;
+        for (auto* x : { &v.extra1, &v.extra2, &v.extra3 })
         {
             x->subSign = 1.0f;
             x->tilt = 0.0f;
@@ -514,24 +563,45 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.ota.reset();
         v.otaMix = v.otaTarget = current.filterModel == FilterModel::ota ? 1.0f : 0.0f;
         v.highPass.reset();
+        v.eqA.reset();
+        v.eqB.reset();
+        v.eqC.reset();
+        v.dampenA.reset();
+        v.dampenB.reset();
+        v.dampenC.reset();
+        v.dampenFresh = true;
         v.highPassTail = 0;
         v.osc2Out = 0.0f;
         v.outGain = 0.0f;
         // A new sound: its own recording from silence, its grains, its drift, its mode.
         v.noise.reseed (osp::Prng::deriveSeed (v.seed, 0x4e4fu, 0));
+        v.hybridNoise.reseed (osp::Prng::deriveSeed (v.seed, 0x484eu, 0));   // (the hybrid's NOISE: its own sequence)
         v.doublingPhase = 0.0;
         v.doublingDelay = v.doublingTarget = 0.018 * internalRate;
         v.recording.restart();
         v.grainMix = current.granular ? 1.0f : 0.0f;
         v.granulator.start (current.granular ? current.grains : cloudGrains(), v.seed);
+        // Card B's grains: the same seed, so the two cards' grains fall together when their
+        // settings match (as one granulator on both parts did before state version 8).
+        v.recording2.restart();
+        v.grainMix2 = current.granular2 ? 1.0f : 0.0f;
+        v.granulator2.start (current.granular2 ? current.grains2 : cloudGrains(), v.seed);
+        v.partB = v.partC = 0.0f;
         v.driftRng.reseed (osp::Prng::deriveSeed (v.seed, 0x6472696674ull, 0));
         v.driftNow = v.driftFrom = v.driftTo = {};
         v.driftCountdown = 0;
         v.driftSegment = 1;
+        v.driftB.rng.reseed (osp::Prng::deriveSeed (v.seed, 0x6472696674ull, 1));   // (lane B's own)
+        v.driftB.now = v.driftB.from = v.driftB.to = {};
+        v.driftB.countdown = 0;
+        v.driftB.segment = 1;
         updateDrift (v);
         // It begins part-way through a wander, not at its centre (as ANDOR OSP's voices).
         v.driftFrom = v.driftNow = v.driftTo;
         v.driftCountdown = 0;
+        v.driftB.from = v.driftB.now = v.driftB.to;
+        v.driftB.countdown = 0;
+        combineDrift (v);
         v.notePitch = note;
         startModeEngine (v);
     }
@@ -564,17 +634,37 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     // morph's weights at once: a note never begins with another mix and glides to it).
     if (retrigger || ! wasActive)
     {
-        if (organicSource != nullptr)
+        // An imported sample source sounds the zones this key and velocity select (in
+        // ORGANIC's place); else ORGANIC's recording.
+        for (auto& z : v.zones)
+            z.stop();
+        v.zoneCount = 0;
+        if ((v.cards & 4) == 0)
+            v.organic.stop();   // card C is not this note's: no recording, no zones
+        else if (sampleSource != nullptr)
+        {
+            v.organic.stop();
+            std::array<int, SampleSource::maxLayers> picked {};
+            const int velocity127 = std::clamp (static_cast<int> (std::lround (v.velocity * 127.0f)), 1, 127);
+            v.zoneCount = sampleSource->select (v.note, velocity127, picked);
+            for (int i = 0; i < v.zoneCount; ++i)
+            {
+                const auto& zone = sampleSource->zones[static_cast<std::size_t> (picked[static_cast<std::size_t> (i)])];
+                v.zones[static_cast<std::size_t> (i)].start (&zone);
+                v.zoneGains[static_cast<std::size_t> (i)] = zone.gain * sampleSource->gain;
+            }
+        }
+        else if (organicSource != nullptr)
             v.organic.start (organicSource, current.organic.start, current.organic.reverse);
         else
             v.organic.stop();
-        v.morph.start (morphAvailable() ? morphProfile : nullptr, v.seed);
+        v.morph.start (v.seed);
         v.morphCountdown = 0;
         v.layerGainsFresh = true;
     }
     applyVoiceModulation (v);
     updateVoiceControl (v, current.lfo.scope == osp::mod::Scope::poly ? static_cast<float> (v.lfo.value) : lfoValue,
-                        static_cast<float> (std::clamp (current.lfoAmount + wheel * (1.0 - current.lfoAmount), 0.0, 1.0)));
+                        static_cast<float> (std::clamp (current.lfoAmount + (current.wheelToLfo ? wheel : 0.0f) * (1.0 - current.lfoAmount), 0.0, 1.0)));
     v.outGain = wasActive ? v.outGain : v.outGainTarget;
     if (current.phaseMode == PhaseMode::reset)
     {
@@ -613,10 +703,30 @@ void Synth::setOrganic (const osp::InstrumentModel* model) noexcept
     organicSource = model;
 }
 
+void Synth::setSampleSource (const SampleSource* source) noexcept
+{
+    if (source == sampleSource)
+        return;
+    for (auto& v : voices)
+        for (int i = 0; i < v.zoneCount; ++i)
+            v.zones[static_cast<std::size_t> (i)].captureTail (v.zoneSteps[static_cast<std::size_t> (i)]);
+    sampleSource = source;
+}
+
+bool Synth::organicPlaying (const Voice& v) noexcept
+{
+    if (v.organic.playing())
+        return true;
+    for (int i = 0; i < v.zoneCount; ++i)
+        if (v.zones[static_cast<std::size_t> (i)].playing())
+            return true;
+    return false;
+}
+
 void Synth::releaseVoice (Voice& v) noexcept
 {
     // FOLLOW off: a note playing a recording lets it play out before it is released.
-    if (! current.organic.follow && v.organic.playing() && v.organicGain > 0.0f)
+    if (! current.organic.follow && organicPlaying (v) && v.organicGain > 0.0f)
     {
         v.releaseWhenPlayedOut = true;
         return;
@@ -992,6 +1102,15 @@ void Synth::applyVoiceModulation (Voice& v) noexcept
         p.grains.density = std::clamp (current.grains.density * std::exp2 (offsetOf (v, D::grainDensityA)), 4.0, 40.0);
     if (compiled.has (D::grainSizeA))
         p.grains.sizeSeconds = std::clamp (current.grains.sizeSeconds * std::exp2 (offsetOf (v, D::grainSizeA)), 0.02, 0.4);
+    // Card B's grains (state version 8): ANDOR OSP's layer C destinations (card B is layer C).
+    if (compiled.has (D::grainPositionC))
+        p.grains2.position = std::clamp (current.grains2.position + offsetOf (v, D::grainPositionC), 0.0, 1.0);
+    if (compiled.has (D::grainSpreadC))
+        p.grains2.spread = std::clamp (current.grains2.spread + offsetOf (v, D::grainSpreadC), 0.0, 1.0);
+    if (compiled.has (D::grainDensityC))
+        p.grains2.density = std::clamp (current.grains2.density * std::exp2 (offsetOf (v, D::grainDensityC)), 4.0, 40.0);
+    if (compiled.has (D::grainSizeC))
+        p.grains2.sizeSeconds = std::clamp (current.grains2.sizeSeconds * std::exp2 (offsetOf (v, D::grainSizeC)), 0.02, 0.4);
     if (compiled.has (D::ampSustain))
         p.ampSustain = std::clamp (current.ampSustain + offsetOf (v, D::ampSustain), 0.0, 1.0);
 }
@@ -1000,7 +1119,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 {
     const auto& p = patchOf (v);
     if (v.modulated)   // (LFO AMOUNT may be among the moved controls)
-        depth = static_cast<float> (std::clamp (p.lfoAmount + wheel * (1.0 - p.lfoAmount), 0.0, 1.0));
+        depth = static_cast<float> (std::clamp (p.lfoAmount + (p.wheelToLfo ? wheel : 0.0f) * (1.0 - p.lfoAmount), 0.0, 1.0));
     const auto& d = drift[static_cast<std::size_t> (v.slot)];
     const auto a = static_cast<float> (std::clamp (p.analogAmount, 0.0, 1.0));
     // LFO DELAY / RISE (state version 4): each note's LFO depths wait, then fade in. Off (both
@@ -1018,7 +1137,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     const double performed = p.tuneSemitones + p.fineTuneCents / 100.0 + bend * p.bendRangeSemitones;
     // MOVEMENT DRIFT (the voice's own wander and the shared one); REIMAGINED's read speed
     // (wow, self-modulation) moves the oscillators themselves while they are the source.
-    const double drifted = (v.driftNow[0] + sharedDriftCents) / 100.0
+    const double drifted = (v.driftOut[0] + sharedDriftCents) / 100.0
                            + (v.modeEngine != nullptr ? 12.0 * std::log2 (std::max (1.0e-3, v.modeFactor)) * (1.0 - v.grainMix) : 0.0);
     const double common = v.pitch + v.unisonOffset + performed + drifted;
     v.notePitch = common;
@@ -1026,10 +1145,14 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     // a crystal; what is left is the divider's and the waveshaper's own small spread).
     const double tolerance1 = p.osc1Model == OscModel::dco ? 0.2 : 1.0, wander1 = p.osc1Model == OscModel::dco ? 0.1 : 1.0;
     const double tolerance2 = p.osc2Model == OscModel::dco ? 0.2 : 1.0, wander2 = p.osc2Model == OscModel::dco ? 0.1 : 1.0;
-    const double note1 = common + 12.0 * p.osc1Octave + p.osc1Coarse + a * (0.10 * tolerance1 * d.pitch1 + 0.03 * wander1 * d.wander) + lfoD * p.lfoPitch1;
+    const double note1 = common + 12.0 * p.osc1Octave + p.osc1Coarse + a * (0.10 * tolerance1 * d.pitch1 + 0.03 * wander1 * d.wander) + lfoD * p.lfoPitch1
+                         + p.osc1FineCents / 100.0;   // (state version 8: OSC 1's own DETUNE; 0 adds nothing)
     const double base2 = p.osc2KeyTrack ? common : 60.0 + v.unisonOffset + performed;
     const double note2 = base2 + 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2 - 0.03 * wander2 * d.wander)
-                         + lfoD * p.lfoPitch2 - (p.osc2LowFrequency ? 12.0 * lowFrequencyOctaves : 0.0);
+                         + lfoD * p.lfoPitch2 - (p.osc2LowFrequency ? 12.0 * lowFrequencyOctaves : 0.0)
+                         // (the mode's read speed moves OSC 2 while card B's own source is the
+                         // oscillator; exactly 0 while both cards' sources match)
+                         + (v.modeEngine != nullptr ? 12.0 * std::log2 (std::max (1.0e-3, v.modeFactor)) * static_cast<double> (v.grainMix - v.grainMix2) : 0.0);
     v.dt1 = std::clamp (math::noteToHz (note1) / internalRate, 1.0e-9, 0.45);
     v.dt2 = std::clamp (math::noteToHz (note2) / internalRate, 1.0e-9, 0.45);
     v.width1 = static_cast<float> (std::clamp (p.osc1Width + 0.04 * a * d.width1 + lfoD * p.lfoWidth1, 0.02, 0.98));
@@ -1048,6 +1171,19 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.gain1 = 0.0f;
     if (! p.osc2Enabled)
         v.gain2 = 0.0f;
+    // State version 8: card B's VELO (its level follows velocity; 0: as set).
+    if (p.osc2Velo > 0.0)
+        v.gain2 *= static_cast<float> (1.0 - p.osc2Velo + p.osc2Velo * static_cast<double> (v.velocity * v.velocity));
+    // State version 8: each oscillator's card M / S (the noise mixer goes with OSC 1's card).
+    if (! p.osc1Heard)
+        v.gain1 = v.gainNoise = 0.0f;
+    if (! p.osc2Heard)
+        v.gain2 = 0.0f;
+    // The arpeggiator's card lanes: only the cards this note was given.
+    if ((v.cards & 1) == 0)
+        v.gain1 = v.gainNoise = 0.0f;
+    if ((v.cards & 2) == 0)
+        v.gain2 = 0.0f;
 
     // State version 4: the slots' models (CLASSIC + CLASSIC, no ring, white noise: the
     // original path, untouched), DCO PWM, RING MOD glided.
@@ -1056,14 +1192,60 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.ringNow = 0.0f;
     // ORGANIC: the note's pitch with its own TUNE (not the oscillators' card's) against the
     // recording's root (or the override).
+    // (State version 8: card C's own OCT and DETUNE move the notes it is played with.)
+    const double hybridPitch = 12.0 * p.hybridOctave + p.hybridFineCents / 100.0;
+    v.morphSourceHz = math::noteToHz (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch);
     if (v.organic.playing())
-        v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones, static_cast<double> (p.organic.rootOverride));
-    v.organicGain = p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
-    v.organicOn = ! v.organic.finished();
+        v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch, static_cast<double> (p.organic.rootOverride));
+    v.organicGain = (v.cards & 4) != 0 && p.organic.heard && p.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (p.organic.levelDb)) : 0.0f;
+    if (p.hybridVelo > 0.0)   // card C's VELO
+        v.organicGain *= static_cast<float> (1.0 - p.hybridVelo + p.hybridVelo * static_cast<double> (v.velocity * v.velocity));
+    bool zonesOn = false;
+    for (int i = 0; i < v.zoneCount; ++i)
+    {
+        auto& zone = v.zones[static_cast<std::size_t> (i)];
+        if (zone.playing())
+            v.zoneSteps[static_cast<std::size_t> (i)] = zone.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch);
+        zonesOn = zonesOn || ! zone.finished();
+    }
+    // State version 8: the hybrid as OSC 3 or NOISE (only the selected type plays: the engine
+    // hands the synth no recording or zones then).
+    const bool generating = (v.cards & 4) != 0 && (p.hybridType == HybridType::oscillator || p.hybridType == HybridType::noise);
+    v.hybridGen = generating ? p.hybridType : HybridType::sample;
+    if (p.hybridType == HybridType::oscillator)
+    {
+        const double note3 = common + 12.0 * p.osc3Octave + p.osc3Coarse + p.osc3FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2);
+        v.dt3 = std::clamp (math::noteToHz (note3) / internalRate, 1.0e-9, 0.45);
+        v.width3 = static_cast<float> (std::clamp (p.osc3Width + 0.04 * a * d.width2 + lfoD * p.lfoWidth3, 0.02, 0.98));
+        planSlot (v, 3, p, v.dt3);
+        if (p.osc3Model == OscModel::dco)
+        {
+            const float depthNow = 0.45f * static_cast<float> (std::clamp (p.dco3.pwmDepth, 0.0, 1.0));
+            v.pwm3 = p.dco3.pwmSource == PwmSource::lfo ? depthNow * lfoNow * v.lfoFade : 0.0f;
+            v.pwmEnv3 = p.dco3.pwmSource == PwmSource::env ? depthNow : 0.0f;
+        }
+        else
+            v.pwm3 = v.pwmEnv3 = 0.0f;
+    }
+    else if (p.hybridType == HybridType::noise)
+    {
+        // TONE: a one-pole low-pass, 200 Hz .. 18 kHz; MOVEMENT: a slow seeded drift of its level.
+        const double keyed = std::exp2 (std::clamp (p.hybridNoiseKeys, 0.0, 1.0) * (common - 60.0) / 12.0);   // KEYS: the tone follows the key
+        const double toneHz = std::min (0.45 * internalRate, 200.0 * std::pow (90.0, std::clamp (p.hybridNoiseTone, 0.0, 1.0)) * keyed);
+        v.hybridToneCoef = p.hybridNoiseTone >= 0.999 && p.hybridNoiseKeys <= 0.0 ? 1.0f : static_cast<float> (1.0 - std::exp (-2.0 * math::pi * toneHz / internalRate));
+        if (--v.hybridMoveCountdown <= 0)
+        {
+            v.hybridMoveCountdown = 24;
+            const double movement = std::clamp (p.hybridNoiseMovement, 0.0, 1.0);
+            v.hybridMoveTarget = static_cast<float> (1.0 - movement * v.hybridNoise.nextDouble());
+        }
+    }
+    v.organicOn = ! v.organic.finished() || zonesOn || generating;
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
                     && ! v.organicOn;
-    // MORPH: with a profile for the recording this note plays (else the sources as they are).
-    v.morphOn = p.morph.enabled && v.morph.active() && v.organicOn && morphAvailable() && v.organic.playingModel() == organicSource;
+    // MORPH: whenever this note sounds both the oscillators and card C (whatever C plays:
+    // the recording, OSC 3, NOISE, an instrument patch's zones), it hears them and fuses them.
+    v.morphOn = p.morph.enabled && v.organicOn && (v.cards & 3) != 0 && (v.cards & 4) != 0;
     if (! v.classicPair)
     {
         planSlot (v, 1, p, v.dt1);
@@ -1076,19 +1258,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         };
         if (v.morphOn && --v.morphCountdown <= 0)
         {
-            v.morphCountdown = 4;   // (every 32 host samples: its gains and partials glide between)
-            // The carrier's spectrum (its slots' waves at their levels) and fundamental.
-            v.carrierSpectrum.fill (0.0f);
-            const auto add = [&v] (const osc::SlotPlan& plan, float width, float g) {
-                morph::addCarrierSpectrum (v.carrierSpectrum, plan.waves.saw, plan.waves.pulse, plan.waves.triangle, plan.squareWidth ? 0.5f : width,
-                                           g * plan.waves.gain);
-            };
-            const auto carrier = p.morph.carrier;
-            if (carrier != MorphCarrier::osc2)
-                add (v.plan1, v.width1, std::max (v.gain1, carrier == MorphCarrier::osc1 ? 1.0f : 0.0f));
-            if (carrier != MorphCarrier::osc1)
-                add (v.plan2, v.width2, std::max (v.gain2, carrier == MorphCarrier::osc2 ? 1.0f : 0.0f));
-            morph::MorphVoice::Control c;
+            v.morphCountdown = 4;   // (every 32 host samples: its partials and gains glide between)
+            morph::LiveMorph::Control c;
             c.position = p.morph.position;
             c.method = p.morph.method;
             c.texture = p.morph.texture;
@@ -1096,9 +1267,9 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
             c.formants = p.morph.formants;
             c.detail = p.morph.detail;
             c.levelMatch = p.morph.levelMatch;
-            c.profileSeconds = v.organic.seconds();
-            c.fundamentalHz = (carrier == MorphCarrier::osc2 ? v.dt2 : v.dt1) * internalRate;
-            c.carrier = &v.carrierSpectrum;
+            c.carrierHz = (p.morph.carrier == MorphCarrier::osc2 ? v.dt2 : v.dt1) * internalRate;
+            // Card C's fundamental: OSC 3's own; else the note as C plays it (its OCT / DETUNE).
+            c.sourceHz = v.hybridGen == HybridType::oscillator ? v.dt3 * internalRate : v.morphSourceHz;
             v.morph.control (c);
         }
         pwm (p.dco1, v.pwm1, v.pwmEnv1);
@@ -1115,7 +1286,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     if (v.modulated && (p.tone < current.tone || p.tone > current.tone))
         toneMoved = static_cast<float> (math::hzToNote (math::toneToHz (p.tone)) - math::hzToNote (math::toneToHz (current.tone)));
     v.cutoffNote = toneNote + toneMoved + static_cast<float> (p.keyTrack * (v.pitch - 60.0)) + a * (1.0f * d.cutoff + 0.2f * d.wander)
-                   + lfoD * static_cast<float> (p.lfoCutoff) + static_cast<float> (12.0 * v.driftNow[1]);
+                   + lfoD * static_cast<float> (p.lfoCutoff) + static_cast<float> (12.0 * v.driftOut[1]);
     const double velocityScale = 1.0 - p.velocityToFilter + p.velocityToFilter * v.velocity;
     v.envDepth = static_cast<float> (p.envDepthSemitones * velocityScale);
     const float resonanceNow = std::clamp (resonanceSmoothed + moved (p.resonance, current.resonance), 0.0f, 1.0f);
@@ -1148,7 +1319,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         else if (v.highPassTail > 0)
             v.highPass.setMode (variant, flat);
     }
-    equalPower (v.pan + static_cast<float> (v.driftNow[3]) + v.panMod, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
+    equalPower (v.pan + static_cast<float> (v.driftOut[3]) + v.panMod, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
     const float driveMoved = moved (p.filterDrive, current.filterDrive);
     v.driveGain = driveMoved != 0.0f ? std::exp2 (4.0f * std::clamp (driveSmoothed + driveMoved, 0.0f, 1.0f)) : driveGain;
     v.makeUp = (1.0f + 0.35f * v.k) / std::sqrt (v.driveGain) * math::dbToGain (p.driveTrimDb);
@@ -1156,15 +1327,17 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 
     // Envelopes: the slot's tolerance on the times (+-20 % at 100 %).
     const double t = 0.2 * a;
-    v.env.setTimes (p.filterAttack * (1.0 + t * d.attack), p.filterDecay * (1.0 + t * d.decay), p.filterSustain, p.filterRelease * (1.0 + t * d.release));
+    const double ampAttack = (v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack) * (1.0 + t * d.attack);
+    const double ampDecay = (v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay) * (1.0 + t * d.decay);
+    const double ampRelease = (v.ampReleaseSeconds >= 0.0 ? v.ampReleaseSeconds : p.ampRelease) * (1.0 + t * d.release);
+    if (p.envLink)   // ENV LINK: one envelope for both, as on a Juno-106: the AMP envelope (the one on screen) shapes the filter too
+        v.env.setTimes (ampAttack, ampDecay, p.ampSustain, ampRelease);
+    else
+        v.env.setTimes (p.filterAttack * (1.0 + t * d.attack), p.filterDecay * (1.0 + t * d.decay), p.filterSustain, p.filterRelease * (1.0 + t * d.release));
     if (p.vcaGate)   // GATE: the amplitude opens and closes with the key (a few ms against clicks)
         v.amp.setTimes (0.002, 0.001, 1.0, 0.006);
-    else if (p.envLink)   // ENV LINK: the amplitude follows the filter envelope's ADSR (one envelope, as on a Juno-106)
-        v.amp.setTimes (p.filterAttack * (1.0 + t * d.attack), p.filterDecay * (1.0 + t * d.decay), p.filterSustain, p.filterRelease * (1.0 + t * d.release));
     else
-        v.amp.setTimes ((v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack) * (1.0 + t * d.attack),
-                        (v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay) * (1.0 + t * d.decay), p.ampSustain,
-                        (v.ampReleaseSeconds >= 0.0 ? v.ampReleaseSeconds : p.ampRelease) * (1.0 + t * d.release));
+        v.amp.setTimes (ampAttack, ampDecay, p.ampSustain, ampRelease);
 
     // Level: velocity (VELOCITY RANGE dB between the hardest and softest note), LEVEL, MUTE.
     // APPLY TO AMP: VEL's curve shapes the velocity the loudness follows (a straight curve,
@@ -1201,12 +1374,20 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.gain2 *= v.oscLayerGain;
         v.gainNoise *= v.oscLayerGain;
         v.organicGain *= v.organicLayerGain;
-        v.outGainTarget = velocityGain * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+        v.outGainTarget = velocityGain * voiceGain * math::dbToGain (static_cast<float> (v.driftOut[2]));
     }
     else
     {
         v.layerGainsFresh = true;   // (a recording loaded mid-note starts from its targets)
-        v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftNow[2]));
+        v.outGainTarget = p.mute ? 0.0f : velocityGain * level * voiceGain * math::dbToGain (static_cast<float> (v.driftOut[2]));
+    }
+    // MORPH needs both sides: a silent carrier (muted, at its lowest, the A/B mix all C) or a
+    // silent card C leaves the other exactly as it plays.
+    if (v.morphOn)
+    {
+        const float carrierGain = p.morph.carrier == MorphCarrier::osc1 ? v.gain1 : (p.morph.carrier == MorphCarrier::osc2 ? v.gain2 : v.gain1 + v.gain2);
+        if (carrierGain <= 0.0f || v.organicGain <= 0.0f)
+            v.morphOn = false;
     }
 
     // The source: ONE SHOT <-> GRANULAR glides (about 8 ms); the grains' settings, moved by
@@ -1224,26 +1405,54 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.cloud = (1.0f - v.grainMix) * shape.granular;
     v.granulator.setRemap (shape.granular);
     v.grainStep = v.modeEngine != nullptr ? v.modeFactor : 1.0;
-    if (p.granular)
+    // Card B's source, independently (state version 8): its own glide, KALEIDOSCOPE's cloud
+    // under OSC 2 while it plays REGULAR.
+    v.grainMix2 += 0.05f * ((p.granular2 ? 1.0f : 0.0f) - v.grainMix2);
+    v.cloud2 = (1.0f - v.grainMix2) * shape.granular;
+    v.granulator2.setRemap (shape.granular);
+    // Each card's grains, moved by the REIMAGINED mode's travel and KEY DNA (one table: each
+    // key's granular identity, on both cards' grains).
+    double dnaAmount = -1.0;
+    if (keyDnaInUse != nullptr && keyDnaInUse->active() && (p.granular || p.granular2))
     {
-        auto g = p.grains;
+        // AMOUNT, moved by a route to KEY DNA A AMOUNT (ANDOR OSP's destination).
+        dnaAmount = keyDna.amount;
+        if (v.modulated && modRuntime.compiled.has (osp::mod::Dest::keyDnaAmountA))
+            dnaAmount = std::clamp (dnaAmount + offsetOf (v, osp::mod::Dest::keyDnaAmountA), 0.0, 1.0);
+    }
+    const auto grainsOf = [&] (osp::GranularParams g)
+    {
         if (v.modeEngine != nullptr)
             g.position = std::clamp (g.position + v.modeEngine->grainPositionOffset(), 0.0, 1.0);
-        if (keyDnaTable.active())
-            osp::keydna::apply (keyDnaTable.at (v.note), keyDna.amount, g);
-        v.granulator.setParams (g);
-    }
-    else
-        v.granulator.setParams (cloudGrains());
+        if (dnaAmount >= 0.0)
+            osp::keydna::apply (keyDnaInUse->at (v.note), dnaAmount, g);
+        return g;
+    };
+    v.granulator.setParams (p.granular ? grainsOf (p.grains) : cloudGrains());
+    v.granulator2.setParams (p.granular2 ? grainsOf (p.grains2) : cloudGrains());
+
+    // Each card's EQ and DAMPEN (ANDOR OSP's), on its own part of the voice before the filter.
+    // DAMPEN's damping glides about 10 ms, as OSP's voice; a new note's lands at once.
+    const int internalSamples = controlPeriod * oversampling;
+    v.eqA.control (p.eqA, internalSamples);
+    v.eqB.control (p.eqB, internalSamples);
+    v.eqC.control (p.eqC, internalSamples);
+    const double dampenSmoothing = 1.0 - std::exp (-static_cast<double> (controlPeriod) / (0.01 * hostRate));
+    v.dampenA.control (p.dampenA, dampenCurves[0], v.note, internalRate, dampenSmoothing, v.dampenFresh);
+    v.dampenB.control (p.dampenB, dampenCurves[1], v.note, internalRate, dampenSmoothing, v.dampenFresh);
+    v.dampenC.control (p.dampenC, dampenCurves[2], v.note, internalRate, dampenSmoothing, v.dampenFresh);
+    v.dampenFresh = false;
+    v.splitCards = ! legacyCards && (v.eqA.active() || v.dampenA.active() || v.eqC.active() || v.dampenC.active());
 }
 
 void Synth::updateDrift (Voice& v) noexcept
 {
     // ANDOR OSP's per-voice DRIFT (InstrumentEngine's shape, InstrumentVoice's wander), with
-    // KALEIDOSCOPE's own instability: depths in cents, octaves of tone, dB and place.
+    // KALEIDOSCOPE's own instability: depths in cents, octaves of tone, dB and place. MOVEMENT
+    // lane A at the macro x its LEVEL (100 % and on: exactly as before lanes).
     const auto& sh = current.effects;
-    const bool driftMode = sh.movementMode == osp::MovementMode::drift;
-    const double m = driftMode ? std::pow (std::clamp (current.motion, 0.0, 1.0), 0.75) : 0.0;
+    const bool driftMode = sh.movementMode == osp::MovementMode::drift && current.movementA.on;
+    const double m = driftMode ? std::pow (std::clamp (current.motion * current.movementA.level, 0.0, 1.0), 0.75) : 0.0;
     const auto& rs = current.reimaginedSettings;
     const double r = rs.mode == osp::ReimaginedMode::kaleidoscope ? std::clamp (current.reimagined, 0.0, 1.0) : 0.0;
     const double rr = 0.5 * r * r;
@@ -1253,29 +1462,63 @@ void Synth::updateDrift (Voice& v) noexcept
         1.5 * m + 1.0 * rr,
         0.3 * m + 0.2 * rr * static_cast<double> (osp::kaleidoscope::width (rs.kaleidoscope.spread)),
     };
+    const double rateHz = driftMode ? osp::shaping::driftSpeedHz (sh.driftSpeed) : 0.15;
+    glideDrift (v.driftFrom, v.driftTo, v.driftNow, v.driftCountdown, v.driftSegment, v.driftRng, depth, rateHz);
+
+    // Lane B's DRIFT: its own wander (its own speed and randomness), not the same one louder.
+    const auto& b = current.movementB;
+    const bool driftB = current.movementBLane.on && b.movementMode == osp::MovementMode::drift;
+    const double mb = driftB ? std::pow (std::clamp (current.motion * current.movementBLane.level, 0.0, 1.0), 0.75) : 0.0;
+    const std::array<double, 4> depthB { mb * osp::shaping::driftPitchCents (b.driftPitch), mb * osp::shaping::driftToneOctaves (b.driftTone), 1.5 * mb, 0.3 * mb };
+    auto& d = v.driftB;
+    glideDrift (d.from, d.to, d.now, d.countdown, d.segment, d.rng, depthB, osp::shaping::driftSpeedHz (b.driftSpeed));
+
+    v.driftDepthA = depth;
+    v.driftDepthB = depthB;
+    combineDrift (v);
+}
+
+void Synth::combineDrift (Voice& v) noexcept
+{
+    // Two independent wanders add in power, not amplitude: together they never swing further
+    // than sqrt (a^2 + b^2) of their depths (one lane alone: exactly its own).
+    for (std::size_t i = 0; i < v.driftOut.size(); ++i)
+    {
+        const double a = v.driftDepthA[i], b = v.driftDepthB[i];
+        if (b <= 0.0)
+            v.driftOut[i] = v.driftNow[i];
+        else if (a <= 0.0)
+            v.driftOut[i] = v.driftB.now[i];
+        else
+            v.driftOut[i] = (v.driftNow[i] + v.driftB.now[i]) * std::sqrt (a * a + b * b) / (a + b);
+    }
+}
+
+void Synth::glideDrift (std::array<double, 4>& from, std::array<double, 4>& to, std::array<double, 4>& now, int& countdown, int& segment, osp::Prng& rng,
+                        const std::array<double, 4>& depth, double rateHz) noexcept
+{
     if (depth[0] <= 0.0 && depth[1] <= 0.0 && depth[2] <= 0.0 && depth[3] <= 0.0)
     {
-        v.driftNow = v.driftFrom = v.driftTo = {};
-        v.driftCountdown = 0;
+        now = from = to = {};
+        countdown = 0;
         return;
     }
-    if (--v.driftCountdown <= 0)
+    if (--countdown <= 0)
     {
         // A new glide from wherever the drift is now to fresh random values.
-        v.driftFrom = v.driftNow;
+        from = now;
         for (std::size_t i = 0; i < depth.size(); ++i)
         {
-            const double magnitude = v.driftRng.uniform (0.35, 1.0);
-            v.driftTo[i] = depth[i] * (v.driftRng.nextDouble() < 0.5 ? -magnitude : magnitude);
+            const double magnitude = rng.uniform (0.35, 1.0);
+            to[i] = depth[i] * (rng.nextDouble() < 0.5 ? -magnitude : magnitude);
         }
-        const double rateHz = driftMode ? osp::shaping::driftSpeedHz (sh.driftSpeed) : 0.15;
-        const double seconds = v.driftRng.uniform (0.6, 1.4) / std::max (0.01, rateHz);
-        v.driftCountdown = v.driftSegment = std::max (1, static_cast<int> (seconds * hostRate / controlPeriod));
+        const double seconds = rng.uniform (0.6, 1.4) / std::max (0.01, rateHz);
+        countdown = segment = std::max (1, static_cast<int> (seconds * hostRate / controlPeriod));
     }
-    const double f = 1.0 - static_cast<double> (v.driftCountdown) / static_cast<double> (v.driftSegment);
+    const double f = 1.0 - static_cast<double> (countdown) / static_cast<double> (segment);
     const double glide = f * f * (3.0 - 2.0 * f);
     for (std::size_t i = 0; i < depth.size(); ++i)
-        v.driftNow[i] = v.driftFrom[i] + (v.driftTo[i] - v.driftFrom[i]) * glide;
+        now[i] = from[i] + (to[i] - from[i]) * glide;
 }
 
 osp::ReimaginedControl Synth::modeControl (const Voice& v) const noexcept
@@ -1347,10 +1590,24 @@ void Synth::controlUpdate() noexcept
 
     // MOVEMENT DRIFT's shared part: the whole instrument wanders a little together.
     sharedDriftCents = 0.0;
-    if (p.effects.movementMode == osp::MovementMode::drift && p.motion > 0.0)
-        sharedDriftCents = 0.3 * p.motion * osp::shaping::driftPitchCents (p.effects.driftPitch)
-                           * osp::shaping::sharedWander (p.seed, static_cast<double> (clock) / hostRate, osp::shaping::driftSpeedHz (p.effects.driftSpeed));
-    const auto depth = static_cast<float> (std::clamp (p.lfoAmount + wheel * (1.0 - p.lfoAmount), 0.0, 1.0));
+    {
+        // Lane A's (at its LEVEL; 100 % and on: as before lanes) and lane B's own, in power.
+        const double motionA = p.movementA.on ? p.motion * p.movementA.level : 0.0;
+        const double motionB = p.movementBLane.on ? p.motion * p.movementBLane.level : 0.0;
+        const bool a = p.effects.movementMode == osp::MovementMode::drift && motionA > 0.0;
+        const bool b = p.movementB.movementMode == osp::MovementMode::drift && motionB > 0.0;
+        const double t = static_cast<double> (clock) / hostRate;
+        const double depthA = a ? 0.3 * motionA * osp::shaping::driftPitchCents (p.effects.driftPitch) : 0.0;
+        const double depthB = b ? 0.3 * motionB * osp::shaping::driftPitchCents (p.movementB.driftPitch) : 0.0;
+        if (a)
+            sharedDriftCents = depthA * osp::shaping::sharedWander (p.seed, t, osp::shaping::driftSpeedHz (p.effects.driftSpeed));
+        if (b)
+        {
+            const double wanderB = depthB * osp::shaping::sharedWander (p.seed + 0x5bd1e995ull, t, osp::shaping::driftSpeedHz (p.movementB.driftSpeed));
+            sharedDriftCents = a ? (sharedDriftCents + wanderB) * std::sqrt (depthA * depthA + depthB * depthB) / (depthA + depthB) : wanderB;
+        }
+    }
+    const auto depth = static_cast<float> (std::clamp (p.lfoAmount + (p.wheelToLfo ? wheel : 0.0f) * (1.0 - p.lfoAmount), 0.0, 1.0));
 
     // Glide: the time to cover ~95 % of the interval.
     const double glideCoef = p.glideSeconds > 0.0 ? 1.0 - std::exp (-seconds * 3.0 / p.glideSeconds) : 1.0;
@@ -1362,7 +1619,7 @@ void Synth::controlUpdate() noexcept
             continue;
         v.pitch += (v.pitchTarget - v.pitch) * glideCoef;
         v.ageSeconds += seconds;
-        if (v.releaseWhenPlayedOut && ! v.organic.playing())
+        if (v.releaseWhenPlayedOut && ! organicPlaying (v))
             releaseVoice (v);   // (FOLLOW off: the recording has played out)
         updateDrift (v);
         float lfoNow = lfoValue;
@@ -1390,24 +1647,24 @@ void Synth::controlUpdate() noexcept
 
 void Synth::planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept
 {
-    auto& plan = slot == 1 ? v.plan1 : v.plan2;
-    auto& x = slot == 1 ? v.extra1 : v.extra2;
-    const auto model = slot == 1 ? p.osc1Model : p.osc2Model;
+    auto& plan = slot == 1 ? v.plan1 : (slot == 2 ? v.plan2 : v.plan3);
+    auto& x = slot == 1 ? v.extra1 : (slot == 2 ? v.extra2 : v.extra3);
+    const auto model = slot == 1 ? p.osc1Model : (slot == 2 ? p.osc2Model : p.osc3Model);
     plan = {};
     plan.model = model;
     if (model == OscModel::classic)
     {
-        plan.waves = slot == 1 ? osc::wavesOf (p.osc1Wave) : osc::wavesOf (p.osc2Wave);
+        plan.waves = slot == 1 ? osc::wavesOf (p.osc1Wave) : osc::wavesOf (slot == 2 ? p.osc2Wave : p.osc3Wave);
         return;
     }
     if (model == OscModel::dco)
     {
-        const auto& c = slot == 1 ? p.dco1 : p.dco2;
+        const auto& c = slot == 1 ? p.dco1 : (slot == 2 ? p.dco2 : p.dco3);
         plan.waves = osc::wavesOf (c);
         plan.subLevel = static_cast<float> (std::clamp (c.subLevel, 0.0, 1.0));
         return;
     }
-    const auto& w = slot == 1 ? p.wide1 : p.wide2;
+    const auto& w = slot == 1 ? p.wide1 : (slot == 2 ? p.wide2 : p.wide3);
     plan.waves = osc::wavesOf (w.wave);
     plan.squareWidth = w.wave == WideWave::square;
     plan.superSaw = w.wave == WideWave::superSaw;
@@ -1427,7 +1684,7 @@ void Synth::planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept
     if (plan.tilt)
     {
         const auto& d = drift[static_cast<std::size_t> (v.slot)];
-        const double spread = 1.0 + 0.1 * std::clamp (p.analogAmount, 0.0, 1.0) * (slot == 1 ? d.width1 : d.width2);
+        const double spread = 1.0 + 0.1 * std::clamp (p.analogAmount, 0.0, 1.0) * (slot == 1 ? d.width1 : d.width2);   // (OSC 3: OSC 2's tolerance)
         const double corner = std::min (0.45, dt * 4.0 * std::pow (64.0, shape) * spread);
         x.tiltCoef = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * corner));
     }
@@ -1436,9 +1693,13 @@ void Synth::planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept
 float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& polyMod) noexcept
 {
     // As the CLASSIC pair below, slot by slot: OSC 2 first (Poly Mod's source, sync's master).
+    // A note of the arpeggiator's card C lane alone: the pair is not computed (silent, still).
+    const bool pair = (v.cards & 3) != 0;
     double wrap2 = -1.0;
     const float width2 = std::clamp (v.width2 + v.pwm2 + v.pwmEnv2 * envValue, 0.02f, 0.98f);
-    if (v.plan2.model == OscModel::classic)
+    if (! pair)
+        v.osc2Out = 0.0f;
+    else if (v.plan2.model == OscModel::classic)
     {
         v.phase2 = osc::walk (v.phase2, v.dt2, width2, v.plan2.waves, 1.0, 0.0, v.line2, wrap2);
         v.osc2Out = v.line2.end (osc::naive (v.plan2.waves, v.phase2, width2));
@@ -1457,8 +1718,8 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
 
     double wrap1 = -1.0;
     const double syncAt = p.sync && wrap2 >= 0.0 ? wrap2 : -1.0;
-    float o1;
-    if (v.plan1.model == OscModel::classic)
+    float o1 = 0.0f;
+    if (pair && v.plan1.model == OscModel::classic)
     {
         const auto& w1 = v.plan1.waves;
         if (syncAt >= 0.0)
@@ -1471,15 +1732,20 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
             v.phase1 = osc::walk (v.phase1, dt1, width1, w1, 1.0, 0.0, v.line1, wrap1);
         o1 = v.line1.end (osc::naive (w1, v.phase1, width1));
     }
-    else
+    else if (pair)
         o1 = osc::renderModel (v.phase1, v.line1, v.extra1, v.plan1, dt1, width1, syncAt, wrap1);
 
     const float c1 = o1 * v.gain1, c2 = v.osc2Out * v.gain2;
     float mix = c1 + c2;
+    float partB = c2;   // (state version 8: OSC 2's part, card B's, when the cards split)
     // RING MOD: OSC 1 x OSC 2, crossfaded in (never a loud third voice): the product's RMS of
     // two full-scale saws is a third against a saw's 0.58, hence the 1.7; the slots' levels set it.
     if (v.ringNow > 0.0f)
-        mix += v.ringNow * (1.7f * o1 * v.osc2Out * 0.5f * (v.gain1 + v.gain2) - mix);
+    {
+        const float ringed = 1.7f * o1 * v.osc2Out * 0.5f * (v.gain1 + v.gain2);
+        mix += v.ringNow * (ringed - mix);
+        partB = (1.0f - v.ringNow) * c2 + v.ringNow * ringed;   // (the ring goes with card B)
+    }
     if (v.gainNoise > 0.0f)
     {
         float n = static_cast<float> (v.noise.bipolar());
@@ -1493,9 +1759,16 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
         lastNoise = v.gainNoise * n;
         mix += lastNoise;
     }
+    // ORGANIC's part (with MORPH: what the morph adds to the oscillators), card B's.
+    float organic = 0.0f;
     if (v.organicOn)
     {
-        const float o = v.organicGain * v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
+        float source = v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
+        for (int i = 0; i < v.zoneCount; ++i)
+            source += v.zoneGains[static_cast<std::size_t> (i)] * v.zones[static_cast<std::size_t> (i)].next (v.zoneSteps[static_cast<std::size_t> (i)], p.organic.loop);
+        if (v.hybridGen != HybridType::sample)
+            source += hybridSample (v, envValue);
+        const float o = v.organicGain * source;
         if (v.morphOn)
         {
             // The carrier (BOTH: the levelled pair, ring included) into the morph; MORPH ONLY
@@ -1504,16 +1777,87 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
             const auto carrier = p.morph.carrier;
             const float pair = mix - (v.gainNoise > 0.0f ? lastNoise : 0.0f);
             const float c = carrier == MorphCarrier::osc1 ? c1 : (carrier == MorphCarrier::osc2 ? c2 : pair);
-            const float y = v.morph.process (o, c);
+            const float y = v.morph.process (c, o);
             if (p.morph.output == MorphOutput::morphOnly)
-                mix += y - c;
+                organic = y - c;
             else
-                mix += o + v.morph.lastCore();
+                organic = o + v.morph.lastCore();
         }
         else
-            mix += o;
+            organic = o;
+    }
+    // Each card's DAMPEN and EQ on its own part (skipped while off: nothing touched). With
+    // card A's or B's on, each oscillator through its own (OSC 1 and the noise: A; OSC 2 and
+    // the ring: B); else the sum through A exactly as before.
+    if (v.splitCards)
+    {
+        const float raw = partB;
+        partB = cardC (v, raw);
+        mix = cardA (v, mix - raw) + partB;
+    }
+    else
+        mix = cardA (v, mix);   // (both cards' EQ and DAMPEN off: the sum, exactly as before)
+    v.partB = partB * filterInputGain;
+    v.partC = 0.0f;
+    if (v.organicOn)
+    {
+        const float c = cardB (v, organic);
+        mix += c;
+        v.partC = c * filterInputGain;
     }
     return mix;
+}
+
+float Synth::cardA (Voice& v, float x) noexcept
+{
+    if (v.dampenA.active())
+        x = v.dampenA.process (x);
+    if (v.eqA.active())
+        x = v.eqA.process (x);
+    return x;
+}
+
+float Synth::hybridSample (Voice& v, float envValue) noexcept
+{
+    if (v.hybridGen == HybridType::oscillator)
+    {
+        double wrap = -1.0;
+        const float width = std::clamp (v.width3 + v.pwm3 + v.pwmEnv3 * envValue, 0.02f, 0.98f);
+        if (v.plan3.model == OscModel::classic)
+        {
+            v.phase3 = osc::walk (v.phase3, v.dt3, width, v.plan3.waves, 1.0, 0.0, v.line3, wrap);
+            return v.line3.end (osc::naive (v.plan3.waves, v.phase3, width));
+        }
+        return osc::renderModel (v.phase3, v.line3, v.extra3, v.plan3, v.dt3, width, -1.0, wrap);
+    }
+    float n = static_cast<float> (v.hybridNoise.bipolar());
+    if (current.hybridNoiseColor == NoiseColor::juno)
+    {
+        const float c = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * 5000.0 / internalRate));
+        v.hybridColour += c * (n - v.hybridColour);
+        n = v.hybridColour * 1.36f;
+    }
+    v.hybridTone += v.hybridToneCoef * (n - v.hybridTone);
+    v.hybridMove += 0.0005f * (v.hybridMoveTarget - v.hybridMove);
+    return 0.8f * v.hybridTone * v.hybridMove;
+}
+
+float Synth::cardC (Voice& v, float x) noexcept
+{
+    if (v.dampenC.active())
+        x = v.dampenC.process (x);
+    if (v.eqC.active())
+        x = v.eqC.process (x);
+    return x;
+}
+
+float Synth::cardB (Voice& v, float x) noexcept
+{
+    if (v.dampenB.active())
+        x = v.dampenB.process (x);
+    if (v.eqB.active())
+        x = v.eqB.process (x);
+    return x;
 }
 
 float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
@@ -1552,21 +1896,50 @@ float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
         v.phase1 = osc::walk (v.phase1, dt1, width1, w1, 1.0, 0.0, v.line1, wrap1);
     const float o1 = v.line1.end (osc::naive (w1, v.phase1, width1));
 
+    if (v.splitCards)
+    {
+        // Each oscillator through its own card (A: OSC 1 and the noise; B: OSC 2).
+        float a = o1 * v.gain1;
+        if (v.gainNoise > 0.0f)
+            a += v.gainNoise * static_cast<float> (v.noise.bipolar());
+        const float b = cardC (v, v.osc2Out * v.gain2);
+        v.partB = b * filterInputGain;
+        v.partC = 0.0f;
+        return liveStages (v, (cardA (v, a) + b) * filterInputGain);
+    }
     float mix = o1 * v.gain1 + v.osc2Out * v.gain2;
     if (v.gainNoise > 0.0f)
         mix += v.gainNoise * static_cast<float> (v.noise.bipolar());
-    return liveStages (v, mix * filterInputGain);
+    v.partB = v.osc2Out * v.gain2 * filterInputGain;
+    v.partC = 0.0f;
+    return liveStages (v, cardA (v, mix) * filterInputGain);
 }
 
 float Synth::liveStages (Voice& v, float x) noexcept
 {
 
-    // The voice's own recording, and what GRANULAR and KALEIDOSCOPE take from it.
-    v.recording.write (x);
-    if (v.grainMix > 1.0e-4f || v.cloud > 1.0e-4f)
+    // Each card's own recording (A: OSC 1 and the noise; B: OSC 2 and the ring), and what
+    // its GRANULAR and KALEIDOSCOPE take from it; card C's part passes by. With no grains
+    // playing on either card, x is untouched.
+    const float b = v.partB, a = x - b - v.partC;
+    v.recording.write (a);
+    v.recording2.write (b);
+    const bool grainsA = v.grainMix > 1.0e-4f || v.cloud > 1.0e-4f;
+    const bool grainsB = v.grainMix2 > 1.0e-4f || v.cloud2 > 1.0e-4f;
+    if (grainsA || grainsB)
     {
-        const float grains = v.granulator.render (v.recording, v.grainStep);
-        x = x * (1.0f - v.grainMix) * (1.0f - 0.5f * v.cloud) + grains * (v.grainMix + v.cloud);
+        float outA = a, outB = b;
+        if (grainsA)
+        {
+            const float grains = v.granulator.render (v.recording, v.grainStep);
+            outA = a * (1.0f - v.grainMix) * (1.0f - 0.5f * v.cloud) + grains * (v.grainMix + v.cloud);
+        }
+        if (grainsB)
+        {
+            const float grains = v.granulator2.render (v.recording2, v.grainStep);
+            outB = b * (1.0f - v.grainMix2) * (1.0f - 0.5f * v.cloud2) + grains * (v.grainMix2 + v.cloud2);
+        }
+        x = outA + outB + v.partC;
     }
     if (v.doubling > 0.0f)
     {
@@ -1578,9 +1951,9 @@ float Synth::liveStages (Voice& v, float x) noexcept
         {
             const double at = static_cast<double> (v.recording.now()) - delay;
             const auto i = static_cast<std::int64_t> (std::floor (at));
-            const float* t = v.recording.taps (i - 1);
+            const auto t = osp::simd::Float4::load (v.recording.taps (i - 1)) + osp::simd::Float4::load (v.recording2.taps (i - 1));   // (cards A and B)
             const auto wts = osp::hermiteWeights (static_cast<float> (at - static_cast<double> (i)));
-            const float doubled = (wts * osp::simd::Float4::load (t)).sum();
+            const float doubled = (wts * t).sum();
             x = (x + v.doubling * doubled) / (1.0f + 0.5f * v.doubling);
         }
     }
@@ -1693,6 +2066,9 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             {
                 v.active = false;
                 v.held = v.sustained = false;
+                for (auto& z : v.zones)   // (the note is over: its zones are not read again)
+                    z.stop();
+                v.zoneCount = 0;
                 // (`clock` is this control period's first host sample.)
                 v.stoppedAt = clock + static_cast<std::uint64_t> (at / oversampling);
                 if (v.modeEngine != nullptr)
@@ -1785,7 +2161,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
             }
             kaleidoscopeStage.process (left[i], right[i]);
         }
-    effects.process (left, right, numSamples);
+    router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
     const float out = math::dbToGain (current.outputDb);
     for (int i = 0; i < numSamples; ++i)
     {
@@ -1810,7 +2186,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
 Synth::VoiceView Synth::voiceView (int slot) const noexcept
 {
     const auto& v = voices[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))];
-    return { v.active, v.held || v.sustained, v.note, v.amp.value() };
+    return { v.active, v.held || v.sustained, v.note, v.amp.value(), v.cards, v.driftOut[0] };
 }
 
 } // namespace andor::analog

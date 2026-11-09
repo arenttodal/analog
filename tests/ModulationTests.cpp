@@ -201,3 +201,26 @@ TEST_CASE ("modulation: APPLY TO AMP shapes the notes' loudness by VEL's curve; 
     CHECK (identical (plain, play (false, true)));
     CHECK (play (true, true).rms (0.05, 0.3) > 2.0 * plain.rms (0.05, 0.3));
 }
+
+TEST_CASE ("modulation: the mod wheel moves nothing by default; WHEEL links it to LFO 1's depths", "[modulation][wheel]")
+{
+    // State version 10: the classic wheel-to-LFO link is a switch, off in a new instrument (the
+    // wheel then moves only what a route sends it to). LFO 1's default depths (0.4 semitones
+    // on each oscillator) are what the wheel brought in: a vibrato heard as a detune.
+    auto p = measurementPatch();
+    p.lfoAmount = 0.0;
+    const std::vector<Event> still { on (0, 57, 100) };
+    const std::vector<Event> wheelUp { cc (0, 1, 127), on (0, 57, 100) };
+    auto play = [] (const Patch& patch, const std::vector<Event>& events) {
+        auto s = makeSynth (patch);
+        return render (*s, 1.0, events);
+    };
+    CHECK (Patch().wheelToLfo == false);
+    CHECK (play (p, wheelUp).left == play (p, still).left);
+    p.wheelToLfo = true;
+    const auto linked = play (p, wheelUp), rest = play (p, still);
+    double d = 0.0;
+    for (std::size_t i = 0; i < linked.left.size(); ++i)
+        d = std::max (d, static_cast<double> (std::abs (linked.left[i] - rest.left[i])));
+    CHECK (d > 1.0e-3);
+}

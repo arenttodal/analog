@@ -5,9 +5,17 @@
 #include "AnalogEngine.h"
 #include "AnalogMaterialsData.h"
 #include "AnalogParameters.h"
-#include "AnalogOscillatorWorkbench.h"
+#include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
+#include "AnalogRacks.h"
+#include "FxRack.h"
+#include "FxRouting.h"
+#include "FxParameters.h"
 #include "FactoryPatches.h"
+#include "KeyDnaState.h"
+#include "SamplePatches.h"
+#include "SampleSourceUI.h"
+#include "ShellProcessor.h"
 #include "ShellProduct.h"
 
 namespace andor::shell
@@ -17,7 +25,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-5";
+    constexpr const char* factoryVersion = "analog-factory-8";   // (8: MORPH on, the wheel unlinked)
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -75,6 +83,74 @@ namespace
         host.setParameterValue ("ab.blend", 0.5f);
     }
 
+    /** Version 6: KEY DNA is ANDOR OSP's own (its editor; its settings in the session's KeyDna
+        tree, its AMOUNT layerA.keyDna.amount). The analog.keyDna.* parameters an older session
+        stored move there, seeded as they were (the patch's seed): the same profile, the same
+        sound. The old parameters stay, unread. */
+    void migrateFromVersion5 (osp::plugin::InstrumentHost& host)
+    {
+        namespace p = andor::analog::params;
+        auto percent = [&host] (const juce::String& id) { return 0.01 * static_cast<double> (host.parameterValue (id)); };
+        osp::keydna::Settings k;
+        k.enabled = host.parameterValue (p::keyDna) >= 0.5f;
+        k.individuality = percent (p::keyDnaIndividuality);
+        k.seed = static_cast<std::uint64_t> (std::max (1L, std::lround (host.parameterValue ("seed"))));
+        using osp::keydna::Param;
+        k[Param::position].variation = percent (p::keyDnaPosition);
+        k[Param::size].variation = percent (p::keyDnaSize);
+        k[Param::density].variation = percent (p::keyDnaDensity);
+        k[Param::spread].variation = percent (p::keyDnaSpread);
+        k[Param::tune].variation = percent (p::keyDnaTune);
+        host.setKeyDnaSettings (0, k, {}, false);
+        host.setParameterValue (osp::plugin::InstrumentHost::keyDnaAmountId (0), host.parameterValue (p::keyDnaAmount));
+    }
+
+    /** Version 7: ENV LINK's one envelope is the AMP envelope (the one on screen), no longer
+        the filter's. A linked session or preset from before played the filter envelope on
+        both: it is copied into AMP, so it sounds as it did. */
+    void migrateFromVersion6 (osp::plugin::InstrumentHost& host)
+    {
+        namespace p = andor::analog::params;
+        if (host.parameterValue (p::envLink) < 0.5f)
+            return;
+        host.setParameterValue ("attack", 1000.0f * host.parameterValue (p::filterAttack));
+        host.setParameterValue ("decay", 1000.0f * host.parameterValue (p::filterDecay));
+        host.setParameterValue ("sustainLevel", host.parameterValue (p::filterSustain));
+        host.setParameterValue ("release", 1000.0f * host.parameterValue (p::filterRelease));
+    }
+
+    /** Version 8: three engines. Card A was the oscillator pair; now OSC 1 alone, and card B
+        (the shell's layer C) is OSC 2. A session or preset from before had one M / S and one EQ
+        and DAMPEN for the pair: they are copied to card B, so both oscillators are muted,
+        soloed, equalised and damped exactly as before (the curves are linear: EQ (1) + EQ (2)
+        = EQ (1 + 2), nothing processed twice). ORGANIC (layer B) is untouched. */
+    /** Version 9: MORPH hears card C live, is on by default at 50 %, and its position runs the
+        other way (0 % the oscillators, 100 % card C). A session or preset from before keeps
+        its MORPH exactly: its position is turned round (0 % the recording before is 100 %
+        now), and one from before MORPH existed (version 3 and older) keeps it off. */
+    void migrateFromVersion8 (osp::plugin::InstrumentHost& host, int from)
+    {
+        namespace p = andor::analog::params;
+        host.setParameterValue (p::morphPosition, 100.0f - host.parameterValue (p::morphPosition));
+        if (from < 4)
+            host.setParameterValue (p::morphEnabled, 0.0f);
+    }
+
+    void migrateFromVersion7 (osp::plugin::InstrumentHost& host)
+    {
+        using Host = osp::plugin::InstrumentHost;
+        for (const char* name : { "mute", "solo" })
+            host.setParameterValue (Host::layerParameterId (2, name), host.parameterValue (Host::layerParameterId (0, name)));
+        for (const auto& name : Host::eqParameterNames())
+            host.setParameterValue (Host::eqParameterId (2, name), host.parameterValue (Host::eqParameterId (0, name)));
+        for (const auto& name : Host::dampenParameterNames())
+            host.setParameterValue (Host::dampenParameterId (2, name), host.parameterValue (Host::dampenParameterId (0, name)));
+        // GRANULAR was the whole voice's: card B (OSC 2) keeps playing as it did, its own
+        // switch and grains copied from card A's.
+        for (const char* name : { "sourceMode", "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
+            host.setParameterValue (Host::layerParameterId (2, name), host.parameterValue (Host::layerParameterId (0, name)));
+    }
+
     /** ANDOR ANALOG's materials: aged copper for ANDOR OSP's coral, layer A's amber trace,
         the walnut housing and copper badge (tools/make_walnut_skin.py). The ceramic is the
         family's. */
@@ -106,12 +182,6 @@ namespace
     {
         namespace p = andor::analog::params;
         auto values = p::valuesOf (factory.patch);
-        if (factory.keyDna > 0.0)
-        {
-            values[p::keyDna] = 1.0f;
-            for (const auto& id : { p::keyDnaPosition, p::keyDnaSize, p::keyDnaDensity, p::keyDnaSpread })
-                values[id] = static_cast<float> (100.0 * factory.keyDna);
-        }
         auto tree = host.apvts().copyState();
         for (auto* p : host.apvts().processor.getParameters())
             if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
@@ -132,11 +202,21 @@ namespace
         xml->setAttribute ("productVersion", productInfo().stateVersion);
         if (auto params = tree.createXml())
             xml->addChildElement (params.release());
+        // KEY DNA (ANDOR OSP's tree): the sound's own profile on the oscillators' card.
+        std::array<osp::keydna::Settings, osp::plugin::keyDnaState::layerCount> keyDna {};
+        if (factory.keyDna > 0.0)
+            keyDna[0] = andor::analog::keyDnaOf (factory);
+        if (auto dna = osp::plugin::keyDnaState::toTree (keyDna, {}).createXml())
+            xml->addChildElement (dna.release());
         return xml;
     }
 
     void installFactoryPresets (osp::plugin::InstrumentHost& host, const juce::File& folder)
     {
+        // Imported Kontakt patches are reached through card C's SOUNDS only: the presets an
+        // earlier import wrote leave the preset list (to the trash).
+        if (auto* shell = dynamic_cast<ShellProcessor*> (&host))
+            andor::analog::import::retireGeneratedPresets (folder.getParentDirectory(), shell->sampleStoreFolder().getChildFile ("Imported"));
         const auto marker = folder.getChildFile (".version");
         if (marker.loadFileAsString().trim() == factoryVersion)
             return;
@@ -171,14 +251,17 @@ const ProductInfo& productInfo()
         // ANDOR OSP). DRIVE, MOVEMENT, SPACE and ECHO are ANDOR OSP's own (parameters,
         // popovers and sound); FILTER is the instrument's. The first is not assigned yet: it
         // shows ANDOR OSP's LIFE knob, which the engine does not read, so it is disabled.
-        p.macros = { { { andor::analog::params::morphPosition, "MORPH", "Morph: ORGANIC's recording into the oscillators (IMPRINT, FUSE, WEAVE)" },
+        p.macros = { { { andor::analog::params::morphPosition, "MORPH", "Morph: the oscillators (0 %) and card C (100 %) fused into one sound between them" },
                        { "drive", "DRIVE", "Drive: saturation of the whole sound (tube, tape or crunch)" },
                        { andor::analog::params::tone, "FILTER", "Filter: the four-pole filter's cutoff (resonance, envelope, filter drive, LFO amount behind it)" },
                        { "motion", "MOVEMENT", "Movement: drift, tape, chorus, pulse or a rhythmic shaper" },
                        { "space", "SPACE", "Space: the room it plays in" },
                        { "echo", "ECHO", "Echo: repeats of the sound, from a tape echo or a bucket-brigade delay" } } };
         p.macroPopover = [] (int macro, osp::plugin::InstrumentHost& host) { return andor::analog::createMacroPopover (macro, host); };
-        p.addParameters = [] (juce::AudioProcessorValueTreeState::ParameterLayout& layout) { andor::analog::params::addTo (layout); };
+        p.addParameters = [] (juce::AudioProcessorValueTreeState::ParameterLayout& layout) {
+            andor::analog::params::addTo (layout);
+            andor::analog::fxparams::addTo (layout);   // (state version 12: the FX library's slots, appended)
+        };
         p.installFactoryPresets = installFactoryPresets;
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
         // envelope, the generator's level, pan, tune, REIMAGINED and grains) and these.
@@ -187,17 +270,145 @@ const ProductInfo& productInfo()
         // heading, OSCILLATORS beside M and S, opens the OSCILLATOR WORKBENCH in the
         // waveform's dark well (the shell's in-card editor; its view is an interface
         // preference, never a parameter).
-        p.generatorStartControl = { andor::analog::params::osc2Fine, "DETUNE", nullptr };
-        p.generatorWellEditor = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createOscillatorWorkbench (host); };
+        // Three engines (docs/THREE_ENGINE_ARCHITECTURE.md): A OSC 1 (the shell's layer A), B OSC 2
+        // (its layer C), C the hybrid (its layer B: ORGANIC's IDs, recordings and imports stay
+        // where they are). Each oscillator's card: DETUNE, TUNE, OCT, LEVEL of its own.
+        p.threeEngines.enabled = true;
+        p.threeEngines.order = { 0, 2, 1 };
+        p.cardArpeggiator = true;   // each card arpeggiated or holding the keys, its own pattern unlinked
+        // The effects rack: MOVEMENT, ECHO and SPACE each expanded beside its macro (one at a time).
+        p.rackModules = { osp::plugin::rack::Kind::movement, osp::plugin::rack::Kind::echo, osp::plugin::rack::Kind::space };
+        // FILTER and MORPH: the product's own inline racks (the same rack, the same parts),
+        // opened from their macro's name as the others (their popovers stay the quick view).
+        p.productRacks = { { andor::analog::params::tone, osp::plugin::rack::Kind::filter, andor::analog::createFilterRack },
+                           { andor::analog::params::morphPosition, osp::plugin::rack::Kind::morph, andor::analog::createMorphRack },
+                           // The FX library's rack: no macro of its own; FX ROUTING opens it.
+                           { {}, osp::plugin::rack::Kind::fx, andor::analog::createFxRack } };
+        // MOVEMENT's two lanes (state version 11): A is MOVEMENT itself, B a second one.
+        {
+            using namespace andor::analog::params;
+            osp::plugin::InstrumentHost::MovementLane a, b;
+            a.prefix = "movement.";
+            b.prefix = movementBPrefix;
+            for (auto* lane : { &a, &b })
+            {
+                const int index = lane == &a ? 0 : 1;
+                lane->onId = movementLaneId (index, "on");
+                lane->levelId = movementLaneId (index, "level");
+                lane->syncId = movementLaneId (index, "sync");
+                lane->pulseDivisionId = movementLaneId (index, "pulse.division");
+                lane->phaseId = movementLaneId (index, "phase");
+            }
+            p.movementLanes = { a, b };
+        }
+        p.mixEndLabels = { "A+B", "C" };   // (the header MIX: the analog pair against card C)
+        // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
+        // a SAMPLE or INSTRUMENT PATCH only.
+        p.cardModifiersShown = [] (int layer, osp::plugin::InstrumentHost& host) {
+            if (layer != 1)
+                return false;
+            const int type = juce::roundToInt (host.parameterValue (andor::analog::params::hybridType));
+            return type == static_cast<int> (andor::analog::HybridType::sample) || type == static_cast<int> (andor::analog::HybridType::instrumentPatch);
+        };
+        // ... as a compact row of icon keys at the top-left of card C's dark well (its foot free,
+        // as cards A and B), only the ones that act on what card C plays: a SAMPLE all four; an
+        // INSTRUMENT PATCH's zones LINK, LOOP and FOLLOW (they do not play backwards).
+        p.cardModifiersInWell = true;
+        p.stableModulationTabs = true;
+        // FX ROUTING (docs/FX_ROUTING_IMPLEMENTATION.md): its icon beside SAVE, its view in the
+        // cards' place.
+        // The shared racks' hardware faceplates (V2: docs/FX_RACK_V2_PROGRESS.md) - interface only.
+        {
+            using osp::plugin::rack::Kind;
+            osp::plugin::rack::Faceplate movement, echo, space;
+            movement.enamel = juce::Colour (0xff3d596a);
+            movement.stripes = { juce::Colour (0xff5d8299), juce::Colour (0xffa3bfcf), juce::Colour (0xffdce6ea) };
+            movement.glow = juce::Colour (0xff9fd6f2);
+            movement.glassTop = juce::Colour (0xff17222a);
+            movement.glassBottom = juce::Colour (0xff111a20);
+            movement.subtitle = "MODULATION RACK";
+            echo.enamel = juce::Colour (0xff2b5f59);
+            echo.stripes = { juce::Colour (0xff468f87), juce::Colour (0xff97c7bf), juce::Colour (0xffd9a14a) };
+            echo.glow = juce::Colour (0xff8fe6d9);
+            echo.glassTop = juce::Colour (0xff142522);
+            echo.glassBottom = juce::Colour (0xff0f1c1a);
+            echo.subtitle = "DELAY PROCESSOR";
+            space.enamel = juce::Colour (0xff594a68);
+            space.stripes = { juce::Colour (0xff8a77a0), juce::Colour (0xffc4b5d4), juce::Colour (0xffe3d7c4) };
+            space.glow = juce::Colour (0xffd6c2ff);
+            space.glassTop = juce::Colour (0xff1e1a26);
+            space.glassBottom = juce::Colour (0xff16131d);
+            space.subtitle = "REVERB PROCESSOR";
+            p.rackFaceplates = { { Kind::movement, movement }, { Kind::echo, echo }, { Kind::space, space } };
+        }
+        p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
+        p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
+            if (layer != 1)
+                return 0xf;
+            const int type = juce::roundToInt (host.parameterValue (andor::analog::params::hybridType));
+            return type == static_cast<int> (andor::analog::HybridType::instrumentPatch) ? (1 | 4 | 8) : 0xf;
+        };
+        p.cardControls = [] (int layer, osp::plugin::InstrumentHost& host) {
+            namespace ap = andor::analog::params;
+            using K = andor::shell::ProductInfo::CardKnob;
+            std::array<K, 5> k {};
+            // Every card the same first four (DETUNE, TUNE, OCT, LEVEL), its fifth its own.
+            if (layer == 0)
+                k = { K { ap::osc1Fine, "DETUNE" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" }, K { ap::osc1Level, "LEVEL" }, K {} };
+            else if (layer == 2)   // (REIMAGINED processes the analog pair: card A's, never twice)
+                k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K { ap::osc2Velo, "VELO" } };
+            else
+            {
+                // Card C by its type.
+                using andor::analog::HybridType;
+                const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (ap::hybridType)), 0, 3));
+                const K level { "layerB.level", "LEVEL" };
+                if (type == HybridType::oscillator)
+                    k = { K { ap::osc3Fine, "DETUNE" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, level, K { ap::hybridVelo, "VELO" } };
+                else if (type == HybridType::noise)
+                    k = { K { ap::hybridNoiseTone, "TONE" }, K { ap::hybridNoiseMovement, "MOVEMENT" }, K { ap::hybridNoiseKeys, "KEYS" }, level, K { ap::hybridVelo, "VELO" } };
+                else   // a recording or a patch: its pitch (the notes it is played with), START
+                    k = { K { ap::hybridFine, "DETUNE" }, K { "layerB.tune", "TUNE" }, K { ap::hybridOctave, "OCT" }, level, K { "layerB.start", "START" } };
+            }
+            return k;
+        };
+        // Each oscillator's sound design in its card's well, revealed by the pointer (no
+        // workbench to open): the selected model's own controls.
+        p.wellOverlay = [] (int layer, osp::plugin::InstrumentHost& host) -> std::unique_ptr<osp::plugin::WellOverlay> {
+            if (layer == 0)
+                return andor::analog::createOscillatorOverlay (host, 1, layer);
+            if (layer == 2)
+                return andor::analog::createOscillatorOverlay (host, 2, layer);
+            return andor::analog::createHybridOverlay (host);   // card C: its type and that type's controls
+        };
+        p.wellOverlayKey = [] (int layer, osp::plugin::InstrumentHost& host) {
+            return layer == 1 ? andor::analog::hybridOverlayKey (host) : andor::analog::oscillatorOverlayKey (host, layer == 0 ? 1 : 2);
+        };
         // ORGANIC: one recording beside the oscillators (the shell's layer B: ANDOR OSP's loader,
         // sample store, card and recall).
-        p.hybridSampleName = "ORGANIC";
+        p.hybridSampleName = "HYBRID";
+        // Empty, ORGANIC is a compact ADD SAMPLE dock beside the oscillators' card (about a
+        // fifth of the area); a recording opens its own card, the two then sharing equally.
+        p.hybridSampleDock = false;   // (three engines: the hybrid keeps its full column)
+        // The Sample Source importer: a Kontakt patch (its NKI and samples) into native sounds that
+        // play in ORGANIC's place; ORGANIC's heading then picks among them.
+        p.hybridAction = { "Import Kontakt patch", [] (osp::plugin::InstrumentHost& host) { andor::analog::runKontaktImport (host); } };
+        p.hybridHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSoundPopover (host); };
         // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
-        p.generatorModeName = "Standard";
+        p.generatorModeName = "Regular";
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();
-        p.stateVersion = 5;
+        // The AMP envelope says when it is not what plays (VCA GATE), and editing it gives the
+        // amplitude back to it.
+        p.ampEnvelopeNote = [] (osp::plugin::InstrumentHost& host) {
+            return host.parameterValue (andor::analog::params::vcaMode) >= 0.5f ? juce::String ("GATE") : juce::String();
+        };
+        p.ampEnvelopeTouched = [] (osp::plugin::InstrumentHost& host) {
+            if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
+                host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
+        };
+        p.stateVersion = 13;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -207,6 +418,30 @@ const ProductInfo& productInfo()
                 migrateFromVersion3 (host);
             if (from < 5)
                 migrateFromVersion4 (host);
+            if (from < 6)
+                migrateFromVersion5 (host);
+            if (from < 7)
+                migrateFromVersion6 (host);
+            if (from < 8)
+                migrateFromVersion7 (host);
+            if (from < 9)
+                migrateFromVersion8 (host, from);
+            if (from < 10)
+                host.setParameterValue (andor::analog::params::lfoWheel, 1.0f);   // (version 10: the wheel's link to LFO 1 is a switch, off when new; before, always on)
+            if (from < 11)
+            {
+                // Version 11: MOVEMENT's lanes - lane A on at 100 %, lane B off: as before.
+                using namespace andor::analog::params;
+                juce::StringArray lanes;
+                for (const int lane : { 0, 1 })
+                    for (const char* name : { "on", "level", "sync", "pulse.division", "phase" })
+                        lanes.add (movementLaneId (lane, name));
+                for (const auto& name : movementSettingNames())
+                    lanes.add (movementBPrefix + name);
+                for (const auto& id : lanes)
+                    if (auto* parameter = host.apvts().getParameter (id))
+                        parameter->setValueNotifyingHost (parameter->getDefaultValue());
+            }
         };
         return p;
     }();

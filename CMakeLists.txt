@@ -40,10 +40,17 @@ add_library(analog_dsp STATIC
     dsp/FactoryPatches.cpp
     dsp/HalfBand.cpp
     dsp/JunoChorus.cpp
-    dsp/morph/MorphAnalyzer.cpp
-    dsp/morph/MorphVoice.cpp
+    dsp/morph/LiveMorph.cpp
     dsp/LiveGranulator.cpp
-    dsp/Synth.cpp)
+    dsp/Synth.cpp
+    dsp/fx/FxGraph.cpp
+    dsp/fx/FxEngine.cpp
+    dsp/fx/FxProcessors.cpp
+    dsp/fx/FxTone.cpp
+    dsp/fx/FxDynamics.cpp
+    dsp/fx/FxModulation.cpp
+    dsp/fx/FxSpectral.cpp
+    dsp/fx/FxRetro.cpp)
 target_include_directories(analog_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/dsp)
 target_link_libraries(analog_dsp PUBLIC osp_dsp)
 set_target_properties(analog_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -60,6 +67,10 @@ if(OSP_BUILD_TESTS)
         tests/EnvelopeTests.cpp
         tests/VoiceTests.cpp
         tests/RenderTests.cpp
+        tests/FxBaselineTests.cpp
+        tests/FxGraphTests.cpp
+        tests/FxEffectTests.cpp
+        tests/FxRetroTests.cpp
         tests/RealtimeTests.cpp
         tests/LiveTests.cpp
         tests/ModulationTests.cpp
@@ -68,8 +79,11 @@ if(OSP_BUILD_TESTS)
         tests/ChorusTests.cpp
         tests/ModelTests.cpp
         tests/OrganicTests.cpp
-        tests/MorphAnalysisTests.cpp
         tests/MorphTests.cpp
+        tests/LiveMorphTests.cpp
+        tests/MovementLaneTests.cpp
+        tests/CardEqTests.cpp
+        tests/SampleSourceTests.cpp
         tools/Wav.cpp)
     target_include_directories(analog_dsp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/tools)
     target_link_libraries(analog_dsp_tests PRIVATE analog_dsp Catch2::Catch2WithMain)
