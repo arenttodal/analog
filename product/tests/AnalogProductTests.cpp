@@ -7087,7 +7087,8 @@ TEST_CASE ("analog: V4 TAPE - ECHO and MOVEMENT TAPE as a reel deck on the same 
     const int height = echo->getHeight();
     REQUIRE (osp::plugin::rackTapeDeckShown (*echo));
     CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE TIMING STEREO");
-    // The regions: knobs left, the deck in the middle, the display right (~250-336 x 90-122).
+    // The regions: knobs left, the deck in the middle, the display right - its whole column,
+    // as tall as SPACE's graph (to the face's bottom margin), no caption over it.
     const auto deck = osp::plugin::rackTapeDeckBounds (*echo);
     const auto display = osp::plugin::rackSlot (*echo, 5);
     const auto cells = osp::plugin::rackCellBounds (*echo);
@@ -7095,9 +7096,9 @@ TEST_CASE ("analog: V4 TAPE - ECHO and MOVEMENT TAPE as a reel deck on the same 
     CHECK (cells.back().getRight() < deck.getX());
     CHECK (deck.getRight() < display.getX());
     CHECK (display.getWidth() >= 250);
-    CHECK (display.getWidth() <= 340);
-    CHECK (display.getHeight() >= 90);
-    CHECK (display.getHeight() <= 122);
+    CHECK (display.getRight() <= echo->getWidth());
+    CHECK (display.getHeight() >= 140);
+    CHECK (display.getBottom() == echo->getHeight() - 16);
     CHECK (deck.getBottom() <= echo->getHeight());
     // TIMING and STEREO: the same parameters, as small segmented keys.
     auto* timing = dynamic_cast<SegmentedSwitch*> (osp::plugin::rackCell (*echo, "TIMING"));
