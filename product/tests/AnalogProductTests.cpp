@@ -6182,6 +6182,27 @@ TEST_CASE ("analog: RETRO - uninserted by default; its rack shows each personali
     CHECK (knobs == 3);
 }
 
+TEST_CASE ("analog: the host is told the route's latency - RETRO's frame once routed, nothing in CLASSIC", "[analog][fx][latency]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    renderShell (p, 0.1);
+    p.pollLoads();
+    const int voices = p.getLatencySamples();   // (the oscillators' own, CLASSIC)
+    auto route = fx::classicGraph();
+    route.custom = true;
+    route.chain.push_back (fx::Node::effect ({ fx::Type::retro, 0 }));
+    REQUIRE (engine.setFxRoute (route));
+    renderShell (p, 0.2);
+    p.pollLoads();   // (the shell's timer: the message thread)
+    CHECK (p.getLatencySamples() == voices + fx::Retro::frameFor (p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0));
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    renderShell (p, 0.2);
+    p.pollLoads();
+    CHECK (p.getLatencySamples() == voices);
+}
+
 TEST_CASE ("analog: FX presets - every factory preset loads and reads as itself; a change marks it; a chain round-trips", "[analog][fx][presets]")
 {
     namespace fx = andor::analog::fx;

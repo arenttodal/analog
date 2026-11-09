@@ -34,7 +34,9 @@ public:
     juce::String layerGeneratorName (int layer) const override { return layer == 0 ? generatorName() : (layer == 2 ? juce::String ("OSC 2") : juce::String()); }
     juce::StringArray boundParameters() const override { return params::engineParameterIds(); }
     void prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters) override;
-    int latencySamples() const override { return synth.latencySamples(); }
+    /** The voices' oversampling and the CUSTOM route's effects (FxEngine's plan; 0 in CLASSIC):
+        the shell tells the host whenever it changes. */
+    int latencySamples() const override { return synth.latencySamples() + synth.fxEngine().latencySamples(); }
     /** Layer B is the hybrid (the shell's hybrid layer): its recording reaches every voice
         while the hybrid is a SAMPLE (process() hands it over; another type keeps it dormant). */
     void setSource (int layer, const osp::plugin::LoadedInstrument* source) noexcept override

@@ -68,7 +68,7 @@ MIX 65 %, noise off, no compressor, no dropouts; an Init patch has none in its r
 - **Latency.** Constant in every personality: one codec frame (1024 samples at 48 kHz), so
   switching personality never changes it; MIX's dry is delayed to match (MIX 0 is the input,
   delayed, exactly). Personality switches crossfade over 20 ms; the new one starts clean.
-  The route does not yet report it to the host (FX Rack V2 gate 8, the latency planner).
+  In a route it is planned and reported to the host (docs/FX_ROUTING_IMPLEMENTATION.md, Latency).
 - **Real time.** No allocation, lock or I/O in process (tested with the other new effects,
   personalities switched mid-stream, blocks 1-512); the FFTs are prepared in prepare().
   One instance costs 1.1-2.2 % of a core here (`[benchmark][retro]`, Release, 48 kHz).

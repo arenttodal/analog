@@ -50,6 +50,7 @@ public:
     /** The effect's state cleared; MIX and OUTPUT at their settings (no glide from nothing). */
     void reset() noexcept final;
     int latency() const noexcept override { return latencySamples; }
+    int maxLatency() const noexcept override { return std::max (latencySamples, latencyCeiling); }
 
 protected:
     /** The effect alone, in place (wet), over a run of at most maxBlock samples. */
@@ -58,9 +59,11 @@ protected:
     virtual void resetEffect() noexcept = 0;
     void setCommon (const Common& c) noexcept;
     void setLatency (int samples);
+    /** The most a mode can add at this rate (prepare): the route plans on it. */
+    void setLatencyCeiling (int samples) noexcept { latencyCeiling = std::max (0, samples); }
 
     double rate = 48000.0;
-    int maxBlock = 512, latencySamples = 0;
+    int maxBlock = 512, latencySamples = 0, latencyCeiling = 0;
 
 private:
     std::vector<float> dryL, dryR;

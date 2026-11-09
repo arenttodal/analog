@@ -239,6 +239,7 @@ void Flanger::prepareEffect()
         l.prepare (static_cast<int> (0.03 * rate));
     // (the dry path sized for THROUGH-ZERO; set() says which mode reports it)
     setLatency (static_cast<int> (throughZeroMs * 0.001 * rate));
+    setLatencyCeiling (static_cast<int> (throughZeroMs * 0.001 * rate));   // (CLASSIC is padded to it in a route)
     throughZero = true;   // (so the first set() in CLASSIC mode drops it to 0)
 }
 

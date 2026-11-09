@@ -7,8 +7,56 @@
 namespace andor::analog::fx
 {
 
+void AlignLine::allocate (int capacity)
+{
+    l.assign (static_cast<std::size_t> (std::max (1, capacity)), 0.0f);
+    r.assign (l.size(), 0.0f);
+    pos = 0;
+}
+
+void AlignLine::clear() noexcept
+{
+    std::fill (l.begin(), l.end(), 0.0f);
+    std::fill (r.begin(), r.end(), 0.0f);
+    pos = 0;
+}
+
+void AlignLine::run (float* left, float* right, int n, int delay) noexcept
+{
+    const int size = static_cast<int> (l.size());
+    delay = std::clamp (delay, 0, size - 1);
+    if (delay == 0)
+        return;
+    for (int i = 0; i < n; ++i)
+    {
+        l[static_cast<std::size_t> (pos)] = left[i];
+        r[static_cast<std::size_t> (pos)] = right[i];
+        int at = pos - delay;
+        if (at < 0)
+            at += size;
+        left[i] = l[static_cast<std::size_t> (at)];
+        right[i] = r[static_cast<std::size_t> (at)];
+        if (++pos == size)
+            pos = 0;
+    }
+}
+
 namespace
 {
+    /** A group's alignment lines, pre-order (the order the engine walks them). */
+    void planGroups (const std::vector<Node>& chain, CompiledGraph& c)
+    {
+        for (const auto& n : chain)
+        {
+            if (n.kind == Node::Kind::effect)
+                continue;
+            c.groupBase.push_back (static_cast<int> (c.aligns.size()));
+            c.aligns.resize (c.aligns.size() + n.lanes.size() + 1);
+            for (const auto& lane : n.lanes)
+                planGroups (lane, c);
+        }
+    }
+
     bool hasSplitter (const std::vector<Node>& chain)
     {
         for (const auto& n : chain)
@@ -35,7 +83,10 @@ std::shared_ptr<const CompiledGraph> compile (const Graph& g, std::uint64_t gene
     auto c = std::make_shared<CompiledGraph>();
     c->generation = generation;
     c->graph = g;
-    c->latency = 0;   // (every processor so far adds none; see FxProcessor::latency)
+    c->latency = 0;
+    planGroups (c->graph.chain, *c);
+    for (auto& line : c->aligns)
+        line.allocate (CompiledGraph::alignCapacity);
     return c;
 }
 
@@ -61,6 +112,10 @@ void FxEngine::prepare (double rate, int maximumBlockSize)
                 p->prepare (rate, maxBlock);
                 p->set (settings, s);
             }
+            // A latent effect's dry (its bypass, its glide) and its pad, at this rate.
+            const int most = p != nullptr ? p->maxLatency() : 0;
+            dryLines[static_cast<std::size_t> (id.flatIndex())].allocate (most > 0 ? most + 1 : 1);
+            padLines[static_cast<std::size_t> (id.flatIndex())].allocate (most > 0 ? most + 1 : 1);
         }
     bypassStep = static_cast<float> (1.0 / (0.02 * rate));
     duckStep = static_cast<float> (1.0 / (0.005 * rate));
@@ -74,6 +129,12 @@ void FxEngine::reset() noexcept
             p->reset();
     for (int i = 0; i < totalInstances(); ++i)
         active[static_cast<std::size_t> (i)] = 1.0f;
+    for (auto* lines : { &dryLines, &padLines })
+        for (auto& line : *lines)
+            line.clear();
+    if (current != nullptr)
+        for (auto& line : current->aligns)
+            line.clear();
     duck = 1.0f;
     ducking = false;
     played = false;
@@ -159,7 +220,7 @@ void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, i
         else if (ducking)
             run = std::min (remaining, 32);
         if (custom)
-            runCustom (legacy, current->graph, l, r, run);
+            runCustom (legacy, *current, l, r, run);
         else
             legacy.process (l, r, run);   // CLASSIC: the original chain, as it always was
 
@@ -183,23 +244,49 @@ void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, i
     if (current != nullptr)
         exchange.publishOldestInUse (waiting != nullptr ? std::min (current->generation, waiting->generation) : current->generation);
     customNow.store (current != nullptr && current->graph.custom, std::memory_order_relaxed);
-    latencyNow.store (current != nullptr && current->graph.custom ? current->latency : 0, std::memory_order_relaxed);
+    latencyNow.store (current != nullptr && current->graph.custom ? chainLatency (current->graph.chain) : 0, std::memory_order_relaxed);
 }
 
-void FxEngine::runCustom (osp::PostProcessor& legacy, const Graph& g, float* left, float* right, int n) noexcept
+int FxEngine::effectLatency (InstanceId id) const noexcept
+{
+    const auto* p = isLegacy (id.type) ? nullptr : processors[static_cast<std::size_t> (id.flatIndex())].get();
+    return p != nullptr ? p->maxLatency() : 0;
+}
+
+int FxEngine::chainLatency (const std::vector<Node>& chain) const noexcept
+{
+    // A chain: its effects add up; a group: its slowest lane (the others are aligned to it).
+    int total = 0;
+    for (const auto& node : chain)
+    {
+        if (node.kind == Node::Kind::effect)
+            total += effectLatency (node.fx);
+        else
+        {
+            int slowest = 0;
+            for (const auto& lane : node.lanes)
+                slowest = std::max (slowest, chainLatency (lane));
+            total += slowest;
+        }
+    }
+    return total;
+}
+
+void FxEngine::runCustom (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n) noexcept
 {
     legacy.customReimagined (left, right, n);   // (locked upstream: before every routed effect)
-    runChain (legacy, g.chain, left, right, n, 0);
+    int group = 0;
+    runChain (legacy, g.graph.chain, left, right, n, 0, group);
 }
 
-void FxEngine::runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth) noexcept
+void FxEngine::runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group) noexcept
 {
     for (const auto& node : chain)
     {
         if (node.kind == Node::Kind::effect)
             runEffect (legacy, node, left, right, n, depth);
         else
-            runGroup (legacy, node, left, right, n, depth);
+            runGroup (legacy, node, left, right, n, depth, group);
     }
 }
 
@@ -266,10 +353,28 @@ void FxEngine::runEffect (osp::PostProcessor& legacy, const Node& node, float* l
             break;
     }
 
-    // Inserts: y = x + a (f (x) - x); not run while fully bypassed.
-    if (a <= 0.0f && ! gliding)
-        return;
+    // Inserts: y = x + a (f (x) - x); not run while fully bypassed. A latent one (RETRO,
+    // CONVOLUTION, BLUR, a through-zero FLANGER) delays its dry by its maxLatency and pads its
+    // wet up to it: on, off or gliding, the route's latency is the same.
     auto* p = processors[index].get();
+    const int most = p != nullptr ? p->maxLatency() : 0;
+    const int pad = p != nullptr ? std::max (0, most - p->latency()) : 0;
+    const auto bytes = sizeof (float) * static_cast<std::size_t> (n);
+    if (most > 0)
+    {
+        std::memcpy (b.inL.data(), left, bytes);
+        std::memcpy (b.inR.data(), right, bytes);
+        dryLines[index].run (b.inL.data(), b.inR.data(), n, most);   // (always fed: no jump into a glide)
+    }
+    if (a <= 0.0f && ! gliding)
+    {
+        if (most > 0)
+        {
+            std::memcpy (left, b.inL.data(), bytes);
+            std::memcpy (right, b.inR.data(), bytes);
+        }
+        return;
+    }
     const bool tail = p != nullptr && p->hasTail();
     if (! gliding && a >= 1.0f)
     {
@@ -279,6 +384,8 @@ void FxEngine::runEffect (osp::PostProcessor& legacy, const Node& node, float* l
             legacy.customMovement (left, right, n);
         else if (p != nullptr)
             p->process (left, right, n);
+        if (pad > 0)
+            padLines[index].run (left, right, n, pad);
         return;
     }
     // Gliding (or a tail draining): process a copy, crossfade.
@@ -297,41 +404,65 @@ void FxEngine::runEffect (osp::PostProcessor& legacy, const Node& node, float* l
         legacy.customMovement (b.workL.data(), b.workR.data(), n);
     else if (p != nullptr)
         p->process (b.workL.data(), b.workR.data(), n);
+    if (pad > 0)
+        padLines[index].run (b.workL.data(), b.workR.data(), n, pad);
+    const float* dl = most > 0 ? b.inL.data() : left;   // (the dry, aligned to the wet)
+    const float* dr = most > 0 ? b.inR.data() : right;
     for (int i = 0; i < n; ++i)
     {
         const float g = gliding ? b.dry[static_cast<std::size_t> (i)] : a;
+        const auto k = static_cast<std::size_t> (i);
         if (tail)
         {
-            left[i] = (1.0f - g) * left[i] + b.workL[static_cast<std::size_t> (i)];
-            right[i] = (1.0f - g) * right[i] + b.workR[static_cast<std::size_t> (i)];
+            left[i] = (1.0f - g) * dl[i] + b.workL[k];
+            right[i] = (1.0f - g) * dr[i] + b.workR[k];
         }
         else
         {
-            left[i] += g * (b.workL[static_cast<std::size_t> (i)] - left[i]);
-            right[i] += g * (b.workR[static_cast<std::size_t> (i)] - right[i]);
+            left[i] = dl[i] + g * (b.workL[k] - dl[i]);
+            right[i] = dr[i] + g * (b.workR[k] - dr[i]);
         }
     }
 }
 
-void FxEngine::runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth) noexcept
+void FxEngine::runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group) noexcept
 {
     auto& b = buffers[static_cast<std::size_t> (depth)];
     const auto bytes = sizeof (float) * static_cast<std::size_t> (n);
+    // This group's alignment lines (pre-order, as compile() planned them): each lane delayed to
+    // the slowest one, the dry (a send's) to it too.
+    const int base = group < static_cast<int> (current->groupBase.size()) ? current->groupBase[static_cast<std::size_t> (group)] : -1;
+    ++group;
+    int slowest = 0;
+    for (const auto& lane : node.lanes)
+        slowest = std::max (slowest, chainLatency (lane));
     std::memcpy (b.inL.data(), left, bytes);
     std::memcpy (b.inR.data(), right, bytes);
     std::fill (b.accL.begin(), b.accL.begin() + n, 0.0f);
     std::fill (b.accR.begin(), b.accR.begin() + n, 0.0f);
+    const bool send = node.law == Law::send;
+    if (send)
+    {
+        // The dry under the sends (and what each send's difference is taken from), delayed to
+        // the lanes: `wet` is free at this depth while a group runs.
+        std::memcpy (b.wetL.data(), left, bytes);
+        std::memcpy (b.wetR.data(), right, bytes);
+        if (base >= 0)
+            current->aligns[static_cast<std::size_t> (base) + node.lanes.size()].run (b.wetL.data(), b.wetR.data(), n, slowest);
+    }
     for (std::size_t lane = 0; lane < node.lanes.size(); ++lane)
     {
         std::memcpy (b.workL.data(), b.inL.data(), bytes);
         std::memcpy (b.workR.data(), b.inR.data(), bytes);
-        runChain (legacy, node.lanes[lane], b.workL.data(), b.workR.data(), n, depth + 1);
+        runChain (legacy, node.lanes[lane], b.workL.data(), b.workR.data(), n, depth + 1, group);
+        if (base >= 0)
+            current->aligns[static_cast<std::size_t> (base) + lane].run (b.workL.data(), b.workR.data(), n, slowest - chainLatency (node.lanes[lane]));
         const float g = node.gains[lane];
-        if (node.law == Law::send)
+        if (send)
             for (int i = 0; i < n; ++i)
             {
-                b.accL[static_cast<std::size_t> (i)] += g * (b.workL[static_cast<std::size_t> (i)] - b.inL[static_cast<std::size_t> (i)]);
-                b.accR[static_cast<std::size_t> (i)] += g * (b.workR[static_cast<std::size_t> (i)] - b.inR[static_cast<std::size_t> (i)]);
+                b.accL[static_cast<std::size_t> (i)] += g * (b.workL[static_cast<std::size_t> (i)] - b.wetL[static_cast<std::size_t> (i)]);
+                b.accR[static_cast<std::size_t> (i)] += g * (b.workR[static_cast<std::size_t> (i)] - b.wetR[static_cast<std::size_t> (i)]);
             }
         else
             for (int i = 0; i < n; ++i)
@@ -340,11 +471,11 @@ void FxEngine::runGroup (osp::PostProcessor& legacy, const Node& node, float* le
                 b.accR[static_cast<std::size_t> (i)] += g * b.workR[static_cast<std::size_t> (i)];
             }
     }
-    if (node.law == Law::send)
+    if (send)
         for (int i = 0; i < n; ++i)
         {
-            left[i] = b.inL[static_cast<std::size_t> (i)] + b.accL[static_cast<std::size_t> (i)];
-            right[i] = b.inR[static_cast<std::size_t> (i)] + b.accR[static_cast<std::size_t> (i)];
+            left[i] = b.wetL[static_cast<std::size_t> (i)] + b.accL[static_cast<std::size_t> (i)];
+            right[i] = b.wetR[static_cast<std::size_t> (i)] + b.accR[static_cast<std::size_t> (i)];
         }
     else
         for (int i = 0; i < n; ++i)

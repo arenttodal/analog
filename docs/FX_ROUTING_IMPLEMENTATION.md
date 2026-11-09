@@ -76,9 +76,29 @@ build cannot play is refused (`setFxRoute` returns false; nothing changes).
   is never covered; scrolled-out tiles are not hit.
 - The gear: Restore original, Save FX chain, Load FX chain, Show chains folder.
 
+## Latency (FX Rack V2, gate 8)
+
+The route's latency is planned live from each effect's `maxLatency()` (the most any of its modes
+adds at this rate: RETRO's codec frame, CONVOLUTION's partition, BLUR's window, a FLANGER's
+through-zero delay): a chain adds its effects up, a parallel group takes its slowest lane.
+`FxEngine` then keeps it constant whatever happens inside:
+
+- a latent effect switched off (its ON) or gliding is not skipped in time: its dry goes through
+  its own line at its maxLatency, and its wet is padded from its current latency up to it (a
+  FLANGER in CLASSIC mode is padded to THROUGH-ZERO's 6 ms);
+- each lane of a parallel group is delayed to the slowest one (no comb between lanes), and a
+  send's dry waits for the lanes too (`CompiledGraph::aligns`, planned in `compile`, written
+  only by the audio thread while it plays that graph);
+- `AnalogEngine::latencySamples` adds the route's latency to the voices' own, and the shell
+  (OSP `ShellProcessor`, its 20 Hz timer) tells the host whenever it changes: inserting a latent
+  effect, CUSTOM <-> CLASSIC (CLASSIC adds none).
+
+Tested: `[fx][route][latency]` (RETRO in series, off, in a lane, under a send: the input
+exactly 1024 samples later; FLANGER's two modes at one latency) and
+`[analog][fx][latency]` (the host's figure).
+
 ## Not built yet
 
-Gates 6 (BUS 1 / BUS 2 and per-card stems), 8 (splitters in the engine, latency alignment of
-parallel lanes and host latency reporting), 9 (the Advanced view), 10 (Lock FX), user impulse
-files for CONVOLUTION, and DRIVE's creative modes. Splitter nodes are in the graph grammar and
+Gates 6 (BUS 1 / BUS 2 and per-card stems), 8's splitters in the engine, 9 (the Advanced
+view), 10 (Lock FX), user impulse files for CONVOLUTION, and DRIVE's creative modes. Splitter nodes are in the graph grammar and
 validated, but `compile` refuses them until the engine plays them.

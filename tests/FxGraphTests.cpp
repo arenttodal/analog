@@ -3,6 +3,7 @@
 // CUSTOM graph sounds as CLASSIC does, other orders differ as they should, parallel lanes sum to
 // unity, bypass drains tails, swapping routes while playing stays finite and keeps tails.
 #include "TestUtil.h"
+#include "fx/Effects.h"
 #include "fx/FxEngine.h"
 
 #include <catch2/catch_approx.hpp>
@@ -319,4 +320,76 @@ TEST_CASE ("fx graph: edits - move, stack, unstack, nudge, remove, bypass; each 
     const auto before = g;
     CHECK_FALSE (fx::insertEffect (g, {}, 0, Node::effect (drive)));
     CHECK (g == before);
+}
+
+TEST_CASE ("fx route latency: a latent effect delays the route by its maxLatency - on, off, in a lane, under a send - and the engine reports it", "[fx][route][latency]")
+{
+    auto p = chainPatch();
+    p.drive = p.motion = p.echo = p.space = 0.0;
+    p.fx.retro[0].mix = 0.0f;   // (RETRO at MIX 0: its aligned dry, exactly)
+    const int latency = fx::Retro::frameFor (48000.0);
+    const auto plain = custom ({ fxNode (Type::utility) });
+    const auto reference = play (p, &plain);
+    auto delayedBy = [&reference] (const Stereo& out, int samples) {
+        double diff = 0.0, peak = 1.0e-12;
+        for (std::size_t i = 0; i + static_cast<std::size_t> (samples) < out.left.size(); ++i)
+        {
+            const auto j = i + static_cast<std::size_t> (samples);
+            diff = std::max ({ diff, std::abs (static_cast<double> (out.left[j]) - reference.left[i]), std::abs (static_cast<double> (out.right[j]) - reference.right[i]) });
+            peak = std::max (peak, std::abs (static_cast<double> (reference.left[i])));
+        }
+        return 20.0 * std::log10 (std::max (1.0e-15, diff) / peak);
+    };
+    auto routed = [&p] (const Graph& g, int& reported) {
+        auto s = makeSynth (p);
+        s->setFxGraph (fx::compile (g, 1));
+        auto out = render (*s, 2.0, phrase(), 256);
+        reported = s->fxEngine().latencySamples();
+        return out;
+    };
+    int reported = -1;
+    // In series.
+    const auto serial = custom ({ fxNode (Type::utility), Node::effect ({ Type::retro, 0 }) });
+    CHECK (delayedBy (routed (serial, reported), latency) < -120.0);
+    CHECK (reported == latency);
+    // Off (its own ON): the same latency - the route never jumps in time.
+    p.fx.retro[0].on = false;
+    CHECK (delayedBy (routed (serial, reported), latency) < -120.0);
+    CHECK (reported == latency);
+    p.fx.retro[0].on = true;
+    // In one lane of a linear pair: the other lane waits for it (no comb), the sum is unity.
+    const auto lanes = custom ({ fxNode (Type::utility), Node::parallel ({ Node::effect ({ Type::retro, 0 }) }, {}, Law::linear) });
+    CHECK (delayedBy (routed (lanes, reported), latency) < -100.0);
+    CHECK (reported == latency);
+    // Under a send: the dry waits too.
+    const auto send = custom ({ fxNode (Type::utility), Node::parallel ({ Node::effect ({ Type::retro, 0 }) }, {}, Law::send) });
+    CHECK (delayedBy (routed (send, reported), latency) < -100.0);
+    CHECK (reported == latency);
+    // CLASSIC adds nothing.
+    {
+        auto s = makeSynth (p);
+        render (*s, 0.1, phrase(), 256);
+        CHECK (s->fxEngine().latencySamples() == 0);
+    }
+}
+
+TEST_CASE ("fx route latency: a FLANGER's mode never moves the route in time (CLASSIC padded to THROUGH-ZERO's latency)", "[fx][route][latency]")
+{
+    auto p = chainPatch();
+    p.drive = p.motion = p.echo = p.space = 0.0;
+    p.fx.flanger[0].mix = 0.0f;
+    const auto g = custom ({ fxNode (Type::utility), Node::effect ({ Type::flanger, 0 }) });
+    int reported[2] {};
+    Stereo out[2];
+    for (int mode = 0; mode < 2; ++mode)
+    {
+        p.fx.flanger[0].mode = mode;
+        auto s = makeSynth (p);
+        s->setFxGraph (fx::compile (g, 1));
+        out[mode] = render (*s, 1.0, phrase(), 256);
+        reported[mode] = s->fxEngine().latencySamples();
+    }
+    CHECK (reported[0] == reported[1]);
+    CHECK (reported[0] > 0);
+    CHECK (peakDifferenceDb (out[0], out[1]) < -100.0);   // (MIX 0: both the dry, at the same moment)
 }

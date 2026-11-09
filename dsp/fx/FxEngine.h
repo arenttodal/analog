@@ -15,12 +15,30 @@ namespace andor::analog::fx
 
 struct Impulse;
 
-/** A graph ready for the audio thread: immutable once published (ModelExchange). */
+/** A delay that aligns one path to another (a parallel lane, a group's dry): a ring, sized in
+    prepare / compile, read at any delay below its size. */
+struct AlignLine
+{
+    std::vector<float> l, r;
+    int pos = 0;
+    void allocate (int capacity);
+    void clear() noexcept;
+    /** In place: writes the block and replaces it with itself `delay` samples ago. */
+    void run (float* left, float* right, int n, int delay) noexcept;
+};
+
+/** A graph ready for the audio thread: immutable once published (ModelExchange); its alignment
+    delays are the audio thread's (allocated here, written only while it plays this graph). */
 struct CompiledGraph
 {
+    /** The longest a parallel lane can be delayed to meet the slowest one (at 192 kHz: two
+        RETROs and a spectral effect in one lane fit). */
+    static constexpr int alignCapacity = 16384;
     std::uint64_t generation = 0;
     Graph graph;
-    int latency = 0;   ///< samples the longest path adds (lanes are aligned to it)
+    int latency = 0;   ///< (unused: the latency is planned live from the processors' maxLatency)
+    std::vector<int> groupBase;               ///< a group's first line (pre-order): its lanes, then its dry
+    mutable std::vector<AlignLine> aligns;
 };
 
 /** Builds the audio thread's copy of a valid graph (empty pointer: not valid). Message thread. */
@@ -61,7 +79,8 @@ public:
 
     /** The route now playing is CUSTOM (any thread; for the interface and tests). */
     bool playingCustom() const noexcept { return customNow.load (std::memory_order_relaxed); }
-    /** Samples the CUSTOM route adds after the voices (0 in CLASSIC). */
+    /** Samples the CUSTOM route adds after the voices (0 in CLASSIC): the longest path's
+        effects at their maxLatency; every shorter lane and bypassed effect is delayed to it. */
     int latencySamples() const noexcept { return latencyNow.load (std::memory_order_relaxed); }
 
     /** The processor of a new effect's slot (null for the original four). For meters. */
@@ -79,10 +98,12 @@ private:
         std::vector<float> inL, inR, accL, accR, workL, workR, wetL, wetR, dry;
     };
 
-    void runCustom (osp::PostProcessor& legacy, const Graph& g, float* left, float* right, int n) noexcept;
-    void runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth) noexcept;
+    void runCustom (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n) noexcept;
+    void runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group) noexcept;
     void runEffect (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth) noexcept;
-    void runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth) noexcept;
+    void runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group) noexcept;
+    int chainLatency (const std::vector<Node>& chain) const noexcept;
+    int effectLatency (InstanceId id) const noexcept;
 
     double sampleRate = 48000.0;
     int maxBlock = 512;
@@ -92,6 +113,7 @@ private:
     std::array<Buffers, maxDepth + 2> buffers;
     std::array<std::unique_ptr<Processor>, totalInstances()> processors;
     std::array<float, totalInstances()> active {};   ///< the bypass glide, 0..1
+    std::array<AlignLine, totalInstances()> dryLines, padLines;   ///< a latent effect's dry (at its maxLatency) and its pad (maxLatency - latency)
     float bypassStep = 0.001f;
     float duck = 1.0f, duckStep = 0.004f;
     bool ducking = false, played = false;

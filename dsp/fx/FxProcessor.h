@@ -26,6 +26,10 @@ public:
     virtual void process (float* left, float* right, int numSamples) noexcept = 0;
     /** Samples it delays its output by (its dry path included). */
     virtual int latency() const noexcept { return 0; }
+    /** The most it can ever delay at this rate (a mode that adds latency included): the route is
+        planned on it, so switching the effect's mode never changes the route's latency (the
+        engine pads the difference). */
+    virtual int maxLatency() const noexcept { return latency(); }
     /** A wet tail (a delay, an impulse): bypassed, it stops hearing new input while the tail
         drains, rather than being cut. */
     virtual bool hasTail() const noexcept { return false; }
