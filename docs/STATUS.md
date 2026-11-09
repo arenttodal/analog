@@ -1,5 +1,18 @@
 # ANDOR ANALOG — status
 
+> **9 Nov 2026: 1.0.0 release candidate** (branch `claude/release-candidate`;
+> docs/release/READINESS_SCORECARD.md). On the baseline (`main` a25c270, OSP 3d949cd), the full
+> suite passed 13/13 on Linux. Release fixes:
+> - the arpeggiator no longer allocates on the audio thread (OSP `claude/analog-release`);
+> - only the 831 parameters the engine reads are offered for automation (128 inert ones are not);
+> - a factory update no longer deletes the musician's files in `Presets/Factory`;
+> - frozen contracts: a modulation-destination golden and real 1.0 session fixtures;
+> - one version source (`product.json`, 1.0.0).
+>
+> Packaging: notices, an EULA draft, a signing-ready `.pkg` and Inno Setup installer in CI,
+> static SQLite on Windows with a DLL check, and pluginval in macOS CI. The header below
+> (30 October) and some rows are older than the code; where they differ, the scorecard is current.
+
 _30 October 2026: state version 4, the unified expansion (docs/UNIFIED_ANALOG_EXPANSION_PLAN.md).
 Each slot can be CLASSIC, DCO or WIDE. There are now OTA filters, a high-pass, a chorus, Juno
 modulation, ORGANIC (one recording beside the oscillators) and MORPH (IMPRINT, FUSE, WEAVE).
