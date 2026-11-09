@@ -8,6 +8,16 @@ read-only output-peak telemetry value (below). CLASSIC still plays bit for bit.
 
 ## ROUTING (`product/Source/FxRouting.*`)
 
+> **Later cleanup (supersedes parts of this page):** the routing view now carries no words it
+> does not need. The ENGINE MIXER / FX CHAIN titles, TO FX, "A + B + C -> one shared FX path",
+> the header's SERIES / PARALLEL status, the PARALLEL pill (SPLIT keeps its name), the CONT. 2 /
+> FROM 1 words (the wire turns at a small node instead) and the whole footer (path summary,
+> selection, the arrow / Parallel / Series keys; the tile menu and the keys do the same) are
+> gone. The mixer's rows share the column's full height, one per card. The collapse key is an X.
+> The TAPE deck's display fills its column, as tall as SPACE's graph, with no REPEATS / SPEED
+> caption or PREDICTED word.
+
+
 **Engine mixer.** It takes 21 % of the panel (it was 26.8 %), with a 170 px floor. Each card's
 row has its colour block (28 px), its name (13.5 px semibold), its model (10.5 px), and a small
 ceramic knob (42 px; 38 px when narrow) with the value under it. The knob is the instrument's own

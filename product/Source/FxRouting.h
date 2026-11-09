@@ -18,7 +18,7 @@ class AnalogEngine;
     it, selecting, hovering or dragging never changes the sound; a drop, a menu choice or a key
     that edits the route does (and makes it CUSTOM), as one undoable step.
 
-    Left, the ENGINE MIXER (a third of the width at most: the cards' levels, the path they take);
+    Left, the cards' mixer (a third of the width at most: the cards' levels, the path they take);
     then one continuous wire from the mixer through the chain to a small OUTPUT. Effects are
     compact tiles (icon, name, what it is set to, its bypass light). A tile dropped in a gap
     goes there in series; dropped on another tile, the two are stacked in parallel (split above
@@ -126,9 +126,9 @@ private:
     juce::Rectangle<int> chainArea() const;
     bool layoutAttempt (const fx::Graph&, float scale, const std::vector<bool>& collapsed, int tailFrom);
     int summaryAt (juce::Point<int> p) const;
+    juce::Rectangle<int> mixerRow (int index) const;
     void showSummaryMenu (int index);
     void paintSummary (juce::Graphics&, const Summary&) const;
-    juce::String pathStatus() const;
     bool apply (const fx::Graph& next, const juce::String& what);
     fx::Graph route() const;
     juce::String subtitleOf (fx::InstanceId id) const;
@@ -149,10 +149,9 @@ private:
     std::optional<fx::InstanceId> quickId;
     std::array<std::unique_ptr<juce::Slider>, 3> levels;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 3> levelAttachments;
-    std::array<std::unique_ptr<juce::TextButton>, 4> footerButtons;   // <- -> PARALLEL SERIES
     std::vector<std::unique_ptr<TileKnob>> tileKnobs;
 
-    juce::Rectangle<int> headerArea, mixerArea, zoneArea, footerArea, outputBox, wireFrom;
+    juce::Rectangle<int> headerArea, mixerArea, zoneArea, outputBox, wireFrom;
     std::vector<Tile> placed;
     std::vector<Gap> gapList;
     struct Group

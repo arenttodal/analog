@@ -343,6 +343,10 @@ const ProductInfo& productInfo()
             p.movementLanes = { a, b };
         }
         p.mixEndLabels = { "A+B", "C" };   // (the header MIX: the analog pair against card C)
+        // No header MIX for now (the cards' own levels and the routing view's balance them): the
+        // preset bar takes its room, SAVE and ROUTING after it as keys of one size.
+        p.headerMix = false;
+        p.crossCloseKeys = true;   // (the ARPEGGIATOR closes with the racks' X)
         // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
         // a SAMPLE or INSTRUMENT PATCH only.
         p.cardModifiersShown = [] (int layer, osp::plugin::InstrumentHost& host) {
@@ -428,6 +432,9 @@ const ProductInfo& productInfo()
         p.hybridHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSoundPopover (host); };
         // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
         p.generatorModeName = "Regular";
+        // ...shown as a GRANULAR on / off key (the grain cloud, lit in the card's colour): the
+        // oscillator plays as it is unless lit. Card C keeps its mode menu (ANDOR OSP's symbols).
+        p.generatorGranularToggle = true;
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();

@@ -388,7 +388,7 @@ namespace
             {
                 g.setColour (gtype::grid);
                 g.fillRect (juce::Rectangle<float> (xOf (hz) - 0.5f, plot.getY(), 1.0f, plot.getHeight()));
-                gtype::small (g, hz >= 1000.0 ? juce::String (hz / 1000.0, 0) + " kHz" : juce::String (hz, 0) + " Hz",
+                gtype::small (g, hz >= 1000.0 ? juce::String (juce::roundToInt (hz / 1000.0)) + " kHz" : juce::String (juce::roundToInt (hz)) + " Hz",
                               juce::Rectangle<float> (xOf (hz) - 30.0f, plot.getBottom() + 3.0f, 60.0f, 12.0f), juce::Justification::centred);
             }
             for (const double db : { 12.0, 0.0, -12.0, -24.0, -36.0 })

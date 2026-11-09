@@ -30,7 +30,6 @@ namespace
         const juce::Colour c[3] { juce::Colour (0xffc77f50), juce::Colour (0xff819aaf), juce::Colour (0xff879f8c) };
         return c[juce::jlimit (0, 2, i)];
     }
-    constexpr int mixerRowH = 66;
 
     AnalogEngine& engineOf (osp::plugin::InstrumentHost& host) { return dynamic_cast<AnalogEngine&> (dynamic_cast<andor::shell::ShellProcessor&> (host).productEngine()); }
 
@@ -122,17 +121,21 @@ public:
         const auto r = getLocalBounds().toFloat();
         if (kind == Kind::collapse)
         {
-            g.setColour (juce::Colour (0xfffaf6ee));
-            g.fillEllipse (r.reduced (1.0f));
-            g.setColour (over ? juce::Colour (0xffb9ab9b) : juce::Colour (0xffd7cbbe));
-            g.drawEllipse (r.reduced (1.0f), 1.0f);
-            juce::Path chevron;
+            // The racks' borderless X (the same size and stroke): the view closes, back to the cards.
             const auto c = r.getCentre();
-            chevron.startNewSubPath (c.x - 5.0f, c.y + 2.5f);
-            chevron.lineTo (c.x, c.y - 2.5f);
-            chevron.lineTo (c.x + 5.0f, c.y + 2.5f);
-            g.setColour (juce::Colour (0xff6f6a62));
-            g.strokePath (chevron, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            if (over || down)
+            {
+                g.setColour (osp::plugin::design::colour::text.withAlpha (down ? 0.11f : 0.07f));
+                g.fillEllipse (juce::Rectangle<float> (24.0f, 24.0f).withCentre (c));
+            }
+            juce::Path cross;
+            const float a = 4.6f;
+            cross.startNewSubPath (c.x - a, c.y - a);
+            cross.lineTo (c.x + a, c.y + a);
+            cross.startNewSubPath (c.x + a, c.y - a);
+            cross.lineTo (c.x - a, c.y + a);
+            g.setColour (osp::plugin::design::colour::text.withAlpha (over || down ? 1.0f : 0.8f));   // (the ARPEGGIATOR's ink)
+            g.strokePath (cross, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             return;
         }
         if (over || down || getToggleState())
@@ -578,44 +581,6 @@ FxRoutingView::FxRoutingView (osp::plugin::InstrumentHost& h) : host (h), engine
         addAndMakeVisible (*s);
     }
 
-    // The footer's keyboard-free actions.
-    const char* labels[4] { "\xe2\x86\x90", "\xe2\x86\x92", "Parallel", "Series" };
-    const char* tips[4] { "Move the selected effect left", "Move the selected effect right", "Stack the selected effect in parallel with the next one",
-                          "Take the selected effect out of its parallel pair" };
-    for (int i = 0; i < 4; ++i)
-    {
-        auto& b = footerButtons[static_cast<std::size_t> (i)];
-        b = std::make_unique<juce::TextButton> (juce::String::fromUTF8 (labels[i]));
-        b->setTooltip (tips[i]);
-        b->setColour (juce::TextButton::buttonColourId, juce::Colour (0xfffaf5ed));
-        b->setColour (juce::TextButton::textColourOffId, juce::Colour (0xff665e54));
-        b->setColour (juce::ComboBox::outlineColourId, juce::Colour (0xffd9cfc2));
-        addAndMakeVisible (*b);
-    }
-    footerButtons[0]->onClick = [this] {
-        if (selected)
-            if (auto g = route(); fx::nudgeEffect (g, *selected, -1))
-                apply (g, "Move effect left");
-    };
-    footerButtons[1]->onClick = [this] {
-        if (selected)
-            if (auto g = route(); fx::nudgeEffect (g, *selected, 1))
-                apply (g, "Move effect right");
-    };
-    footerButtons[2]->onClick = [this] {
-        if (! selected)
-            return;
-        const auto o = order();
-        const auto it = std::find (o.begin(), o.end(), *selected);
-        if (it != o.end() && it + 1 != o.end())
-            stackOn (*selected, *(it + 1));
-    };
-    footerButtons[3]->onClick = [this] {
-        if (selected)
-            if (auto g = route(); fx::unstackEffect (g, *selected))
-                apply (g, "Effect to series");
-    };
-
     engine.onFxRouteChanged = [safe = juce::Component::SafePointer<FxRoutingView> (this)] {
         if (safe != nullptr)
         {
@@ -984,8 +949,9 @@ void FxRoutingView::resized()
     auto inner = getLocalBounds().reduced (18, 13);
     headerArea = inner.removeFromTop (34);
     auto header = headerArea;
-    close->setBounds (header.removeFromRight (24).withSizeKeepingCentre (24, 24));
-    header.removeFromRight (12);
+    // The X as the racks' and the ARPEGGIATOR's: a 30 px target centred 25 px from the right edge.
+    close->setBounds (juce::Rectangle<int> (30, 30).withCentre ({ getWidth() - 25, headerArea.getCentreY() }));
+    header.setRight (close->getX() - 6);
     gear->setBounds (header.removeFromRight (26).withSizeKeepingCentre (26, 26));
     header.removeFromRight (10);
     const int statusWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (11.5f, fonts::Weight::semibold), statusText())) + 14;
@@ -997,14 +963,7 @@ void FxRoutingView::resized()
     // a card's name and its knob collide.
     mixerArea = inner.removeFromLeft (std::max (170, juce::roundToInt (0.21f * static_cast<float> (inner.getWidth()))));
     zoneArea = inner.withTrimmedLeft (30);
-    footerArea = zoneArea.removeFromBottom (36);
-    auto footer = footerArea.withTrimmedTop (8);
-    for (int i = 3; i >= 0; --i)
-    {
-        const int w = i >= 2 ? 64 : 30;
-        footerButtons[static_cast<std::size_t> (i)]->setBounds (footer.removeFromRight (w).withSizeKeepingCentre (w, 25));
-        footer.removeFromRight (6);
-    }
+    zoneArea.removeFromBottom (12);   // (no footer: the tiles' menus and keys move and stack)
     if (library != nullptr && library->isVisible())
         showLibrary (true);
     layoutChain();
@@ -1012,7 +971,7 @@ void FxRoutingView::resized()
 
 juce::Rectangle<int> FxRoutingView::chainArea() const
 {
-    return zoneArea.withTrimmedTop (30).withTrimmedBottom (6);
+    return zoneArea.withTrimmedTop (14).withTrimmedBottom (6);
 }
 
 namespace
@@ -1055,14 +1014,12 @@ void FxRoutingView::projectRoute()
     // The mixer at the same legibility: its rows, names and knobs scale with the board.
     mixerScale = bMax;
     {
-        const int rowH = juce::roundToInt (static_cast<float> (mixerRowH) * mixerScale);
-        auto rowsArea = mixerArea.withTrimmedRight (16).withTrimmedTop (26);
         const int knob = juce::roundToInt ((mixerArea.getWidth() >= 210 ? 42.0f : 38.0f) * mixerScale);
-        for (auto& level : levels)
+        for (int i = 0; i < static_cast<int> (levels.size()); ++i)
         {
-            auto row = rowsArea.removeFromTop (rowH);
+            const auto row = mixerRow (i);
             // The knob at the row's right, its value under it (painted).
-            level->setBounds (juce::Rectangle<int> (knob, knob).withCentre ({ row.getRight() - juce::roundToInt (26.0f * mixerScale), row.getCentreY() - juce::roundToInt (7.0f * mixerScale) }));
+            levels[static_cast<std::size_t> (i)]->setBounds (juce::Rectangle<int> (knob, knob).withCentre ({ row.getRight() - juce::roundToInt (26.0f * mixerScale), row.getCentreY() - juce::roundToInt (7.0f * mixerScale) }));
         }
     }
 
@@ -1492,15 +1449,6 @@ void FxRoutingView::paint (juce::Graphics& g)
 
     paintMixer (g);
 
-    // The chain zone's title (as strong as ENGINE MIXER, on its line).
-    const auto titleRow = zoneArea.withHeight (22);
-    g.setColour (juce::Colour (0xff5f574f));
-    g.setFont (font (13.5f * mixerScale, fonts::Weight::semibold, 0.07f));
-    g.drawText ("FX CHAIN", titleRow, juce::Justification::centredLeft, false);
-    g.setColour (juce::Colour (0xff958a7d));
-    g.setFont (font (10.5f * mixerScale, fonts::Weight::medium, 0.08f));
-    g.drawText (rows.size() > 1 ? "SERIES, CONTINUED ON ROW 2" : (groups.empty() ? "IN SERIES" : "SERIES + PARALLEL"), titleRow, juce::Justification::centredRight, false);
-
     // The wires: one line per row, from the mixer (row 1) to OUTPUT (the last row); between
     // two rows, CONT. 2 and FROM 1 and the quiet return between them.
     const float wireWidth = 1.6f;
@@ -1520,16 +1468,20 @@ void FxRoutingView::paint (juce::Graphics& g)
         juce::PathStrokeType (1.0f).createDashedStroke (dashed, ret, dashes, 2);
         g.setColour (wire.withAlpha (0.55f));
         g.fillPath (dashed);
-        for (const auto& [box, text] : { std::pair<juce::Rectangle<int>, const char*> { contOut, "CONT. 2" }, { contIn, "FROM 1" } })
-        {
-            g.setColour (juce::Colour (0xfffaf6ee));
-            g.fillRoundedRectangle (box.toFloat(), 0.5f * static_cast<float> (box.getHeight()));
-            g.setColour (juce::Colour (0xffc9bfb2));
-            g.drawRoundedRectangle (box.toFloat().reduced (0.5f), 0.5f * static_cast<float> (box.getHeight()) - 0.5f, 1.0f);
-            g.setColour (juce::Colour (0xff6f675e));
-            g.setFont (font (10.5f * metrics.b, fonts::Weight::semibold, 0.06f));
-            g.drawText (text, box, juce::Justification::centred, false);
-        }
+        // (no words: the wire runs on to the turn, a small node, down and back, on into row 2)
+        g.setColour (wire);
+        g.fillRect (juce::Rectangle<float> (static_cast<float> (contOut.getX()), static_cast<float> (rows[0].centreY) - 0.5f * wireWidth,
+                                            static_cast<float> (contOut.getWidth() / 2), wireWidth));
+        g.fillRect (juce::Rectangle<float> (static_cast<float> (contIn.getCentreX()), static_cast<float> (rows[1].centreY) - 0.5f * wireWidth,
+                                            static_cast<float> (contIn.getRight() - contIn.getCentreX()), wireWidth));
+        g.setColour (wire.withAlpha (0.55f));
+        g.drawLine (static_cast<float> (contOut.getCentreX()), static_cast<float> (rows[0].centreY), static_cast<float> (contOut.getCentreX()),
+                    static_cast<float> (contOut.getBottom()), 1.0f);
+        g.drawLine (static_cast<float> (contIn.getCentreX()), static_cast<float> (contIn.getY()), static_cast<float> (contIn.getCentreX()),
+                    static_cast<float> (rows[1].centreY), 1.0f);
+        g.setColour (wire);
+        for (const auto& box : { contOut, contIn })
+            g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (box.getCentre().toFloat()));
     }
     // The stages' splits and joins: down / up to each lane, across, back to the line.
     for (const auto& grp : groups)
@@ -1560,10 +1512,11 @@ void FxRoutingView::paint (juce::Graphics& g)
         // SPLIT / JOIN where the lanes leave and meet the line.
         g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ x0 + inset, gy }));
         g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ x1 - inset, gy }));
-        // (its name above the stage, clear of the lanes)
+        // (a splitter's name above the stage, clear of the lanes; a parallel stage reads as one)
+        if (grp.split)
         {
             const auto f = font (9.5f * metrics.b, fonts::Weight::semibold, 0.08f);
-            const juce::String word (grp.split ? "SPLIT" : "PARALLEL");
+            const juce::String word ("SPLIT");
             const float tw = juce::GlyphArrangement::getStringWidth (f, word) + 12.0f;
             const auto pill = juce::Rectangle<float> (tw, 14.0f).withCentre ({ 0.5f * (x0 + x1), static_cast<float> (grp.bounds.getY()) - 9.0f });
             g.setColour (juce::Colour (0xfff5f0e8));
@@ -1611,69 +1564,29 @@ void FxRoutingView::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff5d5750));
     g.setFont (font (10.5f * metrics.b, fonts::Weight::semibold, 0.08f));
     g.drawText ("OUTPUT", outputBox, juce::Justification::centred, false);
-
-    // Footer: one restrained line (the path in brief); the selection and the actions.
-    g.setColour (juce::Colour (0xffe5ddd3));
-    g.fillRect (footerArea.withHeight (1));
-    const auto firstButton = footerButtons[0]->getBounds();
-    g.setColour (juce::Colour (0xff776e64));
-    g.setFont (font (11.0f * std::min (mixerScale, 1.15f)));
-    g.drawFittedText (pathStatus(), footerArea.withTrimmedTop (8).withRight (firstButton.getX() - 140), juce::Justification::centredLeft, 1, 0.9f);
-    g.setColour (juce::Colour (0xff877d72));
-    g.setFont (font (11.0f));
-    g.drawText (selected ? juce::String (fx::typeName (selected->type)) : juce::String ("Select an effect"),
-                juce::Rectangle<int> (firstButton.getX() - 134, firstButton.getY(), 126, firstButton.getHeight()), juce::Justification::centredRight, false);
 }
 
-juce::String FxRoutingView::pathStatus() const
+juce::Rectangle<int> FxRoutingView::mixerRow (int index) const
 {
-    const auto g = route();
-    const auto ids = fx::instancesOf (g);
-    int stages = 0, off = 0;
-    std::function<void (const std::vector<fx::Node>&)> walk = [&] (const std::vector<fx::Node>& chain) {
-        for (const auto& node : chain)
-        {
-            if (node.kind != fx::Node::Kind::effect)
-            {
-                ++stages;
-                for (const auto& lane : node.lanes)
-                    walk (lane);
-            }
-        }
-    };
-    walk (g.chain);
-    for (const auto& t : placed)
-        off += t.bypassed ? 1 : 0;
-    juce::String s;
-    s << static_cast<int> (ids.size()) << (ids.size() == 1 ? " effect" : " effects");
-    if (stages > 0)
-        s << juce::String::fromUTF8 (" \xc2\xb7 ") << stages << (stages == 1 ? " parallel stage" : " parallel stages");
-    if (off > 0)
-        s << juce::String::fromUTF8 (" \xc2\xb7 ") << off << " bypassed";
-    s << juce::String::fromUTF8 (" \xc2\xb7 after the voice FILTER, MORPH, DRIFT and CHORUS");
-    return s;
+    // The cards' rows share the column's whole height (no title, no empty foot): one row per
+    // card, however many the instrument has.
+    const auto area = mixerArea.withTrimmedRight (16);
+    const int count = static_cast<int> (levels.size());
+    const int y0 = area.getY() + area.getHeight() * index / count, y1 = area.getY() + area.getHeight() * (index + 1) / count;
+    return { area.getX(), y0, area.getWidth(), y1 - y0 };
 }
 
 void FxRoutingView::paintMixer (juce::Graphics& g) const
 {
     g.setColour (juce::Colour (0xffd9d0c5));
     g.fillRect (juce::Rectangle<int> (mixerArea.getRight(), mixerArea.getY(), 1, mixerArea.getHeight()));
-    auto area = mixerArea.withTrimmedRight (16);
-    auto top = area.removeFromTop (26);
-    // (V4 hierarchy: the zone titles as strong as the macros' titles, a step under ROUTING.)
-    g.setColour (juce::Colour (0xff5f574f));
-    g.setFont (font (13.5f * mixerScale, fonts::Weight::semibold, 0.07f));
-    g.drawText ("ENGINE MIXER", top.withTrimmedBottom (4), juce::Justification::centredLeft, false);
-    g.setColour (juce::Colour (0xff958a7d));
-    g.setFont (font (10.5f * mixerScale, fonts::Weight::medium, 0.08f));
-    g.drawText ("TO FX", top.withTrimmedBottom (4), juce::Justification::centredRight, false);
     const float k = mixerScale;
     const char* names[3] { "OSC 1", "OSC 2", "HYBRID" };
     const juce::String kinds[3] { textOf (host, params::osc1Model), textOf (host, params::osc2Model), textOf (host, params::hybridType) };
     const juce::String levelIds[3] { params::osc1Level, params::osc2Level, "layerB.level" };
     for (int i = 0; i < 3; ++i)
     {
-        auto row = area.removeFromTop (juce::roundToInt (static_cast<float> (mixerRowH) * k));
+        const auto row = mixerRow (i);
         if (i < 2)
         {
             g.setColour (juce::Colour (0xffe7dfd5));
@@ -1698,9 +1611,6 @@ void FxRoutingView::paintMixer (juce::Graphics& g) const
         g.setFont (font (10.5f * k, fonts::Weight::medium));
         g.drawText (textOf (host, levelIds[i]), juce::Rectangle<int> (knob.getCentreX() - 40, knob.getBottom() + 1, 80, juce::roundToInt (13.0f * k)), juce::Justification::centred, false);
     }
-    g.setColour (juce::Colour (0xff8f8579));
-    g.setFont (font (10.5f * k));
-    g.drawFittedText (juce::String::fromUTF8 ("A + B + C \xe2\x86\x92 one shared FX path"), area.withTrimmedTop (10).withHeight (15), juce::Justification::centredLeft, 1, 0.85f);
 }
 
 void FxRoutingView::paintTile (juce::Graphics& g, const Tile& t, bool ghost) const

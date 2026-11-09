@@ -309,6 +309,15 @@ juce::String idOf (fx::InstanceId id, const juce::String& name)
     return juce::String ("analog.fx.") + fx::typeKey (id.type) + "." + juce::String (id.slot + 1) + "." + name;
 }
 
+namespace
+{
+    /** `decimals` places; 0 rounds to a whole number (juce::String (v, 0) would print every digit). */
+    juce::String fixed (float v, int decimals)
+    {
+        return decimals <= 0 ? juce::String (juce::roundToInt (v)) : juce::String (v, decimals);
+    }
+}
+
 juce::String format (const Spec& spec, float v)
 {
     // (A value that rounds to zero reads as 0, never "-0.0".)
@@ -326,34 +335,34 @@ juce::String format (const Spec& spec, float v)
         return std::round (std::abs (static_cast<double> (x)) * scale) / scale < static_cast<double> (limit);
     };
     if (u == "Hz")
-        return ! under (v, 1000.0f, 0) ? juce::String (v / 1000.0f, under (v / 1000.0f, 10.0f, 2) ? 2 : 1) + " kHz" : juce::String (v, under (v, 10.0f, 2) ? 2 : 0) + " Hz";
+        return ! under (v, 1000.0f, 0) ? fixed (v / 1000.0f, under (v / 1000.0f, 10.0f, 2) ? 2 : 1) + " kHz" : fixed (v, under (v, 10.0f, 2) ? 2 : 0) + " Hz";
     if (u == "dB")
-        return (v >= 0.05f ? "+" : "") + juce::String (std::abs (v) < 0.05f ? 0.0f : v, 1) + " dB";
+        return (v >= 0.05f ? "+" : "") + fixed (std::abs (v) < 0.05f ? 0.0f : v, 1) + " dB";
     if (u == "ms")
-        return ! under (v, 1000.0f, 1) ? juce::String (v / 1000.0f, 2) + " s" : juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + " ms";
+        return ! under (v, 1000.0f, 1) ? fixed (v / 1000.0f, 2) + " s" : fixed (v, under (v, 10.0f, 1) ? 1 : 0) + " ms";
     if (u == "us")
         return juce::String (juce::roundToInt (v)) + juce::String::fromUTF8 (" \xc2\xb5s");
     if (u == "s")
-        return juce::String (v, under (v, 10.0f, 2) ? 2 : 1) + " s";
+        return fixed (v, under (v, 10.0f, 2) ? 2 : 1) + " s";
     if (u == "%")
         return juce::String (juce::roundToInt (v)) + " %";
     if (u == "x")
-        return juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + (spec.name.endsWith ("q") ? "" : (spec.name.startsWith ("compress.") ? juce::String::fromUTF8 (" \xc3\x97") : ":1"));
+        return fixed (v, under (v, 10.0f, 1) ? 1 : 0) + (spec.name.endsWith ("q") ? "" : (spec.name.startsWith ("compress.") ? juce::String::fromUTF8 (" \xc3\x97") : ":1"));
     if (u == "deg")
         return juce::String (juce::roundToInt (v)) + juce::String::fromUTF8 ("\xc2\xb0");
     if (u == "st")
-        return (v >= 0.05f ? "+" : "") + juce::String (std::abs (v) < 0.05f ? 0.0f : v, 1) + " st";
+        return (v >= 0.05f ? "+" : "") + fixed (std::abs (v) < 0.05f ? 0.0f : v, 1) + " st";
     if (u == "cents")
-        return juce::String (v, 1) + " ct";
+        return fixed (v, 1) + " ct";
     if (u == "/s")
-        return juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + " /s";
+        return fixed (v, under (v, 10.0f, 1) ? 1 : 0) + " /s";
     if (u == "bit")
-        return juce::String (v, 1) + " bit";
+        return fixed (v, 1) + " bit";
     if (u == "kHz")
-        return juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + " kHz";
+        return fixed (v, under (v, 10.0f, 1) ? 1 : 0) + " kHz";
     if (u == "#")
         return juce::String (juce::roundToInt (v));
-    return juce::String (v, 2);
+    return fixed (v, 2);
 }
 
 void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)

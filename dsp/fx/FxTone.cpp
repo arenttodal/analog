@@ -289,6 +289,7 @@ void Equalizer::processWet (float* left, float* right, int n) noexcept
             design();
         }
         float l = left[i], r = right[i];
+        spectrumIn.push (l, r);   // (telemetry: the rack's spectrum, never the sound)
         for (int s = 0; s < hpStages; ++s)
         {
             l = hpf[static_cast<std::size_t> (s)][0].process (l);
@@ -307,6 +308,7 @@ void Equalizer::processWet (float* left, float* right, int n) noexcept
         }
         left[i] = l;
         right[i] = r;
+        spectrumOut.push (l, r);
     }
 }
 
