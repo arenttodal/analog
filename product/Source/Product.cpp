@@ -395,6 +395,9 @@ const ProductInfo& productInfo()
         p.hybridHeaderPopover = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSoundPopover (host); };
         // The oscillators' card plays them as they are (STANDARD) or as grains (GRANULAR).
         p.generatorModeName = "Regular";
+        // ...shown as a GRANULAR on / off key (the grain cloud, lit in the card's colour): the
+        // oscillator plays as it is unless lit. Card C keeps its mode menu (ANDOR OSP's symbols).
+        p.generatorGranularToggle = true;
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();

@@ -7604,3 +7604,65 @@ TEST_CASE ("analog: the EQ rack is one full-width graphic - nodes drag the real 
     renderShell (p, 0.35);
     CHECK (andor::analog::analyseFxEqSpectrum (*module) > -60.0f);
 }
+
+TEST_CASE ("analog: GRANULAR on cards A and B is an on / off key (the grain cloud); card C keeps its mode menu", "[analog][editor][granular][granular-toggle]")
+{
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    int toggles = 0, menus = 0;
+    for (int layer = 0; layer < 3; ++layer)
+    {
+        auto* key = ui.engineCard (layer).modeSelector();
+        INFO ("layer " << layer);
+        REQUIRE (key != nullptr);
+        if (! p.isGeneratorLayer (layer))
+        {
+            // Card C: ANDOR OSP's mode menu (One Shot / Granular as symbols).
+            CHECK_FALSE (key->isToggle());
+            CHECK (key->iconOnly());
+            ++menus;
+            continue;
+        }
+        ++toggles;
+        REQUIRE (key->isToggle());
+        CHECK_FALSE (key->iconOnly());
+        CHECK (key->getWidth() <= 44);   // (a small key, as EQ beside it)
+        const auto id = juce::String ("layer") + osp::plugin::InstrumentHost::layerName (layer) + ".sourceMode";
+        auto* param = p.apvts().getParameter (id);
+        REQUIRE (param != nullptr);
+        CHECK (param->getValue() < 0.5f);
+        CHECK (key->getTooltip().startsWith ("Granular: off"));
+        // A click: on (one undoable gesture); again: off.
+        p.undoManager.beginNewTransaction();
+        key->mouseUp (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), key->getLocalBounds().getCentre().toFloat(), {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                        key, key, juce::Time::getCurrentTime(), key->getLocalBounds().getCentre().toFloat(), juce::Time::getCurrentTime(), 1, false));
+        CHECK (param->getValue() >= 0.5f);
+        CHECK (key->mode() == 1);
+        CHECK (key->getTooltip().startsWith ("Granular: on"));
+        CHECK (key->keyState() == osp::plugin::skin::KeyState::pressed);
+        CHECK (key->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+        CHECK (param->getValue() < 0.5f);
+    }
+    CHECK (toggles == 2);
+    CHECK (menus == 1);
+    if (const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR"))
+    {
+        const juce::File out (dir);
+        out.createDirectory();
+        auto shoot = [&] (const juce::String& name) {
+            ui.refreshNow();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile (name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        shoot ("granular-toggle-off");
+        setValue (p, "layerA.sourceMode", 1.0f);
+        shoot ("granular-toggle-a-on");
+    }
+}
