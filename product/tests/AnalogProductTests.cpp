@@ -4876,7 +4876,8 @@ TEST_CASE ("analog: MOVEMENT's header is the title, A / B and the shown lane's p
 
     // The title row: the lane selector and the shown lane's power (no LANES, no COPY / SWAP);
     // with the V2 faceplate the preset browser and its actions are in the rail too.
-    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Presets|Preset actions|Lane A|Lane B|Lane power");
+    // (and the save key beside the browser, left of its actions)
+    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Presets|Preset actions|Lane A|Lane B|Save preset|Lane power");
 
     // Choosing a lane shows it and never switches either lane on or off.
     const float a0 = p.parameterValue (onA), b0 = p.parameterValue (onB);
@@ -4900,7 +4901,7 @@ TEST_CASE ("analog: MOVEMENT's header is the title, A / B and the shown lane's p
         INFO ("mode " << mode);
         REQUIRE (! power.isEmpty());
         CHECK (power.getBottom() <= module->titleOffset() + 2);
-        CHECK (power.getX() > osp::plugin::rackSlot (*module, 5).getX());   // over the picture's column, at the right
+        CHECK (power.getX() > module->getWidth() / 2);                      // at the rail's right (over the picture's side)
         CHECK (power.getRight() <= module->getWidth() - 22 - 26);          // before the collapse key
     }
     // It switches the shown lane only.
@@ -7419,4 +7420,41 @@ TEST_CASE ("analog: V5 PATTERNED HARDWARE - one identity per device, legible, no
     view->resized();
     CHECK (view->tileKnobParameters ({ fx::Type::movement, 0 }).contains ("motion"));
     setValue (p, "movement.mode", values.at ("movement.mode"));
+}
+
+TEST_CASE ("analog: every rack with presets has a save key beside its browser, left of the actions", "[analog][rack][ui][savekey]")
+{
+    namespace fx = andor::analog::fx;
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    // MOVEMENT, ECHO, SPACE: the browser (slot 3), the save key (7), the actions (6), in a row.
+    for (const auto kind : { Kind::movement, Kind::echo, Kind::space })
+    {
+        INFO (osp::plugin::rack::name (kind));
+        ui.setRackExpanded (kind, true);
+        ui.refreshNow();
+        auto* module = ui.effectsRack().module (kind);
+        REQUIRE (module != nullptr);
+        const auto browser = osp::plugin::rackSlot (*module, 3), save = osp::plugin::rackSlot (*module, 7), actions = osp::plugin::rackSlot (*module, 6);
+        REQUIRE (! save.isEmpty());
+        CHECK (save.getX() >= browser.getRight());
+        CHECK (save.getRight() <= actions.getX());
+        CHECK (save.getX() - browser.getRight() <= 8);
+        CHECK (save.getBottom() <= module->titleOffset());
+        CHECK (std::abs (save.getCentreY() - browser.getCentreY()) <= 1);
+    }
+    // An FX rack: the same order (its browser, the save key, the overflow key).
+    andor::analog::openFxRack (ui, { fx::Type::compressor, 0 });
+    ui.refreshNow();
+    auto* rack = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));
+    REQUIRE (rack != nullptr);
+    REQUIRE (rack->saveKey() != nullptr);
+    REQUIRE (rack->railComponent() != nullptr);
+    REQUIRE (rack->overflowKey() != nullptr);
+    CHECK (rack->saveKey()->getX() >= rack->railComponent()->getRight());
+    CHECK (rack->saveKey()->getRight() <= rack->overflowKey()->getX());
+    CHECK (rack->saveKey()->getTitle() == "Save preset");
 }

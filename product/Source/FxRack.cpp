@@ -875,6 +875,24 @@ namespace
                 menu();
         }
 
+        /** Save as...: a name for these settings, then saved (the rail's save key, the menu). */
+        void promptSave()
+        {
+            auto* w = new juce::AlertWindow ("Save FX preset", "A name for these settings:", juce::MessageBoxIconType::NoIcon);
+            w->addTextEditor ("name", current() == "Default" ? juce::String ("My ") + fx::typeName (id.type) : current());
+            w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<PresetBar> (this), w] (int result) {
+                if (result == 1 && safe != nullptr)
+                    if (const auto name = w->getTextEditorContents ("name").trim(); name.isNotEmpty())
+                    {
+                        fxpresets::saveUser (safe->id.type, fxpresets::capture (safe->host, safe->id, name));
+                        presetNames[static_cast<std::size_t> (safe->id.flatIndex())] = name;
+                        safe->repaint();
+                    }
+            }), true);
+        }
+
         /** The overflow key's menu: save, delete, the folder, back to the defaults. */
         void showActions (juce::Component& target)
         {
@@ -890,21 +908,8 @@ namespace
         {
             const auto mine = fxpresets::user (id.type);
             m.addItem ("Save as...", [safe = juce::Component::SafePointer<PresetBar> (this)] {
-                if (safe == nullptr)
-                    return;
-                auto* w = new juce::AlertWindow ("Save FX preset", "A name for these settings:", juce::MessageBoxIconType::NoIcon);
-                w->addTextEditor ("name", safe->current() == "Default" ? juce::String ("My ") + fx::typeName (safe->id.type) : safe->current());
-                w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
-                w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-                w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result) {
-                    if (result == 1 && safe != nullptr)
-                        if (const auto name = w->getTextEditorContents ("name").trim(); name.isNotEmpty())
-                        {
-                            fxpresets::saveUser (safe->id.type, fxpresets::capture (safe->host, safe->id, name));
-                            presetNames[static_cast<std::size_t> (safe->id.flatIndex())] = name;
-                            safe->repaint();
-                        }
-                }), true);
+                if (safe != nullptr)
+                    safe->promptSave();
             });
             bool isUser = false;
             for (const auto& p : mine)
@@ -1023,6 +1028,7 @@ namespace
                 presets = bar.get();
                 setRailComponent (std::move (bar), 230);
                 setOverflow ([this] (juce::Component& key) { presets->showActions (key); });
+                setSaveAction ([this] { presets->promptSave(); });   // (the rail's save key, beside the browser)
             }
         }
 
