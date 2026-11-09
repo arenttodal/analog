@@ -74,6 +74,33 @@ jobs:
         with:
           name: ANDOR-Analog-macOS-test
           path: ANDOR-Analog-macOS-test.zip
+      # pluginval (Tracktion, the standard JUCE plugin validator) at its strictest level, on the
+      # VST3 and the AU as shipped. After the uploads, so a failure reports itself (the job goes
+      # red) without withholding the test build. Logs are uploaded either way.
+      - name: pluginval (VST3 and AU, strictness 10)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          pv="pluginval.app/Contents/MacOS/pluginval"
+          art="build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release"
+          mkdir -p pluginval-logs
+          status=0
+          "$pv" --strictness-level 10 --timeout-ms 600000 --output-dir pluginval-logs --validate "$art/VST3/ANDOR Analog.vst3" > pluginval-vst3.log 2>&1 || status=1
+          tail -30 pluginval-vst3.log
+          "$pv" --strictness-level 10 --timeout-ms 600000 --output-dir pluginval-logs --validate ~/Library/Audio/Plug-Ins/Components/"ANDOR Analog.component" > pluginval-au.log 2>&1 || status=1
+          tail -30 pluginval-au.log
+          exit $status
+      - name: Upload the pluginval logs
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluginval-logs
+          path: |
+            pluginval-vst3.log
+            pluginval-au.log
+            pluginval-logs/
+          if-no-files-found: ignore
       - name: Upload the visual regression report
         if: always()
         uses: actions/upload-artifact@v4
