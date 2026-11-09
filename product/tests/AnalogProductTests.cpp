@@ -7117,3 +7117,175 @@ TEST_CASE ("analog: V4 TAPE - ECHO and MOVEMENT TAPE as a reel deck on the same 
     ui.refreshNow();
     CHECK_FALSE (osp::plugin::rackTapeDeckShown (*movement));
 }
+
+TEST_CASE ("analog: V5 review matrix - the route board (six, classic, parallel, five, 869) and every rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v5]")
+{
+    namespace fx = andor::analog::fx;
+    namespace ap = andor::analog::params;
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    setValue (p, "drive", 35.0f);
+    setValue (p, "echo", 40.0f);
+    setValue (p, "space", 30.0f);
+    setValue (p, "motion", 45.0f);
+    setValue (p, ap::resonance, 40.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    int width = 1448;
+    auto save = [&] (const juce::Image& image, const juce::String& name) {
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto size = [&] {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+    };
+    auto shoot = [&] (const juce::String& name) {
+        size();
+        save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), name);
+    };
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    auto e = [] (fx::Type t, int slot = 0) { return fx::Node::effect ({ t, slot }); };
+    auto custom = [] (std::vector<fx::Node> chain) {
+        fx::Graph g;
+        g.custom = true;
+        g.chain = std::move (chain);
+        return g;
+    };
+    auto routeShot = [&] (const juce::String& name) {
+        size();
+        const auto r = editor->getLocalArea (view, view->getLocalBounds());
+        save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), name);
+        save (editor->createComponentSnapshot (r.expanded (4).getIntersection (editor->getLocalBounds()), true, width < 1000 ? 2.0f : 1.0f), name + "-board");
+    };
+    // The six of the reference (MOVEMENT, DRIVE, ECHO, FX FILTER, SPACE, STEREO): a serial
+    // chain, its own order; CLASSIC; a true parallel stage; five; the six at 869.
+    const auto six = custom ({ e (fx::Type::movement), e (fx::Type::drive), e (fx::Type::echo), e (fx::Type::filter), e (fx::Type::space), e (fx::Type::spread) });
+    REQUIRE (engine.setFxRoute (six));
+    routeShot ("v5-01-routing-six");
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    routeShot ("v5-02-routing-classic");
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
+                                          e (fx::Type::spread) })));
+    routeShot ("v5-03-routing-parallel");
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::phaser), e (fx::Type::flanger), e (fx::Type::shifter), e (fx::Type::convolution),
+                                          e (fx::Type::utility), e (fx::Type::retro) })));
+    routeShot ("v5-04-routing-eight-others");
+    REQUIRE (engine.setFxRoute (six));
+    width = 869;
+    routeShot ("v5-05-routing-six-869");
+    width = 1448;
+    // The library (its entries' identities).
+    view->showLibrary (true);
+    routeShot ("v5-06-library");
+    view->showLibrary (false);
+
+    // Every rack, full window and the rack alone.
+    ui.setSourceViewShown (false);
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    struct Rack
+    {
+        const char* name;
+        std::function<void()> open;
+    };
+    auto openFx = [&] (fx::Type t) { andor::analog::openFxRack (ui, { t, 0 }); };
+    const Rack racks[] {
+        { "movement-chorus", [&] { setValue (p, "movement.mode", 2.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-tape", [&] { setValue (p, "movement.mode", 1.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "drive", [&] { openFx (fx::Type::drive); } },
+        { "echo-tape", [&] { setValue (p, "echo.type", 0.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "echo-bbd", [&] { setValue (p, "echo.type", 1.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "fxfilter", [&] { openFx (fx::Type::filter); } },
+        { "space-hall", [&] { setValue (p, "space.engine", 0.0f); ui.setRackExpanded (Kind::space, true); } },
+        { "spread", [&] { openFx (fx::Type::spread); } },
+        { "compressor", [&] { openFx (fx::Type::compressor); } },
+        { "eq", [&] { openFx (fx::Type::eq); } },
+        { "phaser", [&] { openFx (fx::Type::phaser); } },
+        { "flanger", [&] { openFx (fx::Type::flanger); } },
+        { "shifter", [&] { openFx (fx::Type::shifter); } },
+        { "convolution", [&] { openFx (fx::Type::convolution); } },
+        { "utility", [&] { openFx (fx::Type::utility); } },
+        { "retro", [&] { openFx (fx::Type::retro); } },
+        { "voice-filter", [&] { ui.setRackExpanded (Kind::filter, true); } },
+        { "morph", [&] { ui.setRackExpanded (Kind::morph, true); } },
+    };
+    for (const int w : { 1448, 869 })
+        for (const auto& r : racks)
+        {
+            if (w == 869 && ! juce::String (r.name).startsWith ("movement-chorus") && ! juce::String (r.name).startsWith ("echo-tape") && ! juce::String (r.name).startsWith ("compressor"))
+                continue;
+            width = w;
+            r.open();
+            renderShell (p, 0.4);
+            size();
+            const auto prefix = "v5-rack-" + juce::String (w) + "-" + r.name;
+            auto& rack = ui.effectsRack();
+            const auto area = editor->getLocalArea (&rack, rack.getLocalBounds());
+            save (editor->createComponentSnapshot (area.expanded (0, 6).getIntersection (editor->getLocalBounds()), true, w < 1000 ? 2.0f : 1.0f), prefix);
+            if (w == 1448 && (juce::String (r.name) == "echo-tape" || juce::String (r.name) == "movement-chorus"))
+                save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), prefix + "-window");
+        }
+    width = 1448;
+}
+
+TEST_CASE ("analog: V5 audio baseline - representative factory presets and routes render to recorded hashes (ANALOG_AUDIO_HASHES)", "[.][v5-audio]")
+{
+    // A skin pass must be audibly null: these renders (factory presets, CLASSIC and a CUSTOM
+    // route through every effect) are hashed before the pass and compared after it.
+    namespace fx = andor::analog::fx;
+    const auto* path = std::getenv ("ANALOG_AUDIO_HASHES");
+    REQUIRE (path != nullptr);
+    const juce::File file (path);
+    auto hashOf = [] (const juce::AudioBuffer<float>& b) {
+        std::uint64_t h = 1469598103934665603ull;   // (FNV-1a over the samples' bytes)
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        {
+            const auto* bytes = reinterpret_cast<const unsigned char*> (b.getReadPointer (ch));
+            for (std::size_t i = 0; i < sizeof (float) * static_cast<std::size_t> (b.getNumSamples()); ++i)
+                h = (h ^ bytes[i]) * 1099511628211ull;
+        }
+        return juce::String::toHexString (static_cast<juce::int64> (h));
+    };
+    juce::StringArray lines;
+    {
+        ShellProcessor p;
+        const auto list = p.presetList();
+        REQUIRE (list.size() >= 5);
+        for (std::size_t i = 0; i < 5; ++i)
+        {
+            ShellProcessor q;
+            q.openPresetEntry (list[i * (list.size() - 1) / 4]);
+            lines.add (list[i * (list.size() - 1) / 4].name + " " + hashOf (renderShell (q, 1.0)));
+        }
+    }
+    {
+        ShellProcessor q;
+        setValue (q, "drive", 35.0f);
+        setValue (q, "echo", 40.0f);
+        setValue (q, "space", 30.0f);
+        setValue (q, "motion", 45.0f);
+        lines.add ("CLASSIC " + hashOf (renderShell (q, 1.0)));
+        fx::Graph g;
+        g.custom = true;
+        for (int t = 0; t < fx::typeCount; ++t)
+            g.chain.push_back (fx::Node::effect ({ static_cast<fx::Type> (t), 0 }));
+        REQUIRE (dynamic_cast<AnalogEngine&> (q.productEngine()).setFxRoute (g));
+        lines.add ("CUSTOM-ALL " + hashOf (renderShell (q, 1.0)));
+    }
+    const auto text = lines.joinIntoString ("\n");
+    if (file.existsAsFile())
+        CHECK (file.loadFileAsString().replace ("\r\n", "\n").trim() == text.trim());   // (the second run: the same sound)
+    else
+        file.replaceWithText (text, false, false, "\n");
+}
