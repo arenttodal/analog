@@ -183,7 +183,7 @@ jobs:
             deps="$("$dumpbin" -nologo -dependents "$bin" | sed -n 's/^ *\([A-Za-z0-9_.-]*\.[dD][lL][lL]\)$/\1/p')"
             echo "$deps"
             # Allowed: the OS's and the Visual C++ runtime's (installed with Windows 10/11 and by every DAW).
-            bad="$(echo "$deps" | grep -viE '^(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comdlg32|comctl32|shlwapi|ws2_32|winmm|version|imm32|dwmapi|uxtheme|setupapi|cfgmgr32|dxgi|d2d1|dwrite|d3d11|dcomp|wininet|crypt32|bcrypt|rpcrt4|shcore|uiautomationcore|propsys|mf|mfplat|mfreadwrite|winhttp|msvcp140|msvcp140_1|msvcp140_2|vcruntime140|vcruntime140_1|concrt140|api-ms-win-[a-z0-9-]*|ext-ms-win-[a-z0-9-]*|ucrtbase|ntdll|opengl32|hid|winspool\.drv)\.dll$' || true)"
+            bad="$(echo "$deps" | grep -viE '^(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comdlg32|comctl32|shlwapi|ws2_32|winmm|version|imm32|dwmapi|uxtheme|setupapi|cfgmgr32|dxgi|d2d1|dwrite|d3d11|dcomp|wininet|crypt32|bcrypt|rpcrt4|shcore|uiautomationcore|propsys|mf|mfplat|mfreadwrite|winhttp|msvcp140|msvcp140_1|msvcp140_2|vcruntime140|vcruntime140_1|concrt140|api-ms-win-[a-z0-9-]*|ext-ms-win-[a-z0-9-]*|ucrtbase|ntdll|opengl32|hid|dbghelp|winspool\.drv)\.dll$' || true)"
             if [ -n "$bad" ]; then echo "NOT a system DLL: $bad"; status=1; fi
           done
           exit $status
@@ -211,7 +211,8 @@ jobs:
           version="$(python -c "import json;print(json.load(open('product/product.json'))['version'])")"
           python packaging/common/make_notices.py --build build-plugin --osp external/osp --out THIRD_PARTY_NOTICES.txt
           art="$(cygpath -w "$PWD/build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release")"
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DAppVersion=$version" "/DArtefacts=$art" "/DNotices=$(cygpath -w "$PWD/THIRD_PARTY_NOTICES.txt")" "/DOutDir=$(cygpath -w "$PWD/installer")" packaging/windows/ANDOR-Analog.iss
+          # (MSYS_NO_PATHCONV: Git Bash would otherwise turn ISCC's /D... options into paths.)
+          MSYS_NO_PATHCONV=1 "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DAppVersion=$version" "/DArtefacts=$art" "/DNotices=$(cygpath -w "$PWD/THIRD_PARTY_NOTICES.txt")" "/DOutDir=$(cygpath -w "$PWD/installer")" packaging/windows/ANDOR-Analog.iss
           ls -l installer
       - name: Upload the Windows installer
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
