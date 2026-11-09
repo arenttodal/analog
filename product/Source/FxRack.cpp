@@ -81,7 +81,7 @@ namespace
             {
                 g.setColour (grid);
                 g.fillRect (juce::Rectangle<float> (x (hz) - 0.5f, r.getY(), 1.0f, r.getHeight()));
-                small (g, hz >= 1000.0 ? juce::String (hz / 1000.0, 0) + " kHz" : juce::String (hz, 0) + " Hz", { x (hz) - 30.0f, r.getBottom() + 2.0f, 60.0f, 12.0f },
+                small (g, hz >= 1000.0 ? juce::String (juce::roundToInt (hz / 1000.0)) + " kHz" : juce::String (juce::roundToInt (hz)) + " Hz", { x (hz) - 30.0f, r.getBottom() + 2.0f, 60.0f, 12.0f },
                        juce::Justification::centred, 0.8f);
             }
             g.setColour (axis);
@@ -646,7 +646,7 @@ namespace
             g.setColour (colour);
             g.strokePath (p, juce::PathStrokeType (1.6f));
             small (g, "0 - 500 ms", body.withY (body.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centredRight, 0.8f);
-            header (g, area, "BLUR " + juce::String (juce::roundToInt (100.0f * s.blurAmount)) + " %", juce::String (s.blurMs, 0) + " ms");
+            header (g, area, "BLUR " + juce::String (juce::roundToInt (100.0f * s.blurAmount)) + " %", juce::String (juce::roundToInt (s.blurMs)) + " ms");
             foot (g, area, "how fast each frequency's level follows (window 43 ms)");
         }
 
@@ -985,20 +985,41 @@ namespace
         return f;
     }
 
+    /** MAIN / DETAIL only where one row cannot hold every control: STEREO SPREAD (11 in BOTH),
+        COMPRESSOR (10-14 per mode), CONVOLUTION (10), UTILITY (12). FREQ SHIFTER, PHASER,
+        FLANGER and FX FILTER show everything in one view. */
+    bool pagedType (Type type)
+    {
+        switch (type)
+        {
+            case Type::spread:
+            case Type::compressor:
+            case Type::convolution:
+            case Type::utility: return true;
+            default: return false;
+        }
+    }
+
     /** The controls' share of the body: where the graph is the instrument (EQ, the filter, the
         shifter's map, an impulse), it takes more of the rack. */
     float shareFor (Type type)
     {
         switch (type)
         {
-            case Type::eq:
-            case Type::filter: return 0.52f;
+            case Type::phaser:
+            case Type::flanger: return 0.645f;   // (one view: nine controls)
+            case Type::filter: return 0.58f;     // (one view: up to eight)
+            case Type::eq: return 0.52f;
             case Type::shifter:
             case Type::convolution: return 0.55f;
             case Type::drive: return 0.5f;
             default: return 0.62f;
         }
     }
+
+    /** FX FILTER's type family: 0 the plain responses, 1 the combs (COMB DAMP acts), 2 the
+        formants (FORMANT acts). */
+    int filterFamily (int type) { return type >= 9 ? 2 : (type >= 7 ? 1 : 0); }
 
     class FxRack final : public ParameterRack
     {
@@ -1017,8 +1038,9 @@ namespace
                 setPages ({ "BAND 1", "BAND 2", "BAND 3", "BAND 4", "HP / LP" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
             else if (id.type == Type::retro)
                 setPages ({ "MAIN", "MACHINE", "MOTION", "DYNAMICS" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
-            else
+            else if (pagedType (id.type))
                 setPages ({ "MAIN", "DETAIL" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
+            // (FREQ SHIFTER, PHASER, FLANGER, FX FILTER: everything in one row - no pages)
             setGraph (std::make_unique<FxGraph> (h, id));
             // The hardware faceplate: the preset browser and the overflow key in the rail.
             setFaceplate (faceplateFor (id.type));
@@ -1050,6 +1072,8 @@ namespace
                 k += 10 * (value (host, id, "sync") >= 0.5f ? 1 : 0);
             if (id.type == Type::retro)
                 k += 100 * (juce::roundToInt (value (host, id, "digital.era")) + 1);   // (DIGITAL's 80s / 90s / CODEC: other cells)
+            if (id.type == Type::filter)
+                k += 1000 * filterFamily (juce::roundToInt (value (host, id, "type")));   // (COMB DAMP / FORMANT where they act)
             return k;
         }
 
@@ -1190,22 +1214,22 @@ namespace
                     }
                     break;
                 case Type::filter:
-                    if (page == 0)
-                    {
-                        listCell (pid (id, "type"), "TYPE", "The filter's response");
-                        k ("freq", "FREQ");
-                        k ("reso", "RESO");
-                        k ("drive", "DRIVE");
-                        k ("mix", "MIX");
-                        k ("output", "OUTPUT");
-                    }
-                    else
-                    {
-                        k ("pan", "PAN");
+                {
+                    // One view; COMB DAMP and FORMANT only with the types they act on.
+                    const int family = filterFamily (juce::roundToInt (value (host, id, "type")));
+                    listCell (pid (id, "type"), "TYPE", "The filter's response");
+                    k ("freq", "FREQ");
+                    k ("reso", "RESO");
+                    if (family == 1)
                         k ("combDamp", "COMB DAMP");
+                    if (family == 2)
                         k ("formantShift", "FORMANT");
-                    }
+                    k ("drive", "DRIVE");
+                    k ("pan", "PAN");
+                    k ("mix", "MIX");
+                    k ("output", "OUTPUT");
                     break;
+                }
                 case Type::phaser:
                 case Type::flanger:
                 {
@@ -1215,54 +1239,47 @@ namespace
                     else
                         mode ({ { "CLASSIC", "Classic", 0 }, { "THRU-ZERO", "Through-zero", 1 } }, 200, "THROUGH-ZERO: the sweep passes the dry (6 ms latency)");
                     const bool sync = value (host, id, "sync") >= 0.5f;
-                    if (page == 0)
+                    // One view (nine controls at most).
+                    if (sync)
+                        stepped ("division", "RATE");
+                    else
+                        k ("rate", "RATE");
+                    switchCell (pid (id, "sync"), "TIMING", { { "FREE", "Free", 0 }, { "SYNC", "Sync", 1 } }, "Its own rate or the host's tempo");
+                    k ("depth", "DEPTH");
+                    if (phaser)
                     {
-                        if (sync)
-                            stepped ("division", "RATE");
-                        else
-                            k ("rate", "RATE");
-                        switchCell (pid (id, "sync"), "TIMING", { { "FREE", "Free", 0 }, { "SYNC", "Sync", 1 } }, "Its own rate or the host's tempo");
-                        k ("depth", "DEPTH");
-                        if (phaser)
-                        {
-                            k ("center", "CENTER");
-                            k ("feedback", "FEEDBACK");
-                            stepped ("stages", "STAGES");
-                        }
-                        else
-                        {
-                            k ("delay", "DELAY");
-                            k ("feedback", "FEEDBACK");
-                        }
-                        k ("mix", "MIX");
+                        k ("center", "CENTER");
+                        k ("feedback", "FEEDBACK");
+                        stepped ("stages", "STAGES");
                     }
                     else
                     {
-                        k ("stereo", "STEREO");
-                        if (! phaser)
-                            k ("width", "WIDTH");
-                        k ("output", "OUTPUT");
+                        k ("delay", "DELAY");
+                        k ("feedback", "FEEDBACK");
+                        k ("width", "WIDTH");
                     }
+                    k ("stereo", "STEREO");
+                    k ("mix", "MIX");
+                    k ("output", "OUTPUT");
                     break;
                 }
                 case Type::shifter:
                     mode ({ { "SHIFT", "Shift", 0 }, { "BLUR", "Blur", 1 } }, 160, "SHIFT: every partial by the same Hz; BLUR: a spectral smear");
-                    if (page == 0 && m == 0)
+                    // One view: the mode's controls, then OUTPUT (no DETAIL page).
+                    if (m == 0)
                     {
                         k ("hz", "SHIFT");
                         switchCell (pid (id, "direction"), "DIR", { { "UP", "Up", 0 }, { "DOWN", "Down", 1 } }, "Upwards or downwards");
                         k ("width", "WIDTH");
                         k ("feedback", "FEEDBACK");
-                        k ("mix", "MIX");
                     }
-                    else if (page == 0)
+                    else
                     {
                         k ("blurAmount", "AMOUNT");
                         k ("blurTime", "TIME");
-                        k ("mix", "MIX");
                     }
-                    else
-                        k ("output", "OUTPUT");
+                    k ("mix", "MIX");
+                    k ("output", "OUTPUT");
                     break;
                 case Type::convolution:
                     mode ({ { "REALISTIC", "Realistic", 0 }, { "CREATIVE", "Creative", 1 } }, 200, "REALISTIC: the impulse as it is; CREATIVE: reverse and size freely");
