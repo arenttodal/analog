@@ -1,4 +1,5 @@
 #include "FxRack.h"
+#include "FxIdentity.h"
 #include "AnalogEngine.h"
 #include "FxParameters.h"
 #include "FxPresets.h"
@@ -201,7 +202,7 @@ namespace
         void paintGraph (juce::Graphics& g, juce::Rectangle<float> area) override
         {
             reader.read (settings);
-            const auto colour = faceplateFor (id.type).glow;   // (the faceplate's glow on its glass)
+            const auto colour = visualIdentityFor (id.type).motifInk.brighter (0.15f);   // (V5: the device ink on its glass)
             plot.r = area.reduced (14.0f, 0.0f).withTrimmedTop (24.0f).withTrimmedBottom (32.0f);
             switch (id.type)
             {
@@ -971,105 +972,11 @@ namespace
         tuned to the approved V2 renders; interface only. */
     ParameterRack::Faceplate faceplateFor (Type type)
     {
-        ParameterRack::Faceplate f;
-        const auto a = fxAccent (type);
-        f.enamel = a.darker (0.55f);
-        f.glow = a.brighter (0.7f);
-        f.stripes = { a, a.brighter (0.55f), juce::Colour (0xffd9a14a) };
-        switch (type)
-        {
-            case Type::drive:
-                f.enamel = juce::Colour (0xff874630);
-                f.stripes = { juce::Colour (0xffae6847), juce::Colour (0xffe09a52), juce::Colour (0xffeacf9c) };
-                f.glow = juce::Colour (0xffffad6b);
-                f.glassTop = juce::Colour (0xff2a1f19);
-                f.glassBottom = juce::Colour (0xff1f1712);
-                f.subtitle = "ANALOG SATURATION / HARMONICS";
-                break;
-            case Type::compressor:
-                f.enamel = juce::Colour (0xff4f5b47);
-                f.stripes = { juce::Colour (0xffd8962f), juce::Colour (0xffe6c27c), juce::Colour (0xff69785d) };
-                f.glow = juce::Colour (0xfff2a73c);
-                f.glassTop = juce::Colour (0xff1f2a22);
-                f.glassBottom = juce::Colour (0xff161f19);
-                f.subtitle = "DYNAMICS PROCESSOR";
-                break;
-            case Type::spread:
-                f.enamel = juce::Colour (0xff2e6c72);
-                f.stripes = { juce::Colour (0xff3f8f97), juce::Colour (0xff8cc5c9), juce::Colour (0xffd3e3df) };
-                f.glow = juce::Colour (0xff7fe1e9);
-                f.glassTop = juce::Colour (0xff15292c);
-                f.glassBottom = juce::Colour (0xff0f1f21);
-                f.subtitle = "STEREO IMAGING / WIDENING";
-                break;
-            case Type::eq:
-                f.enamel = juce::Colour (0xff6e5c33);
-                f.stripes = { juce::Colour (0xffb8963f), juce::Colour (0xffe1c785), juce::Colour (0xff7f8a6a) };
-                f.glow = juce::Colour (0xfff3c768);
-                f.glassTop = juce::Colour (0xff24221b);
-                f.glassBottom = juce::Colour (0xff1a1914);
-                f.subtitle = "PARAMETRIC EQUALIZER";
-                break;
-            case Type::filter:
-                f.enamel = juce::Colour (0xff3d5a4a);
-                f.stripes = { juce::Colour (0xff5d8a73), juce::Colour (0xffa9c7b2), juce::Colour (0xffd9a14a) };
-                f.glow = juce::Colour (0xff9fe0b8);
-                f.glassTop = juce::Colour (0xff18261f);
-                f.glassBottom = juce::Colour (0xff111c16);
-                f.subtitle = "FILTER PROCESSOR";
-                break;
-            case Type::phaser:
-                f.enamel = juce::Colour (0xff474b72);
-                f.stripes = { juce::Colour (0xff6f74a3), juce::Colour (0xffadb0d3), juce::Colour (0xffd3a25a) };
-                f.glow = juce::Colour (0xffb7bcff);
-                f.glassTop = juce::Colour (0xff1b1d2b);
-                f.glassBottom = juce::Colour (0xff14151f);
-                f.subtitle = "ALL-PASS PHASE MACHINE";
-                break;
-            case Type::flanger:
-                f.enamel = juce::Colour (0xff3f5c69);
-                f.stripes = { juce::Colour (0xff6f94a3), juce::Colour (0xffadc7d0), juce::Colour (0xffcfd7d8) };
-                f.glow = juce::Colour (0xffa9dcef);
-                f.glassTop = juce::Colour (0xff182329);
-                f.glassBottom = juce::Colour (0xff11191d);
-                f.subtitle = "COMB MODULATOR";
-                break;
-            case Type::shifter:
-                f.enamel = juce::Colour (0xff514c6b);
-                f.stripes = { juce::Colour (0xff807b9a), juce::Colour (0xffb7b0d0), juce::Colour (0xffd6a65d) };
-                f.glow = juce::Colour (0xffd2c4ff);
-                f.glassTop = juce::Colour (0xff1e1c27);
-                f.glassBottom = juce::Colour (0xff16141d);
-                f.subtitle = "FREQUENCY OFFSET / BLUR";
-                break;
-            case Type::convolution:
-                f.enamel = juce::Colour (0xff4f4936);
-                f.stripes = { juce::Colour (0xff847b61), juce::Colour (0xffc2b693), juce::Colour (0xff4d6a5a) };
-                f.glow = juce::Colour (0xffeed59b);
-                f.glassTop = juce::Colour (0xff22201a);
-                f.glassBottom = juce::Colour (0xff191813);
-                f.subtitle = "IMPULSE CABINET";
-                break;
-            case Type::utility:
-                f.enamel = juce::Colour (0xff4c4d4b);
-                f.stripes = { juce::Colour (0xff8c8d8a), juce::Colour (0xffc4c4c0), juce::Colour (0xffdedcd6) };
-                f.glow = juce::Colour (0xffe6efe9);
-                f.glassTop = juce::Colour (0xff1d2120);
-                f.glassBottom = juce::Colour (0xff161918);
-                f.subtitle = "METER BRIDGE";
-                break;
-            case Type::retro:
-                // Rust terracotta enamel, ochre / seafoam stripes, an amber glow on warm glass.
-                f.enamel = juce::Colour (0xff8e3f2a);
-                f.stripes = { juce::Colour (0xffc0643f), juce::Colour (0xffd9a14a), juce::Colour (0xff6fa79a) };
-                f.glow = juce::Colour (0xffffa45c);
-                f.glassTop = juce::Colour (0xff2b1f18);
-                f.glassBottom = juce::Colour (0xff1f1612);
-                f.subtitle = "TAPE / VINYL / DIGITAL CHARACTER";
-                break;
-            default:
-                break;
-        }
+        // V5 PATTERNED HARDWARE: the device's identity (docs/VISUAL_IDENTITY_INDEX.md) - the same
+        // enamel and motif as its routing tile; DRIVE keeps its V2 subtitle.
+        auto f = faceplateFromIdentity (visualIdentityFor (type));
+        if (type == Type::drive)
+            f.subtitle = "ANALOG SATURATION / HARMONICS";
         return f;
     }
 
@@ -1091,7 +998,7 @@ namespace
     class FxRack final : public ParameterRack
     {
     public:
-        explicit FxRack (osp::plugin::InstrumentHost& h) : ParameterRack (h, "FX", fxAccent (shownInstance.type), shareFor (shownInstance.type)), id (shownInstance)
+        explicit FxRack (osp::plugin::InstrumentHost& h) : ParameterRack (h, "FX", visualIdentityFor (shownInstance.type).motifInk, shareFor (shownInstance.type)), id (shownInstance)
         {
             juce::String title = fx::typeName (id.type);
             if (fx::capacity[static_cast<std::size_t> (id.type)] > 1)
@@ -1573,23 +1480,30 @@ namespace
             g.fillRoundedRectangle (r.reduced (0.5f), 8.0f);
             g.setColour (juce::Colour (0xffd2c7b9));
             g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
-            const auto accent = fxAccent (id.type);
-            auto icon = fxIcon (id.type);
-            icon.applyTransform (icon.getTransformToScaleToFit (juce::Rectangle<float> (static_cast<float> (pad), 9.0f, 15.0f, 15.0f), true));
-            g.setColour (accent);
-            g.strokePath (icon, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            g.setColour (juce::Colour (0xff313532));
-            g.setFont (fonts::make (11.0f, fonts::Weight::semibold, 0.075f));
-            g.drawText (title(), juce::Rectangle<int> (pad + 22, 6, getWidth() - 140, 20), juce::Justification::centredLeft, true);
+            // V5: the title band is the device's enamel and motif (its tile and its rack).
+            const auto& identity = visualIdentityFor (id.type);
+            {
+                juce::Graphics::ScopedSaveState clip (g);
+                juce::Path rounded;
+                rounded.addRoundedRectangle (r.reduced (0.5f), 8.0f);
+                g.reduceClipRegion (rounded);
+                const auto band = juce::Rectangle<float> (0.0f, 0.0f, r.getWidth(), static_cast<float> (titleH));
+                g.setColour (identity.enamel);
+                g.fillRect (band);
+                paintFxMotif (g, identity.motif, band.withWidth (70.0f).reduced (2.0f, 3.0f), identity, MotifScale::mini);
+                g.setColour (identity.edge.withAlpha (0.6f));
+                g.fillRect (band.withTop (band.getBottom() - 1.0f));
+            }
+            g.setColour (identity.text);
+            g.setFont (fonts::make (12.5f, fonts::Weight::bold, 0.07f));
+            g.drawText (title(), juce::Rectangle<int> (pad + 52, 5, getWidth() - 170, 20), juce::Justification::centredLeft, true);
             g.setFont (fonts::make (8.5f, fonts::Weight::semibold, 0.08f));
-            g.setColour (hoverExpand ? juce::Colour (0xff313532) : juce::Colour (0xff716d65));
+            g.setColour (identity.text.withAlpha (hoverExpand ? 1.0f : 0.78f));
             g.drawRoundedRectangle (expandArea().toFloat().reduced (0.5f), 4.0f, 1.0f);
             g.drawText ("EXPAND", expandArea(), juce::Justification::centred, false);
-            g.setColour (juce::Colour (0xff716d65));
+            g.setColour (identity.text.withAlpha (0.85f));
             g.setFont (fonts::make (13.0f));
             g.drawText (juce::String::fromUTF8 ("\xc3\x97"), closeArea(), juce::Justification::centred, false);
-            g.setColour (juce::Colour (0xffded5c9));
-            g.fillRect (pad, titleH, getWidth() - 2 * pad, 1);
         }
 
         void resized() override
@@ -1708,7 +1622,7 @@ namespace
                 if (host.apvts().getParameter (c.id) == nullptr)
                     continue;
                 auto k = std::make_unique<MiniKnob> (host.apvts(), c.id, c.caption, textOf (host, c.id));
-                k->setArcColour (fxAccent (id.type));
+                k->setArcColour (visualIdentityFor (id.type).enamel);
                 k->setRackMetrics (true);
                 addAndMakeVisible (*k);
                 knobs.push_back (std::move (k));

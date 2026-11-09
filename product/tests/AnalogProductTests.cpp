@@ -16,6 +16,7 @@
 #include "FxPresets.h"
 #include "FxRack.h"
 #include "FxRouting.h"
+#include "FxIdentity.h"
 #include "fx/Effects.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
@@ -31,6 +32,7 @@
 #include "engine/RhythmicShaper.h"
 #include "io/AudioFileIO.h"
 
+#include <set>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -726,7 +728,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         setValue (q, "layerB.start", 50.0f);
         setValue (q, "layerB.tune", 12.0f);   // (twice as fast: the held notes reach the loop)
     };
-    int checkedBound = 0, checkedUnbound = 0;
+    int checkedBound = 0, checkedUnbound = 0, checkedFx = 0;
     for (auto* base : p.getParameters())
     {
         auto* param = dynamic_cast<juce::RangedAudioParameter*> (base);
@@ -758,7 +760,15 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             other = 0.0f;   // 1 voice (the chord is three notes)
         param->setValueNotifyingHost (other);
         const auto changed = renderShell (p, 0.6);
-        if (isBound (id))
+        if (id.startsWith ("analog.fx."))
+        {
+            // The routed effects' (V3: declared read so their racks stay live): heard only once
+            // their effect is in a CUSTOM route ([fx] tests); in CLASSIC they change nothing.
+            CHECK (isBound (id));
+            CHECK (identical (reference, changed));
+            ++checkedFx;
+        }
+        else if (isBound (id))
         {
             const double d = differenceRms (reference, changed);
             UNSCOPED_INFO (id << ": " << 20.0 * std::log10 (std::max (d, 1.0e-12)) << " dB");
@@ -775,7 +785,8 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
     // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), and
     // the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
-    CHECK (checkedBound == bound.size() - 5 + 7 + 10 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 5: "analog.arp.*" is a pattern too)
+    CHECK (checkedBound == bound.size() - 6 + 7 + 10 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 6: "analog.arp.*" and "analog.fx.*" are patterns too)
+    CHECK (checkedFx > 300);   // (every routed effect's slot parameters: declared, silent in CLASSIC)
     CHECK (checkedUnbound > 100);
 }
 
@@ -4191,6 +4202,7 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
     editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
     std::map<Kind, std::array<juce::Rectangle<int>, 4>> slots;
     std::map<Kind, float> heights;
+    setValue (p, "echo.type", 1.0f);   // (BBD: the approved layout; TAPE's deck is V4's own, [v4])
     for (const auto kind : { Kind::movement, Kind::echo, Kind::space })
     {
         ui.setRackExpanded (kind, true);
@@ -4267,6 +4279,19 @@ TEST_CASE ("analog: the approved rack layout - each module's graph column fixed,
         auto* module = ui.effectsRack().module (c.kind);
         REQUIRE (module != nullptr);
         CHECK (osp::plugin::rackDensity (*module) == c.dense);
+        if (osp::plugin::rackTapeDeckShown (*module))
+        {
+            // V4's TAPE deck (ECHO TAPE, MOVEMENT TAPE; its own layout, [v4]): the first control
+            // on the same origin, the dense slots, the deck between the knobs and the display.
+            const auto cells = osp::plugin::rackCellBounds (*module);
+            REQUIRE (! cells.empty());
+            CHECK (cells.front().getX() == osp::plugin::rack::hardware::bleedMeasures.contentLeft());
+            for (std::size_t i = 1; i < cells.size(); ++i)
+                CHECK (cells[i].getX() - cells[i - 1].getRight() == 5);
+            CHECK (cells.back().getRight() < osp::plugin::rackTapeDeckBounds (*module).getX());
+            CHECK (osp::plugin::rackTapeDeckBounds (*module).getRight() < osp::plugin::rackSlot (*module, 5).getX());
+            continue;
+        }
         // The graph: the module's column, whatever its mode; its right edge every module's.
         const auto picture = osp::plugin::rackSlot (*module, 5);
         if (pictureOf.count (c.kind) == 0)
@@ -4275,12 +4300,13 @@ TEST_CASE ("analog: the approved rack layout - each module's graph column fixed,
         if (! pictureRight)
             pictureRight = picture.getRight();
         CHECK (picture.getRight() == *pictureRight);
-        CHECK (picture.getHeight() == 156);   // (V2 faceplate: 160 less its bezel's room)
+        // (V3 full-bleed face: the graph fills the body to the face's 16 px bottom margin.)
+        CHECK (picture.getHeight() == module->getHeight() - module->titleOffset() - 7 - 16);
         // The cells: left-aligned from one origin on the approved slot widths (after the
         // faceplate's stripes), all before the divider; knobs never shrink (59 px in every family).
         const auto cells = osp::plugin::rackCellBounds (*module);
         REQUIRE (! cells.empty());
-        CHECK (cells.front().getX() == osp::plugin::rack::hardware::contentLeft);
+        CHECK (cells.front().getX() == osp::plugin::rack::hardware::bleedMeasures.contentLeft());
         CHECK (cells.back().getRight() + 17 < picture.getX() - 18);
         for (std::size_t i = 1; i < cells.size(); ++i)
             CHECK (cells[i].getX() - cells[i - 1].getRight() == (c.dense ? 5 : 7));
@@ -4345,6 +4371,8 @@ TEST_CASE ("analog: the racks' switches are their parameters - TIMING, STEREO, F
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
     // ECHO: TIMING (FREE up, SYNC down), STEREO (MONO / PING / WIDE), both following the host.
+    // (BBD: vertical switches; TAPE's deck has them as segmented keys, [v4].)
+    setValue (p, "echo.type", 1.0f);
     ui.setRackExpanded (Kind::echo, true);
     ui.refreshNow();
     auto* echo = ui.effectsRack().module (Kind::echo);
@@ -4506,7 +4534,8 @@ TEST_CASE ("analog: every rack's first control sits at one X, in every mode; the
                 reference = cell;
             CHECK (cell.getX() == reference->getX());           // left-aligned on one grid
             CHECK (cell.getY() == reference->getY());
-            CHECK (cell.getWidth() == (osp::plugin::rackDensity (*module) == 1 ? 89 : 104));   // a knob's slot in its family
+            // A knob's slot in its family (V4's TAPE deck: the dense slots, its knobs left of the reels).
+            CHECK (cell.getWidth() == (osp::plugin::rackDensity (*module) == 1 || osp::plugin::rackTapeDeckShown (*module) ? 89 : 104));
         }
     };
     check (Kind::space, "space.engine", 5);
@@ -6414,4 +6443,980 @@ TEST_CASE ("analog: screenshots of the FX racks and quick settings (ANALOG_SCREE
                 width = 1448;
             }
     }
+}
+
+TEST_CASE ("analog: V3 review - every rack family in its modes, full window and rack, at 869, 1448 and 1810 px (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v3]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rack::ParameterRack;
+    namespace ap = andor::analog::params;
+    namespace fx = andor::analog::fx;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    // The new effects inserted (a CUSTOM route) so their racks open as they do for a musician.
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    for (const auto t : { fx::Type::compressor, fx::Type::spread, fx::Type::phaser, fx::Type::retro })
+        view->insertNew (t);
+    ui.setSourceViewShown (false);
+    setValue (p, "echo", 40.0f);
+    setValue (p, "space", 35.0f);
+    setValue (p, ap::resonance, 40.0f);
+    auto openFx = [&] (fx::Type t) { view->openEditor ({ t, 0 }); };
+    auto openFilter = [&] {
+        ui.setRackExpanded (Kind::filter, true);
+        if (auto* f = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter)))
+        {
+            f->showPage (0);
+            f->showSubPage (0);
+        }
+    };
+    struct View
+    {
+        const char* name;
+        std::function<void()> set;
+    };
+    const View views[] {
+        { "filter-ladder", [&] { setValue (p, ap::filterModel, 0.0f); openFilter(); } },
+        { "filter-ota", [&] { setValue (p, ap::filterModel, 1.0f); openFilter(); } },
+        { "movement-drift", [&] { setValue (p, "movement.mode", 0.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-tape", [&] { setValue (p, "movement.mode", 1.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-chorus", [&] { setValue (p, "movement.mode", 2.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-pulse", [&] { setValue (p, "movement.mode", 3.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "echo-tape", [&] { setValue (p, "echo.type", 0.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "echo-bbd", [&] { setValue (p, "echo.type", 1.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "space-hall", [&] { setValue (p, "space.engine", 0.0f); ui.setRackExpanded (Kind::space, true); } },
+        { "space-abyss", [&] { setValue (p, "space.engine", 1.0f); ui.setRackExpanded (Kind::space, true); } },
+        { "comp-clean", [&] { setValue (p, "analog.fx.comp.1.mode", 0.0f); openFx (fx::Type::compressor); } },
+        { "comp-fet", [&] { setValue (p, "analog.fx.comp.1.mode", 1.0f); openFx (fx::Type::compressor); } },
+        { "comp-ott", [&] { setValue (p, "analog.fx.comp.1.mode", 2.0f); openFx (fx::Type::compressor); } },
+        { "retro", [&] { openFx (fx::Type::retro); } },
+        { "spread", [&] { openFx (fx::Type::spread); } },
+        { "phaser", [&] { openFx (fx::Type::phaser); } },
+    };
+    for (const int width : { 1448, 869, 1810 })
+        for (const auto& v : views)
+        {
+            v.set();
+            renderShell (p, 0.4);   // (the graphs show what was heard)
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            ui.refreshNow();
+            ui.effectsRack().settle();
+            auto save = [&] (const juce::Image& image, const juce::String& name) {
+                const auto file = out.getChildFile (name + ".png");
+                file.deleteFile();
+                juce::FileOutputStream stream (file);
+                juce::PNGImageFormat().writeImageToStream (image, stream);
+            };
+            const auto prefix = juce::String (width) + "-" + v.name;
+            auto& rack = ui.effectsRack();
+            const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+            save (editor->createComponentSnapshot (r.expanded (0, 6).getIntersection (editor->getLocalBounds()), true, 1.0f), prefix + "-rack");
+            if (width == 1448 || juce::String (v.name).startsWith ("space") || juce::String (v.name).startsWith ("filter"))
+                save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), prefix + "-window");
+        }
+}
+
+TEST_CASE ("analog: FILTER's live graph shows the cutoff the engine's voice uses - ENV, KEYS, velocity, release, the most recent voice, PREVIEW when silent", "[analog][rack][filterlive]")
+{
+    using osp::plugin::rack::Kind;
+    namespace ap = andor::analog::params;
+    using andor::analog::filtergraph::LiveView;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setRackExpanded (Kind::filter, true);
+    auto* module = ui.effectsRack().module (Kind::filter);
+    REQUIRE (module != nullptr);
+    juce::Component* graph = nullptr;
+    LiveView v;
+    for (auto* c : module->getChildren())
+        if (andor::analog::filtergraph::liveView (c, v))
+            graph = c;
+    REQUIRE (graph != nullptr);
+    setValue (p, ap::analogAmount, 0.0f);   // (no slot tolerance: the base is the mapping's)
+    setValue (p, ap::envDepth, 24.0f);
+    setValue (p, ap::keyTrack, 0.0f);
+    setValue (p, ap::velocityToFilter, 0.0f);
+    setValue (p, ap::envLink, 0.0f);
+    setValue (p, ap::filterAttack, 0.008f);
+    setValue (p, ap::filterDecay, 0.5f);
+    setValue (p, ap::filterSustain, 20.0f);
+    setValue (p, ap::filterRelease, 0.35f);
+    p.prepareToPlay (rate, block);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);   // (the graph reads the settings once)
+    auto run = [&p] (double seconds, std::vector<juce::MidiMessage> first = {}) {
+        juce::AudioBuffer<float> buffer (2, block);
+        const int blocks = std::max (1, static_cast<int> (seconds * rate / block));
+        for (int b = 0; b < blocks; ++b)
+        {
+            juce::MidiBuffer midi;
+            if (b == 0)
+                for (auto& m : first)
+                    midi.addEvent (m, 0);
+            p.processBlock (buffer, midi);
+        }
+    };
+    // The engine's own figures for the voice the graph follows (the truth to compare against).
+    auto truth = [&engine] (int note, andor::analog::Synth::FilterTap::Snapshot& out) {
+        andor::analog::Synth::FilterTap::Snapshot s;
+        for (int slot = 0; slot < AnalogEngine::voiceSlots; ++slot)
+            if (engine.filterTap (slot)->read (s) && s.active && s.note == note)
+            {
+                out = s;
+                return true;
+            }
+        return false;
+    };
+    andor::analog::Synth::FilterTap::Snapshot t;
+    REQUIRE (andor::analog::filtergraph::liveView (graph, v, 0.0));
+    CHECK (v.mode == 0);   // IDLE: nothing playing, nothing edited
+
+    // A C4 at velocity 100: LIVE, its base and cutoff exactly the engine's; ENV +24: the reach
+    // two octaves (x4) above the base.
+    run (0.3, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (60, t));
+    CHECK (v.mode == 1);
+    CHECK (v.note == 60);
+    CHECK (v.velocity == 100);
+    CHECK (v.baseNote == Approx (t.baseNote).margin (1.0e-4));
+    CHECK (v.nowNote == Approx (std::min<double> (t.cutoffNote, engine.cutoffNoteHigh())).margin (1.0e-4));
+    CHECK (v.reachNote - v.baseNote == Approx (24.0).margin (1.0e-3));
+    CHECK (std::pow (2.0, (v.reachNote - v.baseNote) / 12.0) == Approx (4.0).margin (1.0e-3));
+    CHECK (v.peakNote > v.baseNote + 23.0);   // (an 8 ms attack: the envelope reached its top)
+    CHECK ((v.stage == 2 || v.stage == 3));    // DECAY or SUSTAIN
+    // Held: the cutoff settles at the sustain (20 % of the travel).
+    run (1.2);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.nowNote - v.baseNote == Approx (0.2 * 24.0).margin (0.25));
+    const double sustained = v.nowNote;
+    // Released: RELEASE, falling towards the base; the voice ends, the graph rests.
+    run (0.1, { juce::MidiMessage::noteOff (1, 60) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.stage == 4);
+    CHECK (v.nowNote < sustained);
+    run (3.0);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 0);
+
+    // Negative ENV sweeps down: the reach an octave below the base.
+    setValue (p, ap::envDepth, -12.0f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);   // (an edit while silent: a PREVIEW starts)
+    CHECK (v.mode == 2);
+    run (0.2, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 1);   // (a real note replaces the preview at once)
+    CHECK (v.reachNote - v.baseNote == Approx (-12.0).margin (1.0e-3));
+    CHECK (v.nowNote < v.baseNote);
+    run (0.05, { juce::MidiMessage::noteOff (1, 60) });
+    run (3.0);
+
+    // KEYS 100 %: C3 and C5 two octaves apart in the base, as the engine has them.
+    setValue (p, ap::envDepth, 24.0f);
+    setValue (p, ap::keyTrack, 100.0f);
+    setValue (p, ap::lfoCutoff, 0.0f);   // (KEYS alone moves the base: no LFO on the cutoff)
+    run (0.2, { juce::MidiMessage::noteOn (1, 48, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (48, t));
+    CHECK (v.note == 48);
+    CHECK (v.baseNote == Approx (t.baseNote).margin (1.0e-4));
+    const double c3 = v.baseNote;
+    // The most recent note is followed: C5 now (C3 still sounds); its base as the engine has it,
+    // about two octaves up (KEYS 100 %; MOVEMENT's drift wanders each voice a little).
+    run (0.2, { juce::MidiMessage::noteOn (1, 72, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (72, t));
+    CHECK (v.note == 72);
+    CHECK (v.baseNote == Approx (t.baseNote).margin (1.0e-4));
+    CHECK (v.baseNote - c3 == Approx (24.0).margin (3.0));
+    // C5 released and over: back to the one still held.
+    run (0.05, { juce::MidiMessage::noteOff (1, 72) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.note == 72);   // (its release is still followed)
+    run (3.0);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.note == 48);
+    run (0.05, { juce::MidiMessage::noteOff (1, 48) });
+    run (3.0);
+
+    // VEL TO FILTER 100 %: velocity 64 scales the depth to 64 / 127 of ENV, as the engine does.
+    setValue (p, ap::keyTrack, 0.0f);
+    setValue (p, ap::velocityToFilter, 100.0f);
+    run (0.2, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (64)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (60, t));
+    CHECK (v.reachNote - v.baseNote == Approx (24.0 * 64.0 / 127.0).margin (1.0e-3));
+    CHECK (v.reachNote - v.baseNote == Approx (t.envDepth).margin (1.0e-4));
+    run (0.05, { juce::MidiMessage::noteOff (1, 60) });
+    run (3.0);
+    setValue (p, ap::velocityToFilter, 0.0f);
+
+    // PREVIEW (nothing playing): an edit runs the notional C4 through the same envelope -
+    // ATTACK, DECAY, SUSTAIN, RELEASE - and ends at rest. Silent: nothing was rendered.
+    setValue (p, ap::filterAttack, 0.2f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 2);
+    andor::analog::filtergraph::liveView (graph, v, 0.1);
+    CHECK (v.stage == 1);   // ATTACK (0.2 s)
+    CHECK (v.nowNote > v.baseNote);
+    CHECK (v.nowNote < v.reachNote);
+    andor::analog::filtergraph::liveView (graph, v, 0.15);
+    CHECK ((v.stage == 2 || v.stage == 3));
+    for (int i = 0; i < 40 && v.mode == 2; ++i)
+        andor::analog::filtergraph::liveView (graph, v, 0.1);
+    CHECK (v.mode == 0);
+    CHECK (v.nowNote == Approx (v.baseNote));
+    // ENV LINK: the AMP envelope's times drive it - a 2 s AMP attack is still rising after 0.5 s.
+    setValue (p, ap::envLink, 1.0f);
+    setValue (p, "attack", 2000.0f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 2);
+    andor::analog::filtergraph::liveView (graph, v, 0.5);
+    CHECK (v.stage == 1);
+    // ENV 0: the cutoff stays put while the envelope runs.
+    setValue (p, ap::envLink, 0.0f);
+    setValue (p, ap::envDepth, 0.0f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    andor::analog::filtergraph::liveView (graph, v, 0.1);
+    CHECK (v.nowNote == Approx (v.baseNote));
+}
+
+TEST_CASE ("analog: FILTER's live graph as frames - a played note's sweep, then a silent PREVIEW (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-filter-sweep]")
+{
+    using osp::plugin::rack::Kind;
+    namespace ap = andor::analog::params;
+    using andor::analog::filtergraph::LiveView;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setRackExpanded (Kind::filter, true);
+    setValue (p, ap::envDepth, 30.0f);
+    setValue (p, ap::resonance, 55.0f);
+    setValue (p, ap::tone, 35.0f);
+    setValue (p, ap::filterAttack, 0.35f);
+    setValue (p, ap::filterDecay, 0.8f);
+    setValue (p, ap::filterSustain, 35.0f);
+    setValue (p, ap::filterRelease, 0.9f);
+    editor->setSize (1448, juce::roundToInt (1448.0f * ui.instrumentHeight() / 1448.0f));
+    ui.refreshNow();
+    auto* module = ui.effectsRack().module (Kind::filter);
+    REQUIRE (module != nullptr);
+    juce::Component* graph = nullptr;
+    LiveView v;
+    for (auto* c : module->getChildren())
+        if (andor::analog::filtergraph::liveView (c, v))
+            graph = c;
+    REQUIRE (graph != nullptr);
+    p.prepareToPlay (rate, block);
+    // (The setup's edits started a preview: let it end before recording.)
+    for (int i = 0; i < 200 && (andor::analog::filtergraph::liveView (graph, v, 0.1), v.mode != 0); ++i) {}
+    constexpr double frame = 1.0 / 30.0;
+    int index = 0;
+    auto shoot = [&] {
+        auto& rack = ui.effectsRack();
+        const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+        graph->repaint();
+        const auto image = editor->createComponentSnapshot (r, true, 1.0f);
+        const auto file = out.getChildFile ("sweep-" + juce::String (index++).paddedLeft ('0', 4) + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    juce::AudioBuffer<float> buffer (2, 1600);   // (one frame of audio at 48 kHz)
+    auto play = [&] (double seconds, std::vector<juce::MidiMessage> first = {}) {
+        for (int f = 0; f < static_cast<int> (seconds / frame); ++f)
+        {
+            juce::MidiBuffer midi;
+            if (f == 0)
+                for (auto& m : first)
+                    midi.addEvent (m, 0);
+            for (int done = 0; done < 1600; done += block)
+            {
+                juce::AudioBuffer<float> part (2, block);
+                p.processBlock (part, midi);
+                midi.clear();
+            }
+            andor::analog::filtergraph::liveView (graph, v, frame);
+            shoot();
+        }
+    };
+    play (0.3);
+    play (2.0, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)) });   // LIVE: attack, decay, sustain
+    play (1.6, { juce::MidiMessage::noteOff (1, 60) });                                     // release, then rest
+    // Silent PREVIEW: an edit of DECAY with nothing playing.
+    setValue (p, ap::filterDecay, 0.4f);
+    for (int f = 0; f < 75; ++f)
+    {
+        andor::analog::filtergraph::liveView (graph, v, frame);
+        shoot();
+    }
+}
+
+TEST_CASE ("analog: V4 approval shots - ROUTING (classic, five, ten in two rows, parallel, 869) and the TAPE racks (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v4]")
+{
+    namespace fx = andor::analog::fx;
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    setValue (p, "drive", 35.0f);
+    setValue (p, "echo", 40.0f);
+    setValue (p, "space", 30.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    int width = 1448;
+    auto save = [&] (const juce::Image& image, const juce::String& name) {
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), name);
+    };
+    ui.setSourceViewShown (true);
+    REQUIRE (dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent()) != nullptr);
+    auto e = [] (fx::Type t, int slot = 0) { return fx::Node::effect ({ t, slot }); };
+    auto custom = [] (std::vector<fx::Node> chain) {
+        fx::Graph g;
+        g.custom = true;
+        g.chain = std::move (chain);
+        return g;
+    };
+    // 1. The original CLASSIC path.
+    shoot ("v4-1-routing-classic");
+    // 2. Five in a row.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::echo), e (fx::Type::space), e (fx::Type::spread) })));
+    shoot ("v4-2-routing-five");
+    // 3. Ten: two rows.
+    const auto ten = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
+                               e (fx::Type::spread), e (fx::Type::phaser), e (fx::Type::retro), e (fx::Type::utility) });
+    REQUIRE (engine.setFxRoute (ten));
+    shoot ("v4-3-routing-ten");
+    // 4. Two parallel branches (ECHO || SPACE then a serial SPREAD after the join).
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
+                                          e (fx::Type::spread) })));
+    shoot ("v4-4-routing-parallel");
+    // 5. The ten at 869.
+    REQUIRE (engine.setFxRoute (ten));
+    width = 869;
+    shoot ("v4-5-routing-ten-869");
+    width = 1448;
+    // 6. ECHO TAPE, 7. MOVEMENT TAPE (the whole instrument: the rack's height), 8. the rail.
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    ui.setSourceViewShown (false);
+    setValue (p, "echo.type", 0.0f);
+    ui.setRackExpanded (Kind::echo, true);
+    renderShell (p, 0.6);
+    shoot ("v4-6-echo-tape");
+    setValue (p, "movement.mode", 1.0f);
+    setValue (p, "motion", 45.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    renderShell (p, 0.6);
+    shoot ("v4-7-movement-tape");
+    {
+        // The rail: A / B, the horizontal ON, the preset bar, the actions, the borderless X.
+        auto& rack = ui.effectsRack();
+        const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+        save (editor->createComponentSnapshot (r.withLeft (r.getRight() - 620).withHeight (40), true, 2.0f), "v4-8-header-closeup");
+    }
+}
+
+//==============================================================================
+// V4 (docs/FX_ROUTING_TAPE_V4.md): the routing's mixer knobs, its two-row projection of the
+// route, the TAPE decks.
+
+TEST_CASE ("analog: V4 ROUTING - the engine mixer's knobs are the cards' own levels (same parameters, same units)", "[analog][fx][routing][ui][v4]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    // About a fifth of the panel (V4: 21 %, never more than a quarter).
+    CHECK (view->mixerBounds().getWidth() <= view->getWidth() / 4);
+    CHECK (view->mixerBounds().getWidth() >= view->getWidth() / 6);
+    const juce::String ids[3] { "analog.osc1.level", "analog.osc2.level", "layerB.level" };
+    for (int i = 0; i < 3; ++i)
+    {
+        INFO (ids[i]);
+        auto* knob = view->levelKnob (i);
+        REQUIRE (knob != nullptr);
+        auto* param = p.apvts().getParameter (ids[i]);
+        REQUIRE (param != nullptr);
+        CHECK (knob->getSliderStyle() == juce::Slider::RotaryHorizontalVerticalDrag);
+        CHECK (knob->getWidth() >= 36);
+        CHECK (knob->getWidth() <= 56);
+        CHECK (knob->getWidth() == knob->getHeight());
+        CHECK (view->mixerBounds().contains (knob->getBounds()));
+        // The knob moves the card's parameter; the parameter (a card, automation) moves the knob.
+        const double target = knob->getMinimum() + 0.3 * (knob->getMaximum() - knob->getMinimum());
+        knob->setValue (target, juce::sendNotificationSync);
+        CHECK (p.parameterValue (ids[i]) == Catch::Approx (knob->getValue()).margin (1.0e-3));
+        setValue (p, ids[i], param->convertFrom0to1 (param->getDefaultValue()));
+        CHECK (knob->getValue() == Catch::Approx (param->convertFrom0to1 (param->getDefaultValue())).margin (1.0e-3));
+    }
+    // HYBRID's level is in dB at 0.0 dB (never turned into a percentage by the knob).
+    CHECK (p.apvts().getParameter ("layerB.level")->getCurrentValueAsText() == "0.0 dB");
+    // Nothing about the route moved.
+    CHECK (dynamic_cast<AnalogEngine&> (p.productEngine()).fxRoute() == fx::classicGraph());
+}
+
+TEST_CASE ("analog: V4 ROUTING - the board is a projection of the route: one row, two rows in order, parallel stages, summaries, never scrolled", "[analog][fx][routing][ui][v4]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    auto sizeTo = [&] (int width) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);   // (paint: the board follows the scale)
+    };
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    sizeTo (1448);
+    auto e = [] (fx::Type t, int slot = 0) { return fx::Node::effect ({ t, slot }); };
+    auto custom = [] (std::vector<fx::Node> chain) {
+        fx::Graph g;
+        g.custom = true;
+        g.chain = std::move (chain);
+        return g;
+    };
+    auto relayout = [&] {
+        view->resized();
+        editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+    };
+    auto noOverlaps = [&] {
+        const auto& t = view->tiles();
+        for (std::size_t i = 0; i < t.size(); ++i)
+        {
+            CHECK (view->chainBounds().contains (t[i].bounds));
+            CHECK_FALSE (t[i].bounds.intersects (view->outputBounds()));
+            for (std::size_t j = i + 1; j < t.size(); ++j)
+                CHECK_FALSE (t[i].bounds.intersects (t[j].bounds));
+            for (const auto& s : view->summaries())
+                CHECK_FALSE (t[i].bounds.intersects (s.bounds));
+        }
+    };
+
+    // (V5 PATTERNED HARDWARE supersedes V4's tile size: miniature hardware 178-204 x 70-84 at
+    // the canonical width, four a row; the topology rules are V4's.)
+    // Four: one row, centred on one line.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::echo), e (fx::Type::space) })));
+    relayout();
+    CHECK (view->rowCount() == 1);
+    REQUIRE (view->tiles().size() == 4);
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        const auto& t = view->tiles()[i];
+        CHECK (t.bounds.getWidth() >= 178);
+        CHECK (t.bounds.getWidth() <= 204);
+        CHECK (t.bounds.getHeight() >= 70);
+        CHECK (t.bounds.getHeight() <= 84);
+        CHECK (t.bounds.getCentreY() == view->outputBounds().getCentreY());
+        CHECK (t.light.getWidth() >= 24);   // (the bypass target)
+        if (i > 0)
+            CHECK (t.bounds.getX() > view->tiles()[i - 1].bounds.getRight());
+    }
+    CHECK (view->summaries().empty());
+    noOverlaps();
+
+    // Eight: two rows, four each; row 2 continues row 1 left to right on one column grid;
+    // CONT. 2 / FROM 1; OUTPUT on the last tile's line; the route itself untouched.
+    const auto eight = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
+                                 e (fx::Type::spread), e (fx::Type::phaser) });
+    REQUIRE (engine.setFxRoute (eight));
+    const auto text = fx::toText (engine.fxRoute());
+    relayout();
+    CHECK (fx::toText (engine.fxRoute()) == text);
+    CHECK (view->rowCount() == 2);
+    REQUIRE (view->tiles().size() == 8);
+    const auto order = fx::instancesOf (engine.fxRoute());
+    for (std::size_t i = 0; i < 8; ++i)
+        CHECK (view->tiles()[i].id == order[i]);
+    const int row1 = view->tiles().front().bounds.getCentreY(), row2 = view->tiles().back().bounds.getCentreY();
+    CHECK (row2 > row1);
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        const auto& t = view->tiles()[i];
+        CHECK (t.bounds.getCentreY() == (i < 4 ? row1 : row2));
+        if (i % 4 > 0)
+            CHECK (t.bounds.getX() > view->tiles()[i - 1].bounds.getRight());   // (never reversed)
+        if (i >= 4)
+            CHECK (t.bounds.getX() == view->tiles()[i - 4].bounds.getX());     // (one column grid)
+    }
+    CHECK (! view->continuationOut().isEmpty());
+    CHECK (! view->continuationIn().isEmpty());
+    CHECK (view->continuationOut().getCentreY() == row1);
+    CHECK (view->continuationIn().getCentreY() == row2);
+    CHECK (view->outputBounds().getCentreY() == row2);
+    CHECK (view->wireStart().getCentreY() == row1);
+    noOverlaps();
+    // A drop into row 2's first gap goes between the rows' effects (index 4), as drawn.
+    const auto gap = std::find_if (view->gaps().begin(), view->gaps().end(), [&] (const auto& g) {
+        return g.path.empty() && g.index == 4 && g.bounds.getCentreY() == row2;
+    });
+    REQUIRE (gap != view->gaps().end());
+    REQUIRE (view->moveTo ({ fx::Type::phaser, 0 }, gap->path, gap->index));
+    CHECK (fx::instancesOf (engine.fxRoute())[4] == fx::InstanceId { fx::Type::phaser, 0 });
+    p.undo().undo();
+    CHECK (fx::toText (engine.fxRoute()) == text);
+
+    // Ten at the canonical width: eight tiles' room - what does not fit is a labelled summary;
+    // every effect is on the board, in the route's order.
+    const auto ten = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
+                               e (fx::Type::spread), e (fx::Type::phaser), e (fx::Type::retro), e (fx::Type::utility) });
+    REQUIRE (engine.setFxRoute (ten));
+    relayout();
+    CHECK (view->rowCount() == 2);
+    CHECK (! view->summaries().empty());
+    {
+        std::vector<fx::InstanceId> shown;
+        for (const auto& tile : view->tiles())
+            shown.push_back (tile.id);
+        for (const auto& sum : view->summaries())
+            for (const auto& id : sum.members)
+                shown.push_back (id);
+        CHECK (shown == fx::instancesOf (engine.fxRoute()));
+    }
+    noOverlaps();
+
+    // A parallel stage: its lanes in one stage (split before, join after), on the row's line.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), fx::Node::parallel ({ e (fx::Type::echo) }, { e (fx::Type::space) }), e (fx::Type::spread) })));
+    relayout();
+    CHECK (view->rowCount() == 1);
+    REQUIRE (view->tiles().size() == 4);
+    const auto& t = view->tiles();
+    CHECK (t[1].stacked);
+    CHECK (t[2].stacked);   // (SPACE: the lower lane)
+    CHECK (t[1].bounds.getX() == t[2].bounds.getX());
+    CHECK (t[2].bounds.getY() > t[1].bounds.getBottom());
+    CHECK (t[0].bounds.getRight() < std::min (t[1].bounds.getX(), t[2].bounds.getX()));
+    CHECK (t[3].bounds.getX() > std::max (t[1].bounds.getRight(), t[2].bounds.getRight()));
+    CHECK (t[3].bounds.getCentreY() == view->outputBounds().getCentreY());
+    CHECK (t[0].bounds.getCentreY() == t[3].bounds.getCentreY());
+    noOverlaps();
+    // The wider stage wraps as a whole: its lanes stay together on row 2, after the split.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
+                                          e (fx::Type::spread) })));
+    relayout();
+    REQUIRE (view->tiles().size() == 6);
+    CHECK (view->tiles()[2].bounds.getCentreY() == view->tiles()[3].bounds.getCentreY());
+    CHECK (view->tiles()[4].bounds.getY() > view->tiles()[2].bounds.getBottom());
+    CHECK (view->tiles()[5].bounds.getX() > std::max (view->tiles()[3].bounds.getRight(), view->tiles()[4].bounds.getRight()));
+    noOverlaps();
+
+    // 869: larger tiles in design units (legible), four a row at most; what does not fit is a
+    // labelled summary - every effect is on the board, as a tile or in a summary.
+    REQUIRE (engine.setFxRoute (ten));
+    sizeTo (869);
+    CHECK (view->tileScale() > 1.1f);
+    std::map<int, int> perRow;
+    for (const auto& tile : view->tiles())
+        ++perRow[tile.bounds.getCentreY()];
+    for (const auto& s : view->summaries())
+        ++perRow[s.bounds.getCentreY()];
+    CHECK (perRow.size() <= 2);
+    for (const auto& [y, count] : perRow)
+        CHECK (count <= 4);
+    std::vector<fx::InstanceId> shown;
+    for (const auto& tile : view->tiles())
+        shown.push_back (tile.id);
+    for (const auto& s : view->summaries())
+        for (const auto& id : s.members)
+            shown.push_back (id);
+    CHECK (shown == fx::instancesOf (engine.fxRoute()));   // (all of them, in the route's order)
+    noOverlaps();
+    CHECK (fx::toText (engine.fxRoute()) == fx::toText (ten));
+    // Back to the canonical width: eight fit as tiles again.
+    sizeTo (1448);
+    REQUIRE (engine.setFxRoute (eight));
+    relayout();
+    CHECK (view->summaries().empty());
+    CHECK (view->tiles().size() == 8);
+}
+
+TEST_CASE ("analog: V4 TAPE - ECHO and MOVEMENT TAPE as a reel deck on the same parameters; the reels rest in silence", "[analog][rack][ui][v4]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rackui::SegmentedSwitch;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    setValue (p, "echo", 40.0f);
+    setValue (p, "echo.type", 0.0f);   // TAPE
+    ui.setRackExpanded (Kind::echo, true);
+    ui.refreshNow();
+    auto* echo = ui.effectsRack().module (Kind::echo);
+    REQUIRE (echo != nullptr);
+    const int height = echo->getHeight();
+    REQUIRE (osp::plugin::rackTapeDeckShown (*echo));
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE TIMING STEREO");
+    // The regions: knobs left, the deck in the middle, the display right (~250-336 x 90-122).
+    const auto deck = osp::plugin::rackTapeDeckBounds (*echo);
+    const auto display = osp::plugin::rackSlot (*echo, 5);
+    const auto cells = osp::plugin::rackCellBounds (*echo);
+    REQUIRE (cells.size() == 4);
+    CHECK (cells.back().getRight() < deck.getX());
+    CHECK (deck.getRight() < display.getX());
+    CHECK (display.getWidth() >= 250);
+    CHECK (display.getWidth() <= 340);
+    CHECK (display.getHeight() >= 90);
+    CHECK (display.getHeight() <= 122);
+    CHECK (deck.getBottom() <= echo->getHeight());
+    // TIMING and STEREO: the same parameters, as small segmented keys.
+    auto* timing = dynamic_cast<SegmentedSwitch*> (osp::plugin::rackCell (*echo, "TIMING"));
+    auto* stereo = dynamic_cast<SegmentedSwitch*> (osp::plugin::rackCell (*echo, "STEREO"));
+    REQUIRE (timing != nullptr);
+    REQUIRE (stereo != nullptr);
+    timing->choose (0);
+    CHECK (p.parameterValue ("echo.sync") < 0.5f);
+    timing->choose (1);
+    CHECK (p.parameterValue ("echo.sync") >= 0.5f);
+    stereo->choose (2);
+    CHECK (juce::roundToInt (p.parameterValue ("echo.stereo")) == 2);
+    setValue (p, "echo.stereo", 1.0f);
+    CHECK (stereo->positionIndex() == 1);   // (automation moves it)
+
+    // The reels: still in silence; turning while the echo sounds; easing to rest when it stops.
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) == 0.0);
+    osp::plugin::advanceRackTapeDeck (*echo, 0.5);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) == 0.0);   // (nothing has sounded)
+    renderShell (p, 0.3);   // (the phrase: notes still sounding at its end)
+    REQUIRE (p.outputPeak() > 1.0e-3f);
+    osp::plugin::advanceRackTapeDeck (*echo, 1.0);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) > 0.5);
+    setValue (p, "echo", 0.0f);   // (the echo off: the module no longer plays)
+    for (int i = 0; i < 90; ++i)
+        osp::plugin::advanceRackTapeDeck (*echo, 1.0 / 30.0);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) == 0.0);
+    setValue (p, "echo", 40.0f);
+
+    // Other ECHO modes: as approved (no deck); the rack keeps its height.
+    setValue (p, "echo.type", 1.0f);   // BBD
+    ui.refreshNow();
+    CHECK_FALSE (osp::plugin::rackTapeDeckShown (*echo));
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE TIMING STEREO");
+    CHECK (echo->getHeight() == height);
+    setValue (p, "echo.type", 0.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackTapeDeckShown (*echo));
+
+    // MOVEMENT TAPE: INTENSITY, WOW, FLUTTER, WEAR (never delay controls); its own deck.
+    setValue (p, "motion", 45.0f);
+    setValue (p, "movement.mode", 1.0f);   // TAPE
+    ui.setRackExpanded (Kind::movement, true);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    REQUIRE (movement != nullptr);
+    CHECK (osp::plugin::rackTapeDeckShown (*movement));
+    CHECK (osp::plugin::rackMovementCaptions (*movement) == "INTENSITY WOW FLUTTER WEAR");
+    CHECK (movement->getHeight() == height);
+    renderShell (p, 0.3);
+    osp::plugin::advanceRackTapeDeck (*movement, 1.0);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*movement) > 0.5);
+    setValue (p, "movement.mode", 0.0f);   // DRIFT: as approved
+    ui.refreshNow();
+    CHECK_FALSE (osp::plugin::rackTapeDeckShown (*movement));
+}
+
+TEST_CASE ("analog: V5 review matrix - the route board (six, classic, parallel, five, 869) and every rack (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v5]")
+{
+    namespace fx = andor::analog::fx;
+    namespace ap = andor::analog::params;
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    setValue (p, "drive", 35.0f);
+    setValue (p, "echo", 40.0f);
+    setValue (p, "space", 30.0f);
+    setValue (p, "motion", 45.0f);
+    setValue (p, "movement.mode", 2.0f);   // (CHORUS: the reference's MOVEMENT, and its rack shot's)
+    setValue (p, ap::resonance, 40.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    int width = 1448;
+    auto save = [&] (const juce::Image& image, const juce::String& name) {
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto size = [&] {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+    };
+    auto shoot = [&] (const juce::String& name) {
+        size();
+        save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), name);
+    };
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    auto e = [] (fx::Type t, int slot = 0) { return fx::Node::effect ({ t, slot }); };
+    auto custom = [] (std::vector<fx::Node> chain) {
+        fx::Graph g;
+        g.custom = true;
+        g.chain = std::move (chain);
+        return g;
+    };
+    auto routeShot = [&] (const juce::String& name) {
+        size();
+        const auto r = editor->getLocalArea (view, view->getLocalBounds());
+        save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), name);
+        save (editor->createComponentSnapshot (r.expanded (4).getIntersection (editor->getLocalBounds()), true, width < 1000 ? 2.0f : 1.0f), name + "-board");
+    };
+    // The six of the reference (MOVEMENT, DRIVE, ECHO, FX FILTER, SPACE, STEREO): a serial
+    // chain, its own order; CLASSIC; a true parallel stage; five; the six at 869.
+    const auto six = custom ({ e (fx::Type::movement), e (fx::Type::drive), e (fx::Type::echo), e (fx::Type::filter), e (fx::Type::space), e (fx::Type::spread) });
+    REQUIRE (engine.setFxRoute (six));
+    routeShot ("v5-01-routing-six");
+    // Each tile alone (2x): the miniature of its rack (the pairs).
+    auto tileShots = [&] {
+        for (const auto& t : view->tiles())
+        {
+            const auto r = editor->getLocalArea (view, t.bounds.expanded (6));
+            save (editor->createComponentSnapshot (r, true, 2.0f), juce::String ("v5-tile-") + fx::typeKey (t.id.type));
+        }
+    };
+    tileShots();
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    routeShot ("v5-02-routing-classic");
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
+                                          e (fx::Type::spread) })));
+    routeShot ("v5-03-routing-parallel");
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::phaser), e (fx::Type::flanger), e (fx::Type::shifter), e (fx::Type::convolution),
+                                          e (fx::Type::utility), e (fx::Type::retro) })));
+    routeShot ("v5-04-routing-eight-others");
+    tileShots();
+    REQUIRE (engine.setFxRoute (six));
+    width = 869;
+    routeShot ("v5-05-routing-six-869");
+    width = 1448;
+    // The library (its entries' identities).
+    view->showLibrary (true);
+    routeShot ("v5-06-library");
+    view->showLibrary (false);
+
+    // Every rack, full window and the rack alone.
+    ui.setSourceViewShown (false);
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    struct Rack
+    {
+        const char* name;
+        std::function<void()> open;
+    };
+    auto openFx = [&] (fx::Type t) { andor::analog::openFxRack (ui, { t, 0 }); };
+    const Rack racks[] {
+        { "movement-chorus", [&] { setValue (p, "movement.mode", 2.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-tape", [&] { setValue (p, "movement.mode", 1.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "drive", [&] { openFx (fx::Type::drive); } },
+        { "echo-tape", [&] { setValue (p, "echo.type", 0.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "echo-bbd", [&] { setValue (p, "echo.type", 1.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "fxfilter", [&] { openFx (fx::Type::filter); } },
+        { "space-hall", [&] { setValue (p, "space.engine", 0.0f); ui.setRackExpanded (Kind::space, true); } },
+        { "spread", [&] { openFx (fx::Type::spread); } },
+        { "compressor", [&] { openFx (fx::Type::compressor); } },
+        { "eq", [&] { openFx (fx::Type::eq); } },
+        { "phaser", [&] { openFx (fx::Type::phaser); } },
+        { "flanger", [&] { openFx (fx::Type::flanger); } },
+        { "shifter", [&] { openFx (fx::Type::shifter); } },
+        { "convolution", [&] { openFx (fx::Type::convolution); } },
+        { "utility", [&] { openFx (fx::Type::utility); } },
+        { "retro", [&] { openFx (fx::Type::retro); } },
+        { "voice-filter", [&] { ui.setRackExpanded (Kind::filter, true); } },
+        { "morph", [&] { ui.setRackExpanded (Kind::morph, true); } },
+    };
+    for (const int w : { 1448, 869 })
+        for (const auto& r : racks)
+        {
+            if (w == 869 && ! juce::String (r.name).startsWith ("movement-chorus") && ! juce::String (r.name).startsWith ("echo-tape") && ! juce::String (r.name).startsWith ("compressor"))
+                continue;
+            width = w;
+            r.open();
+            renderShell (p, 0.4);
+            size();
+            const auto prefix = "v5-rack-" + juce::String (w) + "-" + r.name;
+            auto& rack = ui.effectsRack();
+            const auto area = editor->getLocalArea (&rack, rack.getLocalBounds());
+            save (editor->createComponentSnapshot (area.expanded (0, 6).getIntersection (editor->getLocalBounds()), true, w < 1000 ? 2.0f : 1.0f), prefix);
+            if (w == 1448 && (juce::String (r.name) == "echo-tape" || juce::String (r.name) == "movement-chorus"))
+                save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), prefix + "-window");
+        }
+    width = 1448;
+}
+
+TEST_CASE ("analog: V5 audio baseline - representative factory presets and routes render to recorded hashes (ANALOG_AUDIO_HASHES)", "[.][v5-audio]")
+{
+    // A skin pass must be audibly null: these renders (factory presets, CLASSIC and a CUSTOM
+    // route through every effect) are hashed before the pass and compared after it.
+    namespace fx = andor::analog::fx;
+    const auto* path = std::getenv ("ANALOG_AUDIO_HASHES");
+    REQUIRE (path != nullptr);
+    const juce::File file (path);
+    auto hashOf = [] (const juce::AudioBuffer<float>& b) {
+        std::uint64_t h = 1469598103934665603ull;   // (FNV-1a over the samples' bytes)
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        {
+            const auto* bytes = reinterpret_cast<const unsigned char*> (b.getReadPointer (ch));
+            for (std::size_t i = 0; i < sizeof (float) * static_cast<std::size_t> (b.getNumSamples()); ++i)
+                h = (h ^ bytes[i]) * 1099511628211ull;
+        }
+        return juce::String::toHexString (static_cast<juce::int64> (h));
+    };
+    juce::StringArray lines;
+    {
+        ShellProcessor p;
+        const auto list = p.presetList();
+        REQUIRE (list.size() >= 5);
+        for (std::size_t i = 0; i < 5; ++i)
+        {
+            ShellProcessor q;
+            q.openPresetEntry (list[i * (list.size() - 1) / 4]);
+            lines.add (list[i * (list.size() - 1) / 4].name + " " + hashOf (renderShell (q, 1.0)));
+        }
+    }
+    {
+        ShellProcessor q;
+        setValue (q, "drive", 35.0f);
+        setValue (q, "echo", 40.0f);
+        setValue (q, "space", 30.0f);
+        setValue (q, "motion", 45.0f);
+        lines.add ("CLASSIC " + hashOf (renderShell (q, 1.0)));
+        fx::Graph g;
+        g.custom = true;
+        for (int t = 0; t < fx::typeCount; ++t)
+            g.chain.push_back (fx::Node::effect ({ static_cast<fx::Type> (t), 0 }));
+        REQUIRE (dynamic_cast<AnalogEngine&> (q.productEngine()).setFxRoute (g));
+        lines.add ("CUSTOM-ALL " + hashOf (renderShell (q, 1.0)));
+    }
+    const auto text = lines.joinIntoString ("\n");
+    if (file.existsAsFile())
+        CHECK (file.loadFileAsString().replace ("\r\n", "\n").trim() == text.trim());   // (the second run: the same sound)
+    else
+        file.replaceWithText (text, false, false, "\n");
+}
+
+TEST_CASE ("analog: V5 PATTERNED HARDWARE - one identity per device, legible, no violet; the tiles' knobs are the racks' parameters", "[analog][fx][routing][ui][v5]")
+{
+    namespace fx = andor::analog::fx;
+    using andor::analog::visualIdentityFor;
+    // Every device: its own enamel and motif, its name readable on it, no violet hue.
+    std::set<juce::uint32> enamels;
+    std::set<int> motifs;
+    for (int i = 0; i < fx::typeCount; ++i)
+    {
+        const auto type = static_cast<fx::Type> (i);
+        const auto& id = visualIdentityFor (type);
+        INFO (fx::typeName (type));
+        enamels.insert (id.enamel.getARGB());
+        motifs.insert (static_cast<int> (id.motif));
+        CHECK (andor::analog::contrastRatio (id.text, id.enamel) >= 3.0f);   // (bold 13.5 px names: large-text contrast)
+        const float hue = id.enamel.getHue() * 360.0f;
+        CHECK_FALSE ((hue > 245.0f && hue < 330.0f && id.enamel.getSaturation() > 0.12f));   // (no violet / purple)
+        CHECK (juce::String (id.tileName).isNotEmpty());
+    }
+    CHECK (static_cast<int> (enamels.size()) == fx::typeCount);
+    CHECK (static_cast<int> (motifs.size()) == fx::typeCount);
+    for (const auto rack : { andor::analog::SynthRack::voiceFilter, andor::analog::SynthRack::morph })
+    {
+        const auto& id = andor::analog::synthIdentity (rack);
+        CHECK (andor::analog::contrastRatio (id.text, id.enamel) >= 3.0f);
+        CHECK (motifs.count (static_cast<int> (id.motif)) == 0);   // (their own motifs)
+    }
+    // The faceplates: the whole face is the enamel, with the device's motif.
+    const auto f = andor::analog::faceplateFromIdentity (visualIdentityFor (fx::Type::echo));
+    CHECK (f.enamelBody);
+    CHECK (f.fullBleed);
+    CHECK (f.motif != nullptr);
+    CHECK (f.body == visualIdentityFor (fx::Type::echo).enamel);
+
+    // The tiles' knobs: real attachments to the racks' parameters, both ways; none on a
+    // parallel lane's compact tile.
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    CHECK (view->tileKnobParameters ({ fx::Type::drive, 0 }) == juce::StringArray { "drive", "drive.tone", "drive.body" });
+    CHECK (view->tileKnobParameters ({ fx::Type::echo, 0 }).isEmpty());   // (CLASSIC: ECHO and SPACE are a parallel pair)
+    fx::Graph g;
+    g.custom = true;
+    for (const auto t : { fx::Type::movement, fx::Type::drive, fx::Type::echo, fx::Type::filter, fx::Type::space, fx::Type::spread })
+        g.chain.push_back (fx::Node::effect ({ t, 0 }));
+    REQUIRE (engine.setFxRoute (g));
+    view->resized();
+    const auto before = fx::toText (engine.fxRoute());
+    CHECK (view->tileKnobParameters ({ fx::Type::echo, 0 }) == juce::StringArray { "echo.division", "echo.feedback", "echo" });
+    CHECK (view->tileKnobParameters ({ fx::Type::space, 0 }) == juce::StringArray { "space.size", "space.decay", "space" });
+    const fx::InstanceId filter { fx::Type::filter, 0 };
+    const auto filterKnobs = view->tileKnobParameters (filter);
+    REQUIRE (filterKnobs.size() == 3);
+    for (const auto& t : view->tiles())
+        for (const auto& pidName : view->tileKnobParameters (t.id))
+        {
+            INFO (pidName.toStdString());
+            auto* k = view->tileKnob (t.id, pidName);
+            REQUIRE (k != nullptr);
+            CHECK (k->getParentComponent() == view);
+            CHECK (t.bounds.contains (k->getBounds()));
+            CHECK (k->getWidth() >= 28);   // (the hit area)
+            CHECK_FALSE (k->getBounds().intersects (t.light));
+            auto* param = p.apvts().getParameter (pidName);
+            REQUIRE (param != nullptr);
+            const double target = k->getMinimum() + 0.37 * (k->getMaximum() - k->getMinimum());
+            k->setValue (target, juce::sendNotificationSync);
+            CHECK (p.parameterValue (pidName) == Catch::Approx (k->getValue()).margin (1.0e-3));
+            setValue (p, pidName, param->convertFrom0to1 (param->getDefaultValue()));
+            CHECK (k->getValue() == Catch::Approx (param->convertFrom0to1 (param->getDefaultValue())).margin (1.0e-3));
+        }
+    // Turning knobs, laying out again, resizing: the route itself never moved.
+    view->resized();
+    CHECK (fx::toText (engine.fxRoute()) == before);
+    // A mode change changes which knobs a tile shows, never a parameter.
+    const auto values = allParameterValues (p);
+    setValue (p, "movement.mode", 2.0f);   // CHORUS
+    view->resized();
+    CHECK (view->tileKnobParameters ({ fx::Type::movement, 0 }).contains ("motion"));
+    setValue (p, "movement.mode", values.at ("movement.mode"));
 }

@@ -57,7 +57,30 @@ public:
         juce::Rectangle<int> bounds;
     };
     const std::vector<Gap>& gaps() const noexcept { return gapList; }
+    /** A group summary (V4): what the compact board shows in place of effects it cannot fit at
+        a readable size (a parallel stage, or the chain's tail). Never hidden: its count, its
+        members' bypass state, and a menu that reaches each of them. */
+    struct Summary
+    {
+        juce::Rectangle<int> bounds;
+        std::vector<fx::InstanceId> members;
+        bool group = false;   ///< a parallel / split stage (else the chain's last effects)
+        int lanes = 0;
+    };
+    const std::vector<Summary>& summaries() const noexcept { return summaryList; }
+    /** One row, or two (a serial chain wrapped left to right, never reversed). */
+    int rowCount() const noexcept { return static_cast<int> (rows.size()); }
+    juce::Rectangle<int> continuationOut() const noexcept { return contOut; }
+    juce::Rectangle<int> continuationIn() const noexcept { return contIn; }
+    juce::Rectangle<int> chainBounds() const { return chainArea(); }
     juce::Rectangle<int> mixerBounds() const noexcept { return mixerArea; }
+    juce::Slider* levelKnob (int card) const noexcept { return card >= 0 && card < 3 ? levels[static_cast<std::size_t> (card)].get() : nullptr; }
+    /** V5: a tile's mini knobs (tests): their parameter IDs, and the knob for one. */
+    juce::StringArray tileKnobParameters (fx::InstanceId id) const;
+    juce::Slider* tileKnob (fx::InstanceId id, const juce::String& parameterId) const;
+    /** The tiles' scale on this board (1 at the canonical width; larger in design units when
+        the window is small, so names stay legible). */
+    float tileScale() const noexcept { return metrics.b; }
     juce::Rectangle<int> outputBounds() const noexcept { return outputBox; }
     juce::Rectangle<int> wireStart() const noexcept { return wireFrom; }
     std::optional<fx::InstanceId> selection() const noexcept { return selected; }
@@ -93,22 +116,29 @@ private:
     class IconButton;
     class Library;
     class RouteEdit;
+    class TileKnob;
 
     void timerCallback() override;
     void layoutChain();
+    void projectRoute();
+    /** V5: each full-size tile's 2-3 small real knobs (the same parameters as its rack). */
+    void placeTileKnobs();
     juce::Rectangle<int> chainArea() const;
-    int chainClipRight() const noexcept;
+    bool layoutAttempt (const fx::Graph&, float scale, const std::vector<bool>& collapsed, int tailFrom);
+    int summaryAt (juce::Point<int> p) const;
+    void showSummaryMenu (int index);
+    void paintSummary (juce::Graphics&, const Summary&) const;
+    juce::String pathStatus() const;
     bool apply (const fx::Graph& next, const juce::String& what);
     fx::Graph route() const;
     juce::String subtitleOf (fx::InstanceId id) const;
     juce::String signature() const;
     int tileAt (juce::Point<int> p) const;
     int gapAt (juce::Point<int> p) const;
-    void paintTile (juce::Graphics&, const Tile&) const;
+    void paintTile (juce::Graphics&, const Tile&, bool ghost = false) const;
     void paintMixer (juce::Graphics&) const;
     void showTileMenu (fx::InstanceId id);
     void placeQuick();
-    void revealTile (fx::InstanceId id);
     std::vector<fx::InstanceId> order() const;
 
     osp::plugin::InstrumentHost& host;
@@ -120,6 +150,7 @@ private:
     std::array<std::unique_ptr<juce::Slider>, 3> levels;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 3> levelAttachments;
     std::array<std::unique_ptr<juce::TextButton>, 4> footerButtons;   // <- -> PARALLEL SERIES
+    std::vector<std::unique_ptr<TileKnob>> tileKnobs;
 
     juce::Rectangle<int> headerArea, mixerArea, zoneArea, footerArea, outputBox, wireFrom;
     std::vector<Tile> placed;
@@ -131,7 +162,21 @@ private:
         bool split = false;
     };
     std::vector<Group> groups;
-    int scrollX = 0, contentWidth = 0;
+    std::vector<Summary> summaryList;
+    struct Row
+    {
+        int centreY = 0, left = 0, right = 0;
+    };
+    std::vector<Row> rows;
+    juce::Rectangle<int> contOut, contIn;   ///< CONT. 2 / FROM 1 (two rows only)
+    struct Metrics
+    {
+        float b = 1.0f;
+        int tileW = 192, tileH = 84, stackedH = 60, gapW = 22, stackGap = 8, branch = 18, rowGap = 28;
+    };
+    Metrics metrics;
+    float layoutScale = 0.0f;   ///< the window scale the board was laid out for
+    float mixerScale = 1.0f;    ///< the mixer's type and knobs (with the board's legibility)
     std::optional<fx::InstanceId> selected, pressed, hovered;
     bool dragging = false;
     juce::Point<int> dragAt;

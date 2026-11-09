@@ -8,6 +8,7 @@
 #include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
 #include "AnalogRacks.h"
+#include "FxIdentity.h"
 #include "FxRack.h"
 #include "FxRouting.h"
 #include "FxParameters.h"
@@ -166,6 +167,9 @@ namespace
         m.identityA = { juce::Colour (0xffd9824c), juce::Colour (0xff9c4a22), juce::Colour (0xfff0a060), juce::Colour (0xffc8703f), juce::Colour (0xffd57e48),
                         juce::Colour (0xffe4b07a) };
         m.graphiteOnWell = true;
+        // The macros' identities: ANDOR OSP's mineral palette, SPACE in spore (no mauve).
+        m.macros = { juce::Colour (0xffbe7552), juce::Colour (0xffb5843a), juce::Colour (0xff7b8d69),
+                     juce::Colour (0xff73899c), juce::Colour (0xff8b9180), juce::Colour (0xff5c9490) };
         m.pack = AnalogMaterialsData::walnutskin_zip;
         m.packSize = static_cast<size_t> (AnalogMaterialsData::walnutskin_zipSize);
         return m;
@@ -320,26 +324,17 @@ const ProductInfo& productInfo()
         // The shared racks' hardware faceplates (V2: docs/FX_RACK_V2_PROGRESS.md) - interface only.
         {
             using osp::plugin::rack::Kind;
-            osp::plugin::rack::Faceplate movement, echo, space;
-            movement.enamel = juce::Colour (0xff3d596a);
-            movement.stripes = { juce::Colour (0xff5d8299), juce::Colour (0xffa3bfcf), juce::Colour (0xffdce6ea) };
-            movement.glow = juce::Colour (0xff9fd6f2);
-            movement.glassTop = juce::Colour (0xff17222a);
-            movement.glassBottom = juce::Colour (0xff111a20);
-            movement.subtitle = "MODULATION RACK";
-            echo.enamel = juce::Colour (0xff2b5f59);
-            echo.stripes = { juce::Colour (0xff468f87), juce::Colour (0xff97c7bf), juce::Colour (0xffd9a14a) };
-            echo.glow = juce::Colour (0xff8fe6d9);
-            echo.glassTop = juce::Colour (0xff142522);
-            echo.glassBottom = juce::Colour (0xff0f1c1a);
-            echo.subtitle = "DELAY PROCESSOR";
-            space.enamel = juce::Colour (0xff594a68);
-            space.stripes = { juce::Colour (0xff8a77a0), juce::Colour (0xffc4b5d4), juce::Colour (0xffe3d7c4) };
-            space.glow = juce::Colour (0xffd6c2ff);
-            space.glassTop = juce::Colour (0xff1e1a26);
-            space.glassBottom = juce::Colour (0xff16131d);
-            space.subtitle = "REVERB PROCESSOR";
+            // V5 PATTERNED HARDWARE (docs/VISUAL_IDENTITY_INDEX.md): each rack wears its device's
+            // identity - the same enamel and motif as its routing tile.
+            namespace an = andor::analog;
+            auto movement = an::faceplateFromIdentity (an::visualIdentityFor (an::fx::Type::movement));
+            auto echo = an::faceplateFromIdentity (an::visualIdentityFor (an::fx::Type::echo));
+            auto space = an::faceplateFromIdentity (an::visualIdentityFor (an::fx::Type::space));
+            // V4: the TAPE modes (ECHO's tape echo, MOVEMENT's wow and flutter) as a light reel
+            // deck (docs/FX_ROUTING_TAPE_V4.md).
+            movement.tapeDeck = echo.tapeDeck = true;
             p.rackFaceplates = { { Kind::movement, movement }, { Kind::echo, echo }, { Kind::space, space } };
+            p.fullBleedRacks = true;
         }
         p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {

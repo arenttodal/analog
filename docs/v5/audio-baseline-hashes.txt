@@ -1,0 +1,7 @@
+Init 8afa29be533a9b45
+Hollow Organ e02263bc1ff7d48d
+Mono Lead 45209772267a2f2
+String Pad 862a6ba0c71dd68f
+Noise Swell 7a4ed288ea5a4bc6
+CLASSIC e6a0faca2638909f
+CUSTOM-ALL 562eb39c3351ee4a
