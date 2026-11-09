@@ -50,19 +50,28 @@ decision to sell are the owner's.
 
 - [ ] **JUCE**: ANDOR OSP pins JUCE 8.0.9. Check the licence that applies to that version, and buy
       the commercial entitlement (or comply with the AGPL) before distributing closed-source binaries.
-- [ ] **Artwork**: only `shared/andor-ui/Resources` from ANDOR OSP's repository (see its
-      `assets/manifest.json`); this repository holds none. The owner authorizes its use in this product.
-- [ ] **Fonts**: Inter and Outfit travel with their OFL licence files.
+- [ ] **Artwork**: `shared/andor-ui/Resources` from ANDOR OSP's repository (see its
+      `assets/manifest.json`), plus this repository's `product/Resources/walnut-skin.zip`
+      (procedural, `tools/make_walnut_skin.py`). The owner authorises their use in writing.
+- [ ] **Fonts**: Inter and Outfit are OFL. Their licence texts travel in THIRD_PARTY_NOTICES.txt,
+      which `packaging/common/make_notices.py` builds for both installers.
 - [ ] **Branding**: "Prophet-inspired" is internal sound direction only; no product text, preset name
       or marketing may suggest Sequential or Arturia endorsement or copied sound, code or design.
 - [ ] Factory presets are synthesized only (no samples, no outside files) — true today.
 
-## Known release blockers
+## Known release blockers (updated for the 1.0.0 release candidate, 9 Nov 2026)
 
-- The host lists all 350 ANDOR parameters plus ANALOG's 57 (the shell's grouped layout is still to come;
-  four of ANALOG's own, the first version's LFO, are unused since version 2 and say so in their names).
-- No host or listening validation yet (Linux tests and the macOS CI build with auval, see docs/STATUS.md).
+See docs/release/READINESS_SCORECARD.md for the evidence and docs/release/RELEASE_CANDIDATE.md
+for the runbook.
 
+- **Host parameter list:** resolved by the shell's automation filter. The host still holds all
+  959 parameters (identifiers are forever), but only the 831 that ANALOG's engine reads are
+  offered for automation. The 128 others (ANDOR schema controls ANALOG does not play, and the
+  retired v1 LFO and v5 KEY DNA ones) are flagged non-automatable. Test:
+  `analog: a DAW may automate exactly the parameters the engine reads`.
+- **Still open, owner or human only:** JUCE and Steinberg VST3 licences; Apple Developer ID and
+  notarisation; Windows code signing; EULA approval; DAW validation (H1–H11 in the runbook);
+  listening sign-off.
 
 ## State version 4
 

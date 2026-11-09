@@ -74,6 +74,70 @@ jobs:
         with:
           name: ANDOR-Analog-macOS-test
           path: ANDOR-Analog-macOS-test.zip
+      # The retail installer (.pkg with the EULA page, notices installed): signed and notarised
+      # when the repository has the Apple secrets, otherwise UNSIGNED but identical (the beta).
+      - name: Build the macOS installer
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          APPLE_CERTIFICATES_P12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+          APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          ANALOG_APP_IDENTITY: ${{ secrets.ANALOG_APP_IDENTITY }}
+          ANALOG_INSTALLER_IDENTITY: ${{ secrets.ANALOG_INSTALLER_IDENTITY }}
+          ANALOG_NOTARY_KEY: ${{ secrets.ANALOG_NOTARY_KEY }}
+          ANALOG_NOTARY_KEY_ID: ${{ secrets.ANALOG_NOTARY_KEY_ID }}
+          ANALOG_NOTARY_ISSUER: ${{ secrets.ANALOG_NOTARY_ISSUER }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATES_P12" ]; then
+            kc="$RUNNER_TEMP/signing.keychain-db"; kcpw="$(uuidgen)"
+            security create-keychain -p "$kcpw" "$kc"
+            security set-keychain-settings -lut 21600 "$kc"
+            security unlock-keychain -p "$kcpw" "$kc"
+            printf '%s' "$APPLE_CERTIFICATES_P12" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+            security import "$RUNNER_TEMP/certs.p12" -P "$APPLE_CERTIFICATES_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+            security list-keychain -d user -s "$kc"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" > /dev/null
+            rm -f "$RUNNER_TEMP/certs.p12"
+          else
+            unset ANALOG_APP_IDENTITY ANALOG_INSTALLER_IDENTITY
+          fi
+          version="$(python3 -c "import json;print(json.load(open('product/product.json'))['version'])")"
+          python3 packaging/common/make_notices.py --build build-plugin --osp external/osp --out THIRD_PARTY_NOTICES.txt
+          packaging/macos/build-installer.sh "build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release" "$version" installer THIRD_PARTY_NOTICES.txt
+          ls -l installer
+      - name: Upload the macOS installer
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANDOR-Analog-macOS-installer
+          path: installer/
+          if-no-files-found: error
+      # pluginval (Tracktion, the standard JUCE plugin validator) at its strictest level, on the
+      # VST3 and the AU as shipped. After the uploads, so a failure reports itself (the job goes
+      # red) without withholding the test build. Logs are uploaded either way.
+      - name: pluginval (VST3 and AU, strictness 10)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          pv="pluginval.app/Contents/MacOS/pluginval"
+          art="build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release"
+          mkdir -p pluginval-logs
+          status=0
+          "$pv" --strictness-level 10 --timeout-ms 600000 --output-dir pluginval-logs --validate "$art/VST3/ANDOR Analog.vst3" > pluginval-vst3.log 2>&1 || status=1
+          tail -30 pluginval-vst3.log
+          "$pv" --strictness-level 10 --timeout-ms 600000 --output-dir pluginval-logs --validate ~/Library/Audio/Plug-Ins/Components/"ANDOR Analog.component" > pluginval-au.log 2>&1 || status=1
+          tail -30 pluginval-au.log
+          exit $status
+      - name: Upload the pluginval logs
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluginval-logs
+          path: |
+            pluginval-vst3.log
+            pluginval-au.log
+            pluginval-logs/
+          if-no-files-found: ignore
       - name: Upload the visual regression report
         if: always()
         uses: actions/upload-artifact@v4
@@ -94,17 +158,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Dependencies (SQLite for ANDOR OSP's Library, from vcpkg)
-        run: vcpkg install sqlite3:x64-windows
+      # SQLite linked statically (the dynamic-CRT static triplet): a DLL build would need
+      # sqlite3.dll beside the host, which a plug-in cannot rely on.
+      - name: Dependencies (SQLite for ANDOR OSP's Library, from vcpkg, static)
+        run: vcpkg install sqlite3:x64-windows-static-md
       - name: Configure
         run: |
           toolchain="$(cygpath -m "$VCPKG_INSTALLATION_ROOT")/scripts/buildsystems/vcpkg.cmake"
-          cmake -B build-plugin -G "Visual Studio 17 2022" -A x64 -DOSP_BUILD_PLUGIN=ON "-DCMAKE_TOOLCHAIN_FILE=$toolchain"
+          cmake -B build-plugin -G "Visual Studio 17 2022" -A x64 -DOSP_BUILD_PLUGIN=ON "-DCMAKE_TOOLCHAIN_FILE=$toolchain" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
       - name: Build
         id: build
         run: cmake --build build-plugin --config Release --parallel --target ANDOR_Analog_All andor_analog_tests analog_dsp_tests
       - name: Test (engine, product)
         run: ctest --test-dir build-plugin -C Release --output-on-failure -R "^(analog_dsp_tests|andor_analog_tests)$"
+      # What the shipped binaries load: only Windows' own DLLs (a clean PC has nothing else).
+      - name: Check DLL dependencies
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          dumpbin="$(ls "/c/Program Files/Microsoft Visual Studio/2022/"*/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe | head -1)"
+          art="build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release"
+          status=0
+          for bin in "$art/VST3/ANDOR Analog.vst3/Contents/x86_64-win/ANDOR Analog.vst3" "$art/Standalone/ANDOR Analog.exe"; do
+            echo "== $bin"
+            deps="$("$dumpbin" -nologo -dependents "$bin" | sed -n 's/^ *\([A-Za-z0-9_.-]*\.[dD][lL][lL]\)$/\1/p')"
+            echo "$deps"
+            # Allowed: the OS's and the Visual C++ runtime's (installed with Windows 10/11 and by every DAW).
+            bad="$(echo "$deps" | grep -viE '^(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comdlg32|comctl32|shlwapi|ws2_32|winmm|version|imm32|dwmapi|uxtheme|setupapi|cfgmgr32|dxgi|d2d1|dwrite|d3d11|dcomp|wininet|crypt32|bcrypt|rpcrt4|shcore|uiautomationcore|propsys|mf|mfplat|mfreadwrite|winhttp|msvcp140|msvcp140_1|msvcp140_2|vcruntime140|vcruntime140_1|concrt140|api-ms-win-[a-z0-9-]*|ext-ms-win-[a-z0-9-]*|ucrtbase|ntdll|opengl32|hid|dbghelp|winspool\.drv)\.dll$' || true)"
+            if [ -n "$bad" ]; then echo "NOT a system DLL: $bad"; status=1; fi
+          done
+          exit $status
       - name: Package Windows test build
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
@@ -123,3 +205,19 @@ jobs:
         with:
           name: ANDOR-Analog-Windows-test
           path: ANDOR-Analog-Windows-test.zip
+      - name: Build the Windows installer (Inno Setup)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          version="$(python -c "import json;print(json.load(open('product/product.json'))['version'])")"
+          python packaging/common/make_notices.py --build build-plugin --osp external/osp --out THIRD_PARTY_NOTICES.txt
+          art="$(cygpath -w "$PWD/build-plugin/osp/external-products/product/ANDOR_Analog_artefacts/Release")"
+          # (MSYS_NO_PATHCONV: Git Bash would otherwise turn ISCC's /D... options into paths.)
+          MSYS_NO_PATHCONV=1 "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DAppVersion=$version" "/DArtefacts=$art" "/DNotices=$(cygpath -w "$PWD/THIRD_PARTY_NOTICES.txt")" "/DOutDir=$(cygpath -w "$PWD/installer")" packaging/windows/ANDOR-Analog.iss
+          ls -l installer
+      - name: Upload the Windows installer
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANDOR-Analog-Windows-installer
+          path: installer/
+          if-no-files-found: error

@@ -9,7 +9,7 @@ An ANDOR instrument built from the ANDOR Instrument Shell (`shared/andor-shell`)
 | Slug | `analog` |
 | Plugin code | `Aanl` (manufacturer `Ospx`) |
 | Bundle ID | `com.osp.andoranalog` |
-| Version | 0.1.0 |
+| Version | 1.0.0 (from `product.json`, the only place it is written) |
 | CMake target | `ANDOR_Analog` (tests: `andor_analog_tests`) |
 | Presets | `Documents/ANDOR Analog/Presets/*.andoranalog` |
 | Saved state | `<ANDOR_ANALOG product="analog">` |
