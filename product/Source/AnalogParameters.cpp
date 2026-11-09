@@ -1,4 +1,5 @@
 #include "AnalogParameters.h"
+#include "ParameterFactory.h"
 
 #include "AnalogMath.h"
 #include "InstrumentHost.h"
@@ -280,27 +281,27 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     const Patch d;   // the INIT patch: the defaults
     auto id = [] (const juce::String& name) { return juce::ParameterID { name, 1 }; };
     auto percent = [&] (const juce::String& name, const char* title, double value) {
-        layout.add (std::make_unique<Float> (id (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
                                              Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     };
     auto onOff = [&] (const juce::String& name, const char* title, bool value) {
-        layout.add (std::make_unique<juce::AudioParameterBool> (id (name), title, value));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (id (name), title, value));
     };
     auto choice = [&] (const juce::String& name, const char* title, juce::StringArray items, int value) {
-        layout.add (std::make_unique<juce::AudioParameterChoice> (id (name), title, items, value));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (id (name), title, items, value));
     };
     auto integer = [&] (const juce::String& name, const char* title, int lo, int hi, int value, const char* unit) {
-        layout.add (std::make_unique<juce::AudioParameterInt> (id (name), title, lo, hi, value,
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterInt> (id (name), title, lo, hi, value,
                                                                juce::AudioParameterIntAttributes().withLabel (unit).withStringFromValueFunction ([unit] (int v, int) {
                                                                    return (v > 0 ? "+" : "") + juce::String (v) + " " + unit;
                                                                })));
     };
     auto time = [&] (const juce::String& name, const char* title, float lo, float hi, float centre, double value) {
-        layout.add (std::make_unique<Float> (id (name), title, skewed (lo, hi, centre), static_cast<float> (value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (name), title, skewed (lo, hi, centre), static_cast<float> (value),
                                              Attributes().withLabel ("s").withStringFromValueFunction (secondsText)));
     };
     auto bipolar = [&] (const juce::String& name, const char* title, float range, double value, const char* unit, int decimals) {
-        layout.add (std::make_unique<Float> (id (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
                                              Attributes().withLabel (unit).withStringFromValueFunction ([unit, decimals] (float v, int) {
                                                  return signedText (v, unit, decimals);
                                              })));
@@ -309,7 +310,7 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // The macros of its own: BLEND, TONE (the cutoff, shown in Hz); the LFO's amount (the
     // first version's MOTION macro: its ID is kept, its knob is in the TONE popover now).
     percent (blend, "Blend", d.blend);
-    layout.add (std::make_unique<Float> (id (tone), "Filter", juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), static_cast<float> (100.0 * d.tone),
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (tone), "Filter", juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), static_cast<float> (100.0 * d.tone),
                                          Attributes().withLabel ("%").withStringFromValueFunction ([] (float v, int) { return hertzText (math::toneToHz (0.01 * v)); })));
     percent (motion, "LFO Amount", d.lfoAmount);
 
@@ -317,14 +318,14 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     choice (osc1Wave, "Osc 1 Wave", { "Saw", "Pulse", "Saw+Pulse" }, static_cast<int> (d.osc1Wave));
     integer (osc1Octave, "Osc 1 Octave", -2, 2, d.osc1Octave, "oct");
     integer (osc1Coarse, "Osc 1 Coarse", -12, 12, static_cast<int> (d.osc1Coarse), "st");
-    layout.add (std::make_unique<Float> (id (osc1Width), "Osc 1 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc1Width),
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (osc1Width), "Osc 1 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc1Width),
                                          Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     percent (osc1Level, "Osc 1 Level", d.osc1Level);
     choice (osc2Wave, "Osc 2 Wave", { "Saw", "Triangle", "Pulse", "Saw+Tri", "Saw+Pulse", "Tri+Pulse", "All" }, static_cast<int> (d.osc2Wave));
     integer (osc2Octave, "Osc 2 Octave", -2, 2, d.osc2Octave, "oct");
     integer (osc2Coarse, "Osc 2 Coarse", -12, 12, static_cast<int> (d.osc2Coarse), "st");
     bipolar (osc2Fine, "Osc 2 Fine", 100.0f, d.osc2FineCents, "ct", 0);
-    layout.add (std::make_unique<Float> (id (osc2Width), "Osc 2 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc2Width),
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (osc2Width), "Osc 2 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc2Width),
                                          Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     percent (osc2Level, "Osc 2 Level", d.osc2Level);
     onOff (osc2KeyTrack, "Osc 2 Keyboard", d.osc2KeyTrack);
@@ -344,7 +345,7 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     bipolar (envDepth, "Filter Env Amount", 60.0f, d.envDepthSemitones, "st", 1);
     percent (velocityToFilter, "Velocity to Filter", d.velocityToFilter);
     percent (driveBias, "Drive Bias", d.driveBias);
-    layout.add (std::make_unique<Float> (id (driveTrim), "Drive Trim", juce::NormalisableRange<float> (-12.0f, 6.0f, 0.1f), static_cast<float> (d.driveTrimDb),
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (driveTrim), "Drive Trim", juce::NormalisableRange<float> (-12.0f, 6.0f, 0.1f), static_cast<float> (d.driveTrimDb),
                                          Attributes().withLabel ("dB").withStringFromValueFunction ([] (float v, int) { return signedText (v, "dB", 1); })));
     time (filterAttack, "Filter Attack", 0.001f, 30.0f, 0.25f, d.filterAttack);
     time (filterDecay, "Filter Decay", 0.005f, 40.0f, 0.6f, d.filterDecay);
@@ -354,7 +355,7 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // The first version's LFO (unused since version 2: the LFO is ANDOR OSP's LFO 1, mod.lfo1.*,
     // and sessions saved with these are migrated to it). Kept so their IDs never change.
     choice (lfoWave, "LFO Wave (v1, unused)", { "Sine", "Triangle", "Ramp", "Square", "S&H" }, 1);
-    layout.add (std::make_unique<Float> (id (lfoRate), "LFO Rate (v1, unused)", skewed (0.02f, 25.0f, 2.0f), 4.0f,
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (id (lfoRate), "LFO Rate (v1, unused)", skewed (0.02f, 25.0f, 2.0f), 4.0f,
                                          Attributes().withLabel ("Hz").withStringFromValueFunction ([] (float v, int) {
                                              return juce::String (v, v < 1.0f ? 2 : 1) + " Hz";
                                          })));
@@ -387,12 +388,12 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // DRIVE now). KEY DNA: each key's own grains (GRANULAR), as ANDOR OSP's KeyDna.
     auto v2 = [] (const juce::String& name) { return juce::ParameterID { name, 2 }; };
     auto percent2 = [&] (const juce::String& name, const char* title, double value) {
-        layout.add (std::make_unique<Float> (v2 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v2 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
                                              Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     };
     percent2 (filterDrive, "Filter Drive", d.filterDrive);
     const osp::keydna::Settings dna;
-    layout.add (std::make_unique<juce::AudioParameterBool> (v2 (keyDna), "Key DNA", dna.enabled));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v2 (keyDna), "Key DNA", dna.enabled));
     percent2 (keyDnaAmount, "Key DNA Amount", dna.amount);
     percent2 (keyDnaIndividuality, "Key DNA Individuality", dna.individuality);
     percent2 (keyDnaPosition, "Key DNA Position", keyDnaDefaultVariation);
@@ -406,21 +407,21 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // version 3 played it.
     auto v4 = [] (const juce::String& name) { return juce::ParameterID { name, 4 }; };
     auto percent4 = [&] (const juce::String& name, const char* title, double value) {
-        layout.add (std::make_unique<Float> (v4 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v4 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
                                              Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     };
     auto onOff4 = [&] (const juce::String& name, const char* title, bool value) {
-        layout.add (std::make_unique<juce::AudioParameterBool> (v4 (name), title, value));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v4 (name), title, value));
     };
     auto choice4 = [&] (const juce::String& name, const char* title, juce::StringArray items, int value) {
-        layout.add (std::make_unique<juce::AudioParameterChoice> (v4 (name), title, items, value));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v4 (name), title, items, value));
     };
     auto time4 = [&] (const juce::String& name, const char* title, float hi, double value) {
-        layout.add (std::make_unique<Float> (v4 (name), title, skewed (0.0f, hi, 0.6f), static_cast<float> (value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v4 (name), title, skewed (0.0f, hi, 0.6f), static_cast<float> (value),
                                              Attributes().withLabel ("s").withStringFromValueFunction (secondsText)));
     };
     auto bipolar4 = [&] (const juce::String& name, const char* title, float range, double value, const char* unit, int decimals) {
-        layout.add (std::make_unique<Float> (v4 (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v4 (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
                                              Attributes().withLabel (unit).withStringFromValueFunction ([unit, decimals] (float v, int) {
                                                  return signedText (v, unit, decimals);
                                              })));
@@ -461,7 +462,7 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     onOff4 (osc1Enabled, "Osc 1 On", d.osc1Enabled);
     onOff4 (osc2Enabled, "Osc 2 On", d.osc2Enabled);
     const auto& o = d.organic;
-    layout.add (std::make_unique<juce::AudioParameterInt> (v4 (organicRoot), "Organic Root", -1, 127, o.rootOverride,
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterInt> (v4 (organicRoot), "Organic Root", -1, 127, o.rootOverride,
                                                            juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) {
                                                                if (v < 0)
                                                                    return juce::String ("Auto");
@@ -483,23 +484,23 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // State version 8: three engines (appended; the shell's layerC.* exist already).
     auto v8 = [] (const juce::String& name) { return juce::ParameterID { name, 8 }; };
     auto percent8 = [&] (const juce::String& name, const char* title, double value) {
-        layout.add (std::make_unique<Float> (v8 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v8 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
                                              Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     };
     auto choice8 = [&] (const juce::String& name, const char* title, juce::StringArray items, int value) {
-        layout.add (std::make_unique<juce::AudioParameterChoice> (v8 (name), title, items, value));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v8 (name), title, items, value));
     };
     auto onOff8 = [&] (const juce::String& name, const char* title, bool value) {
-        layout.add (std::make_unique<juce::AudioParameterBool> (v8 (name), title, value));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v8 (name), title, value));
     };
     auto integer8 = [&] (const juce::String& name, const char* title, int lo, int hi, int value, const char* unit) {
-        layout.add (std::make_unique<juce::AudioParameterInt> (v8 (name), title, lo, hi, value,
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterInt> (v8 (name), title, lo, hi, value,
                                                                juce::AudioParameterIntAttributes().withLabel (unit).withStringFromValueFunction ([unit] (int v, int) {
                                                                    return (v > 0 ? "+" : "") + juce::String (v) + " " + unit;
                                                                })));
     };
     auto bipolar8 = [&] (const juce::String& name, const char* title, float range, double value, const char* unit, int decimals) {
-        layout.add (std::make_unique<Float> (v8 (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v8 (name), title, juce::NormalisableRange<float> (-range, range, 0.01f), static_cast<float> (value),
                                              Attributes().withLabel (unit).withStringFromValueFunction ([unit, decimals] (float v, int) {
                                                  return signedText (v, unit, decimals);
                                              })));
@@ -511,7 +512,7 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     integer8 (osc3Octave, "Osc 3 Octave", -2, 2, d.osc3Octave, "oct");
     integer8 (osc3Coarse, "Osc 3 Coarse", -12, 12, static_cast<int> (d.osc3Coarse), "st");
     bipolar8 (osc3Fine, "Osc 3 Fine", 100.0f, d.osc3FineCents, "ct", 0);
-    layout.add (std::make_unique<Float> (v8 (osc3Width), "Osc 3 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc3Width),
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v8 (osc3Width), "Osc 3 Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f), static_cast<float> (100.0 * d.osc3Width),
                                          Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     bipolar8 (lfoWidth3, "LFO to Osc 3 Width", 45.0f, 100.0 * d.lfoWidth3, "%", 0);
     onOff8 (osc3DcoSaw, "Osc 3 DCO Saw", d.dco3.saw);
@@ -531,13 +532,13 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent8 (hybridVelo, "Hybrid Velocity", d.hybridVelo);
     percent8 (hybridNoiseKeys, "Hybrid Noise Keys", d.hybridNoiseKeys);
     // State version 10: the mod wheel to LFO 1's depths, off in a new instrument.
-    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { lfoWheel, 10 }, "LFO Mod Wheel", d.wheelToLfo));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (juce::ParameterID { lfoWheel, 10 }, "LFO Mod Wheel", d.wheelToLfo));
 
     // State version 11: MOVEMENT's lanes. Lane A on at 100 % and lane B off: every session
     // from before plays exactly as it did.
     auto v11 = [] (const juce::String& name) { return juce::ParameterID { name, 11 }; };
     auto percent11 = [&] (const juce::String& name, const juce::String& title, double value) {
-        layout.add (std::make_unique<Float> (v11 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v11 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
                                              Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     };
     juce::StringArray cycles;
@@ -548,16 +549,16 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
         const auto& lanePatch = lane == 0 ? d.movementA : d.movementBLane;
         const auto& laneShaping = lane == 0 ? d.effects : d.movementB;
         const juce::String name = lane == 0 ? "Movement A " : "Movement B ";
-        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (movementLaneId (lane, "on")), name + "On", lanePatch.on));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v11 (movementLaneId (lane, "on")), name + "On", lanePatch.on));
         percent11 (movementLaneId (lane, "level"), name + "Intensity", lanePatch.level);
-        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (movementLaneId (lane, "sync")), name + "Pulse Sync", laneShaping.pulseSync));
-        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (movementLaneId (lane, "pulse.division")), name + "Pulse Cycle", cycles, laneShaping.pulseDivision));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v11 (movementLaneId (lane, "sync")), name + "Pulse Sync", laneShaping.pulseSync));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v11 (movementLaneId (lane, "pulse.division")), name + "Pulse Cycle", cycles, laneShaping.pulseDivision));
         percent11 (movementLaneId (lane, "phase"), name + "Phase", laneShaping.movementPhase);
     }
     {
         const auto& b = d.movementB;
         auto id = [] (const char* n) { return movementBPrefix + n; };
-        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("mode")), "Movement B Mode", juce::StringArray { "Drift", "Tape", "Chorus", "Pulse", "Shaper" },
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v11 (id ("mode")), "Movement B Mode", juce::StringArray { "Drift", "Tape", "Chorus", "Pulse", "Shaper" },
                                                                   static_cast<int> (b.movementMode)));
         percent11 (id ("drift.speed"), "Movement B Drift Speed", b.driftSpeed);
         percent11 (id ("drift.pitch"), "Movement B Drift Pitch", b.driftPitch);
@@ -574,13 +575,13 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
         juce::StringArray patterns;
         for (int i = 0; i < osp::RhythmicShaper::patternCount; ++i)
             patterns.add (osp::RhythmicShaper::patternName (i));
-        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.pattern")), "Movement B Shaper Pattern", patterns, b.shaper.pattern));
-        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.rate")), "Movement B Shaper Rate",
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v11 (id ("shaper.pattern")), "Movement B Shaper Pattern", patterns, b.shaper.pattern));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v11 (id ("shaper.rate")), "Movement B Shaper Rate",
                                                                   juce::StringArray { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" }, static_cast<int> (b.shaper.rate)));
-        layout.add (std::make_unique<juce::AudioParameterChoice> (v11 (id ("shaper.target")), "Movement B Shaper Target", juce::StringArray { "Vol", "Filter", "Both" },
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v11 (id ("shaper.target")), "Movement B Shaper Target", juce::StringArray { "Vol", "Filter", "Both" },
                                                                   static_cast<int> (b.shaper.target)));
         percent11 (id ("shaper.smooth"), "Movement B Shaper Smooth", b.shaper.smooth);
-        layout.add (std::make_unique<juce::AudioParameterBool> (v11 (id ("shaper.custom")), "Movement B Shaper Custom", b.shaper.custom));
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v11 (id ("shaper.custom")), "Movement B Shaper Custom", b.shaper.custom));
     }
 }
 

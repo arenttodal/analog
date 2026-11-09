@@ -1,4 +1,5 @@
 #include "FxParameters.h"
+#include "ParameterFactory.h"
 
 #include <cmath>
 #include "fx/FxDsp.h"
@@ -369,16 +370,16 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                 const juce::ParameterID id { idOf ({ type, slot }, spec.name), type == fx::Type::retro ? 29 : 28 };
                 const auto title = prefix + spec.title;
                 if (spec.kind == Kind::toggle)
-                    layout.add (std::make_unique<juce::AudioParameterBool> (id, title, spec.fallback >= 0.5f));
+                    layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (id, title, spec.fallback >= 0.5f));
                 else if (spec.kind == Kind::choice)
-                    layout.add (std::make_unique<juce::AudioParameterChoice> (id, title, spec.choices, juce::roundToInt (spec.fallback)));
+                    layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (id, title, spec.choices, juce::roundToInt (spec.fallback)));
                 else
                 {
                     juce::NormalisableRange<float> range (spec.low, spec.high);
                     if (spec.centre > spec.low && spec.centre < spec.high)
                         range.setSkewForCentre (spec.centre);
                     const auto* s = &spec;
-                    layout.add (std::make_unique<juce::AudioParameterFloat> (
+                    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (
                         id, title, range, spec.fallback,
                         juce::AudioParameterFloatAttributes().withLabel (spec.unit == "%" ? "%" : spec.unit).withStringFromValueFunction ([s] (float v, int) { return format (*s, v); })));
                 }

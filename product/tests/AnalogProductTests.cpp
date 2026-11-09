@@ -7479,3 +7479,42 @@ TEST_CASE ("analog: V5 PATTERNED HARDWARE - one identity per device, legible, no
     CHECK (view->tileKnobParameters ({ fx::Type::movement, 0 }).contains ("motion"));
     setValue (p, "movement.mode", values.at ("movement.mode"));
 }
+
+//==============================================================================
+// Release contracts (1.0): what a DAW sees and what a saved project holds.
+
+namespace
+{
+    juce::File productSourceDir()
+    {
+        return juce::File (ANDOR_PRODUCT_SCHEMA_GOLDEN).getParentDirectory().getParentDirectory();
+    }
+
+    bool updatingGoldens()
+    {
+        const char* update = std::getenv ("OSP_UPDATE_GOLDEN");
+        return update != nullptr && juce::String (update) == "1";
+    }
+}
+
+TEST_CASE ("analog: a DAW may automate exactly the parameters the engine reads", "[analog][host][automation]")
+{
+    // The others (ANDOR OSP's schema has more than ANALOG plays) are proved inert by the
+    // bindings test: hosts leave them out of their automation lists. IDs and order unchanged.
+    ShellProcessor p;
+    const auto bound = params::engineParameterIds();
+    int automatable = 0, hidden = 0;
+    for (auto* base : p.getParameters())
+    {
+        auto* param = dynamic_cast<juce::RangedAudioParameter*> (base);
+        REQUIRE (param != nullptr);
+        const auto id = param->getParameterID();
+        INFO (id);
+        const bool isBound = osp::plugin::binding::anyBound ({ id }, bound);
+        CHECK (param->isAutomatable() == isBound);
+        (isBound ? automatable : hidden) += 1;
+    }
+    CHECK (hidden > 100);
+    CHECK (automatable > 500);
+    WARN ("host parameters: " << automatable << " automatable, " << hidden << " not offered for automation");
+}
