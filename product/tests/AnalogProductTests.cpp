@@ -5870,23 +5870,31 @@ TEST_CASE ("analog: FX ROUTING - the icon beside SAVE on its centre line; the vi
     editor->setSize (1448, juce::roundToInt (1448.0f * ui.instrumentHeight() / 1448.0f));
     ui.refreshNow();
 
-    // The icon: borderless, beside SAVE, on SAVE's centre line, 12 px from it, clear of MIX.
+    // The header without MIX: [ preset bar ][ SAVE ][ ROUTING ] as keys of one size on one
+    // centre line, 8 px apart, 28 px clear of VOLUME; MIX hidden.
     auto& icon = ui.sourceViewToggle();
     REQUIRE (icon.isVisible());
     juce::Component* save = nullptr;
     juce::Component* mix = nullptr;
+    juce::Component* bar = nullptr;
     for (auto* c : icon.getParentComponent()->getChildren())
     {
         if (dynamic_cast<osp::plugin::SavePresetButton*> (c) != nullptr)
             save = c;
         if (dynamic_cast<osp::plugin::HeaderMix*> (c) != nullptr)
             mix = c;
+        if (dynamic_cast<osp::plugin::PresetBar*> (c) != nullptr)
+            bar = c;
     }
     REQUIRE (save != nullptr);
-    REQUIRE (mix != nullptr);
+    REQUIRE (bar != nullptr);
+    CHECK ((mix == nullptr || ! mix->isVisible()));
     CHECK (icon.getBounds().getCentreY() == save->getBounds().getCentreY());
-    CHECK (icon.getX() - save->getRight() == 12);
-    CHECK (mix->getX() >= icon.getRight() + 15);
+    CHECK (icon.getBounds().getCentreY() == bar->getBounds().getCentreY());
+    CHECK (icon.getWidth() == save->getWidth());
+    CHECK (icon.getHeight() == save->getHeight());
+    CHECK (icon.getX() - save->getRight() == 8);
+    CHECK (save->getX() - bar->getRight() == 8);
 
     // Opening it: the cards go, the view is in their place; macros and keyboard stay.
     std::vector<juce::Rectangle<int>> others;

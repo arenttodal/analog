@@ -306,6 +306,10 @@ const ProductInfo& productInfo()
             p.movementLanes = { a, b };
         }
         p.mixEndLabels = { "A+B", "C" };   // (the header MIX: the analog pair against card C)
+        // No header MIX for now (the cards' own levels and the routing view's balance them): the
+        // preset bar takes its room, SAVE and ROUTING after it as keys of one size.
+        p.headerMix = false;
+        p.crossCloseKeys = true;   // (the ARPEGGIATOR closes with the racks' X)
         // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
         // a SAMPLE or INSTRUMENT PATCH only.
         p.cardModifiersShown = [] (int layer, osp::plugin::InstrumentHost& host) {

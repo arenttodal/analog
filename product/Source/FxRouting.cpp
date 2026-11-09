@@ -121,20 +121,21 @@ public:
         const auto r = getLocalBounds().toFloat();
         if (kind == Kind::collapse)
         {
-            g.setColour (juce::Colour (0xfffaf6ee));
-            g.fillEllipse (r.reduced (1.0f));
-            g.setColour (over ? juce::Colour (0xffb9ab9b) : juce::Colour (0xffd7cbbe));
-            g.drawEllipse (r.reduced (1.0f), 1.0f);
-            // (an X: the routing view closes, back to the cards)
-            juce::Path cross;
+            // The racks' borderless X (the same size and stroke): the view closes, back to the cards.
             const auto c = r.getCentre();
-            const float a = 4.0f;
+            if (over || down)
+            {
+                g.setColour (osp::plugin::design::colour::text.withAlpha (down ? 0.11f : 0.07f));
+                g.fillEllipse (juce::Rectangle<float> (24.0f, 24.0f).withCentre (c));
+            }
+            juce::Path cross;
+            const float a = 4.6f;
             cross.startNewSubPath (c.x - a, c.y - a);
             cross.lineTo (c.x + a, c.y + a);
             cross.startNewSubPath (c.x + a, c.y - a);
             cross.lineTo (c.x - a, c.y + a);
-            g.setColour (juce::Colour (0xff6f6a62));
-            g.strokePath (cross, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (osp::plugin::design::colour::text.withAlpha (over || down ? 1.0f : 0.8f));   // (the ARPEGGIATOR's ink)
+            g.strokePath (cross, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             return;
         }
         if (over || down || getToggleState())
@@ -948,8 +949,9 @@ void FxRoutingView::resized()
     auto inner = getLocalBounds().reduced (18, 13);
     headerArea = inner.removeFromTop (34);
     auto header = headerArea;
-    close->setBounds (header.removeFromRight (24).withSizeKeepingCentre (24, 24));
-    header.removeFromRight (12);
+    // The X as the racks' and the ARPEGGIATOR's: a 30 px target centred 25 px from the right edge.
+    close->setBounds (juce::Rectangle<int> (30, 30).withCentre ({ getWidth() - 25, headerArea.getCentreY() }));
+    header.setRight (close->getX() - 6);
     gear->setBounds (header.removeFromRight (26).withSizeKeepingCentre (26, 26));
     header.removeFromRight (10);
     const int statusWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (11.5f, fonts::Weight::semibold), statusText())) + 14;
