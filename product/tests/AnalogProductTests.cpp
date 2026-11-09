@@ -513,6 +513,65 @@ TEST_CASE ("analog: the factory presets are installed, listed and load exactly",
     CHECK (q.presetList().size() == list.size() + 1);
 }
 
+TEST_CASE ("analog: a factory update replaces only the factory files it wrote; the musician's stay", "[analog][presets]")
+{
+    // Its own Documents folder (ANDOR_DOCUMENTS_DIR), so the real factory set is not touched.
+    Scratch scratch;
+    struct Documents
+    {
+        explicit Documents (const juce::String& path)
+        {
+           #if JUCE_WINDOWS
+            ::_putenv_s ("ANDOR_DOCUMENTS_DIR", path.toRawUTF8());
+           #else
+            ::setenv ("ANDOR_DOCUMENTS_DIR", path.toRawUTF8(), 1);
+           #endif
+        }
+        ~Documents()
+        {
+           #if JUCE_WINDOWS
+            ::_putenv_s ("ANDOR_DOCUMENTS_DIR", "");
+           #else
+            ::unsetenv ("ANDOR_DOCUMENTS_DIR");
+           #endif
+        }
+    } documents (scratch.dir.getFullPathName());
+    ShellProcessor p;
+    const auto factory = p.presetFolder().getChildFile ("Factory");
+    const auto manifest = factory.getChildFile (".manifest");
+    REQUIRE (manifest.existsAsFile());
+    juce::StringArray lines;
+    manifest.readLines (lines);
+    lines.removeEmptyStrings();
+    CHECK (lines.size() == static_cast<int> (factoryPatches().size()));
+    REQUIRE (lines.size() >= 2);
+    // A musician's preset saved into Factory, and a factory preset they saved over (changed).
+    const auto mine = factory.getChildFile ("Mine In Factory.andoranalog");
+    REQUIRE (p.savePreset (mine));
+    const auto overwritten = factory.getChildFile (lines[0].fromFirstOccurrenceOf (" ", false, false));
+    const auto untouched = factory.getChildFile (lines[1].fromFirstOccurrenceOf (" ", false, false));
+    REQUIRE (overwritten.existsAsFile());
+    REQUIRE (untouched.existsAsFile());
+    setValue (p, "gain", -12.0f);
+    REQUIRE (p.savePreset (overwritten));
+    const auto theirs = overwritten.loadFileAsString();
+    const auto untouchedBefore = untouched.getLastModificationTime();
+    // An update brings another factory set.
+    factory.getChildFile (".version").replaceWithText ("analog-factory-older");
+    juce::Thread::sleep (1100);   // (file times have a resolution of a second on some systems)
+    ShellProcessor q;
+    CHECK (mine.existsAsFile());
+    CHECK (overwritten.loadFileAsString() == theirs);                       // their save kept
+    CHECK (untouched.existsAsFile());
+    CHECK (untouched.getLastModificationTime() > untouchedBefore);          // rewritten by the update
+    CHECK (factory.getChildFile (".version").loadFileAsString().trim() != "analog-factory-older");
+    // The new manifest lists what it wrote now (not the musician's files).
+    juce::StringArray after;
+    factory.getChildFile (".manifest").readLines (after);
+    CHECK_FALSE (after.joinIntoString ("\n").contains ("Mine In Factory"));
+    CHECK_FALSE (after.joinIntoString ("\n").contains (overwritten.getFileName()));
+}
+
 TEST_CASE ("analog: the plugin plays exactly what the engine renders from the same patch", "[analog][engine]")
 {
     ShellProcessor p;

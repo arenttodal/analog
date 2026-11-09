@@ -19,6 +19,8 @@
 #include "ShellProcessor.h"
 #include "ShellProduct.h"
 
+#include <juce_cryptography/juce_cryptography.h>
+
 namespace andor::shell
 {
 
@@ -224,18 +226,53 @@ namespace
         const auto marker = folder.getChildFile (".version");
         if (marker.loadFileAsString().trim() == factoryVersion)
             return;
-        // Our own folder only: replace the previous version's set.
-        if (folder.isDirectory())
-            folder.deleteRecursively();
+        // Replace the previous version's set, and only that: ".manifest" lists every file the
+        // installer wrote with the SHA-256 of what it wrote. A file the musician saved into
+        // Factory, or a factory file they saved over, is never deleted. (A folder from before
+        // the manifest: its preset files go to the trash, recoverable, instead of being
+        // deleted.)
+        const auto manifest = folder.getChildFile (".manifest");
+        auto hashOf = [] (const juce::File& f) { return juce::SHA256 (f).toHexString(); };
+        if (manifest.existsAsFile())
+        {
+            juce::StringArray lines;
+            manifest.readLines (lines);
+            for (const auto& line : lines)
+            {
+                const auto hash = line.upToFirstOccurrenceOf (" ", false, false);
+                const auto relative = line.fromFirstOccurrenceOf (" ", false, false);
+                if (relative.isEmpty() || relative.contains ("..") || juce::File::isAbsolutePath (relative))
+                    continue;
+                const auto f = folder.getChildFile (relative);
+                if (f.existsAsFile() && hashOf (f) == hash)
+                    f.deleteFile();
+            }
+        }
+        else if (folder.isDirectory())
+        {
+            for (const auto& f : folder.findChildFiles (juce::File::findFiles, true, "*" + productInfo().presetExtension))
+                if (! f.moveToTrash())
+                    f.moveFileTo (f.withFileExtension (productInfo().presetExtension + ".old"));
+        }
         if (! folder.createDirectory())
             return;
+        juce::StringArray written;
         for (const auto& factory : andor::analog::factoryPatches())
         {
             const auto file = folder.getChildFile (juce::String (factory.category)).getChildFile (safeFileName (factory.name) + productInfo().presetExtension);
             file.getParentDirectory().createDirectory();
-            if (auto xml = presetXml (host, factory))
-                xml->writeTo (file);
+            // A musician's own file where a factory preset would go keeps its place: the
+            // factory one is skipped (it is still in the instrument; renaming theirs gets it back).
+            if (file.existsAsFile())
+                continue;
+            if (auto xml = presetXml (host, factory); xml != nullptr && xml->writeTo (file))
+                written.add (hashOf (file) + " " + file.getRelativePathFrom (folder).replaceCharacter ('\\', '/'));
         }
+        // Empty category folders left by the previous set go.
+        for (const auto& d : folder.findChildFiles (juce::File::findDirectories, false))
+            if (d.findChildFiles (juce::File::findFilesAndDirectories, true).isEmpty())
+                d.deleteFile();
+        manifest.replaceWithText (written.joinIntoString ("\n") + "\n");
         marker.replaceWithText (factoryVersion);
     }
 }
