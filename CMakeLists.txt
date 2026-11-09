@@ -12,8 +12,16 @@ cmake_minimum_required(VERSION 3.25)
 #   cmake -B build -G Ninja                              # engine, tests, renderer
 #   cmake -B build-plugin -G Ninja -DOSP_BUILD_PLUGIN=ON # + the plugin and its tests
 
+# One version, in product/product.json (the plug-in's, the installers' and this project's).
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/product/product.json" ANALOG_PRODUCT_JSON)
+string(JSON ANALOG_VERSION GET "${ANALOG_PRODUCT_JSON}" version)
+if(NOT ANALOG_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "product/product.json: version '${ANALOG_VERSION}' is not MAJOR.MINOR.PATCH")
+endif()
+set(ANALOG_VERSION "${ANALOG_VERSION}" CACHE INTERNAL "ANDOR Analog's version (product/product.json)")
+
 project(ANDOR_ANALOG
-    VERSION 0.1.0
+    VERSION ${ANALOG_VERSION}
     DESCRIPTION "ANDOR ANALOG: a living analog instrument"
     LANGUAGES C CXX)
 

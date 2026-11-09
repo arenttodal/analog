@@ -4,7 +4,7 @@
   "slug": "analog",
   "pluginCode": "Aanl",
   "bundleId": "com.osp.andoranalog",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "target": "ANDOR_Analog",
   "identity": "/ANALOG",
   "tagline": "A living analog instrument",
