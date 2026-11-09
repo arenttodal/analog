@@ -72,8 +72,10 @@ build cannot play is refused (`setFxRoute` returns false; nothing changes).
 - A tile's click: its quick settings (FxRack's `createFxQuickPopover`), anchored to it; a
   double-click, EXPAND or Return: its full rack (`openFxRack`: the new effects' `rack::Kind::fx`
   module, the original four their own racks, DRIVE its popover). Esc closes the popover first.
-- A long chain pans (the wheel; a chosen tile pans into view) under a fade before OUTPUT, which
-  is never covered; scrolled-out tiles are not hit.
+- (V4, docs/FX_ROUTING_TAPE_V4.md: replaces the panning.) A long chain wraps into two rows,
+  left to right, with CONT. 2 / FROM 1; what cannot fit at a legible size is a labelled group
+  summary whose menu reaches every member. The board never scrolls. The engine mixer's levels
+  are ceramic knobs on the cards' own LEVEL parameters.
 - The gear: Restore original, Save FX chain, Load FX chain, Show chains folder.
 
 ## Latency (FX Rack V2, gate 8)

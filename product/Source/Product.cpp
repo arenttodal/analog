@@ -346,6 +346,9 @@ const ProductInfo& productInfo()
             // V3: every faceplate is the rack's whole face (docs/FX_RACK_V3_POLISH.md).
             for (auto* f : { &movement, &echo, &space })
                 f->fullBleed = true;
+            // V4: the TAPE modes (ECHO's tape echo, MOVEMENT's wow and flutter) as a light reel
+            // deck (docs/FX_ROUTING_TAPE_V4.md).
+            movement.tapeDeck = echo.tapeDeck = true;
             p.rackFaceplates = { { Kind::movement, movement }, { Kind::echo, echo }, { Kind::space, space } };
             p.fullBleedRacks = true;
         }

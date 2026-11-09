@@ -4200,6 +4200,7 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
     editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
     std::map<Kind, std::array<juce::Rectangle<int>, 4>> slots;
     std::map<Kind, float> heights;
+    setValue (p, "echo.type", 1.0f);   // (BBD: the approved layout; TAPE's deck is V4's own, [v4])
     for (const auto kind : { Kind::movement, Kind::echo, Kind::space })
     {
         ui.setRackExpanded (kind, true);
@@ -4276,6 +4277,19 @@ TEST_CASE ("analog: the approved rack layout - each module's graph column fixed,
         auto* module = ui.effectsRack().module (c.kind);
         REQUIRE (module != nullptr);
         CHECK (osp::plugin::rackDensity (*module) == c.dense);
+        if (osp::plugin::rackTapeDeckShown (*module))
+        {
+            // V4's TAPE deck (ECHO TAPE, MOVEMENT TAPE; its own layout, [v4]): the first control
+            // on the same origin, the dense slots, the deck between the knobs and the display.
+            const auto cells = osp::plugin::rackCellBounds (*module);
+            REQUIRE (! cells.empty());
+            CHECK (cells.front().getX() == osp::plugin::rack::hardware::bleedMeasures.contentLeft());
+            for (std::size_t i = 1; i < cells.size(); ++i)
+                CHECK (cells[i].getX() - cells[i - 1].getRight() == 5);
+            CHECK (cells.back().getRight() < osp::plugin::rackTapeDeckBounds (*module).getX());
+            CHECK (osp::plugin::rackTapeDeckBounds (*module).getRight() < osp::plugin::rackSlot (*module, 5).getX());
+            continue;
+        }
         // The graph: the module's column, whatever its mode; its right edge every module's.
         const auto picture = osp::plugin::rackSlot (*module, 5);
         if (pictureOf.count (c.kind) == 0)
@@ -4355,6 +4369,8 @@ TEST_CASE ("analog: the racks' switches are their parameters - TIMING, STEREO, F
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
     editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
     // ECHO: TIMING (FREE up, SYNC down), STEREO (MONO / PING / WIDE), both following the host.
+    // (BBD: vertical switches; TAPE's deck has them as segmented keys, [v4].)
+    setValue (p, "echo.type", 1.0f);
     ui.setRackExpanded (Kind::echo, true);
     ui.refreshNow();
     auto* echo = ui.effectsRack().module (Kind::echo);
@@ -4516,7 +4532,8 @@ TEST_CASE ("analog: every rack's first control sits at one X, in every mode; the
                 reference = cell;
             CHECK (cell.getX() == reference->getX());           // left-aligned on one grid
             CHECK (cell.getY() == reference->getY());
-            CHECK (cell.getWidth() == (osp::plugin::rackDensity (*module) == 1 ? 89 : 104));   // a knob's slot in its family
+            // A knob's slot in its family (V4's TAPE deck: the dense slots, its knobs left of the reels).
+            CHECK (cell.getWidth() == (osp::plugin::rackDensity (*module) == 1 || osp::plugin::rackTapeDeckShown (*module) ? 89 : 104));
         }
     };
     check (Kind::space, "space.engine", 5);
@@ -6748,4 +6765,355 @@ TEST_CASE ("analog: FILTER's live graph as frames - a played note's sweep, then 
         andor::analog::filtergraph::liveView (graph, v, frame);
         shoot();
     }
+}
+
+TEST_CASE ("analog: V4 approval shots - ROUTING (classic, five, ten in two rows, parallel, 869) and the TAPE racks (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v4]")
+{
+    namespace fx = andor::analog::fx;
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    setValue (p, "drive", 35.0f);
+    setValue (p, "echo", 40.0f);
+    setValue (p, "space", 30.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    int width = 1448;
+    auto save = [&] (const juce::Image& image, const juce::String& name) {
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), name);
+    };
+    ui.setSourceViewShown (true);
+    REQUIRE (dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent()) != nullptr);
+    auto e = [] (fx::Type t, int slot = 0) { return fx::Node::effect ({ t, slot }); };
+    auto custom = [] (std::vector<fx::Node> chain) {
+        fx::Graph g;
+        g.custom = true;
+        g.chain = std::move (chain);
+        return g;
+    };
+    // 1. The original CLASSIC path.
+    shoot ("v4-1-routing-classic");
+    // 2. Five in a row.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::echo), e (fx::Type::space), e (fx::Type::spread) })));
+    shoot ("v4-2-routing-five");
+    // 3. Ten: two rows.
+    const auto ten = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
+                               e (fx::Type::spread), e (fx::Type::phaser), e (fx::Type::retro), e (fx::Type::utility) });
+    REQUIRE (engine.setFxRoute (ten));
+    shoot ("v4-3-routing-ten");
+    // 4. Two parallel branches (ECHO || SPACE then a serial SPREAD after the join).
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
+                                          e (fx::Type::spread) })));
+    shoot ("v4-4-routing-parallel");
+    // 5. The ten at 869.
+    REQUIRE (engine.setFxRoute (ten));
+    width = 869;
+    shoot ("v4-5-routing-ten-869");
+    width = 1448;
+    // 6. ECHO TAPE, 7. MOVEMENT TAPE (the whole instrument: the rack's height), 8. the rail.
+    REQUIRE (engine.setFxRoute (fx::classicGraph()));
+    ui.setSourceViewShown (false);
+    setValue (p, "echo.type", 0.0f);
+    ui.setRackExpanded (Kind::echo, true);
+    renderShell (p, 0.6);
+    shoot ("v4-6-echo-tape");
+    setValue (p, "movement.mode", 1.0f);
+    setValue (p, "motion", 45.0f);
+    ui.setRackExpanded (Kind::movement, true);
+    renderShell (p, 0.6);
+    shoot ("v4-7-movement-tape");
+    {
+        // The rail: A / B, the horizontal ON, the preset bar, the actions, the borderless X.
+        auto& rack = ui.effectsRack();
+        const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+        save (editor->createComponentSnapshot (r.withLeft (r.getRight() - 620).withHeight (40), true, 2.0f), "v4-8-header-closeup");
+    }
+}
+
+//==============================================================================
+// V4 (docs/FX_ROUTING_TAPE_V4.md): the routing's mixer knobs, its two-row projection of the
+// route, the TAPE decks.
+
+TEST_CASE ("analog: V4 ROUTING - the engine mixer's knobs are the cards' own levels (same parameters, same units)", "[analog][fx][routing][ui][v4]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    // About a fifth of the panel (V4: 21 %, never more than a quarter).
+    CHECK (view->mixerBounds().getWidth() <= view->getWidth() / 4);
+    CHECK (view->mixerBounds().getWidth() >= view->getWidth() / 6);
+    const juce::String ids[3] { "analog.osc1.level", "analog.osc2.level", "layerB.level" };
+    for (int i = 0; i < 3; ++i)
+    {
+        INFO (ids[i]);
+        auto* knob = view->levelKnob (i);
+        REQUIRE (knob != nullptr);
+        auto* param = p.apvts().getParameter (ids[i]);
+        REQUIRE (param != nullptr);
+        CHECK (knob->getSliderStyle() == juce::Slider::RotaryHorizontalVerticalDrag);
+        CHECK (knob->getWidth() >= 36);
+        CHECK (knob->getWidth() <= 56);
+        CHECK (knob->getWidth() == knob->getHeight());
+        CHECK (view->mixerBounds().contains (knob->getBounds()));
+        // The knob moves the card's parameter; the parameter (a card, automation) moves the knob.
+        const double target = knob->getMinimum() + 0.3 * (knob->getMaximum() - knob->getMinimum());
+        knob->setValue (target, juce::sendNotificationSync);
+        CHECK (p.parameterValue (ids[i]) == Catch::Approx (knob->getValue()).margin (1.0e-3));
+        setValue (p, ids[i], param->convertFrom0to1 (param->getDefaultValue()));
+        CHECK (knob->getValue() == Catch::Approx (param->convertFrom0to1 (param->getDefaultValue())).margin (1.0e-3));
+    }
+    // HYBRID's level is in dB at 0.0 dB (never turned into a percentage by the knob).
+    CHECK (p.apvts().getParameter ("layerB.level")->getCurrentValueAsText() == "0.0 dB");
+    // Nothing about the route moved.
+    CHECK (dynamic_cast<AnalogEngine&> (p.productEngine()).fxRoute() == fx::classicGraph());
+}
+
+TEST_CASE ("analog: V4 ROUTING - the board is a projection of the route: one row, two rows in order, parallel stages, summaries, never scrolled", "[analog][fx][routing][ui][v4]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    auto sizeTo = [&] (int width) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);   // (paint: the board follows the scale)
+    };
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    sizeTo (1448);
+    auto e = [] (fx::Type t, int slot = 0) { return fx::Node::effect ({ t, slot }); };
+    auto custom = [] (std::vector<fx::Node> chain) {
+        fx::Graph g;
+        g.custom = true;
+        g.chain = std::move (chain);
+        return g;
+    };
+    auto relayout = [&] {
+        view->resized();
+        editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+    };
+    auto noOverlaps = [&] {
+        const auto& t = view->tiles();
+        for (std::size_t i = 0; i < t.size(); ++i)
+        {
+            CHECK (view->chainBounds().contains (t[i].bounds));
+            CHECK_FALSE (t[i].bounds.intersects (view->outputBounds()));
+            for (std::size_t j = i + 1; j < t.size(); ++j)
+                CHECK_FALSE (t[i].bounds.intersects (t[j].bounds));
+            for (const auto& s : view->summaries())
+                CHECK_FALSE (t[i].bounds.intersects (s.bounds));
+        }
+    };
+
+    // Five: one row, centred on one line, readable tiles (146-158 x 66-76).
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::echo), e (fx::Type::space), e (fx::Type::spread) })));
+    relayout();
+    CHECK (view->rowCount() == 1);
+    REQUIRE (view->tiles().size() == 5);
+    for (std::size_t i = 0; i < 5; ++i)
+    {
+        const auto& t = view->tiles()[i];
+        CHECK (t.bounds.getWidth() >= 146);
+        CHECK (t.bounds.getWidth() <= 158);
+        CHECK (t.bounds.getHeight() >= 66);
+        CHECK (t.bounds.getHeight() <= 76);
+        CHECK (t.bounds.getCentreY() == view->outputBounds().getCentreY());
+        CHECK (t.light.getWidth() >= 24);   // (the bypass target)
+        if (i > 0)
+            CHECK (t.bounds.getX() > view->tiles()[i - 1].bounds.getRight());
+    }
+    CHECK (view->summaries().empty());
+    noOverlaps();
+
+    // Ten: two rows, five each at the canonical width; row 2 continues row 1 left to right;
+    // CONT. 2 / FROM 1; OUTPUT on the last tile's line; the route itself untouched.
+    const auto ten = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
+                               e (fx::Type::spread), e (fx::Type::phaser), e (fx::Type::retro), e (fx::Type::utility) });
+    REQUIRE (engine.setFxRoute (ten));
+    const auto text = fx::toText (engine.fxRoute());
+    relayout();
+    CHECK (fx::toText (engine.fxRoute()) == text);
+    CHECK (view->rowCount() == 2);
+    REQUIRE (view->tiles().size() == 10);
+    const auto order = fx::instancesOf (engine.fxRoute());
+    for (std::size_t i = 0; i < 10; ++i)
+        CHECK (view->tiles()[i].id == order[i]);
+    const int row1 = view->tiles().front().bounds.getCentreY(), row2 = view->tiles().back().bounds.getCentreY();
+    CHECK (row2 > row1);
+    for (std::size_t i = 0; i < 10; ++i)
+    {
+        const auto& t = view->tiles()[i];
+        CHECK (t.bounds.getCentreY() == (i < 5 ? row1 : row2));
+        if (i % 5 > 0)
+            CHECK (t.bounds.getX() > view->tiles()[i - 1].bounds.getRight());   // (never reversed)
+    }
+    CHECK (! view->continuationOut().isEmpty());
+    CHECK (! view->continuationIn().isEmpty());
+    CHECK (view->continuationOut().getCentreY() == row1);
+    CHECK (view->continuationIn().getCentreY() == row2);
+    CHECK (view->outputBounds().getCentreY() == row2);
+    CHECK (view->wireStart().getCentreY() == row1);
+    noOverlaps();
+    // A drop into row 2's first gap goes between the rows' effects (index 5), as drawn.
+    const auto gap = std::find_if (view->gaps().begin(), view->gaps().end(), [&] (const auto& g) {
+        return g.path.empty() && g.index == 5 && g.bounds.getCentreY() == row2;
+    });
+    REQUIRE (gap != view->gaps().end());
+    REQUIRE (view->moveTo ({ fx::Type::utility, 0 }, gap->path, gap->index));
+    CHECK (fx::instancesOf (engine.fxRoute())[5] == fx::InstanceId { fx::Type::utility, 0 });
+    p.undo().undo();
+    CHECK (fx::toText (engine.fxRoute()) == text);
+
+    // A parallel stage: its lanes in one stage (split before, join after), on the row's line.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
+                                          e (fx::Type::spread) })));
+    relayout();
+    CHECK (view->rowCount() == 1);
+    REQUIRE (view->tiles().size() == 6);
+    const auto& t = view->tiles();
+    CHECK (t[2].stacked);
+    CHECK (t[3].stacked);
+    CHECK (t[4].stacked);   // (SPACE: the lower lane)
+    CHECK (t[2].bounds.getCentreY() == t[3].bounds.getCentreY());
+    CHECK (t[4].bounds.getY() > t[2].bounds.getBottom());
+    CHECK (t[1].bounds.getRight() < std::min (t[2].bounds.getX(), t[4].bounds.getX()));
+    const auto spread = std::find_if (t.begin(), t.end(), [] (const auto& x) { return x.id.type == fx::Type::spread; });
+    REQUIRE (spread != t.end());
+    CHECK (spread->bounds.getX() > std::max (t[3].bounds.getRight(), t[4].bounds.getRight()));
+    CHECK (spread->bounds.getCentreY() == view->outputBounds().getCentreY());
+    noOverlaps();
+
+    // 869: larger tiles in design units (legible), four a row at most; what does not fit is a
+    // labelled summary - every effect is on the board, as a tile or in a summary.
+    REQUIRE (engine.setFxRoute (ten));
+    sizeTo (869);
+    CHECK (view->tileScale() > 1.1f);
+    std::map<int, int> perRow;
+    for (const auto& tile : view->tiles())
+        ++perRow[tile.bounds.getCentreY()];
+    for (const auto& s : view->summaries())
+        ++perRow[s.bounds.getCentreY()];
+    CHECK (perRow.size() <= 2);
+    for (const auto& [y, count] : perRow)
+        CHECK (count <= 4);
+    std::vector<fx::InstanceId> shown;
+    for (const auto& tile : view->tiles())
+        shown.push_back (tile.id);
+    for (const auto& s : view->summaries())
+        for (const auto& id : s.members)
+            shown.push_back (id);
+    CHECK (shown == fx::instancesOf (engine.fxRoute()));   // (all of them, in the route's order)
+    noOverlaps();
+    CHECK (fx::toText (engine.fxRoute()) == text);
+    // Back to the canonical width: every tile again.
+    sizeTo (1448);
+    CHECK (view->summaries().empty());
+    CHECK (view->tiles().size() == 10);
+}
+
+TEST_CASE ("analog: V4 TAPE - ECHO and MOVEMENT TAPE as a reel deck on the same parameters; the reels rest in silence", "[analog][rack][ui][v4]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rackui::SegmentedSwitch;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    setValue (p, "echo", 40.0f);
+    setValue (p, "echo.type", 0.0f);   // TAPE
+    ui.setRackExpanded (Kind::echo, true);
+    ui.refreshNow();
+    auto* echo = ui.effectsRack().module (Kind::echo);
+    REQUIRE (echo != nullptr);
+    const int height = echo->getHeight();
+    REQUIRE (osp::plugin::rackTapeDeckShown (*echo));
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE TIMING STEREO");
+    // The regions: knobs left, the deck in the middle, the display right (~250-336 x 90-122).
+    const auto deck = osp::plugin::rackTapeDeckBounds (*echo);
+    const auto display = osp::plugin::rackSlot (*echo, 5);
+    const auto cells = osp::plugin::rackCellBounds (*echo);
+    REQUIRE (cells.size() == 4);
+    CHECK (cells.back().getRight() < deck.getX());
+    CHECK (deck.getRight() < display.getX());
+    CHECK (display.getWidth() >= 250);
+    CHECK (display.getWidth() <= 340);
+    CHECK (display.getHeight() >= 90);
+    CHECK (display.getHeight() <= 122);
+    CHECK (deck.getBottom() <= echo->getHeight());
+    // TIMING and STEREO: the same parameters, as small segmented keys.
+    auto* timing = dynamic_cast<SegmentedSwitch*> (osp::plugin::rackCell (*echo, "TIMING"));
+    auto* stereo = dynamic_cast<SegmentedSwitch*> (osp::plugin::rackCell (*echo, "STEREO"));
+    REQUIRE (timing != nullptr);
+    REQUIRE (stereo != nullptr);
+    timing->choose (0);
+    CHECK (p.parameterValue ("echo.sync") < 0.5f);
+    timing->choose (1);
+    CHECK (p.parameterValue ("echo.sync") >= 0.5f);
+    stereo->choose (2);
+    CHECK (juce::roundToInt (p.parameterValue ("echo.stereo")) == 2);
+    setValue (p, "echo.stereo", 1.0f);
+    CHECK (stereo->positionIndex() == 1);   // (automation moves it)
+
+    // The reels: still in silence; turning while the echo sounds; easing to rest when it stops.
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) == 0.0);
+    osp::plugin::advanceRackTapeDeck (*echo, 0.5);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) == 0.0);   // (nothing has sounded)
+    renderShell (p, 0.3);   // (the phrase: notes still sounding at its end)
+    REQUIRE (p.outputPeak() > 1.0e-3f);
+    osp::plugin::advanceRackTapeDeck (*echo, 1.0);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) > 0.5);
+    setValue (p, "echo", 0.0f);   // (the echo off: the module no longer plays)
+    for (int i = 0; i < 90; ++i)
+        osp::plugin::advanceRackTapeDeck (*echo, 1.0 / 30.0);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*echo) == 0.0);
+    setValue (p, "echo", 40.0f);
+
+    // Other ECHO modes: as approved (no deck); the rack keeps its height.
+    setValue (p, "echo.type", 1.0f);   // BBD
+    ui.refreshNow();
+    CHECK_FALSE (osp::plugin::rackTapeDeckShown (*echo));
+    CHECK (osp::plugin::rackMovementCaptions (*echo) == "TIME FEEDBACK TONE AGE TIMING STEREO");
+    CHECK (echo->getHeight() == height);
+    setValue (p, "echo.type", 0.0f);
+    ui.refreshNow();
+    CHECK (osp::plugin::rackTapeDeckShown (*echo));
+
+    // MOVEMENT TAPE: INTENSITY, WOW, FLUTTER, WEAR (never delay controls); its own deck.
+    setValue (p, "motion", 45.0f);
+    setValue (p, "movement.mode", 1.0f);   // TAPE
+    ui.setRackExpanded (Kind::movement, true);
+    ui.refreshNow();
+    auto* movement = ui.effectsRack().module (Kind::movement);
+    REQUIRE (movement != nullptr);
+    CHECK (osp::plugin::rackTapeDeckShown (*movement));
+    CHECK (osp::plugin::rackMovementCaptions (*movement) == "INTENSITY WOW FLUTTER WEAR");
+    CHECK (movement->getHeight() == height);
+    renderShell (p, 0.3);
+    osp::plugin::advanceRackTapeDeck (*movement, 1.0);
+    CHECK (osp::plugin::rackTapeDeckSpeed (*movement) > 0.5);
+    setValue (p, "movement.mode", 0.0f);   // DRIFT: as approved
+    ui.refreshNow();
+    CHECK_FALSE (osp::plugin::rackTapeDeckShown (*movement));
 }
