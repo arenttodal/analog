@@ -6058,7 +6058,10 @@ TEST_CASE ("analog: the FX rack - every new effect opens in the one 214 px modul
         CHECK (andor::analog::fxRackShown() == id);
         auto* module = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));
         REQUIRE (module != nullptr);
-        CHECK (module->captions().isNotEmpty());
+        if (id.type == fx::Type::eq)
+            CHECK (andor::analog::fxEqGraphic (*module) != nullptr);   // (the graphic is the module: no cells)
+        else
+            CHECK (module->captions().isNotEmpty());
         // The hardware faceplate: power key on the effect's ON, the preset browser and the
         // overflow key in the rail; every cell between the stripes and the graph's bezel.
         CHECK (module->hasFaceplate());
