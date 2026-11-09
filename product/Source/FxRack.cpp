@@ -1680,6 +1680,15 @@ namespace
         auto f = faceplateFromIdentity (visualIdentityFor (type));
         if (type == Type::drive)
             f.subtitle = "ANALOG SATURATION / HARMONICS";
+        if (type == Type::eq)
+        {
+            // The graphic EQ: the body a neutral graphite, one with the graph's glass (the card
+            // EQ's well), so the graphic reads edge to edge; the brass stays in the title rail.
+            f.body = juce::Colour (0xff222627);
+            f.glassTop = juce::Colour (0xff1f2324);
+            f.glassBottom = juce::Colour (0xff1c2021);
+            f.motif = nullptr;
+        }
         return f;
     }
 

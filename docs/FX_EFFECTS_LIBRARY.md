@@ -107,6 +107,8 @@ what plays. The rail carries the preset browser, a save key beside it, the "..."
     samples each; the audio thread only stores samples (relaxed atomics in a fixed array, no
     allocation, no lock), and the graphic takes a 2048-point Hann FFT on the message thread at
     30 Hz. The display rises at once and falls at 45 dB/s.
+  - **The face:** a neutral graphite body one with the glass (no enamel frame, no motif), so
+    the graphic reads edge to edge; the brass stays in the title rail.
 - FX FILTER: the filter's response; COMPRESSOR: the static curve and live gain reduction,
   MULTIBAND's three bands; SPREAD: voices and live correlation; PHASER: the sweep range and the
   live notches; FLANGER: the comb; FREQ SHIFTER: the mapping or BLUR's smoothing; CONVOLUTION:
