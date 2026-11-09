@@ -1,0 +1,55 @@
+ANDOR ANALOG - END USER LICENCE AGREEMENT
+DRAFT FOR LEGAL REVIEW - NOT YET APPROVED BY THE PUBLISHER. Replace every [BRACKETED] item
+and have it reviewed by counsel in the publisher's jurisdiction before the first sale.
+
+1. Parties. This agreement is between [PUBLISHER LEGAL NAME, ADDRESS] ("we") and the person
+   or organisation that installs or uses ANDOR Analog ("you").
+
+2. Licence. When you have bought a licence (or received a beta, review or not-for-resale
+   copy), we grant you a non-exclusive, non-transferable [OR: transferable once, on written
+   notice] licence to install and use ANDOR Analog on up to [N] computers that you own or
+   control, for any musical purpose, commercial or not.
+
+3. Your music. Everything you make with ANDOR Analog (recordings, compositions, performances,
+   rendered audio, presets you create) belongs to you. You may use and sell it without
+   royalties or credit. The factory presets may be used freely in your music; you may not
+   redistribute them as a preset or sample product.
+
+4. Restrictions. You may not: sell, rent, lend, sublicense or distribute the software or your
+   licence except as section 2 allows; remove notices; reverse-engineer, decompile or
+   disassemble it except where the law allows despite this restriction; or use it to build a
+   competing instrument.
+
+5. Samples you import. If you import recordings or sample libraries (for example with the
+   sample import or the Kontakt patch import), you are responsible for having the rights to
+   use them. Importing does not give you any rights in third-party material.
+
+6. Beta copies. Beta copies are provided for evaluation, may contain defects, expire on
+   [DATE] and may not be used for [commercial releases / are fine for commercial releases].
+
+7. Third-party software. ANDOR Analog includes third-party software and fonts under their own
+   licences, listed in THIRD_PARTY_NOTICES.txt. Those licences apply to those components.
+   VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of
+   Apple Inc. Other names are the trademarks of their owners and are used only to describe
+   compatibility; we are not affiliated with or endorsed by them.
+
+8. Updates and support. [Describe: free updates within version 1.x; support by email at
+   SUPPORT ADDRESS; no obligation to provide updates.]
+
+9. Refunds. [Describe the refund policy, consistent with consumer law where the buyer lives,
+   e.g. the EU right of withdrawal for digital content once download has started.]
+
+10. Warranty. To the extent the law allows, the software is provided "as is", without
+    warranty of any kind. Some jurisdictions do not allow the exclusion of implied warranties,
+    so this may not apply to you; your statutory consumer rights are not affected.
+
+11. Liability. To the extent the law allows, our total liability is limited to the amount you
+    paid for the licence, and we are not liable for indirect or consequential loss, including
+    loss of data or projects. Nothing limits liability that cannot be limited by law.
+
+12. Termination. This licence ends if you breach it. You must then uninstall the software.
+
+13. Law. This agreement is governed by the laws of [JURISDICTION]; the courts of [PLACE] have
+    jurisdiction, without prejudice to mandatory consumer protections where you live.
+
+[VERSION / DATE]
