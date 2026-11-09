@@ -265,6 +265,9 @@ const juce::StringArray& engineParameterIds()
         l.add ("analog.arp.*");   // the per-card arpeggiator (the shell's, in ANALOG's namespace)
         // ANDOR OSP's modulation: LFO 2, ENV 1 and 2, VEL and NOTE, the 16 routes.
         l.add ("mod.*");
+        // The routed effects (FxEngine reads every slot's settings each block; an effect not in
+        // the route is simply not run): their racks must stay live, never greyed out.
+        l.add ("analog.fx.*");
         return l;
     }();
     return list;

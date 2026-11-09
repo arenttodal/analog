@@ -1,5 +1,9 @@
 #include "AnalogRacks.h"
+#include "AnalogEngine.h"
+#include "AnalogMath.h"
 #include "AnalogParameters.h"
+#include "Envelope.h"
+#include "ShellProcessor.h"
 #include "Design.h"
 #include "JunoChorus.h"
 #include "OspLookAndFeel.h"
@@ -145,9 +149,34 @@ namespace
     class FilterGraph final : public GraphFrame
     {
     public:
-        FilterGraph (InstrumentHost& h, std::function<int()> p, std::function<int()> s) : host (h), page (std::move (p)), sub (std::move (s)) {}
+        FilterGraph (InstrumentHost& h, std::function<int()> p, std::function<int()> s) : host (h), page (std::move (p)), sub (std::move (s))
+        {
+            reader.attach (h.apvts());
+            engine = dynamic_cast<AnalogEngine*> (&dynamic_cast<andor::shell::ShellProcessor&> (h).productEngine());
+        }
+
+        // V3: the FILTER page follows what the filter does (FX_RACK_V3 E). LIVE: the most recent
+        // sounding voice's cutoff from the engine's telemetry (Synth::FilterTap). PREVIEW: when
+        // an envelope, ENV, TONE or the link is edited with nothing playing, a silent notional
+        // C4 at velocity 100 through the synth's own Envelope and mapping (never heard).
+        enum class Mode { idle, live, preview };
+        Mode mode() const noexcept { return shownMode; }
+        /** Tests: the cutoffs shown (MIDI notes): base, now, the envelope's reach, its peak. */
+        struct Shown
+        {
+            double baseNote = 0.0, nowNote = 0.0, reachNote = 0.0, peakNote = 0.0;
+            int note = 60, velocity = 100, stage = 0;
+        };
+        const Shown& shownCutoffs() const noexcept { return shown3; }
+        void replayPreview() { startPreview(); }
+
         void refresh() override
         {
+            const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            const double dt = lastRefresh > 0.0 ? std::clamp (now - lastRefresh, 0.0, 0.2) : 0.0;
+            lastRefresh = now;
+            if (page() == 0)
+                advanceFilter (dt);
             juce::String sig (page() * 16 + sub());
             for (const auto& id : { params::tone, params::resonance, params::filterModel, params::otaCharacter, params::otaSlope, params::otaHpf, params::junoVariant,
                                     params::vcaMode, juce::String ("attack"), juce::String ("decay"), juce::String ("sustainLevel"), juce::String ("release"),
@@ -162,6 +191,19 @@ namespace
                 shown = sig;
                 repaint();
             }
+            else if (page() == 0 && (shownMode != Mode::idle || settling))
+                repaint();   // (moving: every frame; idle: only when something changed)
+        }
+        /** Tests: one refresh as if `seconds` had passed (no message loop). */
+        void advanceBy (double seconds)
+        {
+            lastRefresh = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            advanceFilter (seconds);
+        }
+        void mouseUp (const juce::MouseEvent&) override
+        {
+            if (page() == 0)
+                startPreview();   // (a click replays the preview - never a sound)
         }
 
     protected:
@@ -184,12 +226,152 @@ namespace
         }
 
     private:
+        params::Reader reader;
+        AnalogEngine* engine = nullptr;
+        Mode shownMode = Mode::idle;
+        Shown shown3;
+        double lastRefresh = 0.0, drawnNote = -1000.0, previewTime = 0.0;
+        static constexpr double previewRate = 48000.0;
+        Envelope previewEnv;
+        bool previewing = false, previewReleased = false, settling = false;
+        int trackedSlot = -1, bestSlot = -1;
+        std::uint64_t trackedOrder = 0;
+        juce::String watched;
         juce::String text (const juce::String& id) const { return textOf (host, id) (plain (host, id)); }
+
+        // The FILTER page's motion (message thread, ~30 Hz): which voice, its cutoffs; or the
+        // preview's note through the same envelope; the drawn cutoff eases towards the truth
+        // (drawing only), so a fast attack still reads as a jump to its peak.
+        void startPreview()
+        {
+            previewing = true;
+            previewTime = 0.0;
+            previewEnv = {};
+            previewEnv.setSampleRate (previewRate);
+            previewEnv.noteOn();
+            previewReleased = false;
+        }
+        static juce::String noteName (int note)
+        {
+            static const char* names[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+            return juce::String (names[((note % 12) + 12) % 12]) + juce::String (note / 12 - 1);
+        }
+        void advanceFilter (double dt)
+        {
+            const auto patch = reader.read();
+            const double cap = engine != nullptr ? engine->cutoffNoteHigh() : 135.0;
+            auto clampNote = [cap] (double n) { return std::clamp (n, -24.0, cap); };
+            // A live voice: the most recent note-on that sounds. A newer note takes over; the one
+            // followed is kept through its release; when it ends, the next most recent one.
+            Synth::FilterTap::Snapshot tap, best, tracked;
+            bool found = false, trackedAlive = false;
+            if (engine != nullptr)
+                for (int slot = 0; slot < AnalogEngine::voiceSlots; ++slot)
+                    if (const auto* t = engine->filterTap (slot); t != nullptr && t->read (tap) && tap.active)
+                    {
+                        if (slot == trackedSlot && tap.order == trackedOrder)
+                        {
+                            tracked = tap;
+                            trackedAlive = true;
+                        }
+                        if (! found || tap.order > best.order)
+                        {
+                            best = tap;
+                            bestSlot = slot;
+                            found = true;
+                        }
+                    }
+            if (found && trackedAlive && best.order <= trackedOrder)
+                best = tracked;   // (nothing newer: keep following it, released or not)
+            else if (found)
+            {
+                trackedSlot = bestSlot;
+                trackedOrder = best.order;
+            }
+            // What starts a preview (with nothing playing): the envelopes, ENV, TONE, the link.
+            juce::String watch;
+            for (const auto& id : { params::filterAttack, params::filterDecay, params::filterSustain, params::filterRelease, params::envDepth, params::tone,
+                                    params::envLink, params::velocityToFilter, juce::String ("attack"), juce::String ("decay"), juce::String ("sustainLevel"),
+                                    juce::String ("release") })
+                watch << juce::String (host.parameterValue (id), 4) << "|";
+            if (watch != watched)
+            {
+                const bool first = watched.isEmpty();
+                watched = watch;
+                if (! first && ! found)
+                    startPreview();   // (restarts from its note-on: the new values, never the old run)
+            }
+            const double restBase = math::hzToNote (math::toneToHz (patch.tone));   // C4: KEYS add nothing
+            if (found)
+            {
+                previewing = false;
+                shownMode = Mode::live;
+                shown3.baseNote = clampNote (best.baseNote);
+                shown3.nowNote = clampNote (best.cutoffNote);
+                shown3.reachNote = clampNote (best.baseNote + best.envDepth);
+                shown3.peakNote = clampNote (best.baseNote + best.envPeak * best.envDepth);
+                shown3.note = best.note;
+                shown3.velocity = juce::roundToInt (best.velocity * 127.0f);
+                shown3.stage = best.stage;
+            }
+            else if (previewing)
+            {
+                shownMode = Mode::preview;
+                // ENV LINK: the AMP envelope's times shape the filter (as Synth::controlUpdate).
+                if (patch.envLink)
+                    previewEnv.setTimes (patch.ampAttack, patch.ampDecay, patch.ampSustain, patch.ampRelease);
+                else
+                    previewEnv.setTimes (patch.filterAttack, patch.filterDecay, patch.filterSustain, patch.filterRelease);
+                const double attack = patch.envLink ? patch.ampAttack : patch.filterAttack;
+                const double decay = patch.envLink ? patch.ampDecay : patch.filterDecay;
+                const double hold = std::clamp (attack + decay, 0.35, 3.0) + 0.6;
+                const int steps = static_cast<int> (dt * previewRate);
+                for (int i = 0; i < steps; ++i)
+                {
+                    if (! previewReleased && previewTime + static_cast<double> (i) / previewRate >= hold)
+                    {
+                        previewEnv.noteOff();
+                        previewReleased = true;
+                    }
+                    previewEnv.next();
+                }
+                previewTime += dt;
+                const double velocity = 100.0 / 127.0;
+                const double depth = patch.envDepthSemitones * (1.0 - patch.velocityToFilter + patch.velocityToFilter * velocity);
+                shown3.baseNote = clampNote (restBase);
+                shown3.nowNote = clampNote (restBase + previewEnv.value() * depth);
+                shown3.reachNote = clampNote (restBase + depth);
+                shown3.peakNote = shown3.reachNote;
+                shown3.note = 60;
+                shown3.velocity = 100;
+                shown3.stage = static_cast<int> (previewEnv.currentStage());
+                if ((previewReleased && ! previewEnv.isActive()) || previewTime > 12.0)
+                    previewing = false;
+            }
+            else
+            {
+                shownMode = Mode::idle;
+                const double depth = patch.envDepthSemitones * (1.0 - patch.velocityToFilter + patch.velocityToFilter * (100.0 / 127.0));
+                shown3.baseNote = shown3.nowNote = clampNote (restBase);
+                shown3.reachNote = shown3.peakNote = clampNote (restBase + depth);
+                shown3.stage = 0;
+            }
+            // Drawing only: ease the drawn cutoff (about 45 ms); settle when it arrives.
+            const double target = shown3.nowNote;
+            if (drawnNote < -100.0 || dt <= 0.0)
+                drawnNote = target;
+            else
+                drawnNote += (1.0 - std::exp (-dt / 0.045)) * (target - drawnNote);
+            settling = std::abs (drawnNote - target) > 0.02;
+            if (! settling)
+                drawnNote = target;
+        }
 
         void paintFilter (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
         {
+            if (drawnNote < -100.0)
+                advanceFilter (0.0);   // (a first paint: the state now)
             filtergraph::Settings s;
-            s.cutoffHz = 20.0 * std::pow (900.0, std::clamp (0.01 * plain (host, params::tone), 0.0, 1.0));
             s.resonance = 0.01 * plain (host, params::resonance);
             s.ota = choice (host, params::filterModel) == 1;
             s.jupiter = choice (host, params::otaCharacter) == 1;
@@ -198,7 +380,7 @@ namespace
             s.junoVariant = choice (host, params::junoVariant);
             const auto plot = area.reduced (14.0f, 0.0f).withTrimmedTop (24.0f).withTrimmedBottom (34.0f);
             constexpr double lo = 20.0, hi = 20000.0, topDb = 24.0, bottomDb = -48.0;
-            auto xOf = [&] (double hz) { return plot.getX() + plot.getWidth() * static_cast<float> (std::log (hz / lo) / std::log (hi / lo)); };
+            auto xOf = [&] (double hz) { return plot.getX() + plot.getWidth() * static_cast<float> (std::log (std::clamp (hz, lo, hi) / lo) / std::log (hi / lo)); };
             auto yOf = [&] (double db) { return plot.getY() + plot.getHeight() * static_cast<float> ((topDb - std::clamp (db, bottomDb, topDb)) / (topDb - bottomDb)); };
             // Grid: decades and every 12 dB (0 dB a step stronger).
             for (const double hz : { 100.0, 1000.0, 10000.0 })
@@ -213,35 +395,101 @@ namespace
                 g.setColour (db == 0.0 ? gtype::axis : gtype::grid);
                 g.fillRect (juce::Rectangle<float> (plot.getX(), yOf (db) - 0.5f, plot.getWidth(), 1.0f));
             }
-            juce::Path curve, fill;
-            for (int i = 0; i <= 240; ++i)
-            {
-                const double hz = lo * std::pow (hi / lo, i / 240.0);
-                const juce::Point<float> p (xOf (hz), yOf (filtergraph::responseDb (s, hz)));
-                if (i == 0)
+            auto curveAt = [&] (double cutoffHz, juce::Path* fill) {
+                auto c = s;
+                c.cutoffHz = cutoffHz;
+                juce::Path curve;
+                for (int i = 0; i <= 240; ++i)
                 {
-                    curve.startNewSubPath (p);
-                    fill.startNewSubPath (p.x, plot.getBottom());
+                    const double hz = lo * std::pow (hi / lo, i / 240.0);
+                    const juce::Point<float> p (xOf (hz), yOf (filtergraph::responseDb (c, hz)));
+                    if (i == 0)
+                    {
+                        curve.startNewSubPath (p);
+                        if (fill != nullptr)
+                            fill->startNewSubPath (p.x, plot.getBottom());
+                    }
+                    else
+                        curve.lineTo (p);
+                    if (fill != nullptr)
+                        fill->lineTo (p);
                 }
-                else
-                    curve.lineTo (p);
-                fill.lineTo (p);
+                if (fill != nullptr)
+                {
+                    fill->lineTo (plot.getRight(), plot.getBottom());
+                    fill->closeSubPath();
+                }
+                return curve;
+            };
+            auto hzOf = [] (double note) { return math::noteToHz (note); };
+            auto hzText = [] (double hz) { return hz >= 1000.0 ? juce::String (hz / 1000.0, 2) + " kHz" : juce::String (juce::roundToInt (hz)) + " Hz"; };
+            const double baseHz = hzOf (shown3.baseNote), nowHz = hzOf (drawnNote), reachHz = hzOf (shown3.reachNote);
+            const bool moving = std::abs (shown3.reachNote - shown3.baseNote) > 0.05;
+            const float dash[] { 3.0f, 3.0f };
+            // 1. ENVELOPE REACH: a dashed ghost (where the envelope takes the cutoff at its top).
+            if (moving)
+            {
+                const auto reach = curveAt (reachHz, nullptr);
+                juce::Path dashed;
+                juce::PathStrokeType (1.0f).createDashedStroke (dashed, reach, dash, 2);
+                g.setColour (colour.withAlpha (0.34f));
+                g.fillPath (dashed);
+                g.setColour (colour.withAlpha (0.28f));
+                g.drawDashedLine (juce::Line<float> (xOf (reachHz), plot.getY(), xOf (reachHz), plot.getBottom()), dash, 2, 1.0f);
             }
-            fill.lineTo (plot.getRight(), plot.getBottom());
-            fill.closeSubPath();
-            g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.2f), 0.0f, plot.getY(), colour.withAlpha (0.02f), 0.0f, plot.getBottom(), false));
+            // 2. BASE: muted and thin under the moving one (at rest it IS the curve).
+            if (shownMode != Mode::idle)
+            {
+                g.setColour (juce::Colour (0xffd9dcd8).withAlpha (0.3f));
+                g.strokePath (curveAt (baseHz, nullptr), juce::PathStrokeType (1.0f));
+                g.setColour (juce::Colour (0xffd9dcd8).withAlpha (0.22f));
+                g.fillRect (juce::Rectangle<float> (xOf (baseHz) - 0.5f, plot.getY(), 1.0f, plot.getHeight()));
+            }
+            // 3. NOW: the response at the cutoff the filter uses (LIVE), or the preview's.
+            juce::Path fill;
+            const auto curve = curveAt (nowHz, &fill);
+            const auto ink = shownMode == Mode::preview ? colour.withMultipliedSaturation (0.7f) : colour;
+            g.setGradientFill (juce::ColourGradient (ink.withAlpha (0.22f), 0.0f, plot.getY(), ink.withAlpha (0.02f), 0.0f, plot.getBottom(), false));
             g.fillPath (fill);
-            g.setColour (colour);
+            g.setColour (ink.withAlpha (0.25f));
+            g.strokePath (curve, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (ink);
             g.strokePath (curve, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            // The cutoff's mark.
-            g.setColour (colour.withAlpha (0.4f));
-            g.fillRect (juce::Rectangle<float> (xOf (s.cutoffHz) - 0.5f, plot.getY(), 1.0f, plot.getHeight()));
+            g.setColour (ink.withAlpha (shownMode == Mode::idle ? 0.4f : 0.85f));
+            g.fillRect (juce::Rectangle<float> (xOf (nowHz) - 0.75f, plot.getY(), 1.5f, plot.getHeight()));
+            // Header: the filter's type, and what is shown (LIVE / PREVIEW / IDLE).
             const juce::String type = s.ota ? juce::String ("OTA ") + (s.jupiter ? "JUPITER" : "JUNO") + middleDot() + (s.twoPole ? "12 dB" : "24 dB")
                                             : "LADDER" + middleDot() + "24 dB";
-            const auto cutoffText = s.cutoffHz >= 1000.0 ? juce::String (s.cutoffHz / 1000.0, 2) + " kHz" : juce::String (juce::roundToInt (s.cutoffHz)) + " Hz";
-            gtype::header (g, area, type + (s.highPass >= 0 ? middleDot() + "HPF " + juce::String (s.highPass) : juce::String()),
-                           "CUTOFF " + cutoffText + middleDot() + "RESO " + juce::String (juce::roundToInt (100.0 * s.resonance)) + " %");
-            gtype::foot (g, area, plain (host, params::envLink) >= 0.5f ? "ENV LINK: the AMP envelope shapes the filter" : "response at rest" + middleDot() + "before ENV and KEYS");
+            juce::String state;
+            if (shownMode == Mode::live)
+                state = "LIVE " + noteName (shown3.note) + middleDot() + "VEL " + juce::String (shown3.velocity);
+            else if (shownMode == Mode::preview)
+                state = "PREVIEW C4" + middleDot() + "VEL 100" + middleDot() + "SILENT";
+            else
+                state = "IDLE" + middleDot() + "RESO " + juce::String (juce::roundToInt (100.0 * s.resonance)) + " %";
+            gtype::header (g, area, type + (s.highPass >= 0 ? middleDot() + "HPF " + juce::String (s.highPass) : juce::String()), state);
+            // Foot: the cutoffs (the engine's mapping, clamped as the filter is) and the stage.
+            juce::String figures = "BASE " + hzText (baseHz);
+            if (shownMode != Mode::idle)
+                figures << "   NOW " << hzText (nowHz);
+            if (moving)
+                figures << "   " << (shownMode == Mode::live ? "PEAK " + hzText (hzOf (shown3.peakNote)) : "REACH " + hzText (reachHz));
+            const bool linked = plain (host, params::envLink) >= 0.5f;
+            gtype::foot (g, area, figures + (linked ? middleDot() + "AMP ENV" : juce::String()));
+            if (shownMode != Mode::idle)
+            {
+                // A / D / S / R: the envelope's stage now (Envelope::Stage 1..4), the current lit.
+                static const char* letters[] { "A", "D", "S", "R" };
+                const float w = 11.0f;
+                float x = area.getRight() - 9.0f - 4.0f * w;
+                g.setFont (fonts::make (8.5f, fonts::Weight::semibold, 0.04f));
+                for (int i = 0; i < 4; ++i, x += w)
+                {
+                    const bool lit = shown3.stage == i + 1;
+                    g.setColour (lit ? ink : juce::Colour (0xffd9dcd8).withAlpha (0.35f));
+                    g.drawText (letters[i], juce::Rectangle<float> (x, area.getBottom() - 15.0f, w, 12.0f), juce::Justification::centred, false);
+                }
+            }
         }
 
         void paintVoice (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
@@ -583,13 +831,14 @@ namespace
             // The synthesis racks wear the family's chassis, quieter (no FX branding): the voice
             // filter's own green; it is never an FX-chain module.
             Faceplate f;
-            const auto green = design::colour::macro (design::colour::Macro::character);
-            f.enamel = green.darker (0.62f);
-            f.stripes = { green.darker (0.2f), green.brighter (0.45f), juce::Colour (0xffe6dccb) };
-            f.glow = green.brighter (0.8f);
-            f.glassTop = juce::Colour (0xff1b2622);
-            f.glassBottom = juce::Colour (0xff141d1a);
+            // V3 palette: deep moss and sage; the whole rack face (full bleed).
+            f.enamel = juce::Colour (0xff405c4f);
+            f.stripes = { juce::Colour (0xff5f7d6c), juce::Colour (0xff8fa992), juce::Colour (0xffe6dccb) };
+            f.glow = juce::Colour (0xffb9d6bd);
+            f.glassTop = juce::Colour (0xff1c2528);
+            f.glassBottom = juce::Colour (0xff192124);
             f.subtitle = "SYNTH  /  VOICE FILTER";
+            f.fullBleed = true;
             setFaceplate (f);
         }
 
@@ -847,12 +1096,14 @@ namespace
             setGraph (std::make_unique<MorphGraph> (h));
             // Copper and rose (the V2 MORPH direction); a synthesis rack, never an FX module.
             Faceplate f;
-            f.enamel = juce::Colour (0xff874a3a);
-            f.stripes = { juce::Colour (0xffbe735d), juce::Colour (0xffe3a892), juce::Colour (0xffd9a14a) };
-            f.glow = juce::Colour (0xffffb79e);
-            f.glassTop = juce::Colour (0xff281e1c);
-            f.glassBottom = juce::Colour (0xff1d1615);
+            // V3 palette: muted terracotta and burnt copper; the whole rack face.
+            f.enamel = juce::Colour (0xff87503b);
+            f.stripes = { juce::Colour (0xffa8664c), juce::Colour (0xffc88462), juce::Colour (0xffd9a14a) };
+            f.glow = juce::Colour (0xffffb48f);
+            f.glassTop = juce::Colour (0xff261f1c);
+            f.glassBottom = juce::Colour (0xff1d1816);
             f.subtitle = "SYNTH  /  SPECTRAL MORPH";
+            f.fullBleed = true;
             setFaceplate (f);
         }
 
@@ -889,5 +1140,24 @@ namespace
 
 std::unique_ptr<osp::plugin::rack::Module> createFilterRack (InstrumentHost& host) { return std::make_unique<FilterRack> (host); }
 std::unique_ptr<osp::plugin::rack::Module> createMorphRack (InstrumentHost& host) { return std::make_unique<MorphRack> (host); }
+
+bool filtergraph::liveView (juce::Component* graph, LiveView& out, double advanceSeconds)
+{
+    auto* g = dynamic_cast<FilterGraph*> (graph);
+    if (g == nullptr)
+        return false;
+    if (advanceSeconds >= 0.0)
+        g->advanceBy (advanceSeconds);
+    const auto& s = g->shownCutoffs();
+    out.mode = static_cast<int> (g->mode());
+    out.baseNote = s.baseNote;
+    out.nowNote = s.nowNote;
+    out.reachNote = s.reachNote;
+    out.peakNote = s.peakNote;
+    out.note = s.note;
+    out.velocity = s.velocity;
+    out.stage = s.stage;
+    return true;
+}
 
 } // namespace andor::analog

@@ -523,6 +523,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     v.cards = cardsFor (channel);
     v.velocity = std::clamp (velocity, 0.0f, 1.0f);
     v.order = ++noteCounter;
+    v.tapPeak = 0.0f;   // (telemetry: the envelope's highest of this note)
     v.seed = osp::Prng::deriveSeed (current.seed, v.order, static_cast<std::uint64_t> (note));
     v.held = true;
     v.sustained = false;
@@ -2009,6 +2010,14 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             v.modeCountdown -= n;
         }
 
+        // (Telemetry, read only: the envelope's highest this interval, its last, Poly Mod's.)
+        for (int k = 0; k < n; ++k)
+            v.tapPeak = std::max (v.tapPeak, scratchEnv[static_cast<std::size_t> (k)]);
+        if (n > 0)
+        {
+            v.tapEnv = scratchEnv[static_cast<std::size_t> (n - 1)];
+            v.tapMod = p.polyModToCutoff ? scratchPolyMod[static_cast<std::size_t> (n - 1)] * polyModCutoffSemitones : 0.0f;
+        }
         int used = n;
         for (int k = 0; k < n; ++k)
         {
@@ -2080,6 +2089,77 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
     }
 }
 
+bool Synth::FilterTap::read (Snapshot& out) const noexcept
+{
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        const auto before = sequence.load (std::memory_order_acquire);
+        if ((before & 1u) != 0)
+            continue;   // (a write in progress)
+        out.active = active.load (std::memory_order_relaxed);
+        out.released = released.load (std::memory_order_relaxed);
+        out.note = note.load (std::memory_order_relaxed);
+        out.stage = stage.load (std::memory_order_relaxed);
+        out.order = order.load (std::memory_order_relaxed);
+        out.velocity = velocity.load (std::memory_order_relaxed);
+        out.baseNote = baseNote.load (std::memory_order_relaxed);
+        out.envDepth = envDepth.load (std::memory_order_relaxed);
+        out.env = env.load (std::memory_order_relaxed);
+        out.envPeak = envPeak.load (std::memory_order_relaxed);
+        out.modNote = modNote.load (std::memory_order_relaxed);
+        out.cutoffNote = cutoffNote.load (std::memory_order_relaxed);
+        std::atomic_thread_fence (std::memory_order_acquire);
+        if (sequence.load (std::memory_order_relaxed) == before)
+            return true;
+    }
+    return false;
+}
+
+void Synth::FilterTap::write (const Snapshot& s) noexcept
+{
+    sequence.fetch_add (1u, std::memory_order_relaxed);
+    std::atomic_thread_fence (std::memory_order_release);
+    active.store (s.active, std::memory_order_relaxed);
+    released.store (s.released, std::memory_order_relaxed);
+    note.store (s.note, std::memory_order_relaxed);
+    stage.store (s.stage, std::memory_order_relaxed);
+    order.store (s.order, std::memory_order_relaxed);
+    velocity.store (s.velocity, std::memory_order_relaxed);
+    baseNote.store (s.baseNote, std::memory_order_relaxed);
+    envDepth.store (s.envDepth, std::memory_order_relaxed);
+    env.store (s.env, std::memory_order_relaxed);
+    envPeak.store (s.envPeak, std::memory_order_relaxed);
+    modNote.store (s.modNote, std::memory_order_relaxed);
+    cutoffNote.store (s.cutoffNote, std::memory_order_relaxed);
+    sequence.fetch_add (1u, std::memory_order_release);
+}
+
+void Synth::publishFilterTaps() noexcept
+{
+    // Once a control period: what each voice's filter used (an ended voice once more, idle).
+    for (std::size_t i = 0; i < voices.size(); ++i)
+    {
+        const auto& v = voices[i];
+        auto& tap = filterTaps[i];
+        if (! v.active && ! tap.isActive())
+            continue;
+        FilterTap::Snapshot s;
+        s.active = v.active;
+        s.released = v.env.isReleasing();
+        s.note = static_cast<int> (std::lround (v.pitch));
+        s.stage = static_cast<int> (v.env.currentStage());
+        s.order = v.order;
+        s.velocity = v.velocity;
+        s.baseNote = v.cutoffNote;
+        s.envDepth = v.envDepth;
+        s.env = v.tapEnv;
+        s.envPeak = v.tapPeak;
+        s.modNote = v.tapMod;
+        s.cutoffNote = v.cutoffNote + v.tapEnv * v.envDepth + v.tapMod;
+        tap.write (s);
+    }
+}
+
 void Synth::render (float* left, float* right, int numSamples) noexcept
 {
     // A host may hand over more than it announced: render it in prepared-size pieces.
@@ -2112,6 +2192,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         for (auto& v : voices)
             if (v.active)
                 renderVoice (v, mixL.data() + from, mixR.data() + from, count);
+        publishFilterTaps();
         controlCountdown -= chunk;
         pos += chunk;
         blockOffset += chunk;

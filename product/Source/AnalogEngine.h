@@ -106,6 +106,12 @@ public:
     std::function<void()> onFxRouteChanged;
     /** A new effect's processor (null for the original four, or before prepare): its meters. */
     const andor::analog::fx::Processor* fxProcessor (andor::analog::fx::InstanceId id) const;
+    /** The voice filter's telemetry (Synth::FilterTap; any thread reads it); null before
+        prepare. The FILTER rack's live graph. */
+    const Synth::FilterTap* filterTap (int slot) const noexcept { return prepared ? &synth.filterTap (slot) : nullptr; }
+    static constexpr int voiceSlots = Synth::maxVoices;
+    /** The highest cutoff the filters reach at this rate (MIDI note). */
+    float cutoffNoteHigh() const noexcept { return synth.cutoffNoteHigh(); }
     /** The impulse CONVOLUTION `slot` plays (null: none yet). */
     std::shared_ptr<const andor::analog::fx::Impulse> convolutionImpulse (int slot) const;
     /** Builds the impulse each CONVOLUTION needs when IMPULSE, DECAY, SIZE, REVERSE, NORMALIZE or

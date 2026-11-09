@@ -26,6 +26,18 @@ namespace filtergraph
     };
     double responseDb (const Settings& s, double hz) noexcept;
 
+    /** Tests: the FILTER page's live graph (FX Rack V3) - mode 0 idle, 1 LIVE (an engine
+        voice's telemetry), 2 PREVIEW (silent); the cutoffs it shows as MIDI notes. With
+        `advanceSeconds` >= 0 it first runs one refresh as if that much time had passed.
+        False: `graph` is not FILTER's graph. */
+    struct LiveView
+    {
+        int mode = 0;
+        double baseNote = 0.0, nowNote = 0.0, reachNote = 0.0, peakNote = 0.0;
+        int note = 0, velocity = 0, stage = 0;
+    };
+    bool liveView (juce::Component* graph, LiveView& out, double advanceSeconds = -1.0);
+
     /** The ladder's drive stage as LadderFilter applies it (its feedback aside): the input
         times the drive's gain, plus the bias, through the saturator, the bias's DC removed:
         u = tanh (gain x + bias) - tanh (bias). DRIVE and BIAS 0..1, as the parameters / 100. */

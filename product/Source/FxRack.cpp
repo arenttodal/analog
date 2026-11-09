@@ -972,6 +972,7 @@ namespace
     ParameterRack::Faceplate faceplateFor (Type type)
     {
         ParameterRack::Faceplate f;
+        f.fullBleed = true;   // (V3: the faceplate is the rack's face)
         const auto a = fxAccent (type);
         f.enamel = a.darker (0.55f);
         f.glow = a.brighter (0.7f);
@@ -1019,11 +1020,11 @@ namespace
                 f.subtitle = "FILTER PROCESSOR";
                 break;
             case Type::phaser:
-                f.enamel = juce::Colour (0xff474b72);
-                f.stripes = { juce::Colour (0xff6f74a3), juce::Colour (0xffadb0d3), juce::Colour (0xffd3a25a) };
-                f.glow = juce::Colour (0xffb7bcff);
-                f.glassTop = juce::Colour (0xff1b1d2b);
-                f.glassBottom = juce::Colour (0xff14151f);
+                f.enamel = juce::Colour (0xff566879);   // (V3: slate)
+                f.stripes = { juce::Colour (0xff6f8293), juce::Colour (0xff95a5ad), juce::Colour (0xffd3a25a) };
+                f.glow = juce::Colour (0xffb8c9d1);
+                f.glassTop = juce::Colour (0xff1c2528);
+                f.glassBottom = juce::Colour (0xff192124);
                 f.subtitle = "ALL-PASS PHASE MACHINE";
                 break;
             case Type::flanger:
@@ -1035,11 +1036,11 @@ namespace
                 f.subtitle = "COMB MODULATOR";
                 break;
             case Type::shifter:
-                f.enamel = juce::Colour (0xff514c6b);
-                f.stripes = { juce::Colour (0xff807b9a), juce::Colour (0xffb7b0d0), juce::Colour (0xffd6a65d) };
-                f.glow = juce::Colour (0xffd2c4ff);
-                f.glassTop = juce::Colour (0xff1e1c27);
-                f.glassBottom = juce::Colour (0xff16141d);
+                f.enamel = juce::Colour (0xff5d6466);   // (V3: aged metal)
+                f.stripes = { juce::Colour (0xff7d8789), juce::Colour (0xffaab3b4), juce::Colour (0xffd6a65d) };
+                f.glow = juce::Colour (0xffc9d3d4);
+                f.glassTop = juce::Colour (0xff1c2528);
+                f.glassBottom = juce::Colour (0xff192124);
                 f.subtitle = "FREQUENCY OFFSET / BLUR";
                 break;
             case Type::convolution:

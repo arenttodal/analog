@@ -71,14 +71,14 @@ juce::Colour fxAccent (Type type)
         case Type::drive: return juce::Colour (0xffae6847);
         case Type::movement: return juce::Colour (0xff759aae);
         case Type::echo: return juce::Colour (0xff468f87);
-        case Type::space: return juce::Colour (0xff9582a4);
+        case Type::space: return juce::Colour (0xff8b9180);   // (V3: spore, as the SPACE macro)
         case Type::spread: return juce::Colour (0xff65a9b5);
         case Type::compressor: return juce::Colour (0xff77836b);
         case Type::eq: return juce::Colour (0xffa18a55);
         case Type::filter: return juce::Colour (0xff688a77);
-        case Type::phaser: return juce::Colour (0xff777ca3);
+        case Type::phaser: return juce::Colour (0xff6f8293);   // (V3: slate)
         case Type::flanger: return juce::Colour (0xff7295a2);
-        case Type::shifter: return juce::Colour (0xff807b9a);
+        case Type::shifter: return juce::Colour (0xff7d8789);   // (V3: aged metal)
         case Type::convolution: return juce::Colour (0xff847b61);
         case Type::utility: return juce::Colour (0xff8c8d8a);
         case Type::retro: return juce::Colour (0xffb5603c);

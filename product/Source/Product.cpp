@@ -166,6 +166,9 @@ namespace
         m.identityA = { juce::Colour (0xffd9824c), juce::Colour (0xff9c4a22), juce::Colour (0xfff0a060), juce::Colour (0xffc8703f), juce::Colour (0xffd57e48),
                         juce::Colour (0xffe4b07a) };
         m.graphiteOnWell = true;
+        // The macros' identities: ANDOR OSP's mineral palette, SPACE in spore (no mauve).
+        m.macros = { juce::Colour (0xffbe7552), juce::Colour (0xffb5843a), juce::Colour (0xff7b8d69),
+                     juce::Colour (0xff73899c), juce::Colour (0xff8b9180), juce::Colour (0xff5c9490) };
         m.pack = AnalogMaterialsData::walnutskin_zip;
         m.packSize = static_cast<size_t> (AnalogMaterialsData::walnutskin_zipSize);
         return m;
@@ -333,13 +336,18 @@ const ProductInfo& productInfo()
             echo.glassTop = juce::Colour (0xff142522);
             echo.glassBottom = juce::Colour (0xff0f1c1a);
             echo.subtitle = "DELAY PROCESSOR";
-            space.enamel = juce::Colour (0xff594a68);
-            space.stripes = { juce::Colour (0xff8a77a0), juce::Colour (0xffc4b5d4), juce::Colour (0xffe3d7c4) };
-            space.glow = juce::Colour (0xffd6c2ff);
-            space.glassTop = juce::Colour (0xff1e1a26);
-            space.glassBottom = juce::Colour (0xff16131d);
+            // V3: SPACE in aged stone and spore (no violet anywhere in the instrument).
+            space.enamel = juce::Colour (0xff6d7569);
+            space.stripes = { juce::Colour (0xff858c7b), juce::Colour (0xffa8ae9c), juce::Colour (0xffdcd6c3) };
+            space.glow = juce::Colour (0xffcfd0c1);
+            space.glassTop = juce::Colour (0xff1c2528);
+            space.glassBottom = juce::Colour (0xff192124);
             space.subtitle = "REVERB PROCESSOR";
+            // V3: every faceplate is the rack's whole face (docs/FX_RACK_V3_POLISH.md).
+            for (auto* f : { &movement, &echo, &space })
+                f->fullBleed = true;
             p.rackFaceplates = { { Kind::movement, movement }, { Kind::echo, echo }, { Kind::space, space } };
+            p.fullBleedRacks = true;
         }
         p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {

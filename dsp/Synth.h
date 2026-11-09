@@ -214,6 +214,44 @@ public:
     };
     VoiceView voiceView (int slot) const noexcept;
 
+    /**
+        The voice filter's telemetry (read only - the FILTER rack's live graph; FX Rack V3). One
+        tap per voice slot, written by the audio thread once a control period from what the
+        voice's filter used (its control-rate base cutoff, the envelope, Poly Mod), a sequence
+        count around each write; any thread reads a consistent snapshot. Writing it changes
+        nothing the voice plays; no allocation, no lock.
+    */
+    struct FilterTap
+    {
+        struct Snapshot
+        {
+            bool active = false, released = false;
+            int note = -1, stage = 0;   ///< MIDI note; Envelope::Stage of the filter's envelope
+            std::uint64_t order = 0;    ///< note-on sequence (0: never played)
+            float velocity = 0.0f;      ///< 0..1
+            float baseNote = 0.0f;      ///< the cutoff before the envelope (TONE, KEYS, ANALOG, LFO, DRIFT, routes), MIDI note
+            float envDepth = 0.0f;      ///< semitones at envelope 1 (ENV scaled by velocity)
+            float env = 0.0f, envPeak = 0.0f;   ///< the filter envelope now; its highest since the note began
+            float modNote = 0.0f;       ///< Poly Mod's semitones now
+            float cutoffNote = 0.0f;    ///< what the filter used last: base + env x depth + Poly Mod (before the table's clamp)
+        };
+        /** False if no consistent snapshot could be read (a write in progress each try). */
+        bool read (Snapshot& out) const noexcept;
+        void write (const Snapshot& s) noexcept;
+        bool isActive() const noexcept { return active.load (std::memory_order_relaxed); }
+
+    private:
+        std::atomic<std::uint32_t> sequence { 0 };
+        std::atomic<bool> active { false }, released { false };
+        std::atomic<int> note { -1 }, stage { 0 };
+        std::atomic<std::uint64_t> order { 0 };
+        std::atomic<float> velocity { 0.0f }, baseNote { 0.0f }, envDepth { 0.0f }, env { 0.0f }, envPeak { 0.0f }, modNote { 0.0f }, cutoffNote { 0.0f };
+    };
+    const FilterTap& filterTap (int slot) const noexcept { return filterTaps[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))]; }
+    /** The cutoff's range as the filters reach it (MIDI notes: the coefficient table's ends). */
+    float cutoffNoteLow() const noexcept { return tableLowNote; }
+    float cutoffNoteHigh() const noexcept { return tableHighNote; }
+
     /** The variation each voice slot carries at ANALOG 100 % (cents of OSC 1 pitch). */
     double slotPitchOffsetCents (int slot) const noexcept;
     /** The grains playing now in every sounding voice, while that card's GRANULAR is on (the
@@ -257,6 +295,7 @@ private:
         int channel = 0, note = -1;
         std::uint8_t cards = 7;   ///< the cards this note sounds on (setCardRouting)
         std::uint64_t order = 0;  ///< note-on sequence (oldest first)
+        float tapEnv = 0.0f, tapPeak = 0.0f, tapMod = 0.0f;   ///< (telemetry only: what the filter used last)
         std::uint64_t seed = 1;   ///< the note's own seed (grains, REIMAGINED, DRIFT)
         float velocity = 1.0f;
         double pitch = 60.0, pitchTarget = 60.0;   ///< MIDI notes (glide moves pitch)
@@ -407,6 +446,7 @@ private:
     osp::ReimaginedControl modeControl (const Voice& v) const noexcept;
     /** Renders `count` oversampled samples of a voice, adding them (panned) to left/right. */
     void renderVoice (Voice& v, float* left, float* right, int count) noexcept;
+    void publishFilterTaps() noexcept;
     /** One sample of a voice's source: oscillators, noise, the recording and the grains;
         `polyMod` is Poly Mod's value at this sample (for the cutoff). */
     float sourceSample (Voice& v, float envValue, float& polyMod) noexcept;
@@ -442,6 +482,8 @@ private:
     int latency = 0;
 
     std::array<Voice, maxVoices> voices;
+
+    std::array<FilterTap, maxVoices> filterTaps;   ///< (telemetry: FilterTap)
     std::array<Drift, maxVoices> drift;
     std::uint64_t noteCounter = 0;
     std::uint64_t clock = 0;   ///< host samples rendered since reset

@@ -726,7 +726,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         setValue (q, "layerB.start", 50.0f);
         setValue (q, "layerB.tune", 12.0f);   // (twice as fast: the held notes reach the loop)
     };
-    int checkedBound = 0, checkedUnbound = 0;
+    int checkedBound = 0, checkedUnbound = 0, checkedFx = 0;
     for (auto* base : p.getParameters())
     {
         auto* param = dynamic_cast<juce::RangedAudioParameter*> (base);
@@ -758,7 +758,15 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             other = 0.0f;   // 1 voice (the chord is three notes)
         param->setValueNotifyingHost (other);
         const auto changed = renderShell (p, 0.6);
-        if (isBound (id))
+        if (id.startsWith ("analog.fx."))
+        {
+            // The routed effects' (V3: declared read so their racks stay live): heard only once
+            // their effect is in a CUSTOM route ([fx] tests); in CLASSIC they change nothing.
+            CHECK (isBound (id));
+            CHECK (identical (reference, changed));
+            ++checkedFx;
+        }
+        else if (isBound (id))
         {
             const double d = differenceRms (reference, changed);
             UNSCOPED_INFO (id << ": " << 20.0 * std::log10 (std::max (d, 1.0e-12)) << " dB");
@@ -775,7 +783,8 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
     // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), and
     // the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
-    CHECK (checkedBound == bound.size() - 5 + 7 + 10 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 5: "analog.arp.*" is a pattern too)
+    CHECK (checkedBound == bound.size() - 6 + 7 + 10 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 6: "analog.arp.*" and "analog.fx.*" are patterns too)
+    CHECK (checkedFx > 300);   // (every routed effect's slot parameters: declared, silent in CLASSIC)
     CHECK (checkedUnbound > 100);
 }
 
@@ -4275,12 +4284,13 @@ TEST_CASE ("analog: the approved rack layout - each module's graph column fixed,
         if (! pictureRight)
             pictureRight = picture.getRight();
         CHECK (picture.getRight() == *pictureRight);
-        CHECK (picture.getHeight() == 156);   // (V2 faceplate: 160 less its bezel's room)
+        // (V3 full-bleed face: the graph fills the body to the face's 16 px bottom margin.)
+        CHECK (picture.getHeight() == module->getHeight() - module->titleOffset() - 7 - 16);
         // The cells: left-aligned from one origin on the approved slot widths (after the
         // faceplate's stripes), all before the divider; knobs never shrink (59 px in every family).
         const auto cells = osp::plugin::rackCellBounds (*module);
         REQUIRE (! cells.empty());
-        CHECK (cells.front().getX() == osp::plugin::rack::hardware::contentLeft);
+        CHECK (cells.front().getX() == osp::plugin::rack::hardware::bleedMeasures.contentLeft());
         CHECK (cells.back().getRight() + 17 < picture.getX() - 18);
         for (std::size_t i = 1; i < cells.size(); ++i)
             CHECK (cells[i].getX() - cells[i - 1].getRight() == (c.dense ? 5 : 7));
@@ -6413,5 +6423,329 @@ TEST_CASE ("analog: screenshots of the FX racks and quick settings (ANALOG_SCREE
                 shoot ("fx-rack-retro-tape-" + juce::String (w));
                 width = 1448;
             }
+    }
+}
+
+TEST_CASE ("analog: V3 review - every rack family in its modes, full window and rack, at 869, 1448 and 1810 px (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v3]")
+{
+    using osp::plugin::rack::Kind;
+    using osp::plugin::rack::ParameterRack;
+    namespace ap = andor::analog::params;
+    namespace fx = andor::analog::fx;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    // The new effects inserted (a CUSTOM route) so their racks open as they do for a musician.
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    for (const auto t : { fx::Type::compressor, fx::Type::spread, fx::Type::phaser, fx::Type::retro })
+        view->insertNew (t);
+    ui.setSourceViewShown (false);
+    setValue (p, "echo", 40.0f);
+    setValue (p, "space", 35.0f);
+    setValue (p, ap::resonance, 40.0f);
+    auto openFx = [&] (fx::Type t) { view->openEditor ({ t, 0 }); };
+    auto openFilter = [&] {
+        ui.setRackExpanded (Kind::filter, true);
+        if (auto* f = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::filter)))
+        {
+            f->showPage (0);
+            f->showSubPage (0);
+        }
+    };
+    struct View
+    {
+        const char* name;
+        std::function<void()> set;
+    };
+    const View views[] {
+        { "filter-ladder", [&] { setValue (p, ap::filterModel, 0.0f); openFilter(); } },
+        { "filter-ota", [&] { setValue (p, ap::filterModel, 1.0f); openFilter(); } },
+        { "movement-drift", [&] { setValue (p, "movement.mode", 0.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-tape", [&] { setValue (p, "movement.mode", 1.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-chorus", [&] { setValue (p, "movement.mode", 2.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "movement-pulse", [&] { setValue (p, "movement.mode", 3.0f); ui.setRackExpanded (Kind::movement, true); } },
+        { "echo-tape", [&] { setValue (p, "echo.type", 0.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "echo-bbd", [&] { setValue (p, "echo.type", 1.0f); ui.setRackExpanded (Kind::echo, true); } },
+        { "space-hall", [&] { setValue (p, "space.engine", 0.0f); ui.setRackExpanded (Kind::space, true); } },
+        { "space-abyss", [&] { setValue (p, "space.engine", 1.0f); ui.setRackExpanded (Kind::space, true); } },
+        { "comp-clean", [&] { setValue (p, "analog.fx.comp.1.mode", 0.0f); openFx (fx::Type::compressor); } },
+        { "comp-fet", [&] { setValue (p, "analog.fx.comp.1.mode", 1.0f); openFx (fx::Type::compressor); } },
+        { "comp-ott", [&] { setValue (p, "analog.fx.comp.1.mode", 2.0f); openFx (fx::Type::compressor); } },
+        { "retro", [&] { openFx (fx::Type::retro); } },
+        { "spread", [&] { openFx (fx::Type::spread); } },
+        { "phaser", [&] { openFx (fx::Type::phaser); } },
+    };
+    for (const int width : { 1448, 869, 1810 })
+        for (const auto& v : views)
+        {
+            v.set();
+            renderShell (p, 0.4);   // (the graphs show what was heard)
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+            ui.refreshNow();
+            ui.effectsRack().settle();
+            auto save = [&] (const juce::Image& image, const juce::String& name) {
+                const auto file = out.getChildFile (name + ".png");
+                file.deleteFile();
+                juce::FileOutputStream stream (file);
+                juce::PNGImageFormat().writeImageToStream (image, stream);
+            };
+            const auto prefix = juce::String (width) + "-" + v.name;
+            auto& rack = ui.effectsRack();
+            const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+            save (editor->createComponentSnapshot (r.expanded (0, 6).getIntersection (editor->getLocalBounds()), true, 1.0f), prefix + "-rack");
+            if (width == 1448 || juce::String (v.name).startsWith ("space") || juce::String (v.name).startsWith ("filter"))
+                save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), prefix + "-window");
+        }
+}
+
+TEST_CASE ("analog: FILTER's live graph shows the cutoff the engine's voice uses - ENV, KEYS, velocity, release, the most recent voice, PREVIEW when silent", "[analog][rack][filterlive]")
+{
+    using osp::plugin::rack::Kind;
+    namespace ap = andor::analog::params;
+    using andor::analog::filtergraph::LiveView;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setRackExpanded (Kind::filter, true);
+    auto* module = ui.effectsRack().module (Kind::filter);
+    REQUIRE (module != nullptr);
+    juce::Component* graph = nullptr;
+    LiveView v;
+    for (auto* c : module->getChildren())
+        if (andor::analog::filtergraph::liveView (c, v))
+            graph = c;
+    REQUIRE (graph != nullptr);
+    setValue (p, ap::analogAmount, 0.0f);   // (no slot tolerance: the base is the mapping's)
+    setValue (p, ap::envDepth, 24.0f);
+    setValue (p, ap::keyTrack, 0.0f);
+    setValue (p, ap::velocityToFilter, 0.0f);
+    setValue (p, ap::envLink, 0.0f);
+    setValue (p, ap::filterAttack, 0.008f);
+    setValue (p, ap::filterDecay, 0.5f);
+    setValue (p, ap::filterSustain, 20.0f);
+    setValue (p, ap::filterRelease, 0.35f);
+    p.prepareToPlay (rate, block);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);   // (the graph reads the settings once)
+    auto run = [&p] (double seconds, std::vector<juce::MidiMessage> first = {}) {
+        juce::AudioBuffer<float> buffer (2, block);
+        const int blocks = std::max (1, static_cast<int> (seconds * rate / block));
+        for (int b = 0; b < blocks; ++b)
+        {
+            juce::MidiBuffer midi;
+            if (b == 0)
+                for (auto& m : first)
+                    midi.addEvent (m, 0);
+            p.processBlock (buffer, midi);
+        }
+    };
+    // The engine's own figures for the voice the graph follows (the truth to compare against).
+    auto truth = [&engine] (int note, andor::analog::Synth::FilterTap::Snapshot& out) {
+        andor::analog::Synth::FilterTap::Snapshot s;
+        for (int slot = 0; slot < AnalogEngine::voiceSlots; ++slot)
+            if (engine.filterTap (slot)->read (s) && s.active && s.note == note)
+            {
+                out = s;
+                return true;
+            }
+        return false;
+    };
+    andor::analog::Synth::FilterTap::Snapshot t;
+    REQUIRE (andor::analog::filtergraph::liveView (graph, v, 0.0));
+    CHECK (v.mode == 0);   // IDLE: nothing playing, nothing edited
+
+    // A C4 at velocity 100: LIVE, its base and cutoff exactly the engine's; ENV +24: the reach
+    // two octaves (x4) above the base.
+    run (0.3, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (60, t));
+    CHECK (v.mode == 1);
+    CHECK (v.note == 60);
+    CHECK (v.velocity == 100);
+    CHECK (v.baseNote == Approx (t.baseNote).margin (1.0e-4));
+    CHECK (v.nowNote == Approx (std::min<double> (t.cutoffNote, engine.cutoffNoteHigh())).margin (1.0e-4));
+    CHECK (v.reachNote - v.baseNote == Approx (24.0).margin (1.0e-3));
+    CHECK (std::pow (2.0, (v.reachNote - v.baseNote) / 12.0) == Approx (4.0).margin (1.0e-3));
+    CHECK (v.peakNote > v.baseNote + 23.0);   // (an 8 ms attack: the envelope reached its top)
+    CHECK ((v.stage == 2 || v.stage == 3));    // DECAY or SUSTAIN
+    // Held: the cutoff settles at the sustain (20 % of the travel).
+    run (1.2);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.nowNote - v.baseNote == Approx (0.2 * 24.0).margin (0.25));
+    const double sustained = v.nowNote;
+    // Released: RELEASE, falling towards the base; the voice ends, the graph rests.
+    run (0.1, { juce::MidiMessage::noteOff (1, 60) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.stage == 4);
+    CHECK (v.nowNote < sustained);
+    run (3.0);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 0);
+
+    // Negative ENV sweeps down: the reach an octave below the base.
+    setValue (p, ap::envDepth, -12.0f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);   // (an edit while silent: a PREVIEW starts)
+    CHECK (v.mode == 2);
+    run (0.2, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 1);   // (a real note replaces the preview at once)
+    CHECK (v.reachNote - v.baseNote == Approx (-12.0).margin (1.0e-3));
+    CHECK (v.nowNote < v.baseNote);
+    run (0.05, { juce::MidiMessage::noteOff (1, 60) });
+    run (3.0);
+
+    // KEYS 100 %: C3 and C5 two octaves apart in the base, as the engine has them.
+    setValue (p, ap::envDepth, 24.0f);
+    setValue (p, ap::keyTrack, 100.0f);
+    setValue (p, ap::lfoCutoff, 0.0f);   // (KEYS alone moves the base: no LFO on the cutoff)
+    run (0.2, { juce::MidiMessage::noteOn (1, 48, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (48, t));
+    CHECK (v.note == 48);
+    CHECK (v.baseNote == Approx (t.baseNote).margin (1.0e-4));
+    const double c3 = v.baseNote;
+    // The most recent note is followed: C5 now (C3 still sounds); its base as the engine has it,
+    // about two octaves up (KEYS 100 %; MOVEMENT's drift wanders each voice a little).
+    run (0.2, { juce::MidiMessage::noteOn (1, 72, static_cast<juce::uint8> (100)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (72, t));
+    CHECK (v.note == 72);
+    CHECK (v.baseNote == Approx (t.baseNote).margin (1.0e-4));
+    CHECK (v.baseNote - c3 == Approx (24.0).margin (3.0));
+    // C5 released and over: back to the one still held.
+    run (0.05, { juce::MidiMessage::noteOff (1, 72) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.note == 72);   // (its release is still followed)
+    run (3.0);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.note == 48);
+    run (0.05, { juce::MidiMessage::noteOff (1, 48) });
+    run (3.0);
+
+    // VEL TO FILTER 100 %: velocity 64 scales the depth to 64 / 127 of ENV, as the engine does.
+    setValue (p, ap::keyTrack, 0.0f);
+    setValue (p, ap::velocityToFilter, 100.0f);
+    run (0.2, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (64)) });
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    REQUIRE (truth (60, t));
+    CHECK (v.reachNote - v.baseNote == Approx (24.0 * 64.0 / 127.0).margin (1.0e-3));
+    CHECK (v.reachNote - v.baseNote == Approx (t.envDepth).margin (1.0e-4));
+    run (0.05, { juce::MidiMessage::noteOff (1, 60) });
+    run (3.0);
+    setValue (p, ap::velocityToFilter, 0.0f);
+
+    // PREVIEW (nothing playing): an edit runs the notional C4 through the same envelope -
+    // ATTACK, DECAY, SUSTAIN, RELEASE - and ends at rest. Silent: nothing was rendered.
+    setValue (p, ap::filterAttack, 0.2f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 2);
+    andor::analog::filtergraph::liveView (graph, v, 0.1);
+    CHECK (v.stage == 1);   // ATTACK (0.2 s)
+    CHECK (v.nowNote > v.baseNote);
+    CHECK (v.nowNote < v.reachNote);
+    andor::analog::filtergraph::liveView (graph, v, 0.15);
+    CHECK ((v.stage == 2 || v.stage == 3));
+    for (int i = 0; i < 40 && v.mode == 2; ++i)
+        andor::analog::filtergraph::liveView (graph, v, 0.1);
+    CHECK (v.mode == 0);
+    CHECK (v.nowNote == Approx (v.baseNote));
+    // ENV LINK: the AMP envelope's times drive it - a 2 s AMP attack is still rising after 0.5 s.
+    setValue (p, ap::envLink, 1.0f);
+    setValue (p, "attack", 2000.0f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    CHECK (v.mode == 2);
+    andor::analog::filtergraph::liveView (graph, v, 0.5);
+    CHECK (v.stage == 1);
+    // ENV 0: the cutoff stays put while the envelope runs.
+    setValue (p, ap::envLink, 0.0f);
+    setValue (p, ap::envDepth, 0.0f);
+    andor::analog::filtergraph::liveView (graph, v, 0.0);
+    andor::analog::filtergraph::liveView (graph, v, 0.1);
+    CHECK (v.nowNote == Approx (v.baseNote));
+}
+
+TEST_CASE ("analog: FILTER's live graph as frames - a played note's sweep, then a silent PREVIEW (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-filter-sweep]")
+{
+    using osp::plugin::rack::Kind;
+    namespace ap = andor::analog::params;
+    using andor::analog::filtergraph::LiveView;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setRackExpanded (Kind::filter, true);
+    setValue (p, ap::envDepth, 30.0f);
+    setValue (p, ap::resonance, 55.0f);
+    setValue (p, ap::tone, 35.0f);
+    setValue (p, ap::filterAttack, 0.35f);
+    setValue (p, ap::filterDecay, 0.8f);
+    setValue (p, ap::filterSustain, 35.0f);
+    setValue (p, ap::filterRelease, 0.9f);
+    editor->setSize (1448, juce::roundToInt (1448.0f * ui.instrumentHeight() / 1448.0f));
+    ui.refreshNow();
+    auto* module = ui.effectsRack().module (Kind::filter);
+    REQUIRE (module != nullptr);
+    juce::Component* graph = nullptr;
+    LiveView v;
+    for (auto* c : module->getChildren())
+        if (andor::analog::filtergraph::liveView (c, v))
+            graph = c;
+    REQUIRE (graph != nullptr);
+    p.prepareToPlay (rate, block);
+    // (The setup's edits started a preview: let it end before recording.)
+    for (int i = 0; i < 200 && (andor::analog::filtergraph::liveView (graph, v, 0.1), v.mode != 0); ++i) {}
+    constexpr double frame = 1.0 / 30.0;
+    int index = 0;
+    auto shoot = [&] {
+        auto& rack = ui.effectsRack();
+        const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+        graph->repaint();
+        const auto image = editor->createComponentSnapshot (r, true, 1.0f);
+        const auto file = out.getChildFile ("sweep-" + juce::String (index++).paddedLeft ('0', 4) + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    juce::AudioBuffer<float> buffer (2, 1600);   // (one frame of audio at 48 kHz)
+    auto play = [&] (double seconds, std::vector<juce::MidiMessage> first = {}) {
+        for (int f = 0; f < static_cast<int> (seconds / frame); ++f)
+        {
+            juce::MidiBuffer midi;
+            if (f == 0)
+                for (auto& m : first)
+                    midi.addEvent (m, 0);
+            for (int done = 0; done < 1600; done += block)
+            {
+                juce::AudioBuffer<float> part (2, block);
+                p.processBlock (part, midi);
+                midi.clear();
+            }
+            andor::analog::filtergraph::liveView (graph, v, frame);
+            shoot();
+        }
+    };
+    play (0.3);
+    play (2.0, { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)) });   // LIVE: attack, decay, sustain
+    play (1.6, { juce::MidiMessage::noteOff (1, 60) });                                     // release, then rest
+    // Silent PREVIEW: an edit of DECAY with nothing playing.
+    setValue (p, ap::filterDecay, 0.4f);
+    for (int f = 0; f < 75; ++f)
+    {
+        andor::analog::filtergraph::liveView (graph, v, frame);
+        shoot();
     }
 }
