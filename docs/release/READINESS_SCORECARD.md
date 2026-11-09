@@ -16,7 +16,7 @@ Nothing is marked PASS without a run.
 | Product | Private beta | Paid release on Black Friday |
 |---|---|---|
 | **ANDOR Analog 1.0.0** | **GO**: both beta installers are built and validated in CI (run 150, macOS: tests, auval, pluginval; run 155, Windows: tests, DLL check, installer) | **CONDITIONAL GO.** Every automated gate passes. The remaining blockers are owner and human items: the JUCE and VST3 licences, Developer ID signing and notarisation, Windows signing, the EULA, and DAW and listening sign-off (H1–H11). If they are done by about 20 November, Black Friday is reachable. If not, launch the private beta and sell after. |
-| **ANDOR OSP** | GO as a free public beta for Analog buyers (after its own CI run on the entitlement fix) | **NO-GO for Black Friday.** It has no owned factory or example sounds, no installer or notices in its packaging, its musical review is open, and its release line has diverged from what Analog ships. Do not let it delay Analog (section 3). |
+| **ANDOR OSP** | GO as a free public beta for Analog buyers (after its own CI run on the entitlement fix) | **NOT YET for Black Friday.** It has a macOS installer script and the owner has thousands of sounds, but those sounds are not yet packaged as factory presets, the installer has never been run with a Developer ID and has no notices or EULA, its musical review is open, and its release line has diverged from what Analog ships. Do not let it delay Analog (section 3). |
 
 ## 1. ANDOR Analog: automated evidence
 
@@ -102,13 +102,15 @@ Nothing is marked PASS without a run.
 | Full suite on OSP default branch | **PASS** 10/10 | local this session at 8da975f (plugin, visual reference, regression, integration, unit…); later commits on that branch are research and docs only |
 | macOS build + ctest in CI | **PASS** | OSP run 276 (191f617) green; later runs were still in progress at the time of writing |
 | Standalone microphone entitlement for notarisation | **Fixed, NOT RUN** | 1a844ed (`packaging/macos/OSP-Standalone.entitlements`; `scripts/package-macos.sh` checks it); needs a Developer ID |
-| Signing, installer, notices, EULA | **NOT DONE** | Only an unsigned test zip. Analog's `packaging/` scripts are the template. |
-| Factory or example sounds the owner has the rights to | **FAIL** | "Load example" is a synthetic vowel |
+| Installer | **EXISTS, NOT RUN** | `scripts/package-macos.sh` builds a signed, notarised `OSP-<version>.pkg` (AU, VST3, standalone) but needs a Developer ID, so it has never been run; CI ships only the unsigned test zip. No Windows installer. |
+| Notices, EULA in the installer | **NOT DONE** | Analog's `packaging/common/` (notices generator, EULA page) is the template. |
+| Factory sounds | **OWNER: to package** | The owner has thousands of sounds and presets of their own; none are installed as factory presets yet ("Load example" is still a synthetic vowel). Needed: the owner picks the set; then a factory-preset folder, its install step and a recall test, as Analog has. |
 | DAW validation, listening (SYNTH Imprint, REIMAGINED, live capture in a DAW) | **NOT RUN** | human |
 | Release line | **IMPORTANT** | Analog ships OSP `claude/space-presets` (+ `claude/analog-release`). OSP's default branch is 19 commits apart from it and lacks SPACE presets, racks and the faceplates. Reunite the lines first (platform plan, step 0). |
 
 **Recommendation:** do not bundle at Black Friday. Offer OSP to Analog buyers as a free public
-beta, and sell the bundle when OSP has owned sounds, an installer and its own DAW pass.
+beta, and sell the bundle when the owner's sounds ship as factory presets, the installer has run signed
+and notarised, and OSP has had its own DAW pass.
 
 ## 4. What happens next
 
