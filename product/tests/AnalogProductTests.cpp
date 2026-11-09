@@ -7166,6 +7166,7 @@ TEST_CASE ("analog: V5 review matrix - the route board (six, classic, parallel, 
     setValue (p, "echo", 40.0f);
     setValue (p, "space", 30.0f);
     setValue (p, "motion", 45.0f);
+    setValue (p, "movement.mode", 2.0f);   // (CHORUS: the reference's MOVEMENT, and its rack shot's)
     setValue (p, ap::resonance, 40.0f);
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
     auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
@@ -7207,6 +7208,15 @@ TEST_CASE ("analog: V5 review matrix - the route board (six, classic, parallel, 
     const auto six = custom ({ e (fx::Type::movement), e (fx::Type::drive), e (fx::Type::echo), e (fx::Type::filter), e (fx::Type::space), e (fx::Type::spread) });
     REQUIRE (engine.setFxRoute (six));
     routeShot ("v5-01-routing-six");
+    // Each tile alone (2x): the miniature of its rack (the pairs).
+    auto tileShots = [&] {
+        for (const auto& t : view->tiles())
+        {
+            const auto r = editor->getLocalArea (view, t.bounds.expanded (6));
+            save (editor->createComponentSnapshot (r, true, 2.0f), juce::String ("v5-tile-") + fx::typeKey (t.id.type));
+        }
+    };
+    tileShots();
     REQUIRE (engine.setFxRoute (fx::classicGraph()));
     routeShot ("v5-02-routing-classic");
     REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
@@ -7215,6 +7225,7 @@ TEST_CASE ("analog: V5 review matrix - the route board (six, classic, parallel, 
     REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::phaser), e (fx::Type::flanger), e (fx::Type::shifter), e (fx::Type::convolution),
                                           e (fx::Type::utility), e (fx::Type::retro) })));
     routeShot ("v5-04-routing-eight-others");
+    tileShots();
     REQUIRE (engine.setFxRoute (six));
     width = 869;
     routeShot ("v5-05-routing-six-869");
