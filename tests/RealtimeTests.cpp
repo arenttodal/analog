@@ -4,6 +4,8 @@
 #include "TestUtil.h"
 
 #include "FactoryPatches.h"
+#include "fx/Effects.h"
+#include "fx/FxProcessor.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -370,6 +372,54 @@ TEST_CASE ("realtime: three engines (each card's EQ and M / S, OSC 3, NOISE, the
         synth.render (left.data(), right.data(), 256);
         synth.handleMidi (noteOff, 3);
         synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: every new effect - RETRO in each personality, switched mid-stream - never allocates", "[realtime][fx][retro]")
+{
+    namespace fx = andor::analog::fx;
+    fx::Settings settings;
+    std::vector<std::unique_ptr<fx::Processor>> processors;
+    for (int t = 4; t < fx::typeCount; ++t)
+        if (auto proc = fx::makeProcessor (static_cast<fx::Type> (t)))
+        {
+            proc->prepare (48000.0, 512);
+            proc->set (settings, 0);
+            proc->reset();
+            processors.push_back (std::move (proc));
+        }
+    REQUIRE (processors.size() >= 10);
+    std::vector<float> l (512), r (512);
+    auto& retro = settings.retro[0];
+    retro.noiseDb = -50.0f;
+    retro.crackle = retro.pops = 0.6f;
+    retro.dropoutRate = 6.0f;
+    retro.dropoutDepth = 0.8f;
+    retro.compAmount = 0.5f;
+    retro.codecAmbience = 0.5f;
+    retro.digitalMotion = 1.0f;
+    counting = true;
+    for (int block = 0; block < 400; ++block)
+    {
+        // The personality every 40 blocks (TAPE, VINYL, 80s, 90s, CODEC and its packet modes).
+        const int which = (block / 40) % 8;
+        retro.mode = which < 2 ? which : fx::RetroSettings::digital;
+        retro.era = which < 2 ? fx::RetroSettings::nineties : std::min (2, which - 2);
+        retro.codecMode = std::max (0, which - 4);
+        retro.aliasHard = (block / 20) % 2 == 1;
+        const int n = 1 + (block * 37) % 512;
+        for (auto& proc : processors)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                l[static_cast<std::size_t> (i)] = 0.3f * std::sin (0.031f * static_cast<float> (block * 512 + i));
+                r[static_cast<std::size_t> (i)] = l[static_cast<std::size_t> (i)];
+            }
+            proc->set (settings, 0);
+            proc->process (l.data(), r.data(), n);
+        }
     }
     counting = false;
     CHECK (allocations.load() == 0);

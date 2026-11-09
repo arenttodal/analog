@@ -58,6 +58,7 @@ namespace
         { Type::space, "SPACE & TIME", "The instrument's rooms, ABYSS, VINTAGE, BLOOM" },
         { Type::convolution, "SPACE & TIME", "A real space from an impulse response" },
         { Type::shifter, "SPACE & TIME", "Frequency shift and spectral blur" },
+        { Type::retro, "CHARACTER", "An aging medium: tape, vinyl, 80s / 90s digital, codec" },
         { Type::utility, "UTILITIES", "Gain, pan, width, polarity, mono bass" },
     };
 }
@@ -80,6 +81,7 @@ juce::Colour fxAccent (Type type)
         case Type::shifter: return juce::Colour (0xff807b9a);
         case Type::convolution: return juce::Colour (0xff847b61);
         case Type::utility: return juce::Colour (0xff8c8d8a);
+        case Type::retro: return juce::Colour (0xffb5603c);
         default: return juce::Colour (0xff9a9488);
     }
 }
@@ -107,6 +109,12 @@ juce::Path fxIcon (Type type)
         case Type::shifter: svg ("M4 16h6l4-8h6M17 5l3 3-3 3"); break;
         case Type::convolution: svg ("M3 12h2l2-7 3 14 3-10 2 6 2-3h4"); break;
         case Type::utility: svg ("M6 4v16M12 4v16M18 4v16M4 9h4M10 14h4M16 7h4"); break;
+        case Type::retro:
+            // Two reels and the tape between them.
+            p.addEllipse (2.5f, 7.0f, 8.0f, 8.0f);
+            p.addEllipse (13.5f, 7.0f, 8.0f, 8.0f);
+            svg ("M6.5 15h11M3 19h18");
+            break;
         default: break;
     }
     return p;

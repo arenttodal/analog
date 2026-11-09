@@ -233,6 +233,56 @@ namespace
                 o.push_back (toggle ("lp.on", "Low Pass On", false, [] (Settings& s, int k, float v) { AT (utility).lpOn = on (v); }));
                 o.push_back (real ("lp.freq", "Low Pass Frequency", 2000.0f, 20000.0f, 18000.0f, "Hz", [] (Settings& s, int k, float v) { AT (utility).lpHz = v; }, 8000.0f));
                 break;
+            case Type::retro:
+                // V2 (version hint 29): docs/FX_EFFECTS_LIBRARY.md, RETRO. CHARACTER and WEAR are
+                // macros over the detail values (deriveRetro), never written into them.
+                common (o, &Settings::retro, 65.0f);
+                o.push_back (choice ("mode", "Mode", { "Tape", "Vinyl", "Digital" }, 0, [] (Settings& s, int k, float v) { AT (retro).mode = index (v); }));
+                o.push_back (choice ("tape.model", "Tape Model", { "Cassette", "Studio Reel" }, 0, [] (Settings& s, int k, float v) { AT (retro).tapeModel = index (v); }));
+                o.push_back (choice ("vinyl.rpm", "Vinyl Speed", { juce::String::fromUTF8 ("33\xe2\x85\x93"), "45", "78" }, 0, [] (Settings& s, int k, float v) { AT (retro).rpm = index (v); }));
+                o.push_back (choice ("digital.era", "Digital Type", { "80s", "90s", "Codec" }, 1, [] (Settings& s, int k, float v) { AT (retro).era = index (v); }));
+                o.push_back (real ("character", "Character", 0.0f, 100.0f, 40.0f, "%", [] (Settings& s, int k, float v) { AT (retro).character = pct (v); }));
+                o.push_back (real ("wear", "Wear", 0.0f, 100.0f, 25.0f, "%", [] (Settings& s, int k, float v) { AT (retro).wear = pct (v); }));
+                o.push_back (real ("input", "Input", -18.0f, 18.0f, 0.0f, "dB", [] (Settings& s, int k, float v) { AT (retro).inputDb = v; }));
+                o.push_back (real ("tone", "Tone", -12.0f, 12.0f, 0.0f, "dB", [] (Settings& s, int k, float v) { AT (retro).toneDb = v; }));
+                o.push_back (real ("saturation", "Saturation", 0.0f, 100.0f, 20.0f, "%", [] (Settings& s, int k, float v) { AT (retro).saturation = pct (v); }));
+                o.push_back (choice ("preserve", "Preserve", { "Low", "Neutral", "High" }, 1, [] (Settings& s, int k, float v) { AT (retro).preserve = index (v); }));
+                o.push_back (real ("wow.depth", "Wow Depth", 0.0f, 100.0f, 12.0f, "%", [] (Settings& s, int k, float v) { AT (retro).wowDepth = pct (v); }));
+                o.push_back (real ("wow.rate", "Wow Rate", 0.1f, 3.0f, 0.55f, "Hz", [] (Settings& s, int k, float v) { AT (retro).wowHz = v; }, 0.6f));
+                o.push_back (real ("flutter.depth", "Flutter Depth", 0.0f, 100.0f, 7.0f, "%", [] (Settings& s, int k, float v) { AT (retro).flutterDepth = pct (v); }));
+                o.push_back (real ("flutter.rate", "Flutter Rate", 3.0f, 20.0f, 6.0f, "Hz", [] (Settings& s, int k, float v) { AT (retro).flutterHz = v; }, 7.0f));
+                o.push_back (real ("transport.random", "Transport Random", 0.0f, 100.0f, 20.0f, "%", [] (Settings& s, int k, float v) { AT (retro).randomness = pct (v); }));
+                o.push_back (real ("stereo.phase", "Stereo Phase", 0.0f, 180.0f, 0.0f, "deg", [] (Settings& s, int k, float v) { AT (retro).stereoPhaseDeg = v; }));
+                o.push_back (choice ("noise.type", "Noise Type", { "Auto", "Tape Hiss", "Vinyl", "Room", "Digital" }, 0, [] (Settings& s, int k, float v) { AT (retro).noiseType = index (v); }));
+                o.push_back (real ("noise.level", "Noise Level", -96.0f, -24.0f, -96.0f, "dB", [] (Settings& s, int k, float v) { AT (retro).noiseDb = v; }));
+                o.push_back (real ("noise.follow", "Noise Follow", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).noiseFollow = pct (v); }));
+                o.push_back (toggle ("noise.automute", "Noise Auto Mute", true, [] (Settings& s, int k, float v) { AT (retro).noiseAutoMute = on (v); }));
+                o.push_back (real ("crackle", "Crackle", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).crackle = pct (v); }));
+                o.push_back (real ("pops", "Pops", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).pops = pct (v); }));
+                o.push_back (real ("dropout.rate", "Dropout Rate", 0.0f, 12.0f, 0.0f, "/s", [] (Settings& s, int k, float v) { AT (retro).dropoutRate = v; }, 2.0f));
+                o.push_back (real ("dropout.depth", "Dropout Depth", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).dropoutDepth = pct (v); }));
+                o.push_back (real ("dropout.length", "Dropout Length", 2.0f, 250.0f, 25.0f, "ms", [] (Settings& s, int k, float v) { AT (retro).dropoutMs = v; }, 30.0f));
+                o.push_back (real ("bandwidth.low", "Low Edge", 20.0f, 800.0f, 20.0f, "Hz", [] (Settings& s, int k, float v) { AT (retro).lowHz = v; }, 120.0f));
+                o.push_back (real ("bandwidth.high", "High Edge", 2000.0f, 20000.0f, 18000.0f, "Hz", [] (Settings& s, int k, float v) { AT (retro).highHz = v; }, 7000.0f));
+                o.push_back (real ("head.bump", "Head Bump", 0.0f, 100.0f, 15.0f, "%", [] (Settings& s, int k, float v) { AT (retro).headBump = pct (v); }));
+                o.push_back (real ("compress.amount", "Compress", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).compAmount = pct (v); }));
+                o.push_back (real ("compress.attack", "Compress Attack", 0.25f, 4.0f, 1.0f, "x", [] (Settings& s, int k, float v) { AT (retro).compAttack = v; }, 1.0f));
+                o.push_back (real ("compress.release", "Compress Release", 0.25f, 8.0f, 1.0f, "x", [] (Settings& s, int k, float v) { AT (retro).compRelease = v; }, 1.0f));
+                o.push_back (toggle ("compress.link", "Compress Link", true, [] (Settings& s, int k, float v) { AT (retro).compLink = on (v); }));
+                o.push_back (real ("compress.tilt", "Sidechain Tilt", -100.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).compTilt = pct (v); }));
+                o.push_back (real ("digital.bits", "Bits", 4.0f, 16.0f, 12.0f, "bit", [] (Settings& s, int k, float v) { AT (retro).bits = v; }));
+                o.push_back (real ("digital.rate", "Rate", 4.0f, 48.0f, 24.0f, "kHz", [] (Settings& s, int k, float v) { AT (retro).rateKHz = v; }, 16.0f));
+                o.push_back (choice ("digital.alias", "Alias", { "Clean", "Hard" }, 0, [] (Settings& s, int k, float v) { AT (retro).aliasHard = index (v) == 1; }));
+                o.push_back (real ("digital.mod", "Motion", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).digitalMotion = pct (v); }));
+                o.push_back (real ("codec.loss", "Loss", 0.0f, 100.0f, 15.0f, "%", [] (Settings& s, int k, float v) { AT (retro).codecLoss = pct (v); }));
+                o.push_back (real ("codec.speed", "Speed", 0.0f, 100.0f, 20.0f, "%", [] (Settings& s, int k, float v) { AT (retro).codecSpeed = pct (v); }));
+                o.push_back (choice ("codec.mode", "Codec Mode", { "Standard", "Drop", "Repeat", "Jitter", "Combined" }, 0, [] (Settings& s, int k, float v) { AT (retro).codecMode = index (v); }));
+                o.push_back (toggle ("codec.artifactOnly", "Artifact Only", false, [] (Settings& s, int k, float v) { AT (retro).artifactOnly = on (v); }));
+                o.push_back (choice ("codec.stereo", "Codec Stereo", { "Stereo", "Joint", "Mono" }, 0, [] (Settings& s, int k, float v) { AT (retro).codecStereo = index (v); }));
+                o.push_back (real ("codec.artifact", "Artifact", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).codecArtifact = pct (v); }));
+                o.push_back (real ("codec.ambience", "Artifact Ambience", 0.0f, 100.0f, 0.0f, "%", [] (Settings& s, int k, float v) { AT (retro).codecAmbience = pct (v); }));
+                o.push_back (real ("seed", "Seed", 0.0f, 999.0f, 0.0f, "#", [] (Settings& s, int k, float v) { AT (retro).seed = juce::roundToInt (v); }));
+                break;
             default: break;
         }
 #undef AT
@@ -279,13 +329,21 @@ juce::String format (const Spec& spec, float v)
     if (u == "%")
         return juce::String (juce::roundToInt (v)) + " %";
     if (u == "x")
-        return juce::String (v, v < 10.0f ? 1 : 0) + (spec.name.endsWith ("q") ? "" : ":1");
+        return juce::String (v, v < 10.0f ? 1 : 0) + (spec.name.endsWith ("q") ? "" : (spec.name.startsWith ("compress.") ? juce::String::fromUTF8 (" \xc3\x97") : ":1"));
     if (u == "deg")
         return juce::String (juce::roundToInt (v)) + juce::String::fromUTF8 ("\xc2\xb0");
     if (u == "st")
         return (v >= 0.05f ? "+" : "") + juce::String (std::abs (v) < 0.05f ? 0.0f : v, 1) + " st";
     if (u == "cents")
         return juce::String (v, 1) + " ct";
+    if (u == "/s")
+        return juce::String (v, v < 10.0f ? 1 : 0) + " /s";
+    if (u == "bit")
+        return juce::String (v, 1) + " bit";
+    if (u == "kHz")
+        return juce::String (v, v < 10.0f ? 1 : 0) + " kHz";
+    if (u == "#")
+        return juce::String (juce::roundToInt (v));
     return juce::String (v, 2);
 }
 
@@ -299,7 +357,8 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
             const juce::String prefix = juce::String ("FX ") + fx::typeName (type) + (fx::capacity[static_cast<std::size_t> (t)] > 1 ? " " + juce::String (slot + 1) : juce::String()) + " ";
             for (const auto& spec : specsOf (type))
             {
-                const juce::ParameterID id { idOf ({ type, slot }, spec.name), 28 };
+                // (Version hints: 28 for the V1 effects; RETRO, appended in V2, 29.)
+                const juce::ParameterID id { idOf ({ type, slot }, spec.name), type == fx::Type::retro ? 29 : 28 };
                 const auto title = prefix + spec.title;
                 if (spec.kind == Kind::toggle)
                     layout.add (std::make_unique<juce::AudioParameterBool> (id, title, spec.fallback >= 0.5f));

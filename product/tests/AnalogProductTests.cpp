@@ -4213,11 +4213,12 @@ TEST_CASE ("analog: MOVEMENT, ECHO and SPACE share one layout - MODE, PRESET, th
         CHECK (heights[kind] == heights[Kind::movement]);
     }
     CHECK (heights[Kind::space] <= 216.0f);   // never taller than the macro panel
-    CHECK (slots[Kind::space][1].getX() > slots[Kind::space][0].getRight());   // PRESET right of MODE
     CHECK (slots[Kind::space][0].getWidth() == 165);   // approved MODE 165 x 27
     CHECK (slots[Kind::space][0].getHeight() == 27);
-    CHECK (slots[Kind::space][1].getWidth() == 294);   // approved PRESET 294 x 27: never stretched
-    CHECK (slots[Kind::space][1].getHeight() == 27);
+    // V2 faceplate: PRESET (236 x 24, never stretched) in the enamel rail, above the body.
+    CHECK (slots[Kind::space][1].getWidth() == 236);
+    CHECK (slots[Kind::space][1].getHeight() == 24);
+    CHECK (slots[Kind::space][1].getBottom() <= 32);
 
     // SHAPER's precision editor (its magnifier): the one module that may be taller.
     ui.setRackExpanded (Kind::movement, true);
@@ -4274,12 +4275,12 @@ TEST_CASE ("analog: the approved rack layout - each module's graph column fixed,
         if (! pictureRight)
             pictureRight = picture.getRight();
         CHECK (picture.getRight() == *pictureRight);
-        CHECK (picture.getHeight() == 160);
-        // The cells: left-aligned from one origin on the approved slot widths, all before the
-        // divider; knobs never shrink (59 px in every family).
+        CHECK (picture.getHeight() == 156);   // (V2 faceplate: 160 less its bezel's room)
+        // The cells: left-aligned from one origin on the approved slot widths (after the
+        // faceplate's stripes), all before the divider; knobs never shrink (59 px in every family).
         const auto cells = osp::plugin::rackCellBounds (*module);
         REQUIRE (! cells.empty());
-        CHECK (cells.front().getX() == 20);
+        CHECK (cells.front().getX() == osp::plugin::rack::hardware::contentLeft);
         CHECK (cells.back().getRight() + 17 < picture.getX() - 18);
         for (std::size_t i = 1; i < cells.size(); ++i)
             CHECK (cells[i].getX() - cells[i - 1].getRight() == (c.dense ? 5 : 7));
@@ -4844,8 +4845,9 @@ TEST_CASE ("analog: MOVEMENT's header is the title, A / B and the shown lane's p
     REQUIRE (module != nullptr);
     const auto onA = params::movementLaneId (0, "on"), onB = params::movementLaneId (1, "on");
 
-    // The title row: the lane selector and the shown lane's power (no LANES, no COPY / SWAP).
-    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Lane A|Lane B|Lane power");
+    // The title row: the lane selector and the shown lane's power (no LANES, no COPY / SWAP);
+    // with the V2 faceplate the preset browser and its actions are in the rail too.
+    CHECK (osp::plugin::rackMovementTitleRow (*module).joinIntoString ("|") == "Presets|Preset actions|Lane A|Lane B|Lane power");
 
     // Choosing a lane shows it and never switches either lane on or off.
     const float a0 = p.parameterValue (onA), b0 = p.parameterValue (onB);
@@ -5345,7 +5347,8 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
     auto* morph = dynamic_cast<ParameterRack*> (ui.effectsRack().module (Kind::morph));
     REQUIRE (morph != nullptr);
     CHECK (morph->captions() == "MORPH TEXTURE ATTACK FORMANTS DETAIL OUTPUT LEVEL MATCH ROOT");
-    REQUIRE (morph->headerSwitch() != nullptr);
+    REQUIRE (morph->powerKey() != nullptr);   // (its ON: the faceplate's power key, MORPH's enable)
+    CHECK (morph->hasFaceplate());
     CHECK (morph->cellNamed ("METHOD") != nullptr);
     CHECK (morph->cellNamed ("CARRIER") != nullptr);
     CHECK (morph->status().isEmpty());   // (card C silent: the graph's empty state says so, not the header)
@@ -5771,7 +5774,7 @@ namespace
     }
 }
 
-TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, old or unreadable, CLASSIC (state 12)", "[analog][fx][state]")
+TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, old or unreadable, CLASSIC (state 12, now 13)", "[analog][fx][state]")
 {
     namespace fx = andor::analog::fx;
     auto custom = fx::classicGraph();
@@ -5785,7 +5788,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 12);
+        CHECK (xml->getIntAttribute ("productVersion") == 13);   // (13: RETRO's parameters appended)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -6069,10 +6072,23 @@ TEST_CASE ("analog: the FX rack - every new effect opens in the one 214 px modul
     view->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
     CHECK (view->quickPopover() == nullptr);
     CHECK (ui.sourceViewShown());
-    // The original four open their own racks (DRIVE its popover), never a copy.
+    // The original four open their own racks, never a copy; DRIVE's is the FX rack's DRIVE
+    // faceplate on the instrument's own parameters (no ON of its own, no FX presets).
     view->openEditor ({ fx::Type::space, 0 });
     ui.refreshNow();
     CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::space });
+    view->openEditor ({ fx::Type::drive, 0 });
+    ui.refreshNow();
+    CHECK (ui.effectsRack().shownKinds() == std::vector<Kind> { Kind::fx });
+    if (auto* drive = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx)))
+    {
+        CHECK (drive->captions() == "DRIVE TONE BODY");
+        CHECK (drive->cellNamed ("MODE") != nullptr);
+        CHECK (drive->powerKey() == nullptr);
+        CHECK (drive->railComponent() == nullptr);
+    }
+    else
+        FAIL ("no DRIVE rack");
     // Opening, swapping and closing never moved a parameter.
     CHECK (allParameterValues (p) == before);
 
@@ -6089,6 +6105,81 @@ TEST_CASE ("analog: the FX rack - every new effect opens in the one 214 px modul
     comp->powerKey()->toggle();
     CHECK (p.parameters.getRawParameterValue ("analog.fx.comp.1.on")->load() > 0.5f);
     CHECK (comp->powerKey()->isOn());
+}
+
+TEST_CASE ("analog: RETRO - uninserted by default; its rack shows each personality's own controls on four pages, all inside the faceplate", "[analog][fx][rack][ui][retro]")
+{
+    namespace fx = andor::analog::fx;
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    // An Init patch has no RETRO in its route (its parameters registered, at their defaults).
+    for (const auto& n : engine.fxRoute().chain)
+        CHECK (n.fx.type != fx::Type::retro);
+    CHECK (p.parameters.getParameter ("analog.fx.retro.1.mode") != nullptr);
+    CHECK (p.parameters.getParameter ("analog.fx.retro.2.seed") != nullptr);
+    CHECK (p.parameters.getRawParameterValue ("analog.fx.retro.1.mix")->load() == Approx (65.0f));
+    CHECK (p.parameters.getRawParameterValue ("analog.fx.retro.1.noise.level")->load() == Approx (-96.0f));   // (noise off)
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    view->setSize (1180, 330);
+    REQUIRE (view->insertNew (fx::Type::retro));
+    const fx::InstanceId id { fx::Type::retro, 0 };
+    view->openEditor (id);
+    ui.refreshNow();
+    auto* module = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));
+    REQUIRE (module != nullptr);
+    auto set = [&p, &ui] (const char* name, float v) {
+        auto* q = p.parameters.getParameter (juce::String ("analog.fx.retro.1.") + name);
+        REQUIRE (q != nullptr);
+        q->setValueNotifyingHost (q->convertTo0to1 (v));
+        ui.refreshNow();
+    };
+    struct Personality { int mode, era; const char* main; };
+    const Personality personalities[] {
+        { 0, 1, "CHARACTER WEAR WOW FLUTTER TONE NOISE MIX OUTPUT" },
+        { 1, 1, "CHARACTER WEAR WOW CRACKLE POPS MIX OUTPUT" },
+        { 2, 0, "CHARACTER WEAR BITS RATE ALIAS MIX OUTPUT" },
+        { 2, 1, "CHARACTER WEAR BITS RATE ALIAS MIX OUTPUT" },
+        { 2, 2, "CHARACTER WEAR LOSS PACKETS ARTIFACT MIX OUTPUT" },
+    };
+    for (const auto& pe : personalities)
+    {
+        INFO ("mode " << pe.mode << " era " << pe.era);
+        set ("mode", static_cast<float> (pe.mode));
+        set ("digital.era", static_cast<float> (pe.era));
+        for (int page = 0; page < 4; ++page)
+        {
+            INFO ("page " << page);
+            module->showPage (page);
+            ui.refreshNow();
+            CHECK (module->page() == page);
+            CHECK (module->captions().isNotEmpty());
+            if (page == 0)
+                CHECK (module->captions() == pe.main);
+            for (const auto& b : module->cellBounds())
+            {
+                CHECK (b.getX() >= module->contentLeft());
+                CHECK (b.getRight() <= module->graphBounds().getX() - 4);
+                CHECK (b.getBottom() <= module->chassisBounds().getBottom());
+            }
+        }
+        module->showPage (0);
+        ui.refreshNow();
+    }
+    // The quick settings: MODE, CHARACTER, WEAR, MIX.
+    ui.setRackExpanded (Kind::fx, false);
+    view->showQuick (id);
+    REQUIRE (view->quickPopover() != nullptr);
+    int knobs = 0;
+    for (auto* c : view->quickPopover()->getChildren())
+        knobs += dynamic_cast<osp::plugin::MiniKnob*> (c) != nullptr ? 1 : 0;
+    CHECK (knobs == 3);
 }
 
 TEST_CASE ("analog: FX presets - every factory preset loads and reads as itself; a change marks it; a chain round-trips", "[analog][fx][presets]")
@@ -6251,5 +6342,55 @@ TEST_CASE ("analog: screenshots of the FX racks and quick settings (ANALOG_SCREE
     {
         width = w;
         shoot ("fx-rack-eq-" + juce::String (w));
+    }
+    width = 1448;
+    // The instrument's own four on their faceplates (DRIVE's rack; MOVEMENT, ECHO, SPACE shared).
+    setValue (p, "drive", 45.0f);
+    setValue (p, "echo", 40.0f);
+    setValue (p, "space", 30.0f);
+    for (const auto t : { fx::Type::drive, fx::Type::movement, fx::Type::echo, fx::Type::space })
+    {
+        view->openEditor ({ t, 0 });
+        shoot ("fx-rack-" + juce::String (fx::typeName (t)).toLowerCase());
+    }
+    for (const int mode : { 1, 2 })
+    {
+        setValue (p, "drive.mode", static_cast<float> (mode));
+        view->openEditor ({ fx::Type::drive, 0 });
+        shoot ("fx-rack-drive-mode" + juce::String (mode));
+    }
+    // RETRO: each personality with audio played through it (its spectrum, its events), each page.
+    struct Look { const char* name; int mode, era; std::vector<std::pair<const char*, float>> values; };
+    const Look looks[] {
+        { "tape", 0, 1, { { "wear", 75.0f }, { "dropout.rate", 3.0f }, { "dropout.depth", 60.0f }, { "noise.level", -60.0f } } },
+        { "vinyl", 1, 1, { { "crackle", 45.0f }, { "pops", 30.0f }, { "wear", 40.0f } } },
+        { "digital-80s", 2, 0, { { "digital.bits", 9.0f }, { "digital.rate", 12.0f } } },
+        { "digital-90s", 2, 1, { { "digital.mod", 60.0f } } },
+        { "codec", 2, 2, { { "codec.loss", 55.0f }, { "codec.mode", 4.0f }, { "codec.speed", 60.0f } } },
+    };
+    const fx::InstanceId retro { fx::Type::retro, 0 };
+    view->openEditor (retro);
+    for (const auto& look : looks)
+    {
+        setValue (p, "analog.fx.retro.1.mode", static_cast<float> (look.mode));
+        setValue (p, "analog.fx.retro.1.digital.era", static_cast<float> (look.era));
+        for (const auto& [n, v] : look.values)
+            setValue (p, juce::String ("analog.fx.retro.1.") + n, v);
+        renderShell (p, 0.5);
+        auto* rack = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (osp::plugin::rack::Kind::fx));
+        REQUIRE (rack != nullptr);
+        for (int page = 0; page < 4; ++page)
+        {
+            rack->showPage (page);
+            shoot ("fx-rack-retro-" + juce::String (look.name) + (page == 0 ? juce::String() : "-page" + juce::String (page + 1)));
+        }
+        rack->showPage (0);
+        if (look.mode == 0)
+            for (const int w : { 869, 1810 })
+            {
+                width = w;
+                shoot ("fx-rack-retro-tape-" + juce::String (w));
+                width = 1448;
+            }
     }
 }

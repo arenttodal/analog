@@ -69,6 +69,21 @@ namespace
                          { "Mono Bass", { { "monoBass", 1 }, { "monoBassHz", 140 } } },
                          { "Wider", { { "width", 150 }, { "monoBass", 1 } } },
                          { "Clean Lows", { { "hp.on", 1 }, { "hp.freq", 40 } } } };
+            case Type::retro:
+                // V2 (docs/FX_EFFECTS_LIBRARY.md): original sounds; no names of real machines.
+                return { { "Warm Tape I", { { "mode", 0 }, { "tape.model", 1 }, { "character", 45 }, { "wear", 15 }, { "saturation", 30 }, { "head.bump", 30 }, { "wow.depth", 8 }, { "flutter.depth", 5 }, { "mix", 70 } } },
+                         { "Worn Tape", { { "mode", 0 }, { "character", 55 }, { "wear", 70 }, { "dropout.rate", 1.5f }, { "dropout.depth", 50 }, { "noise.level", -60 }, { "mix", 75 } } },
+                         { "Cassette Air", { { "mode", 0 }, { "character", 30 }, { "wear", 30 }, { "tone", 3 }, { "bandwidth.high", 15000 }, { "noise.level", -66 }, { "mix", 60 } } },
+                         { "Gentle Flutter", { { "mode", 0 }, { "character", 25 }, { "wear", 20 }, { "wow.depth", 20 }, { "flutter.depth", 25 }, { "flutter.rate", 8 }, { "transport.random", 40 }, { "mix", 60 } } },
+                         { "Dusty Vinyl", { { "mode", 1 }, { "vinyl.rpm", 0 }, { "character", 40 }, { "wear", 35 }, { "crackle", 35 }, { "pops", 15 }, { "noise.level", -62 }, { "mix", 70 } } },
+                         { "45 RPM Haze", { { "mode", 1 }, { "vinyl.rpm", 1 }, { "character", 50 }, { "wear", 45 }, { "wow.depth", 25 }, { "crackle", 15 }, { "tone", -3 }, { "mix", 65 } } },
+                         { "Early Digital", { { "mode", 2 }, { "digital.era", 0 }, { "character", 35 }, { "digital.bits", 10 }, { "digital.rate", 14 }, { "mix", 85 } } },
+                         { "90s Sampler", { { "mode", 2 }, { "digital.era", 1 }, { "character", 15 }, { "wear", 10 }, { "digital.bits", 14 }, { "digital.rate", 26 }, { "mix", 100 } } },
+                         { "Codec Air", { { "mode", 2 }, { "digital.era", 2 }, { "character", 20 }, { "wear", 15 }, { "codec.loss", 35 }, { "codec.speed", 20 }, { "mix", 70 } } },
+                         { "Broken Packet", { { "mode", 2 }, { "digital.era", 2 }, { "character", 40 }, { "wear", 50 }, { "codec.loss", 60 }, { "codec.speed", 70 }, { "codec.mode", 4 }, { "mix", 100 } } },
+                         { "Artifact Only", { { "mode", 2 }, { "digital.era", 2 }, { "character", 30 }, { "codec.loss", 55 }, { "codec.artifactOnly", 1 }, { "mix", 100 } } },
+                         { "Acoustic Warmth", { { "mode", 0 }, { "tape.model", 1 }, { "character", 30 }, { "wear", 10 }, { "saturation", 25 }, { "preserve", 2 }, { "head.bump", 20 }, { "mix", 50 } } },
+                         { "Bowed Halo", { { "mode", 0 }, { "character", 35 }, { "wear", 30 }, { "stereo.phase", 60 }, { "wow.depth", 18 }, { "flutter.depth", 6 }, { "transport.random", 50 }, { "tone", 2 }, { "mix", 55 } } } };
             default: return {};
         }
     }

@@ -323,4 +323,74 @@ private:
     dsp::Glide widthGlide;
 };
 
+
+//==============================================================================
+/** RETRO's macro mapping (pure: tested apart). CHARACTER pushes saturation and a darker tilt
+    (and, when the user has switched the compressor on, its amount); WEAR deepens wow and
+    flutter, narrows the bandwidth and, past half, brings in dropouts. Base values are the
+    user's; the macros offset them and never overwrite them. */
+struct RetroDerived
+{
+    float saturation, tiltDb, compAmount, wowDepth, flutterDepth, dropoutRate, dropoutDepth, lowHz, highHz, bits, rateKHz, codecLoss, codecSpeed;
+};
+RetroDerived deriveRetro (const RetroSettings& s) noexcept;
+
+/**
+    RETRO: an aging machine in three personalities (docs/FX_EFFECTS_LIBRARY.md). TAPE: an
+    anti-aliased (ADAA) asymmetric saturation with frequency preservation, head bump and
+    bandwidth, wow / flutter / drift on a modulated delay, dropouts, hiss. VINYL: the platter's
+    wow at its speed (33 1/3, 45, 78), crackle and pops, groove rumble, a softer response.
+    DIGITAL: 80s / 90s converters (sample and hold with or without anti-alias filters, bit
+    depth with dither or raw) and CODEC (an STFT: masking and quantisation of weak bins, band
+    limit, dropped / repeated frames, phase jitter; stereo, joint or mono; the artifact alone
+    or emphasised; a small ambience on the artifact). One optional compressor before it all.
+    Its latency is constant (one codec frame) in every personality; switching crossfades.
+    Every random thing is seeded (osp::Prng): the same settings render the same samples.
+*/
+class Retro final : public InsertBase
+{
+public:
+    Retro();
+    ~Retro() override;
+    void resetEffect() noexcept override;
+    void set (const Settings& s, int slot) noexcept override;
+    bool hasTail() const noexcept override { return true; }
+    RetroSettings settings() const noexcept { return p; }
+
+    /** The machine's linear response (head bump, bandwidth, tilt) at a frequency (dB): the
+        graph's curve, from the same designs the audio uses. */
+    static double responseDb (const RetroSettings& s, double rate, double hz) noexcept;
+    /** The codec frame (and the latency) at a rate. */
+    static int frameFor (double rate) noexcept;
+
+    // Telemetry (any thread reads; the audio thread writes).
+    static constexpr int bands = 48;
+    std::array<std::atomic<float>, bands> spectrumDb {};   ///< the output, 30 Hz - 20 kHz (log)
+    std::atomic<float> wowCents { 0.0f }, effectiveBits { 16.0f }, effectiveRateKHz { 48.0f }, keptFraction { 1.0f };
+    std::array<std::atomic<std::uint32_t>, 16> eventTicks {};   ///< recent events (dropouts, clicks, packets), in ticks
+    std::array<std::atomic<int>, 16> eventKinds {};             ///< 0 dropout, 1 crackle, 2 pop, 3 packet
+    std::atomic<int> eventHead { 0 };
+    std::atomic<std::uint32_t> ticks { 0 };                     ///< 1 tick = 64 samples
+    std::atomic<float> ticksPerSecond { 750.0f };               ///< (at the prepared rate)
+    static constexpr int tickSamples = 64;
+
+private:
+    struct State;
+    void prepareEffect() override;
+    void processWet (float* left, float* right, int n) noexcept override;
+    void runMode (int mode, const float* inL, const float* inR, float* outL, float* outR, int n) noexcept;
+    void runAnalog (int mode, const float* inL, const float* inR, float* outL, float* outR, int n) noexcept;
+    void runDigital (const float* inL, const float* inR, float* outL, float* outR, int n) noexcept;
+    void runCodec (const float* inL, const float* inR, float* outL, float* outR, int n) noexcept;
+    void codecFrame() noexcept;
+    void analyse (const float* l, const float* r, int n) noexcept;
+    void event (int kind) noexcept;
+    void design() noexcept;
+    int personality (const RetroSettings& s) const noexcept { return s.mode == RetroSettings::digital && s.era == RetroSettings::codec ? 3 : s.mode; }
+
+    RetroSettings p;
+    int slot = 0;
+    std::unique_ptr<State> st;
+};
+
 } // namespace andor::analog::fx

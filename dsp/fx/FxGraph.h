@@ -23,12 +23,13 @@ enum class Type : int
 {
     drive, movement, echo, space,                                   // the original four (one each)
     spread, compressor, eq, filter, phaser, flanger, shifter, convolution, utility,
+    retro,                                                          // (V2, appended: state 13)
     count
 };
 constexpr int typeCount = static_cast<int> (Type::count);
 
 /** How many of each a graph may hold (fixed pools: their host parameters are registered once). */
-constexpr std::array<int, typeCount> capacity { 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 2 };
+constexpr std::array<int, typeCount> capacity { 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2 };
 
 /** Its saved key ("eq") and its name for people ("EQUALIZER"). */
 const char* typeKey (Type t) noexcept;

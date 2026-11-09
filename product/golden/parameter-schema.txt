@@ -446,3 +446,99 @@ analog.fx.utility.2.hp.on v28 bool "FX UTILITY 2 High Pass On" label="" range=0.
 analog.fx.utility.2.hp.freq v28 float "FX UTILITY 2 High Pass Frequency" label="Hz" range=20.0000..200.0000/0.0000 skew=0.46085 default=30.0000 steps=2147483647 texts=20 Hz|60 Hz|200 Hz
 analog.fx.utility.2.lp.on v28 bool "FX UTILITY 2 Low Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.fx.utility.2.lp.freq v28 float "FX UTILITY 2 Low Pass Frequency" label="Hz" range=2000.0000..20000.0000/0.0000 skew=0.63093 default=18000.0000 steps=2147483647 texts=2.00 kHz|8.00 kHz|20.0 kHz
+analog.fx.retro.1.on v29 bool "FX RETRO 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.mix v29 float "FX RETRO 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=65.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.output v29 float "FX RETRO 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.1.mode v29 choice "FX RETRO 1 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Tape|Vinyl|Digital [Tape|Vinyl|Digital]
+analog.fx.retro.1.tape.model v29 choice "FX RETRO 1 Tape Model" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Cassette|Cassette|Studio Reel [Cassette|Studio Reel]
+analog.fx.retro.1.vinyl.rpm v29 choice "FX RETRO 1 Vinyl Speed" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=33⅓|45|78 [33⅓|45|78]
+analog.fx.retro.1.digital.era v29 choice "FX RETRO 1 Digital Type" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=80s|90s|Codec [80s|90s|Codec]
+analog.fx.retro.1.character v29 float "FX RETRO 1 Character" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=40.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.wear v29 float "FX RETRO 1 Wear" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=25.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.input v29 float "FX RETRO 1 Input" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.retro.1.tone v29 float "FX RETRO 1 Tone" label="dB" range=-12.0000..12.0000/0.0000 skew=0.88847 default=0.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.1.saturation v29 float "FX RETRO 1 Saturation" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.preserve v29 choice "FX RETRO 1 Preserve" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=Low|Neutral|High [Low|Neutral|High]
+analog.fx.retro.1.wow.depth v29 float "FX RETRO 1 Wow Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.wow.rate v29 float "FX RETRO 1 Wow Rate" label="Hz" range=0.1000..3.0000/0.0000 skew=0.39431 default=0.5500 steps=2147483647 texts=0.10 Hz|0.60 Hz|3.00 Hz
+analog.fx.retro.1.flutter.depth v29 float "FX RETRO 1 Flutter Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=7.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.flutter.rate v29 float "FX RETRO 1 Flutter Rate" label="Hz" range=3.0000..20.0000/0.0000 skew=0.47905 default=6.0000 steps=2147483647 texts=3.00 Hz|7.00 Hz|20 Hz
+analog.fx.retro.1.transport.random v29 float "FX RETRO 1 Transport Random" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.stereo.phase v29 float "FX RETRO 1 Stereo Phase" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.retro.1.noise.type v29 choice "FX RETRO 1 Noise Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Auto|Vinyl|Digital [Auto|Tape Hiss|Vinyl|Room|Digital]
+analog.fx.retro.1.noise.level v29 float "FX RETRO 1 Noise Level" label="dB" range=-96.0000..-24.0000/0.0000 skew=1.00000 default=-96.0000 steps=2147483647 texts=-96.0 dB|-60.0 dB|-24.0 dB
+analog.fx.retro.1.noise.follow v29 float "FX RETRO 1 Noise Follow" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.noise.automute v29 bool "FX RETRO 1 Noise Auto Mute" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.crackle v29 float "FX RETRO 1 Crackle" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.pops v29 float "FX RETRO 1 Pops" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.dropout.rate v29 float "FX RETRO 1 Dropout Rate" label="/s" range=0.0000..12.0000/0.0000 skew=0.38685 default=0.0000 steps=2147483647 texts=0.0 /s|2.0 /s|12 /s
+analog.fx.retro.1.dropout.depth v29 float "FX RETRO 1 Dropout Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.dropout.length v29 float "FX RETRO 1 Dropout Length" label="ms" range=2.0000..250.0000/0.0000 skew=0.31778 default=25.0000 steps=2147483647 texts=2.0 ms|30 ms|250 ms
+analog.fx.retro.1.bandwidth.low v29 float "FX RETRO 1 Low Edge" label="Hz" range=20.0000..800.0000/0.0000 skew=0.33744 default=20.0000 steps=2147483647 texts=20 Hz|120 Hz|800 Hz
+analog.fx.retro.1.bandwidth.high v29 float "FX RETRO 1 High Edge" label="Hz" range=2000.0000..20000.0000/0.0000 skew=0.54113 default=18000.0000 steps=2147483647 texts=2.00 kHz|7.00 kHz|20.0 kHz
+analog.fx.retro.1.head.bump v29 float "FX RETRO 1 Head Bump" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.compress.amount v29 float "FX RETRO 1 Compress" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.compress.attack v29 float "FX RETRO 1 Compress Attack" label="x" range=0.2500..4.0000/0.0000 skew=0.43068 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|4.0 ×
+analog.fx.retro.1.compress.release v29 float "FX RETRO 1 Compress Release" label="x" range=0.2500..8.0000/0.0000 skew=0.29680 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|8.0 ×
+analog.fx.retro.1.compress.link v29 bool "FX RETRO 1 Compress Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.compress.tilt v29 float "FX RETRO 1 Sidechain Tilt" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.retro.1.digital.bits v29 float "FX RETRO 1 Bits" label="bit" range=4.0000..16.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=4.0 bit|10.0 bit|16.0 bit
+analog.fx.retro.1.digital.rate v29 float "FX RETRO 1 Rate" label="kHz" range=4.0000..48.0000/0.0000 skew=0.53348 default=24.0000 steps=2147483647 texts=4.0 kHz|16 kHz|48 kHz
+analog.fx.retro.1.digital.alias v29 choice "FX RETRO 1 Alias" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Clean|Clean|Hard [Clean|Hard]
+analog.fx.retro.1.digital.mod v29 float "FX RETRO 1 Motion" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.loss v29 float "FX RETRO 1 Loss" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.speed v29 float "FX RETRO 1 Speed" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.mode v29 choice "FX RETRO 1 Codec Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Standard|Repeat|Combined [Standard|Drop|Repeat|Jitter|Combined]
+analog.fx.retro.1.codec.artifactOnly v29 bool "FX RETRO 1 Artifact Only" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.retro.1.codec.stereo v29 choice "FX RETRO 1 Codec Stereo" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Stereo|Joint|Mono [Stereo|Joint|Mono]
+analog.fx.retro.1.codec.artifact v29 float "FX RETRO 1 Artifact" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.codec.ambience v29 float "FX RETRO 1 Artifact Ambience" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.1.seed v29 float "FX RETRO 1 Seed" label="#" range=0.0000..999.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0|500|999
+analog.fx.retro.2.on v29 bool "FX RETRO 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.mix v29 float "FX RETRO 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=65.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.output v29 float "FX RETRO 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.2.mode v29 choice "FX RETRO 2 Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Tape|Vinyl|Digital [Tape|Vinyl|Digital]
+analog.fx.retro.2.tape.model v29 choice "FX RETRO 2 Tape Model" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Cassette|Cassette|Studio Reel [Cassette|Studio Reel]
+analog.fx.retro.2.vinyl.rpm v29 choice "FX RETRO 2 Vinyl Speed" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=33⅓|45|78 [33⅓|45|78]
+analog.fx.retro.2.digital.era v29 choice "FX RETRO 2 Digital Type" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=80s|90s|Codec [80s|90s|Codec]
+analog.fx.retro.2.character v29 float "FX RETRO 2 Character" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=40.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.wear v29 float "FX RETRO 2 Wear" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=25.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.input v29 float "FX RETRO 2 Input" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
+analog.fx.retro.2.tone v29 float "FX RETRO 2 Tone" label="dB" range=-12.0000..12.0000/0.0000 skew=0.88847 default=0.0000 steps=2147483647 texts=-12.0 dB|-1.0 dB|+12.0 dB
+analog.fx.retro.2.saturation v29 float "FX RETRO 2 Saturation" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.preserve v29 choice "FX RETRO 2 Preserve" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=Low|Neutral|High [Low|Neutral|High]
+analog.fx.retro.2.wow.depth v29 float "FX RETRO 2 Wow Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.wow.rate v29 float "FX RETRO 2 Wow Rate" label="Hz" range=0.1000..3.0000/0.0000 skew=0.39431 default=0.5500 steps=2147483647 texts=0.10 Hz|0.60 Hz|3.00 Hz
+analog.fx.retro.2.flutter.depth v29 float "FX RETRO 2 Flutter Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=7.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.flutter.rate v29 float "FX RETRO 2 Flutter Rate" label="Hz" range=3.0000..20.0000/0.0000 skew=0.47905 default=6.0000 steps=2147483647 texts=3.00 Hz|7.00 Hz|20 Hz
+analog.fx.retro.2.transport.random v29 float "FX RETRO 2 Transport Random" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.stereo.phase v29 float "FX RETRO 2 Stereo Phase" label="deg" range=0.0000..180.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0°|90°|180°
+analog.fx.retro.2.noise.type v29 choice "FX RETRO 2 Noise Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Auto|Vinyl|Digital [Auto|Tape Hiss|Vinyl|Room|Digital]
+analog.fx.retro.2.noise.level v29 float "FX RETRO 2 Noise Level" label="dB" range=-96.0000..-24.0000/0.0000 skew=1.00000 default=-96.0000 steps=2147483647 texts=-96.0 dB|-60.0 dB|-24.0 dB
+analog.fx.retro.2.noise.follow v29 float "FX RETRO 2 Noise Follow" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.noise.automute v29 bool "FX RETRO 2 Noise Auto Mute" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.crackle v29 float "FX RETRO 2 Crackle" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.pops v29 float "FX RETRO 2 Pops" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.dropout.rate v29 float "FX RETRO 2 Dropout Rate" label="/s" range=0.0000..12.0000/0.0000 skew=0.38685 default=0.0000 steps=2147483647 texts=0.0 /s|2.0 /s|12 /s
+analog.fx.retro.2.dropout.depth v29 float "FX RETRO 2 Dropout Depth" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.dropout.length v29 float "FX RETRO 2 Dropout Length" label="ms" range=2.0000..250.0000/0.0000 skew=0.31778 default=25.0000 steps=2147483647 texts=2.0 ms|30 ms|250 ms
+analog.fx.retro.2.bandwidth.low v29 float "FX RETRO 2 Low Edge" label="Hz" range=20.0000..800.0000/0.0000 skew=0.33744 default=20.0000 steps=2147483647 texts=20 Hz|120 Hz|800 Hz
+analog.fx.retro.2.bandwidth.high v29 float "FX RETRO 2 High Edge" label="Hz" range=2000.0000..20000.0000/0.0000 skew=0.54113 default=18000.0000 steps=2147483647 texts=2.00 kHz|7.00 kHz|20.0 kHz
+analog.fx.retro.2.head.bump v29 float "FX RETRO 2 Head Bump" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.compress.amount v29 float "FX RETRO 2 Compress" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.compress.attack v29 float "FX RETRO 2 Compress Attack" label="x" range=0.2500..4.0000/0.0000 skew=0.43068 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|4.0 ×
+analog.fx.retro.2.compress.release v29 float "FX RETRO 2 Compress Release" label="x" range=0.2500..8.0000/0.0000 skew=0.29680 default=1.0000 steps=2147483647 texts=0.2 ×|1.0 ×|8.0 ×
+analog.fx.retro.2.compress.link v29 bool "FX RETRO 2 Compress Link" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.compress.tilt v29 float "FX RETRO 2 Sidechain Tilt" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
+analog.fx.retro.2.digital.bits v29 float "FX RETRO 2 Bits" label="bit" range=4.0000..16.0000/0.0000 skew=1.00000 default=12.0000 steps=2147483647 texts=4.0 bit|10.0 bit|16.0 bit
+analog.fx.retro.2.digital.rate v29 float "FX RETRO 2 Rate" label="kHz" range=4.0000..48.0000/0.0000 skew=0.53348 default=24.0000 steps=2147483647 texts=4.0 kHz|16 kHz|48 kHz
+analog.fx.retro.2.digital.alias v29 choice "FX RETRO 2 Alias" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Clean|Clean|Hard [Clean|Hard]
+analog.fx.retro.2.digital.mod v29 float "FX RETRO 2 Motion" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.loss v29 float "FX RETRO 2 Loss" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=15.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.speed v29 float "FX RETRO 2 Speed" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=20.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.mode v29 choice "FX RETRO 2 Codec Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Standard|Repeat|Combined [Standard|Drop|Repeat|Jitter|Combined]
+analog.fx.retro.2.codec.artifactOnly v29 bool "FX RETRO 2 Artifact Only" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.fx.retro.2.codec.stereo v29 choice "FX RETRO 2 Codec Stereo" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Stereo|Joint|Mono [Stereo|Joint|Mono]
+analog.fx.retro.2.codec.artifact v29 float "FX RETRO 2 Artifact" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.codec.ambience v29 float "FX RETRO 2 Artifact Ambience" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.fx.retro.2.seed v29 float "FX RETRO 2 Seed" label="#" range=0.0000..999.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0|500|999

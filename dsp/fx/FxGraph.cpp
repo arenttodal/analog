@@ -9,9 +9,9 @@ namespace andor::analog::fx
 
 namespace
 {
-    constexpr const char* keys[typeCount] { "drive", "movement", "echo", "space", "spread", "comp", "eq", "filter", "phaser", "flanger", "shift", "conv", "utility" };
+    constexpr const char* keys[typeCount] { "drive", "movement", "echo", "space", "spread", "comp", "eq", "filter", "phaser", "flanger", "shift", "conv", "utility", "retro" };
     constexpr const char* names[typeCount] { "DRIVE", "MOVEMENT", "ECHO", "SPACE", "STEREO SPREAD", "COMPRESSOR", "EQUALIZER", "FX FILTER",
-                                             "PHASER", "FLANGER", "FREQ SHIFTER", "CONVOLUTION", "UTILITY" };
+                                             "PHASER", "FLANGER", "FREQ SHIFTER", "CONVOLUTION", "UTILITY", "RETRO" };
 }
 
 const char* typeKey (Type t) noexcept { return keys[static_cast<int> (t)]; }

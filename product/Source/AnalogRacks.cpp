@@ -580,6 +580,17 @@ namespace
             setPages ({ "FILTER", "VOICE", "PAIR" }, &filterPageShown);
             setSubPages (1, { "AMP", "MOD", "CHARACTER" }, &voicePageShown);
             setGraph (std::make_unique<FilterGraph> (h, [this] { return page(); }, [this] { return subPage(); }));
+            // The synthesis racks wear the family's chassis, quieter (no FX branding): the voice
+            // filter's own green; it is never an FX-chain module.
+            Faceplate f;
+            const auto green = design::colour::macro (design::colour::Macro::character);
+            f.enamel = green.darker (0.62f);
+            f.stripes = { green.darker (0.2f), green.brighter (0.45f), juce::Colour (0xffe6dccb) };
+            f.glow = green.brighter (0.8f);
+            f.glassTop = juce::Colour (0xff1b2622);
+            f.glassBottom = juce::Colour (0xff141d1a);
+            f.subtitle = "SYNTH  /  VOICE FILTER";
+            setFaceplate (f);
         }
 
     protected:
@@ -834,6 +845,15 @@ namespace
             using namespace params;
             setHeaderSwitch (morphEnabled, "ON", "MORPH: the oscillators and card C become one sound (at 0 % the oscillators, at 100 % card C, between them a fusion)");
             setGraph (std::make_unique<MorphGraph> (h));
+            // Copper and rose (the V2 MORPH direction); a synthesis rack, never an FX module.
+            Faceplate f;
+            f.enamel = juce::Colour (0xff874a3a);
+            f.stripes = { juce::Colour (0xffbe735d), juce::Colour (0xffe3a892), juce::Colour (0xffd9a14a) };
+            f.glow = juce::Colour (0xffffb79e);
+            f.glassTop = juce::Colour (0xff281e1c);
+            f.glassBottom = juce::Colour (0xff1d1615);
+            f.subtitle = "SYNTH  /  SPECTRAL MORPH";
+            setFaceplate (f);
         }
 
     protected:

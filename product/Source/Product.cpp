@@ -317,6 +317,30 @@ const ProductInfo& productInfo()
         p.stableModulationTabs = true;
         // FX ROUTING (docs/FX_ROUTING_IMPLEMENTATION.md): its icon beside SAVE, its view in the
         // cards' place.
+        // The shared racks' hardware faceplates (V2: docs/FX_RACK_V2_PROGRESS.md) - interface only.
+        {
+            using osp::plugin::rack::Kind;
+            osp::plugin::rack::Faceplate movement, echo, space;
+            movement.enamel = juce::Colour (0xff3d596a);
+            movement.stripes = { juce::Colour (0xff5d8299), juce::Colour (0xffa3bfcf), juce::Colour (0xffdce6ea) };
+            movement.glow = juce::Colour (0xff9fd6f2);
+            movement.glassTop = juce::Colour (0xff17222a);
+            movement.glassBottom = juce::Colour (0xff111a20);
+            movement.subtitle = "MODULATION RACK";
+            echo.enamel = juce::Colour (0xff2b5f59);
+            echo.stripes = { juce::Colour (0xff468f87), juce::Colour (0xff97c7bf), juce::Colour (0xffd9a14a) };
+            echo.glow = juce::Colour (0xff8fe6d9);
+            echo.glassTop = juce::Colour (0xff142522);
+            echo.glassBottom = juce::Colour (0xff0f1c1a);
+            echo.subtitle = "DELAY PROCESSOR";
+            space.enamel = juce::Colour (0xff594a68);
+            space.stripes = { juce::Colour (0xff8a77a0), juce::Colour (0xffc4b5d4), juce::Colour (0xffe3d7c4) };
+            space.glow = juce::Colour (0xffd6c2ff);
+            space.glassTop = juce::Colour (0xff1e1a26);
+            space.glassBottom = juce::Colour (0xff16131d);
+            space.subtitle = "REVERB PROCESSOR";
+            p.rackFaceplates = { { Kind::movement, movement }, { Kind::echo, echo }, { Kind::space, space } };
+        }
         p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)
@@ -384,7 +408,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 12;   // (12: the FX route, an engine child: absent = CLASSIC; nothing to migrate)
+        p.stateVersion = 13;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);

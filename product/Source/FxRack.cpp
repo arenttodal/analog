@@ -8,6 +8,7 @@
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 #include "fx/Effects.h"
+#include "engine/DriveProcessor.h"
 
 namespace andor::analog
 {
@@ -130,6 +131,9 @@ namespace
         {
             juce::String sig;
             reader.read (settings);
+            for (const char* legacy : { "drive", "drive.mode", "drive.tone", "drive.body" })
+                if (id.type == Type::drive)
+                    sig << host.parameterValue (legacy) << ",";
             for (const auto& spec : fxparams::specsOf (id.type))
                 sig << host.parameterValue (pid (id, spec.name.toRawUTF8())) << ",";
             if (const auto* p = live())
@@ -149,6 +153,9 @@ namespace
                     sig << ph->notchHz[0].load();
                 if (const auto* fl = dynamic_cast<const fx::Flanger*> (p))
                     sig << fl->delayNowMs.load();
+                if (const auto* r = dynamic_cast<const fx::Retro*> (p))
+                    sig << r->spectrumDb[8].load() << r->spectrumDb[24].load() << r->spectrumDb[40].load() << r->eventHead.load() << r->effectiveBits.load()
+                        << r->keptFraction.load() << r->wowCents.load() << static_cast<int> (r->ticks.load() / 32u);
             }
             if (sig != shown)
             {
@@ -207,6 +214,8 @@ namespace
                 case Type::shifter: paintShift (g, area, colour); break;
                 case Type::convolution: paintConv (g, area, colour); break;
                 case Type::utility: paintUtility (g, area, colour); break;
+                case Type::drive: paintDrive (g, area, colour); break;
+                case Type::retro: paintRetro (g, area, colour); break;
                 default: break;
             }
         }
@@ -218,6 +227,125 @@ namespace
         {
             const auto& band = settings.eq[static_cast<std::size_t> (id.slot)].bands[static_cast<std::size_t> (b)];
             return juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ plot.x (band.hz), plot.y (band.gainDb) });
+        }
+
+        /** RETRO: the medium's response (its own filter designs) over the output's live spectrum;
+            DIGITAL: the converter's effective Nyquist and quantisation floor (live, with MOTION);
+            CODEC: its band limit and the share of bins kept; below, the last seconds' events
+            (dropouts, crackle, pops, packets) where they happened. Nothing drawn is invented. */
+        void paintRetro (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            const auto& s = settings.retro[static_cast<std::size_t> (id.slot)];
+            const auto* r = dynamic_cast<const fx::Retro*> (live());
+            const auto d = fx::deriveRetro (s);
+            const bool digital = s.mode == fx::RetroSettings::digital, codec = digital && s.era == fx::RetroSettings::codec;
+            plot.r = plot.r.withTrimmedBottom (12.0f);
+            plot.topDb = 12.0;
+            plot.bottomDb = -36.0;
+            plot.paintGrid (g);
+            // The live spectrum (the output, 30 Hz - 20 kHz): its own scale, -90..0 dBFS.
+            auto specY = [this] (float db) { return plot.r.getBottom() - plot.r.getHeight() * std::clamp ((db + 90.0f) / 90.0f, 0.0f, 1.0f); };
+            if (r != nullptr)
+            {
+                juce::Path line, fill;
+                for (int b = 0; b < fx::Retro::bands; ++b)
+                {
+                    const double hz = 30.0 * std::pow (20000.0 / 30.0, (b + 0.5) / fx::Retro::bands);
+                    const juce::Point<float> pt (plot.x (hz), specY (r->spectrumDb[static_cast<std::size_t> (b)].load()));
+                    if (b == 0)
+                    {
+                        line.startNewSubPath (pt);
+                        fill.startNewSubPath (pt.x, plot.r.getBottom());
+                    }
+                    else
+                        line.lineTo (pt);
+                    fill.lineTo (pt);
+                }
+                fill.lineTo (plot.x (20000.0 * 0.99), plot.r.getBottom());
+                fill.closeSubPath();
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xffff8a3d).withAlpha (0.38f), 0.0f, plot.r.getY(), juce::Colour (0xffff8a3d).withAlpha (0.04f), 0.0f, plot.r.getBottom(), false));
+                g.fillPath (fill);
+                g.setColour (juce::Colour (0xffff8a3d).withAlpha (0.8f));
+                g.strokePath (line, juce::PathStrokeType (1.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            juce::String left, right;
+            if (codec)
+            {
+                // The band it keeps (LOSS), and what share of the bins survived the last frame.
+                if (d.codecLoss > 0.0f)
+                {
+                    const float cut = plot.x (std::min (19999.0, 20000.0 - 15000.0 * d.codecLoss));
+                    g.setColour (colour.withAlpha (0.10f));
+                    g.fillRect (juce::Rectangle<float>::leftTopRightBottom (cut, plot.r.getY(), plot.r.getRight(), plot.r.getBottom()));
+                    g.setColour (colour.withAlpha (0.8f));
+                    g.fillRect (juce::Rectangle<float> (cut - 0.5f, plot.r.getY(), 1.0f, plot.r.getHeight()));
+                }
+                const float kept = r != nullptr ? r->keptFraction.load() : 1.0f;
+                auto bar = juce::Rectangle<float> (plot.r.getRight() - 112.0f, plot.r.getY() + 4.0f, 100.0f, 5.0f);
+                g.setColour (grid);
+                g.fillRoundedRectangle (bar, 2.0f);
+                g.setColour (colour);
+                g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * std::clamp (kept, 0.0f, 1.0f)), 2.0f);
+                small (g, "BINS KEPT " + juce::String (juce::roundToInt (100.0f * kept)) + " %", bar.translated (0.0f, 6.0f).withHeight (12.0f), juce::Justification::centredRight, 0.85f);
+                left = "CODEC";
+                right = "loss " + juce::String (juce::roundToInt (100.0f * d.codecLoss)) + juce::String::fromUTF8 (" % \xc2\xb7 STFT ") + juce::String (fx::Retro::frameFor (48000.0));
+            }
+            else if (digital)
+            {
+                // The converter now (MOTION moves it): its Nyquist, its quantisation floor.
+                const float bits = r != nullptr ? r->effectiveBits.load() : d.bits;
+                const float rateK = r != nullptr ? r->effectiveRateKHz.load() : d.rateKHz;
+                const float nyq = plot.x (std::clamp (500.0 * rateK, 20.0, 20000.0));
+                g.setColour (colour.withAlpha (0.10f));
+                g.fillRect (juce::Rectangle<float>::leftTopRightBottom (nyq, plot.r.getY(), plot.r.getRight(), plot.r.getBottom()));
+                g.setColour (colour.withAlpha (0.85f));
+                g.fillRect (juce::Rectangle<float> (nyq - 0.5f, plot.r.getY(), 1.0f, plot.r.getHeight()));
+                const float floorY = specY (-6.02f * bits - 1.76f);
+                const float dash[] { 4.0f, 3.0f };
+                g.drawDashedLine (juce::Line<float> (plot.r.getX(), floorY, nyq, floorY), dash, 2, 1.0f);
+                small (g, s.aliasHard ? "ALIASES" : "FILTERED", juce::Rectangle<float> (nyq + 4.0f, plot.r.getY() + 2.0f, 70.0f, 12.0f), juce::Justification::centredLeft, 0.85f);
+                left = s.era == fx::RetroSettings::eighties ? "80s CONVERTER" : "90s CONVERTER";
+                right = juce::String (bits, 1) + juce::String::fromUTF8 (" bit \xc2\xb7 ") + juce::String (rateK, 1) + " kHz";
+            }
+            else
+            {
+                // The medium's response: the same filter designs the audio plays.
+                plot.curve (g, [&s] (double hz) { return fx::Retro::responseDb (s, 48000.0, hz); }, colour);
+                const float cents = r != nullptr ? r->wowCents.load() : 0.0f;
+                left = s.mode == fx::RetroSettings::tape ? (s.tapeModel == 1 ? "REEL" : "CASSETTE") : "VINYL";
+                if (s.mode == fx::RetroSettings::vinyl)
+                {
+                    static const char* rpm[] { "33\xe2\x85\x93", "45", "78" };
+                    left << "  " << juce::String::fromUTF8 (rpm[std::clamp (s.rpm, 0, 2)]) << " RPM";
+                }
+                right = juce::String::fromUTF8 ("pitch ") + (cents >= 0.0f ? "+" : "") + juce::String (cents, 1) + " ct";
+            }
+            // The events of the last four seconds (newest at the right).
+            auto strip = juce::Rectangle<float> (plot.r.getX(), plot.r.getBottom() + 16.0f, plot.r.getWidth(), 8.0f);
+            g.setColour (grid);
+            g.fillRect (strip.withHeight (1.0f).withY (strip.getCentreY()));
+            if (r != nullptr)
+            {
+                const auto now = r->ticks.load();
+                const float window = 4.0f * r->ticksPerSecond.load();
+                static const juce::Colour kinds[] { juce::Colour (0xffe9c46a), juce::Colour (0xfff1e4cf), juce::Colour (0xffff8a3d), juce::Colour (0xff8fd3c4) };
+                for (int e = 0; e < static_cast<int> (r->eventTicks.size()); ++e)
+                {
+                    const auto at = r->eventTicks[static_cast<std::size_t> (e)].load();
+                    if (at == 0u)
+                        continue;
+                    const float age = static_cast<float> (now - at);
+                    if (age < 0.0f || age > window)
+                        continue;
+                    const int kind = std::clamp (r->eventKinds[static_cast<std::size_t> (e)].load(), 0, 3);
+                    if (codec ? kind != 3 : (digital || kind == 3))
+                        continue;   // (this personality's events only: dropouts, crackle, pops; or packets)
+                    const float x = strip.getRight() - strip.getWidth() * age / window;
+                    g.setColour (kinds[kind].withAlpha (1.0f - 0.7f * age / window));
+                    g.fillEllipse (juce::Rectangle<float> (kind == 2 ? 7.0f : 5.0f, kind == 2 ? 7.0f : 5.0f).withCentre ({ x, strip.getCentreY() }));
+                }
+            }
+            header (g, area, left, right);
         }
 
         void paintEq (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
@@ -547,6 +675,71 @@ namespace
             foot (g, area, "the impulse's level over its length (-60 dB at the floor)");
         }
 
+        void paintDrive (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
+        {
+            // DRIVE's own circuit (osp::DriveProcessor::transfer): its steady-state curve, and
+            // the harmonics it makes of a sine at its reference level (computed from the curve).
+            osp::DriveProcessor::Settings d;
+            d.amount = std::clamp (host.parameterValue ("drive") / 100.0, 0.0, 1.0);
+            d.mode = static_cast<osp::DriveMode> (std::clamp (juce::roundToInt (host.parameterValue ("drive.mode")), 0, 2));
+            d.tone = std::clamp (host.parameterValue ("drive.tone") / 100.0, 0.0, 1.0);
+            d.body = std::clamp (host.parameterValue ("drive.body") / 100.0, 0.0, 1.0);
+            auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (26.0f).withTrimmedBottom (22.0f);
+            auto curveBox = body.removeFromLeft (body.getWidth() * 0.46f);
+            curveBox = curveBox.withSizeKeepingCentre (std::min (curveBox.getWidth(), curveBox.getHeight() * 1.15f), curveBox.getHeight());
+            body.removeFromLeft (18.0f);
+            g.setColour (grid);
+            g.fillRect (curveBox.withHeight (1.0f).withY (curveBox.getCentreY()));
+            g.fillRect (juce::Rectangle<float> (curveBox.getCentreX() - 0.5f, curveBox.getY(), 1.0f, curveBox.getHeight()));
+            g.setColour (axis.withMultipliedAlpha (2.0f));
+            g.drawRect (curveBox, 1.0f);
+            const float dashes[] { 3.0f, 3.0f };
+            g.drawDashedLine ({ curveBox.getBottomLeft(), curveBox.getTopRight() }, dashes, 2, 1.0f);
+            juce::Path p;
+            for (int i = 0; i <= 160; ++i)
+            {
+                const double x = -2.0 + 4.0 * i / 160.0;
+                const double y = std::clamp (osp::DriveProcessor::transfer (d, x), -2.0, 2.0);
+                const juce::Point<float> pt (curveBox.getX() + curveBox.getWidth() * static_cast<float> ((x + 2.0) / 4.0),
+                                             curveBox.getBottom() - curveBox.getHeight() * static_cast<float> ((y + 2.0) / 4.0));
+                i == 0 ? p.startNewSubPath (pt) : p.lineTo (pt);
+            }
+            g.setColour (colour.withAlpha (0.25f));
+            g.strokePath (p, juce::PathStrokeType (4.0f));
+            g.setColour (colour);
+            g.strokePath (p, juce::PathStrokeType (1.6f));
+            small (g, "TRANSFER", curveBox.withY (curveBox.getBottom() + 2.0f).withHeight (12.0f), juce::Justification::centredLeft, 0.85f);
+            // Harmonics 1-9 of a sine through the curve (a 256-point DFT of one period).
+            constexpr int n = 256, count = 9;
+            std::array<double, count> mag {};
+            for (int k = 1; k <= count; ++k)
+            {
+                double re = 0.0, im = 0.0;
+                for (int t = 0; t < n; ++t)
+                {
+                    const double ph = juce::MathConstants<double>::twoPi * t / n;
+                    const double y = osp::DriveProcessor::transfer (d, std::sin (ph));
+                    re += y * std::cos (k * ph);
+                    im += y * std::sin (k * ph);
+                }
+                mag[static_cast<std::size_t> (k - 1)] = std::sqrt (re * re + im * im) * 2.0 / n;
+            }
+            auto bars = body.withTrimmedBottom (14.0f);
+            const float w = bars.getWidth() / static_cast<float> (count);
+            for (int k = 0; k < count; ++k)
+            {
+                const double db = 20.0 * std::log10 (std::max (1.0e-6, mag[static_cast<std::size_t> (k)] / std::max (1.0e-9, mag[0])));
+                const float h = bars.getHeight() * static_cast<float> (std::clamp ((db + 72.0) / 72.0, 0.0, 1.0));
+                const auto bar = juce::Rectangle<float> (bars.getX() + w * static_cast<float> (k) + w * 0.25f, bars.getBottom() - h, w * 0.5f, h);
+                g.setGradientFill (juce::ColourGradient (colour, 0.0f, bar.getY(), colour.withAlpha (0.35f), 0.0f, bar.getBottom(), false));
+                g.fillRect (bar);
+                small (g, juce::String (k + 1), juce::Rectangle<float> (bars.getX() + w * static_cast<float> (k), bars.getBottom() + 1.0f, w, 12.0f), juce::Justification::centred, 0.8f);
+            }
+            static const char* modes[3] { "TUBE", "TAPE", "CRUNCH" };
+            header (g, area, juce::String (modes[static_cast<int> (d.mode)]) + juce::String::fromUTF8 (" \xc2\xb7 DRIVE ") + juce::String (juce::roundToInt (100.0 * d.amount)) + " %",
+                    "HARMONICS (dB, -72 .. 0)");
+        }
+
         void paintUtility (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
         {
             const auto* u = dynamic_cast<const fx::Utility*> (live());
@@ -785,6 +978,14 @@ namespace
         f.stripes = { a, a.brighter (0.55f), juce::Colour (0xffd9a14a) };
         switch (type)
         {
+            case Type::drive:
+                f.enamel = juce::Colour (0xff874630);
+                f.stripes = { juce::Colour (0xffae6847), juce::Colour (0xffe09a52), juce::Colour (0xffeacf9c) };
+                f.glow = juce::Colour (0xffffad6b);
+                f.glassTop = juce::Colour (0xff2a1f19);
+                f.glassBottom = juce::Colour (0xff1f1712);
+                f.subtitle = "ANALOG SATURATION / HARMONICS";
+                break;
             case Type::compressor:
                 f.enamel = juce::Colour (0xff4f5b47);
                 f.stripes = { juce::Colour (0xffd8962f), juce::Colour (0xffe6c27c), juce::Colour (0xff69785d) };
@@ -857,6 +1058,15 @@ namespace
                 f.glassBottom = juce::Colour (0xff161918);
                 f.subtitle = "METER BRIDGE";
                 break;
+            case Type::retro:
+                // Rust terracotta enamel, ochre / seafoam stripes, an amber glow on warm glass.
+                f.enamel = juce::Colour (0xff8e3f2a);
+                f.stripes = { juce::Colour (0xffc0643f), juce::Colour (0xffd9a14a), juce::Colour (0xff6fa79a) };
+                f.glow = juce::Colour (0xffffa45c);
+                f.glassTop = juce::Colour (0xff2b1f18);
+                f.glassBottom = juce::Colour (0xff1f1612);
+                f.subtitle = "TAPE / VINYL / DIGITAL CHARACTER";
+                break;
             default:
                 break;
         }
@@ -873,6 +1083,7 @@ namespace
             case Type::filter: return 0.52f;
             case Type::shifter:
             case Type::convolution: return 0.55f;
+            case Type::drive: return 0.5f;
             default: return 0.62f;
         }
     }
@@ -886,21 +1097,36 @@ namespace
             if (fx::capacity[static_cast<std::size_t> (id.type)] > 1)
                 title << " " << (id.slot + 1);
             setHeading (title);
-            setHeaderSwitch (pid (id, "on"), "ON", juce::String (fx::typeName (id.type)) + " on (its own bypass: the route keeps it in place)");
-            if (id.type == Type::eq)
+            if (! fx::isLegacy (id.type))
+                setHeaderSwitch (pid (id, "on"), "ON", juce::String (fx::typeName (id.type)) + " on (its own bypass: the route keeps it in place)");
+            if (id.type == Type::drive)
+                ;   // (one page: DRIVE's own controls)
+            else if (id.type == Type::eq)
                 setPages ({ "BAND 1", "BAND 2", "BAND 3", "BAND 4", "HP / LP" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
+            else if (id.type == Type::retro)
+                setPages ({ "MAIN", "MACHINE", "MOTION", "DYNAMICS" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
             else
                 setPages ({ "MAIN", "DETAIL" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
             setGraph (std::make_unique<FxGraph> (h, id));
             // The hardware faceplate: the preset browser and the overflow key in the rail.
             setFaceplate (faceplateFor (id.type));
-            auto bar = std::make_unique<PresetBar> (h, id);
-            presets = bar.get();
-            setRailComponent (std::move (bar), 230);
-            setOverflow ([this] (juce::Component& key) { presets->showActions (key); });
+            if (! fx::isLegacy (id.type))
+            {
+                auto bar = std::make_unique<PresetBar> (h, id);
+                presets = bar.get();
+                setRailComponent (std::move (bar), 230);
+                setOverflow ([this] (juce::Component& key) { presets->showActions (key); });
+            }
         }
 
     protected:
+        bool faceplateLit() const override
+        {
+            // DRIVE (the instrument's own, no ON of its own): lit while it drives.
+            if (id.type == Type::drive)
+                return host.parameterValue ("drive") > 0.0f;
+            return ParameterRack::faceplateLit();
+        }
         int buildKey() const override
         {
             // A mode or a sync switch changes the cells.
@@ -909,6 +1135,8 @@ namespace
                 k = juce::roundToInt (value (host, id, "mode")) + 1;
             if (host.apvts().getParameter (pid (id, "sync")) != nullptr)
                 k += 10 * (value (host, id, "sync") >= 0.5f ? 1 : 0);
+            if (id.type == Type::retro)
+                k += 100 * (juce::roundToInt (value (host, id, "digital.era")) + 1);   // (DIGITAL's 80s / 90s / CODEC: other cells)
             return k;
         }
 
@@ -923,6 +1151,14 @@ namespace
             const int m = juce::roundToInt (value (host, id, "mode"));
             switch (id.type)
             {
+                case Type::drive:
+                    // The instrument's own DRIVE (ANDOR OSP's; its macro and its popover's
+                    // parameters - never the voice filter's DRIVE / BIAS).
+                    selectorSegment ("drive.mode", "MODE", { { "TUBE", "Tube", 0.0f }, { "TAPE", "Tape", 1.0f }, { "CRUNCH", "Crunch", 2.0f } }, 240,
+                                     "TUBE: warm, even; TAPE: soft, compressing; CRUNCH: a firmer edge");
+                    for (const auto& [pidName, caption] : { std::pair { "drive", "DRIVE" }, std::pair { "drive.tone", "TONE" }, std::pair { "drive.body", "BODY" } })
+                        knob (pidName, caption, [] (double v) { return juce::String (juce::roundToInt (v)) + " %"; });
+                    break;
                 case Type::spread:
                     mode ({ { "HYPER", "Hyper", 0 }, { "DIMENSION", "Dimension", 1 }, { "BOTH", "Both", 2 } }, 240, "HYPER: detuned voices; DIMENSION: a short ensemble; BOTH: one then the other");
                     if (page == 0)
@@ -1135,6 +1371,9 @@ namespace
                         sw ("reverse", "REVERSE", "The impulse played backwards (prepared, not live)");
                     }
                     break;
+                case Type::retro:
+                    buildRetro (page, m);
+                    break;
                 case Type::utility:
                     if (page == 0)
                     {
@@ -1161,6 +1400,145 @@ namespace
         }
 
     private:
+        /** RETRO (docs/FX_EFFECTS_LIBRARY.md): the personality on MAIN with its own controls
+            only (no idle knobs); MACHINE (the medium, its tone, its noise), MOTION (the
+            transport and its wear), DYNAMICS (the internal compressor, the noise's behaviour). */
+        void buildRetro (int page, int mode)
+        {
+            auto k = [this] (const char* name, const char* caption) -> MiniKnob& { return knob (pid (id, name), caption, textOf (host, pid (id, name))); };
+            const int era = juce::roundToInt (value (host, id, "digital.era"));
+            const bool tape = mode == fx::RetroSettings::tape, vinyl = mode == fx::RetroSettings::vinyl;
+            const bool codec = mode == fx::RetroSettings::digital && era == fx::RetroSettings::codec;
+            const bool converter = mode == fx::RetroSettings::digital && ! codec;
+            if (page == 0)
+            {
+                selectorSegment (pid (id, "mode"), "MODE", { { "TAPE", "Tape", 0 }, { "VINYL", "Vinyl", 1 }, { "DIGITAL", "Digital", 2 } }, 230,
+                                 "The medium: TAPE, VINYL or DIGITAL (80s, 90s converters or a CODEC)");
+                if (tape)
+                    selectorSegment (pid (id, "tape.model"), "MODEL", { { "CASSETTE", "Cassette", 0 }, { "REEL", "Studio reel", 1 } }, 170,
+                                     "CASSETTE: a narrower band, more hiss; REEL: wider, a deeper head bump");
+                else if (vinyl)
+                    selectorSegment (pid (id, "vinyl.rpm"), "RPM", { { juce::String::fromUTF8 ("33\xe2\x85\x93"), juce::String::fromUTF8 ("33\xe2\x85\x93 RPM"), 0 }, { "45", "45 RPM", 1 }, { "78", "78 RPM", 2 } }, 150,
+                                     "The platter's speed: its wow turns at this rate");
+                else
+                    selectorSegment (pid (id, "digital.era"), "TYPE", { { "80s", "80s", 0 }, { "90s", "90s", 1 }, { "CODEC", "Codec", 2 } }, 170,
+                                     "80s: truncated, raw; 90s: rounded, dithered, shaped; CODEC: a spectral loss (an STFT)");
+                group ("MEDIUM");
+                k ("character", "CHARACTER");
+                k ("wear", "WEAR");
+                if (tape)
+                {
+                    group ("TRANSPORT");
+                    k ("wow.depth", "WOW");
+                    k ("flutter.depth", "FLUTTER");
+                    group ("TEXTURE");
+                    k ("tone", "TONE");
+                    k ("noise.level", "NOISE");
+                }
+                else if (vinyl)
+                {
+                    group ("GROOVE");
+                    k ("wow.depth", "WOW");
+                    k ("crackle", "CRACKLE");
+                    k ("pops", "POPS");
+                }
+                else if (converter)
+                {
+                    group ("CONVERTER");
+                    k ("digital.bits", "BITS");
+                    k ("digital.rate", "RATE");
+                    switchCell (pid (id, "digital.alias"), "ALIAS", { { "CLEAN", "Clean", 0 }, { "HARD", "Hard", 1 } },
+                                "CLEAN: the converter's filters (no aliasing); HARD: the raw staircase, aliasing on purpose");
+                }
+                else
+                {
+                    group ("CODEC");
+                    k ("codec.loss", "LOSS");
+                    listCell (pid (id, "codec.mode"), "PACKETS", "STANDARD: masking only; DROP / REPEAT: whole frames; JITTER: phases; COMBINED");
+                    k ("codec.artifact", "ARTIFACT");
+                }
+                group ("LEVEL");
+                k ("mix", "MIX");
+                k ("output", "OUTPUT");
+                return;
+            }
+            if (page == 1)
+            {
+                if (codec)
+                {
+                    group ("CODEC");
+                    listCell (pid (id, "codec.stereo"), "STEREO", "STEREO: each side its own mask; JOINT: one mask; MONO: one channel coded");
+                    switchCell (pid (id, "codec.artifactOnly"), "ARTIFACT ONLY", { { "ON", "On", 1 }, { "OFF", "Off", 0 } },
+                                "Only what the codec changed: processed minus the aligned dry");
+                    k ("codec.ambience", "AMBIENCE");
+                    group ("TONE");
+                    k ("input", "INPUT");
+                    k ("tone", "TONE");
+                    k ("bandwidth.low", "LOW EDGE");
+                    k ("noise.level", "NOISE");
+                    return;
+                }
+                group ("TONE");
+                k ("input", "INPUT");
+                if (! converter)
+                {
+                    k ("saturation", "SATURATION");
+                    switchCell (pid (id, "preserve"), "PRESERVE", { { "LOW", "Keep the lows clean", 0 }, { "MID", "Neutral", 1 }, { "HIGH", "Keep the highs clean", 2 } },
+                                "Which band the saturation leaves alone");
+                }
+                if (tape)
+                    k ("head.bump", "HEAD BUMP");
+                if (! tape)
+                    k ("tone", "TONE");
+                group ("BAND");
+                k ("bandwidth.low", "LOW EDGE");
+                if (! converter)
+                    k ("bandwidth.high", "HIGH EDGE");
+                if (! tape)
+                {
+                    group ("NOISE");
+                    k ("noise.level", "LEVEL");   // (TAPE's is on MAIN)
+                }
+                return;
+            }
+            if (page == 2)
+            {
+                if (tape || vinyl)
+                {
+                    group ("TRANSPORT");
+                    if (tape)
+                        k ("wow.rate", "WOW RATE");
+                    else
+                        k ("flutter.depth", "FLUTTER");
+                    k ("flutter.rate", "FLUTTER RATE");
+                    k ("transport.random", "RANDOM");
+                    k ("stereo.phase", "STEREO");
+                    group ("DROPOUTS");
+                    k ("dropout.rate", "RATE");
+                    k ("dropout.depth", "DEPTH");
+                    k ("dropout.length", "LENGTH");
+                    return;
+                }
+                group ("MOTION");
+                if (converter)
+                    k ("digital.mod", "MOTION");
+                else
+                    k ("codec.speed", "SPEED");
+                steppedKnob (pid (id, "seed"), "SEED", textOf (host, pid (id, "seed")));
+                return;
+            }
+            group ("COMPRESSOR");
+            k ("compress.amount", "COMPRESS");
+            k ("compress.attack", "ATTACK");
+            k ("compress.release", "RELEASE");
+            k ("compress.tilt", "SC TILT");
+            switchCell (pid (id, "compress.link"), "LINK", { { "ON", "On", 1 }, { "OFF", "Off", 0 } }, "One detector for both sides");
+            group ("NOISE", true);
+            listCell (pid (id, "noise.type"), "NOISE TYPE", "AUTO: the medium's own; or hiss, groove, a room, a converter's");
+            k ("noise.follow", "FOLLOW");
+            switchCell (pid (id, "noise.automute"), "AUTO MUTE", { { "ON", "On", 1 }, { "OFF", "Off", 0 } }, "250 ms of silence fades the noise away");
+        }
+
         InstanceId id;
         PresetBar* presets = nullptr;
     };
@@ -1384,7 +1762,7 @@ void openFxRack (andor::shell::ShellEditor& editor, InstanceId id)
         case Type::movement: editor.setRackExpanded (Kind::movement, true); return;
         case Type::echo: editor.setRackExpanded (Kind::echo, true); return;
         case Type::space: editor.setRackExpanded (Kind::space, true); return;
-        case Type::drive: editor.openPopup (1); return;
+        case Type::drive: break;   // (V2: DRIVE's hardware rack - its macro's popover stays the quick view)
         default: break;
     }
     // One FX rack at a time: another effect swaps the module (the rack keeps its height).
@@ -1405,7 +1783,8 @@ juce::String quickModeId (InstanceId id)
         case Type::phaser:
         case Type::flanger:
         case Type::shifter:
-        case Type::convolution: return pid (id, "mode");
+        case Type::convolution:
+        case Type::retro: return pid (id, "mode");
         default: return {};
     }
 }
@@ -1437,6 +1816,7 @@ std::vector<QuickControl> quickControls (osp::plugin::InstrumentHost& host, Inst
                                                                     : std::vector<QuickControl> { { pid (id, "blurAmount"), "AMOUNT" }, { pid (id, "blurTime"), "TIME" }, { pid (id, "mix"), "MIX" } };
         case Type::convolution: return { { pid (id, "decay"), "DECAY" }, { pid (id, "size"), "SIZE" }, { pid (id, "mix"), "MIX" } };
         case Type::utility: return { { pid (id, "gain"), "GAIN" }, { pid (id, "pan"), "BALANCE" }, { pid (id, "width"), "WIDTH" } };
+        case Type::retro: return { { pid (id, "character"), "CHARACTER" }, { pid (id, "wear"), "WEAR" }, { pid (id, "mix"), "MIX" } };
         default: return {};
     }
 }

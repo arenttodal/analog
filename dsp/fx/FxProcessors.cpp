@@ -16,6 +16,7 @@ std::unique_ptr<Processor> makeProcessor (Type type)
         case Type::shifter: return std::make_unique<FrequencyShifter>();
         case Type::convolution: return std::make_unique<Convolution>();
         case Type::utility: return std::make_unique<Utility>();
+        case Type::retro: return std::make_unique<Retro>();
         default: return {};   // (the original four are the instrument's own: PostProcessor)
     }
 }
@@ -39,6 +40,7 @@ bool isOn (const Settings& s, InstanceId id) noexcept
         case Type::shifter: return s.shifter[slot].on;
         case Type::convolution: return s.conv[slot].on;
         case Type::utility: return s.utility[slot].on;
+        case Type::retro: return s.retro[slot].on;
         default: return true;
     }
 }

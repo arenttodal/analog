@@ -148,6 +148,44 @@ struct UtilitySettings : Common
     float hpHz = 30.0f, lpHz = 18000.0f;
 };
 
+/** RETRO (V2; docs/FX_EFFECTS_LIBRARY.md): one aging machine, three personalities. Every
+    amount is 0..1 unless stated; neutral defaults are what a newly inserted RETRO starts at. */
+struct RetroSettings : Common
+{
+    enum Mode { tape, vinyl, digital };
+    enum Era { eighties, nineties, codec };
+    enum Preserve { keepLow, neutral, keepHigh };
+    enum NoiseType { autoNoise, hiss, vinylNoise, room, digitalNoise };
+    enum CodecMode { standard, drop, repeat, jitter, combined };
+    enum CodecStereo { stereo, joint, mono };
+    int mode = tape;
+    int tapeModel = 0;             ///< 0 cassette, 1 studio reel
+    int rpm = 0;                   ///< 0 33 1/3, 1 45, 2 78
+    int era = nineties;
+    float character = 0.4f, wear = 0.25f;
+    float inputDb = 0.0f, toneDb = 0.0f;     ///< tone: a tilt, -12..+12 dB
+    float saturation = 0.2f;
+    int preserve = neutral;
+    float wowDepth = 0.12f, wowHz = 0.55f, flutterDepth = 0.07f, flutterHz = 6.0f, randomness = 0.2f, stereoPhaseDeg = 0.0f;
+    int noiseType = autoNoise;
+    float noiseDb = -96.0f;        ///< -96: off
+    float noiseFollow = 0.0f;
+    bool noiseAutoMute = true;
+    float crackle = 0.0f, pops = 0.0f;
+    float dropoutRate = 0.0f, dropoutDepth = 0.0f, dropoutMs = 25.0f;
+    float lowHz = 20.0f, highHz = 18000.0f, headBump = 0.15f;
+    float compAmount = 0.0f, compAttack = 1.0f, compRelease = 1.0f, compTilt = 0.0f;   ///< tilt -1..1
+    bool compLink = true;
+    float bits = 12.0f, rateKHz = 24.0f;
+    bool aliasHard = false;
+    float digitalMotion = 0.0f;
+    float codecLoss = 0.15f, codecSpeed = 0.2f, codecArtifact = 0.0f, codecAmbience = 0.0f;
+    int codecMode = standard, codecStereo = stereo;
+    bool artifactOnly = false;
+    int seed = 0;
+    RetroSettings() { mix = 0.65f; }
+};
+
 struct Settings
 {
     std::array<SpreadSettings, 2> spread;
@@ -159,6 +197,7 @@ struct Settings
     std::array<ShifterSettings, 1> shifter;
     std::array<ConvSettings, 1> conv;
     std::array<UtilitySettings, 2> utility;
+    std::array<RetroSettings, 2> retro;
     double bpm = 120.0;   ///< the host's tempo (synced rates)
 };
 
