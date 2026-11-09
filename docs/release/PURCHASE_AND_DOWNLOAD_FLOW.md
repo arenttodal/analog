@@ -12,6 +12,7 @@ licence activation, and none is added here (see "Copy protection" below).
 | Seller of record | A merchant-of-record store (Paddle, FastSpring or Lemon Squeezy) | They collect and remit VAT and sales tax worldwide and handle refunds and chargebacks. A one-person publisher should not run its own EU VAT MOSS. |
 | Price, launch discount | e.g. list price with a Black Friday introductory price until a fixed date | Show the end date; do not use fake countdowns. |
 | Bundle with OSP | Only when OSP has its own release candidate (see the scorecard) | Selling a bundle obliges you to ship both. |
+| OSP expansion packs | Sold as `.osppack` downloads from the same store; installed in OSP's Library (OSP `docs/release/SOUND_PACKS_SPEC.md`) | Same checkout, receipts and download limits as the installers. |
 | Copy protection | None in 1.0 (download links + licence terms) | No activation code exists. Adding it now would be a new, untested subsystem in the audio path's process. Revisit after launch. |
 | Download host | The store's file delivery, or a private object-storage bucket with expiring signed URLs | Never link GitHub Actions artifacts to customers: they expire and need a GitHub login. |
 | Support channel | One address on the receipt, the website and the manual | |
