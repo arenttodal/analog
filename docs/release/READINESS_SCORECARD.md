@@ -15,7 +15,7 @@ Nothing is marked PASS without a run.
 
 | Product | Private beta | Paid release on Black Friday |
 |---|---|---|
-| **ANDOR Analog 1.0.0** | **GO** once the release-candidate commits are on GitHub and CI is green on them (section 4) | **CONDITIONAL GO.** Every automated gate passes. The remaining blockers are owner and human items: the JUCE and VST3 licences, Developer ID signing and notarisation, Windows signing, the EULA, and DAW and listening sign-off (H1–H11). If they are done by about 20 November, Black Friday is reachable. If not, launch the private beta and sell after. |
+| **ANDOR Analog 1.0.0** | **GO**: both beta installers are built and validated in CI (run 150, macOS: tests, auval, pluginval; run 155, Windows: tests, DLL check, installer) | **CONDITIONAL GO.** Every automated gate passes. The remaining blockers are owner and human items: the JUCE and VST3 licences, Developer ID signing and notarisation, Windows signing, the EULA, and DAW and listening sign-off (H1–H11). If they are done by about 20 November, Black Friday is reachable. If not, launch the private beta and sell after. |
 | **ANDOR OSP** | GO as a free public beta for Analog buyers (after its own CI run on the entitlement fix) | **NO-GO for Black Friday.** It has no owned factory or example sounds, no installer or notices in its packaging, its musical review is open, and its release line has diverged from what Analog ships. Do not let it delay Analog (section 3). |
 
 ## 1. ANDOR Analog: automated evidence
@@ -36,9 +36,12 @@ Nothing is marked PASS without a run.
 | Realtime: no allocation while rendering; arpeggiator allocation fixed | **PASS** | `[realtime]` suites; OSP c2748b6, RC run |
 | CPU | **PASS** (smoke) | `performance-smoke` RC run. Measured earlier (STATUS): 16 voices, 48 kHz, one VM core: CLASSIC 24.8 %, ORGANIC + MORPH 52–55 %. Not measured on a real Mac. |
 | Visual regression (parity with OSP, 0 px outside masks) | **PASS** | `andor_analog_tests_visual`, RC run (Linux) |
-| pluginval strictness 10 (VST3 and AU) | **NOT RUN** | It could not run here (running a downloaded binary is blocked in this environment). It is added to macOS CI (e815ec6) and runs once the branch is pushed with its submodule (section 4). |
-| Windows: no non-system DLL dependency | **NOT RUN** | Fix (static SQLite) and a `dumpbin` check added in CI (a4817c7). They run on push. |
-| Installers built (`.pkg`, Inno Setup) | **NOT RUN** | Scripts and CI steps added (a4817c7). They run on push. `make_notices.py` ran locally: 13 licence texts. |
+| **Release candidate, macOS (universal arm64 + x86_64)**: build, full ctest (engine, product, OSP's suites, visual regressions), `auval -v aumu Aanl Ospx` | **PASS** | CI run 150 (https://github.com/arenttodal/analog/actions/runs/42668904963), job plugin-macos, every step green (58f3c63) |
+| pluginval 1.0.4, strictness 10, VST3 and AU (macOS) | **PASS** | run 150: both runs end in `SUCCESS`, including parameter fuzzing and bus layouts; logs in the `pluginval-logs` artefact |
+| **Release candidate, Windows (x64, MSVC)**: build, engine and product tests | **PASS** | CI run 155 (https://github.com/arenttodal/analog/actions/runs/42678945240), job plugin-windows, every step green (3c5e534) |
+| Windows: no non-system DLL dependency | **PASS** | run 155: the `dumpbin /dependents` check passes for the VST3 and the app. SQLite is now static, so there is no `sqlite3.dll` (run 150 showed it gone); `dbghelp.dll` is System32. |
+| macOS installer built | **PASS (unsigned)** | run 150: `ANDOR-Analog-1.0.0-macOS-UNSIGNED.pkg` (181 MB: AU, VST3, app, notices, EULA page) plus `.sha256`, artefact `ANDOR-Analog-macOS-installer`. Ad-hoc signed; no Apple credentials yet. |
+| Windows installer built | **PASS (unsigned)** | run 155: `ANDOR-Analog-1.0.0-Windows-Setup.exe` (57 MB, Inno Setup: VST3, app, notices, EULA), artefact `ANDOR-Analog-Windows-installer`. Not Authenticode-signed yet. |
 
 ## 2. ANDOR Analog: blockers by class
 
@@ -109,10 +112,12 @@ beta, and sell the bundle when OSP has owned sounds, an installer and its own DA
 
 ## 4. What happens next
 
-1. **Push** OSP `claude/analog-release` and Analog `claude/release-candidate`. The Analog CI run
-   then executes pluginval, the DLL check and both installers, and uploads the private-beta
-   package: the installers, the test zips, `docs/MANUAL.md` and
-   `docs/release/BETA_TESTER_GUIDE.md`.
+1. **Done:** pushed, and CI is green on both platforms. **Private-beta package:**
+   - `ANDOR-Analog-macOS-installer`: https://github.com/arenttodal/analog/actions/runs/42668904963/artifacts/13699989819
+   - `ANDOR-Analog-Windows-installer`: https://github.com/arenttodal/analog/actions/runs/42678945240/artifacts/13701574056
+   - Test zips: macOS https://github.com/arenttodal/analog/actions/runs/42668904963/artifacts/13700552748;
+     Windows: the `ANDOR-Analog-Windows-test` artefact of run 155.
+   - With `docs/MANUAL.md` and `docs/release/BETA_TESTER_GUIDE.md`.
 2. **Owner:** the licences, certificates and secrets (runbook §2–4). Re-run CI: signed and
    notarised installers.
 3. **Humans:** H1–H11, listening sign-off. Record the evidence here.
