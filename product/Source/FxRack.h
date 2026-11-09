@@ -26,6 +26,14 @@ void openFxRack (andor::shell::ShellEditor& editor, fx::InstanceId id);
 /** The effect the FX rack shows (interface state). */
 fx::InstanceId fxRackShown();
 
+/** Tests and screenshots: the EQ rack's graphic (if `module` shows one) analyses its spectrum
+    now - the timer's step - and returns the output's loudest bin (dB); -1000 without one. */
+float analyseFxEqSpectrum (osp::plugin::rack::Module& module);
+/** Tests: the EQ graphic's selected band (0-3, 4 HP, 5 LP; -1 without one) and a node's centre. */
+int fxEqSelectedBand (osp::plugin::rack::Module& module);
+juce::Point<float> fxEqNode (osp::plugin::rack::Module& module, int band);
+juce::Component* fxEqGraphic (osp::plugin::rack::Module& module);
+
 /** The quick settings a tile's single click shows: MODE (when the effect has modes) and up to
     four controls - the same parameters as the rack. Each pair: parameter ID and caption. */
 struct QuickControl

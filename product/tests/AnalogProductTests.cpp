@@ -7458,3 +7458,137 @@ TEST_CASE ("analog: every rack with presets has a save key beside its browser, l
     CHECK (rack->saveKey()->getRight() <= rack->overflowKey()->getX());
     CHECK (rack->saveKey()->getTitle() == "Save preset");
 }
+
+TEST_CASE ("analog: EQ review - the graphic EQ at full width with a live spectrum, 1448 and 869 (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-eq]")
+{
+    namespace fx = andor::analog::fx;
+    using osp::plugin::rack::Kind;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    fx::Graph g;
+    g.custom = true;
+    g.chain = { fx::Node::effect ({ fx::Type::eq, 0 }) };
+    REQUIRE (engine.setFxRoute (g));
+    // A musical curve: a low shelf up, a cut at 350 Hz, a presence lift, the high pass on.
+    setValue (p, "analog.fx.eq.1.band1.gain", 4.0f);
+    setValue (p, "analog.fx.eq.1.band2.gain", -4.5f);
+    setValue (p, "analog.fx.eq.1.band3.gain", 5.0f);
+    setValue (p, "analog.fx.eq.1.band3.q", 1.4f);
+    setValue (p, "analog.fx.eq.1.hp.on", 1.0f);
+    setValue (p, "analog.fx.eq.1.hp.freq", 60.0f);
+    andor::analog::openFxRack (ui, { fx::Type::eq, 0 });
+    for (const int width : { 1448, 869 })
+    {
+        renderShell (p, 0.35);   // (notes still sounding: the taps hold what played)
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        auto* module = ui.effectsRack().module (Kind::fx);
+        REQUIRE (module != nullptr);
+        CHECK (andor::analog::analyseFxEqSpectrum (*module) > -80.0f);
+        auto save = [&] (const juce::Image& image, const juce::String& name) {
+            const auto file = out.getChildFile (name + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        auto& rack = ui.effectsRack();
+        const auto r = editor->getLocalArea (&rack, rack.getLocalBounds());
+        save (editor->createComponentSnapshot (r.expanded (0, 6).getIntersection (editor->getLocalBounds()), true, width < 1000 ? 2.0f : 1.0f), "eq-rack-" + juce::String (width));
+        save (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), "eq-window-" + juce::String (width));
+    }
+}
+
+TEST_CASE ("analog: the EQ rack is one full-width graphic - nodes drag the real parameters, overlays are bound, a live spectrum", "[analog][fx][rack][ui][eqgraphic]")
+{
+    namespace fx = andor::analog::fx;
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    fx::Graph g;
+    g.custom = true;
+    g.chain = { fx::Node::effect ({ fx::Type::eq, 0 }) };
+    REQUIRE (engine.setFxRoute (g));
+    andor::analog::openFxRack (ui, { fx::Type::eq, 0 });
+    ui.refreshNow();
+    auto* module = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));
+    REQUIRE (module != nullptr);
+    auto* graphic = andor::analog::fxEqGraphic (*module);
+    REQUIRE (graphic != nullptr);
+    // The graphic IS the module: no knob cells, no pages; it spans the body under the rail.
+    CHECK (module->captions().isEmpty());
+    CHECK (graphic->getX() <= 20);
+    CHECK (graphic->getRight() >= module->getWidth() - 20);
+    CHECK (graphic->getY() >= module->titleOffset());
+    CHECK (graphic->getBottom() <= module->getHeight());
+    CHECK (module->saveKey() != nullptr);
+
+    // Dragging band 3's node: its frequency and gain, one undoable gesture.
+    p.apvts().copyState();   // (the parameters into the undo state, as the message loop's timer does)
+    const auto before = allParameterValues (p);
+    const auto from = andor::analog::fxEqNode (*module, 2);
+    const auto to = from.translated (60.0f, -20.0f);
+    graphic->mouseDown (mouseEventFor (*graphic, from));
+    graphic->mouseDrag (mouseEventFor (*graphic, to));
+    graphic->mouseUp (mouseEventFor (*graphic, to));
+    p.apvts().copyState();
+    CHECK (andor::analog::fxEqSelectedBand (*module) == 2);
+    CHECK (p.apvts().getParameter ("analog.fx.eq.1.band3.freq")->getValue() > before.at ("analog.fx.eq.1.band3.freq"));
+    CHECK (p.parameterValue ("analog.fx.eq.1.band3.gain") > 1.0f);
+    const auto node = andor::analog::fxEqNode (*module, 2);
+    CHECK (std::abs (node.x - to.x) < 2.0f);
+    CHECK (std::abs (node.y - to.y) < 2.0f);
+    p.undo().undo();   // (the drag: one step)
+    CHECK (p.apvts().getParameter ("analog.fx.eq.1.band3.gain")->getValue() == Catch::Approx (before.at ("analog.fx.eq.1.band3.gain")).margin (1.0e-4));
+    CHECK (p.apvts().getParameter ("analog.fx.eq.1.band3.freq")->getValue() == Catch::Approx (before.at ("analog.fx.eq.1.band3.freq")).margin (1.0e-4));
+
+    // The high pass: off, taken by its node it comes on and moves (frequency only).
+    REQUIRE (p.parameterValue ("analog.fx.eq.1.hp.on") < 0.5f);
+    const auto hpFrom = andor::analog::fxEqNode (*module, 4);
+    graphic->mouseDown (mouseEventFor (*graphic, hpFrom));
+    graphic->mouseDrag (mouseEventFor (*graphic, hpFrom.translated (40.0f, 30.0f)));
+    graphic->mouseUp (mouseEventFor (*graphic, hpFrom.translated (40.0f, 30.0f)));
+    CHECK (p.parameterValue ("analog.fx.eq.1.hp.on") >= 0.5f);
+    CHECK (p.apvts().getParameter ("analog.fx.eq.1.hp.freq")->getValue() > before.at ("analog.fx.eq.1.hp.freq"));
+    // A double-click turns a pass filter off; on a band, its gain back to 0 dB.
+    graphic->mouseDoubleClick (mouseEventFor (*graphic, andor::analog::fxEqNode (*module, 4)));
+    CHECK (p.parameterValue ("analog.fx.eq.1.hp.on") < 0.5f);
+    setValue (p, "analog.fx.eq.1.band2.gain", -6.0f);
+    graphic->mouseDoubleClick (mouseEventFor (*graphic, andor::analog::fxEqNode (*module, 1)));
+    CHECK (p.parameterValue ("analog.fx.eq.1.band2.gain") == Catch::Approx (0.0f).margin (1.0e-3));
+
+    // The overlay fields are the same parameters (both ways): band 1 chosen (a click on its node).
+    graphic->mouseDown (mouseEventFor (*graphic, andor::analog::fxEqNode (*module, 0)));
+    graphic->mouseUp (mouseEventFor (*graphic, andor::analog::fxEqNode (*module, 0)));
+    REQUIRE (andor::analog::fxEqSelectedBand (*module) == 0);
+    int bound = 0;
+    for (auto* c : graphic->getChildren())
+        if (auto* f = dynamic_cast<juce::Slider*> (c))
+        {
+            const auto id = f->getProperties()["paramId"].toString();
+            INFO (id.toStdString());
+            REQUIRE (id.startsWith ("analog.fx.eq.1."));
+            auto* param = p.apvts().getParameter (id);
+            REQUIRE (param != nullptr);
+            const double target = f->getMinimum() + 0.4 * (f->getMaximum() - f->getMinimum());
+            f->setValue (target, juce::sendNotificationSync);
+            CHECK (p.parameterValue (id) == Catch::Approx (f->getValue()).margin (1.0e-3));
+            ++bound;
+        }
+    CHECK (bound == 5);   // (FREQ, GAIN, Q of the selected band; MIX; OUTPUT)
+
+    // The spectrum: silent before anything plays; what plays through the EQ shows.
+    CHECK (andor::analog::analyseFxEqSpectrum (*module) < -80.0f);
+    renderShell (p, 0.35);
+    CHECK (andor::analog::analyseFxEqSpectrum (*module) > -60.0f);
+}

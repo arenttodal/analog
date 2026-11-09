@@ -89,11 +89,24 @@ MIX 65 %, noise off, no compressor, no dropouts; an Init patch has none in its r
 
 `rack::Kind::fx` (OSP, appended; a product rack with no macro of its own). One effect at a time:
 another one swaps the module's contents, the rack keeps its height (tested). Built on the shared
-`ParameterRack`: the title and its ON switch, pages (MAIN / DETAIL; EQ's BAND 1-4 and HP / LP) and
-MODE / PRESET in the selector row, one row of controls on the shared cell lines, and a graph drawn
-from what plays:
+`ParameterRack`: the title and its ON switch, pages (MAIN / DETAIL only where one row cannot
+hold every control: STEREO SPREAD, COMPRESSOR, CONVOLUTION, UTILITY; RETRO's four) and MODE /
+PRESET in the selector row, one row of controls on the shared cell lines, and a graph drawn from
+what plays. The rail carries the preset browser, a save key beside it, the "..." actions.
 
-- EQ: the response from the coefficients, draggable band handles (frequency, gain).
+- EQUALIZER: one full-width graphic (`EqGraphic`; `ParameterRack::setFullWidthGraph`), the card
+  EQ's design at the rack's size. It has no cells, and its controls are overlays:
+  - **The top row:** band chips 1-4 / HP / LP; the selected band's ON, TYPE, FREQ, GAIN and Q
+    (or the pass filter's FREQ and its 12 / 24 slope); MIX and OUT. These are `EqValueField`s
+    bound to the same parameters.
+  - **The nodes:** drag one for frequency, and gain where the type has one; an off node comes
+    on when taken. The wheel sets Q. A double-click resets the gain, or turns a pass filter off.
+    Each drag is one undo step.
+  - **The spectrum:** what plays through it, Pro-Q / EQ Eight style. The output is filled in
+    the device's ink and the input is a quiet line. The Equalizer's `SpectrumTap`s are 4096
+    samples each; the audio thread only stores samples (relaxed atomics in a fixed array, no
+    allocation, no lock), and the graphic takes a 2048-point Hann FFT on the message thread at
+    30 Hz. The display rises at once and falls at 45 dB/s.
 - FX FILTER: the filter's response; COMPRESSOR: the static curve and live gain reduction,
   MULTIBAND's three bands; SPREAD: voices and live correlation; PHASER: the sweep range and the
   live notches; FLANGER: the comb; FREQ SHIFTER: the mapping or BLUR's smoothing; CONVOLUTION:

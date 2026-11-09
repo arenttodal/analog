@@ -38,6 +38,22 @@ struct ScopeTap
     }
 };
 
+/** The last 4096 samples of a signal (the mono sum), for a spectrum analyser: the audio
+    thread only stores samples (relaxed atomics in a fixed array: no allocation, no lock), the
+    interface takes the window and its FFT. A window torn by a write only blurs one frame. */
+struct SpectrumTap
+{
+    static constexpr int size = 4096;   ///< (a power of two)
+    std::array<std::atomic<float>, size> x {};
+    std::atomic<int> head { 0 };
+    void push (float l, float r) noexcept
+    {
+        const int h = head.load (std::memory_order_relaxed);
+        x[static_cast<std::size_t> (h)].store (0.5f * (l + r), std::memory_order_relaxed);
+        head.store ((h + 1) & (size - 1), std::memory_order_release);
+    }
+};
+
 class InsertBase : public Processor
 {
 public:
@@ -99,6 +115,8 @@ public:
     /** The response the coefficients now give, in dB at hz (the graph). Message thread. */
     double responseDb (double hz) const noexcept;
     EqSettings settings() const noexcept { return p; }
+    /** What goes in and what comes out (the rack's spectrum; read-only telemetry). */
+    SpectrumTap spectrumIn, spectrumOut;
 
 private:
     void prepareEffect() override;
