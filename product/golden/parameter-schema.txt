@@ -274,22 +274,22 @@ analog.fx.eq.1.mix v28 float "FX EQUALIZER 1 Mix" label="%" range=0.0000..100.00
 analog.fx.eq.1.output v28 float "FX EQUALIZER 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
 analog.fx.eq.1.band1.on v28 bool "FX EQUALIZER 1 Band 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.1.band1.type v28 choice "FX EQUALIZER 1 Band 1 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.1.band1.freq v28 float "FX EQUALIZER 1 Band 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=100.0000 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.1.band1.freq v28 float "FX EQUALIZER 1 Band 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=100.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.1.band1.gain v28 float "FX EQUALIZER 1 Band 1 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.1.band1.q v28 float "FX EQUALIZER 1 Band 1 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.1.band2.on v28 bool "FX EQUALIZER 1 Band 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.1.band2.type v28 choice "FX EQUALIZER 1 Band 2 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.1.band2.freq v28 float "FX EQUALIZER 1 Band 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=349.9999 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.1.band2.freq v28 float "FX EQUALIZER 1 Band 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=349.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.1.band2.gain v28 float "FX EQUALIZER 1 Band 2 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.1.band2.q v28 float "FX EQUALIZER 1 Band 2 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.1.band3.on v28 bool "FX EQUALIZER 1 Band 3 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.1.band3.type v28 choice "FX EQUALIZER 1 Band 3 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.1.band3.freq v28 float "FX EQUALIZER 1 Band 3 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=2500.0000 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.1.band3.freq v28 float "FX EQUALIZER 1 Band 3 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=2500.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.1.band3.gain v28 float "FX EQUALIZER 1 Band 3 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.1.band3.q v28 float "FX EQUALIZER 1 Band 3 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.1.band4.on v28 bool "FX EQUALIZER 1 Band 4 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.1.band4.type v28 choice "FX EQUALIZER 1 Band 4 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=2.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.1.band4.freq v28 float "FX EQUALIZER 1 Band 4 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=7999.9995 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.1.band4.freq v28 float "FX EQUALIZER 1 Band 4 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=7999.9995 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.1.band4.gain v28 float "FX EQUALIZER 1 Band 4 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.1.band4.q v28 float "FX EQUALIZER 1 Band 4 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.1.hp.on v28 bool "FX EQUALIZER 1 High Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
@@ -303,22 +303,22 @@ analog.fx.eq.2.mix v28 float "FX EQUALIZER 2 Mix" label="%" range=0.0000..100.00
 analog.fx.eq.2.output v28 float "FX EQUALIZER 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
 analog.fx.eq.2.band1.on v28 bool "FX EQUALIZER 2 Band 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.2.band1.type v28 choice "FX EQUALIZER 2 Band 1 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=1.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.2.band1.freq v28 float "FX EQUALIZER 2 Band 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=100.0000 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.2.band1.freq v28 float "FX EQUALIZER 2 Band 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=100.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.2.band1.gain v28 float "FX EQUALIZER 2 Band 1 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.2.band1.q v28 float "FX EQUALIZER 2 Band 1 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.2.band2.on v28 bool "FX EQUALIZER 2 Band 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.2.band2.type v28 choice "FX EQUALIZER 2 Band 2 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.2.band2.freq v28 float "FX EQUALIZER 2 Band 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=349.9999 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.2.band2.freq v28 float "FX EQUALIZER 2 Band 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=349.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.2.band2.gain v28 float "FX EQUALIZER 2 Band 2 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.2.band2.q v28 float "FX EQUALIZER 2 Band 2 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.2.band3.on v28 bool "FX EQUALIZER 2 Band 3 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.2.band3.type v28 choice "FX EQUALIZER 2 Band 3 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.2.band3.freq v28 float "FX EQUALIZER 2 Band 3 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=2500.0000 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.2.band3.freq v28 float "FX EQUALIZER 2 Band 3 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=2500.0000 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.2.band3.gain v28 float "FX EQUALIZER 2 Band 3 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.2.band3.q v28 float "FX EQUALIZER 2 Band 3 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.8000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.2.band4.on v28 bool "FX EQUALIZER 2 Band 4 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.fx.eq.2.band4.type v28 choice "FX EQUALIZER 2 Band 4 Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=2.0000 steps=5 texts=Peak|High Shelf|Low Pass [Peak|Low Shelf|High Shelf|High Pass|Low Pass]
-analog.fx.eq.2.band4.freq v28 float "FX EQUALIZER 2 Band 4 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=7999.9995 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.eq.2.band4.freq v28 float "FX EQUALIZER 2 Band 4 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=7999.9995 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.eq.2.band4.gain v28 float "FX EQUALIZER 2 Band 4 Gain" label="dB" range=-18.0000..18.0000/0.0000 skew=0.92382 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+18.0 dB
 analog.fx.eq.2.band4.q v28 float "FX EQUALIZER 2 Band 4 Q" label="x" range=0.2500..12.0000/0.0000 skew=0.25191 default=0.7000 steps=2147483647 texts=0.2|1.0|12
 analog.fx.eq.2.hp.on v28 bool "FX EQUALIZER 2 High Pass On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
@@ -331,7 +331,7 @@ analog.fx.filter.1.on v28 bool "FX FX FILTER 1 On" label="" range=0.0000..1.0000
 analog.fx.filter.1.mix v28 float "FX FX FILTER 1 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.fx.filter.1.output v28 float "FX FX FILTER 1 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
 analog.fx.filter.1.type v28 choice "FX FX FILTER 1 Type" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=0.0000 steps=12 texts=LP 12|All-pass|Formant III [LP 12|LP 24|HP 12|HP 24|BP 12|Notch|All-pass|Comb +|Comb -|Formant I|Formant II|Formant III]
-analog.fx.filter.1.freq v28 float "FX FX FILTER 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=999.9999 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.filter.1.freq v28 float "FX FX FILTER 1 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=999.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.filter.1.reso v28 float "FX FX FILTER 1 Resonance" label="%" range=0.0000..95.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|48 %|95 %
 analog.fx.filter.1.drive v28 float "FX FX FILTER 1 Drive" label="dB" range=0.0000..24.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0.0 dB|+12.0 dB|+24.0 dB
 analog.fx.filter.1.pan v28 float "FX FX FILTER 1 Pan" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %
@@ -341,7 +341,7 @@ analog.fx.filter.2.on v28 bool "FX FX FILTER 2 On" label="" range=0.0000..1.0000
 analog.fx.filter.2.mix v28 float "FX FX FILTER 2 Mix" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.fx.filter.2.output v28 float "FX FX FILTER 2 Output" label="dB" range=-18.0000..12.0000/0.0000 skew=1.22036 default=0.0000 steps=2147483647 texts=-18.0 dB|-1.0 dB|+12.0 dB
 analog.fx.filter.2.type v28 choice "FX FX FILTER 2 Type" label="" range=0.0000..11.0000/1.0000 skew=1.00000 default=0.0000 steps=12 texts=LP 12|All-pass|Formant III [LP 12|LP 24|HP 12|HP 24|BP 12|Notch|All-pass|Comb +|Comb -|Formant I|Formant II|Formant III]
-analog.fx.filter.2.freq v28 float "FX FX FILTER 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=999.9999 steps=2147483647 texts=20 Hz|1000 Hz|20.0 kHz
+analog.fx.filter.2.freq v28 float "FX FX FILTER 2 Frequency" label="Hz" range=20.0000..20000.0000/0.0000 skew=0.22990 default=999.9999 steps=2147483647 texts=20 Hz|1.00 kHz|20.0 kHz
 analog.fx.filter.2.reso v28 float "FX FX FILTER 2 Resonance" label="%" range=0.0000..95.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|48 %|95 %
 analog.fx.filter.2.drive v28 float "FX FX FILTER 2 Drive" label="dB" range=0.0000..24.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0.0 dB|+12.0 dB|+24.0 dB
 analog.fx.filter.2.pan v28 float "FX FX FILTER 2 Pan" label="%" range=-100.0000..100.0000/0.0000 skew=0.98571 default=0.0000 steps=2147483647 texts=-100 %|-1 %|100 %

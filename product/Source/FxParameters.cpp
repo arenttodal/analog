@@ -1,4 +1,6 @@
 #include "FxParameters.h"
+
+#include <cmath>
 #include "fx/FxDsp.h"
 #include "fx/Effects.h"
 
@@ -316,20 +318,26 @@ juce::String format (const Spec& spec, float v)
     if (spec.kind == Kind::toggle)
         return v >= 0.5f ? "On" : "Off";
     const auto& u = spec.unit;
+    // How many decimals: decided on the value as it will read (9.99999 reads "10", as 10 does),
+    // so a value a float's width from a threshold reads the same on every platform.
+    auto under = [] (float x, float limit, int decimals) {
+        const double scale = std::pow (10.0, decimals);
+        return std::round (std::abs (static_cast<double> (x)) * scale) / scale < static_cast<double> (limit);
+    };
     if (u == "Hz")
-        return std::abs (v) >= 1000.0f ? juce::String (v / 1000.0f, std::abs (v) >= 10000.0f ? 1 : 2) + " kHz" : juce::String (v, std::abs (v) < 10.0f ? 2 : 0) + " Hz";
+        return ! under (v, 1000.0f, 0) ? juce::String (v / 1000.0f, under (v / 1000.0f, 10.0f, 2) ? 2 : 1) + " kHz" : juce::String (v, under (v, 10.0f, 2) ? 2 : 0) + " Hz";
     if (u == "dB")
         return (v >= 0.05f ? "+" : "") + juce::String (std::abs (v) < 0.05f ? 0.0f : v, 1) + " dB";
     if (u == "ms")
-        return v >= 1000.0f ? juce::String (v / 1000.0f, 2) + " s" : juce::String (v, v < 10.0f ? 1 : 0) + " ms";
+        return ! under (v, 1000.0f, 1) ? juce::String (v / 1000.0f, 2) + " s" : juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + " ms";
     if (u == "us")
         return juce::String (juce::roundToInt (v)) + juce::String::fromUTF8 (" \xc2\xb5s");
     if (u == "s")
-        return juce::String (v, v < 10.0f ? 2 : 1) + " s";
+        return juce::String (v, under (v, 10.0f, 2) ? 2 : 1) + " s";
     if (u == "%")
         return juce::String (juce::roundToInt (v)) + " %";
     if (u == "x")
-        return juce::String (v, v < 10.0f ? 1 : 0) + (spec.name.endsWith ("q") ? "" : (spec.name.startsWith ("compress.") ? juce::String::fromUTF8 (" \xc3\x97") : ":1"));
+        return juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + (spec.name.endsWith ("q") ? "" : (spec.name.startsWith ("compress.") ? juce::String::fromUTF8 (" \xc3\x97") : ":1"));
     if (u == "deg")
         return juce::String (juce::roundToInt (v)) + juce::String::fromUTF8 ("\xc2\xb0");
     if (u == "st")
@@ -337,11 +345,11 @@ juce::String format (const Spec& spec, float v)
     if (u == "cents")
         return juce::String (v, 1) + " ct";
     if (u == "/s")
-        return juce::String (v, v < 10.0f ? 1 : 0) + " /s";
+        return juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + " /s";
     if (u == "bit")
         return juce::String (v, 1) + " bit";
     if (u == "kHz")
-        return juce::String (v, v < 10.0f ? 1 : 0) + " kHz";
+        return juce::String (v, under (v, 10.0f, 1) ? 1 : 0) + " kHz";
     if (u == "#")
         return juce::String (juce::roundToInt (v));
     return juce::String (v, 2);
