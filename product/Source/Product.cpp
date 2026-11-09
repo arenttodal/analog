@@ -8,6 +8,7 @@
 #include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
 #include "AnalogRacks.h"
+#include "FxIdentity.h"
 #include "FxRack.h"
 #include "FxRouting.h"
 #include "FxParameters.h"
@@ -323,29 +324,12 @@ const ProductInfo& productInfo()
         // The shared racks' hardware faceplates (V2: docs/FX_RACK_V2_PROGRESS.md) - interface only.
         {
             using osp::plugin::rack::Kind;
-            osp::plugin::rack::Faceplate movement, echo, space;
-            movement.enamel = juce::Colour (0xff3d596a);
-            movement.stripes = { juce::Colour (0xff5d8299), juce::Colour (0xffa3bfcf), juce::Colour (0xffdce6ea) };
-            movement.glow = juce::Colour (0xff9fd6f2);
-            movement.glassTop = juce::Colour (0xff17222a);
-            movement.glassBottom = juce::Colour (0xff111a20);
-            movement.subtitle = "MODULATION RACK";
-            echo.enamel = juce::Colour (0xff2b5f59);
-            echo.stripes = { juce::Colour (0xff468f87), juce::Colour (0xff97c7bf), juce::Colour (0xffd9a14a) };
-            echo.glow = juce::Colour (0xff8fe6d9);
-            echo.glassTop = juce::Colour (0xff142522);
-            echo.glassBottom = juce::Colour (0xff0f1c1a);
-            echo.subtitle = "DELAY PROCESSOR";
-            // V3: SPACE in aged stone and spore (no violet anywhere in the instrument).
-            space.enamel = juce::Colour (0xff6d7569);
-            space.stripes = { juce::Colour (0xff858c7b), juce::Colour (0xffa8ae9c), juce::Colour (0xffdcd6c3) };
-            space.glow = juce::Colour (0xffcfd0c1);
-            space.glassTop = juce::Colour (0xff1c2528);
-            space.glassBottom = juce::Colour (0xff192124);
-            space.subtitle = "REVERB PROCESSOR";
-            // V3: every faceplate is the rack's whole face (docs/FX_RACK_V3_POLISH.md).
-            for (auto* f : { &movement, &echo, &space })
-                f->fullBleed = true;
+            // V5 PATTERNED HARDWARE (docs/VISUAL_IDENTITY_INDEX.md): each rack wears its device's
+            // identity - the same enamel and motif as its routing tile.
+            namespace an = andor::analog;
+            auto movement = an::faceplateFromIdentity (an::visualIdentityFor (an::fx::Type::movement));
+            auto echo = an::faceplateFromIdentity (an::visualIdentityFor (an::fx::Type::echo));
+            auto space = an::faceplateFromIdentity (an::visualIdentityFor (an::fx::Type::space));
             // V4: the TAPE modes (ECHO's tape echo, MOVEMENT's wow and flutter) as a light reel
             // deck (docs/FX_ROUTING_TAPE_V4.md).
             movement.tapeDeck = echo.tapeDeck = true;

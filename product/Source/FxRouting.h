@@ -75,6 +75,9 @@ public:
     juce::Rectangle<int> chainBounds() const { return chainArea(); }
     juce::Rectangle<int> mixerBounds() const noexcept { return mixerArea; }
     juce::Slider* levelKnob (int card) const noexcept { return card >= 0 && card < 3 ? levels[static_cast<std::size_t> (card)].get() : nullptr; }
+    /** V5: a tile's mini knobs (tests): their parameter IDs, and the knob for one. */
+    juce::StringArray tileKnobParameters (fx::InstanceId id) const;
+    juce::Slider* tileKnob (fx::InstanceId id, const juce::String& parameterId) const;
     /** The tiles' scale on this board (1 at the canonical width; larger in design units when
         the window is small, so names stay legible). */
     float tileScale() const noexcept { return metrics.b; }
@@ -113,9 +116,13 @@ private:
     class IconButton;
     class Library;
     class RouteEdit;
+    class TileKnob;
 
     void timerCallback() override;
     void layoutChain();
+    void projectRoute();
+    /** V5: each full-size tile's 2-3 small real knobs (the same parameters as its rack). */
+    void placeTileKnobs();
     juce::Rectangle<int> chainArea() const;
     bool layoutAttempt (const fx::Graph&, float scale, const std::vector<bool>& collapsed, int tailFrom);
     int summaryAt (juce::Point<int> p) const;
@@ -128,7 +135,7 @@ private:
     juce::String signature() const;
     int tileAt (juce::Point<int> p) const;
     int gapAt (juce::Point<int> p) const;
-    void paintTile (juce::Graphics&, const Tile&) const;
+    void paintTile (juce::Graphics&, const Tile&, bool ghost = false) const;
     void paintMixer (juce::Graphics&) const;
     void showTileMenu (fx::InstanceId id);
     void placeQuick();
@@ -143,6 +150,7 @@ private:
     std::array<std::unique_ptr<juce::Slider>, 3> levels;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 3> levelAttachments;
     std::array<std::unique_ptr<juce::TextButton>, 4> footerButtons;   // <- -> PARALLEL SERIES
+    std::vector<std::unique_ptr<TileKnob>> tileKnobs;
 
     juce::Rectangle<int> headerArea, mixerArea, zoneArea, footerArea, outputBox, wireFrom;
     std::vector<Tile> placed;
@@ -164,7 +172,7 @@ private:
     struct Metrics
     {
         float b = 1.0f;
-        int tileW = 150, tileH = 72, stackedH = 66, gapW = 18, stackGap = 8, branch = 16, rowGap = 26;
+        int tileW = 192, tileH = 84, stackedH = 60, gapW = 22, stackGap = 8, branch = 18, rowGap = 28;
     };
     Metrics metrics;
     float layoutScale = 0.0f;   ///< the window scale the board was laid out for

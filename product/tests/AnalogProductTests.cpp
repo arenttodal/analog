@@ -16,6 +16,7 @@
 #include "FxPresets.h"
 #include "FxRack.h"
 #include "FxRouting.h"
+#include "FxIdentity.h"
 #include "fx/Effects.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
@@ -31,6 +32,7 @@
 #include "engine/RhythmicShaper.h"
 #include "io/AudioFileIO.h"
 
+#include <set>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -6927,18 +6929,20 @@ TEST_CASE ("analog: V4 ROUTING - the board is a projection of the route: one row
         }
     };
 
-    // Five: one row, centred on one line, readable tiles (146-158 x 66-76).
-    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::echo), e (fx::Type::space), e (fx::Type::spread) })));
+    // (V5 PATTERNED HARDWARE supersedes V4's tile size: miniature hardware 178-204 x 70-84 at
+    // the canonical width, four a row; the topology rules are V4's.)
+    // Four: one row, centred on one line.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::echo), e (fx::Type::space) })));
     relayout();
     CHECK (view->rowCount() == 1);
-    REQUIRE (view->tiles().size() == 5);
-    for (std::size_t i = 0; i < 5; ++i)
+    REQUIRE (view->tiles().size() == 4);
+    for (std::size_t i = 0; i < 4; ++i)
     {
         const auto& t = view->tiles()[i];
-        CHECK (t.bounds.getWidth() >= 146);
-        CHECK (t.bounds.getWidth() <= 158);
-        CHECK (t.bounds.getHeight() >= 66);
-        CHECK (t.bounds.getHeight() <= 76);
+        CHECK (t.bounds.getWidth() >= 178);
+        CHECK (t.bounds.getWidth() <= 204);
+        CHECK (t.bounds.getHeight() >= 70);
+        CHECK (t.bounds.getHeight() <= 84);
         CHECK (t.bounds.getCentreY() == view->outputBounds().getCentreY());
         CHECK (t.light.getWidth() >= 24);   // (the bypass target)
         if (i > 0)
@@ -6947,27 +6951,29 @@ TEST_CASE ("analog: V4 ROUTING - the board is a projection of the route: one row
     CHECK (view->summaries().empty());
     noOverlaps();
 
-    // Ten: two rows, five each at the canonical width; row 2 continues row 1 left to right;
+    // Eight: two rows, four each; row 2 continues row 1 left to right on one column grid;
     // CONT. 2 / FROM 1; OUTPUT on the last tile's line; the route itself untouched.
-    const auto ten = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
-                               e (fx::Type::spread), e (fx::Type::phaser), e (fx::Type::retro), e (fx::Type::utility) });
-    REQUIRE (engine.setFxRoute (ten));
+    const auto eight = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
+                                 e (fx::Type::spread), e (fx::Type::phaser) });
+    REQUIRE (engine.setFxRoute (eight));
     const auto text = fx::toText (engine.fxRoute());
     relayout();
     CHECK (fx::toText (engine.fxRoute()) == text);
     CHECK (view->rowCount() == 2);
-    REQUIRE (view->tiles().size() == 10);
+    REQUIRE (view->tiles().size() == 8);
     const auto order = fx::instancesOf (engine.fxRoute());
-    for (std::size_t i = 0; i < 10; ++i)
+    for (std::size_t i = 0; i < 8; ++i)
         CHECK (view->tiles()[i].id == order[i]);
     const int row1 = view->tiles().front().bounds.getCentreY(), row2 = view->tiles().back().bounds.getCentreY();
     CHECK (row2 > row1);
-    for (std::size_t i = 0; i < 10; ++i)
+    for (std::size_t i = 0; i < 8; ++i)
     {
         const auto& t = view->tiles()[i];
-        CHECK (t.bounds.getCentreY() == (i < 5 ? row1 : row2));
-        if (i % 5 > 0)
+        CHECK (t.bounds.getCentreY() == (i < 4 ? row1 : row2));
+        if (i % 4 > 0)
             CHECK (t.bounds.getX() > view->tiles()[i - 1].bounds.getRight());   // (never reversed)
+        if (i >= 4)
+            CHECK (t.bounds.getX() == view->tiles()[i - 4].bounds.getX());     // (one column grid)
     }
     CHECK (! view->continuationOut().isEmpty());
     CHECK (! view->continuationIn().isEmpty());
@@ -6976,33 +6982,58 @@ TEST_CASE ("analog: V4 ROUTING - the board is a projection of the route: one row
     CHECK (view->outputBounds().getCentreY() == row2);
     CHECK (view->wireStart().getCentreY() == row1);
     noOverlaps();
-    // A drop into row 2's first gap goes between the rows' effects (index 5), as drawn.
+    // A drop into row 2's first gap goes between the rows' effects (index 4), as drawn.
     const auto gap = std::find_if (view->gaps().begin(), view->gaps().end(), [&] (const auto& g) {
-        return g.path.empty() && g.index == 5 && g.bounds.getCentreY() == row2;
+        return g.path.empty() && g.index == 4 && g.bounds.getCentreY() == row2;
     });
     REQUIRE (gap != view->gaps().end());
-    REQUIRE (view->moveTo ({ fx::Type::utility, 0 }, gap->path, gap->index));
-    CHECK (fx::instancesOf (engine.fxRoute())[5] == fx::InstanceId { fx::Type::utility, 0 });
+    REQUIRE (view->moveTo ({ fx::Type::phaser, 0 }, gap->path, gap->index));
+    CHECK (fx::instancesOf (engine.fxRoute())[4] == fx::InstanceId { fx::Type::phaser, 0 });
     p.undo().undo();
     CHECK (fx::toText (engine.fxRoute()) == text);
 
+    // Ten at the canonical width: eight tiles' room - what does not fit is a labelled summary;
+    // every effect is on the board, in the route's order.
+    const auto ten = custom ({ e (fx::Type::drive), e (fx::Type::movement), e (fx::Type::compressor), e (fx::Type::eq), e (fx::Type::echo), e (fx::Type::space),
+                               e (fx::Type::spread), e (fx::Type::phaser), e (fx::Type::retro), e (fx::Type::utility) });
+    REQUIRE (engine.setFxRoute (ten));
+    relayout();
+    CHECK (view->rowCount() == 2);
+    CHECK (! view->summaries().empty());
+    {
+        std::vector<fx::InstanceId> shown;
+        for (const auto& tile : view->tiles())
+            shown.push_back (tile.id);
+        for (const auto& sum : view->summaries())
+            for (const auto& id : sum.members)
+                shown.push_back (id);
+        CHECK (shown == fx::instancesOf (engine.fxRoute()));
+    }
+    noOverlaps();
+
     // A parallel stage: its lanes in one stage (split before, join after), on the row's line.
+    REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), fx::Node::parallel ({ e (fx::Type::echo) }, { e (fx::Type::space) }), e (fx::Type::spread) })));
+    relayout();
+    CHECK (view->rowCount() == 1);
+    REQUIRE (view->tiles().size() == 4);
+    const auto& t = view->tiles();
+    CHECK (t[1].stacked);
+    CHECK (t[2].stacked);   // (SPACE: the lower lane)
+    CHECK (t[1].bounds.getX() == t[2].bounds.getX());
+    CHECK (t[2].bounds.getY() > t[1].bounds.getBottom());
+    CHECK (t[0].bounds.getRight() < std::min (t[1].bounds.getX(), t[2].bounds.getX()));
+    CHECK (t[3].bounds.getX() > std::max (t[1].bounds.getRight(), t[2].bounds.getRight()));
+    CHECK (t[3].bounds.getCentreY() == view->outputBounds().getCentreY());
+    CHECK (t[0].bounds.getCentreY() == t[3].bounds.getCentreY());
+    noOverlaps();
+    // The wider stage wraps as a whole: its lanes stay together on row 2, after the split.
     REQUIRE (engine.setFxRoute (custom ({ e (fx::Type::drive), e (fx::Type::movement), fx::Node::parallel ({ e (fx::Type::echo), e (fx::Type::compressor) }, { e (fx::Type::space) }),
                                           e (fx::Type::spread) })));
     relayout();
-    CHECK (view->rowCount() == 1);
     REQUIRE (view->tiles().size() == 6);
-    const auto& t = view->tiles();
-    CHECK (t[2].stacked);
-    CHECK (t[3].stacked);
-    CHECK (t[4].stacked);   // (SPACE: the lower lane)
-    CHECK (t[2].bounds.getCentreY() == t[3].bounds.getCentreY());
-    CHECK (t[4].bounds.getY() > t[2].bounds.getBottom());
-    CHECK (t[1].bounds.getRight() < std::min (t[2].bounds.getX(), t[4].bounds.getX()));
-    const auto spread = std::find_if (t.begin(), t.end(), [] (const auto& x) { return x.id.type == fx::Type::spread; });
-    REQUIRE (spread != t.end());
-    CHECK (spread->bounds.getX() > std::max (t[3].bounds.getRight(), t[4].bounds.getRight()));
-    CHECK (spread->bounds.getCentreY() == view->outputBounds().getCentreY());
+    CHECK (view->tiles()[2].bounds.getCentreY() == view->tiles()[3].bounds.getCentreY());
+    CHECK (view->tiles()[4].bounds.getY() > view->tiles()[2].bounds.getBottom());
+    CHECK (view->tiles()[5].bounds.getX() > std::max (view->tiles()[3].bounds.getRight(), view->tiles()[4].bounds.getRight()));
     noOverlaps();
 
     // 869: larger tiles in design units (legible), four a row at most; what does not fit is a
@@ -7026,11 +7057,13 @@ TEST_CASE ("analog: V4 ROUTING - the board is a projection of the route: one row
             shown.push_back (id);
     CHECK (shown == fx::instancesOf (engine.fxRoute()));   // (all of them, in the route's order)
     noOverlaps();
-    CHECK (fx::toText (engine.fxRoute()) == text);
-    // Back to the canonical width: every tile again.
+    CHECK (fx::toText (engine.fxRoute()) == fx::toText (ten));
+    // Back to the canonical width: eight fit as tiles again.
     sizeTo (1448);
+    REQUIRE (engine.setFxRoute (eight));
+    relayout();
     CHECK (view->summaries().empty());
-    CHECK (view->tiles().size() == 10);
+    CHECK (view->tiles().size() == 8);
 }
 
 TEST_CASE ("analog: V4 TAPE - ECHO and MOVEMENT TAPE as a reel deck on the same parameters; the reels rest in silence", "[analog][rack][ui][v4]")
@@ -7288,4 +7321,91 @@ TEST_CASE ("analog: V5 audio baseline - representative factory presets and route
         CHECK (file.loadFileAsString().replace ("\r\n", "\n").trim() == text.trim());   // (the second run: the same sound)
     else
         file.replaceWithText (text, false, false, "\n");
+}
+
+TEST_CASE ("analog: V5 PATTERNED HARDWARE - one identity per device, legible, no violet; the tiles' knobs are the racks' parameters", "[analog][fx][routing][ui][v5]")
+{
+    namespace fx = andor::analog::fx;
+    using andor::analog::visualIdentityFor;
+    // Every device: its own enamel and motif, its name readable on it, no violet hue.
+    std::set<juce::uint32> enamels;
+    std::set<int> motifs;
+    for (int i = 0; i < fx::typeCount; ++i)
+    {
+        const auto type = static_cast<fx::Type> (i);
+        const auto& id = visualIdentityFor (type);
+        INFO (fx::typeName (type));
+        enamels.insert (id.enamel.getARGB());
+        motifs.insert (static_cast<int> (id.motif));
+        CHECK (andor::analog::contrastRatio (id.text, id.enamel) >= 3.0f);   // (bold 13.5 px names: large-text contrast)
+        const float hue = id.enamel.getHue() * 360.0f;
+        CHECK_FALSE ((hue > 245.0f && hue < 330.0f && id.enamel.getSaturation() > 0.12f));   // (no violet / purple)
+        CHECK (juce::String (id.tileName).isNotEmpty());
+    }
+    CHECK (static_cast<int> (enamels.size()) == fx::typeCount);
+    CHECK (static_cast<int> (motifs.size()) == fx::typeCount);
+    for (const auto rack : { andor::analog::SynthRack::voiceFilter, andor::analog::SynthRack::morph })
+    {
+        const auto& id = andor::analog::synthIdentity (rack);
+        CHECK (andor::analog::contrastRatio (id.text, id.enamel) >= 3.0f);
+        CHECK (motifs.count (static_cast<int> (id.motif)) == 0);   // (their own motifs)
+    }
+    // The faceplates: the whole face is the enamel, with the device's motif.
+    const auto f = andor::analog::faceplateFromIdentity (visualIdentityFor (fx::Type::echo));
+    CHECK (f.enamelBody);
+    CHECK (f.fullBleed);
+    CHECK (f.motif != nullptr);
+    CHECK (f.body == visualIdentityFor (fx::Type::echo).enamel);
+
+    // The tiles' knobs: real attachments to the racks' parameters, both ways; none on a
+    // parallel lane's compact tile.
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    CHECK (view->tileKnobParameters ({ fx::Type::drive, 0 }) == juce::StringArray { "drive", "drive.tone", "drive.body" });
+    CHECK (view->tileKnobParameters ({ fx::Type::echo, 0 }).isEmpty());   // (CLASSIC: ECHO and SPACE are a parallel pair)
+    fx::Graph g;
+    g.custom = true;
+    for (const auto t : { fx::Type::movement, fx::Type::drive, fx::Type::echo, fx::Type::filter, fx::Type::space, fx::Type::spread })
+        g.chain.push_back (fx::Node::effect ({ t, 0 }));
+    REQUIRE (engine.setFxRoute (g));
+    view->resized();
+    const auto before = fx::toText (engine.fxRoute());
+    CHECK (view->tileKnobParameters ({ fx::Type::echo, 0 }) == juce::StringArray { "echo.division", "echo.feedback", "echo" });
+    CHECK (view->tileKnobParameters ({ fx::Type::space, 0 }) == juce::StringArray { "space.size", "space.decay", "space" });
+    const fx::InstanceId filter { fx::Type::filter, 0 };
+    const auto filterKnobs = view->tileKnobParameters (filter);
+    REQUIRE (filterKnobs.size() == 3);
+    for (const auto& t : view->tiles())
+        for (const auto& pidName : view->tileKnobParameters (t.id))
+        {
+            INFO (pidName.toStdString());
+            auto* k = view->tileKnob (t.id, pidName);
+            REQUIRE (k != nullptr);
+            CHECK (k->getParentComponent() == view);
+            CHECK (t.bounds.contains (k->getBounds()));
+            CHECK (k->getWidth() >= 28);   // (the hit area)
+            CHECK_FALSE (k->getBounds().intersects (t.light));
+            auto* param = p.apvts().getParameter (pidName);
+            REQUIRE (param != nullptr);
+            const double target = k->getMinimum() + 0.37 * (k->getMaximum() - k->getMinimum());
+            k->setValue (target, juce::sendNotificationSync);
+            CHECK (p.parameterValue (pidName) == Catch::Approx (k->getValue()).margin (1.0e-3));
+            setValue (p, pidName, param->convertFrom0to1 (param->getDefaultValue()));
+            CHECK (k->getValue() == Catch::Approx (param->convertFrom0to1 (param->getDefaultValue())).margin (1.0e-3));
+        }
+    // Turning knobs, laying out again, resizing: the route itself never moved.
+    view->resized();
+    CHECK (fx::toText (engine.fxRoute()) == before);
+    // A mode change changes which knobs a tile shows, never a parameter.
+    const auto values = allParameterValues (p);
+    setValue (p, "movement.mode", 2.0f);   // CHORUS
+    view->resized();
+    CHECK (view->tileKnobParameters ({ fx::Type::movement, 0 }).contains ("motion"));
+    setValue (p, "movement.mode", values.at ("movement.mode"));
 }

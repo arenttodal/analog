@@ -2,6 +2,7 @@
 #include "AnalogEngine.h"
 #include "AnalogMath.h"
 #include "AnalogParameters.h"
+#include "FxIdentity.h"
 #include "Envelope.h"
 #include "ShellProcessor.h"
 #include "Design.h"
@@ -830,16 +831,12 @@ namespace
             setGraph (std::make_unique<FilterGraph> (h, [this] { return page(); }, [this] { return subPage(); }));
             // The synthesis racks wear the family's chassis, quieter (no FX branding): the voice
             // filter's own green; it is never an FX-chain module.
-            Faceplate f;
-            // V3 palette: deep moss and sage; the whole rack face (full bleed).
-            f.enamel = juce::Colour (0xff405c4f);
-            f.stripes = { juce::Colour (0xff5f7d6c), juce::Colour (0xff8fa992), juce::Colour (0xffe6dccb) };
-            f.glow = juce::Colour (0xffb9d6bd);
-            f.glassTop = juce::Colour (0xff1c2528);
-            f.glassBottom = juce::Colour (0xff192124);
-            f.subtitle = "SYNTH  /  VOICE FILTER";
-            f.fullBleed = true;
+            // V5 (docs/VISUAL_IDENTITY_INDEX.md): the voice filter's own sage enamel and its
+            // resonant motif - the same face as the family, never an FX-chain module.
+            const auto& identity = synthIdentity (SynthRack::voiceFilter);
+            auto f = faceplateFromIdentity (identity);
             setFaceplate (f);
+            setAccent (identity.motifInk);
         }
 
     protected:
@@ -1095,16 +1092,11 @@ namespace
             setHeaderSwitch (morphEnabled, "ON", "MORPH: the oscillators and card C become one sound (at 0 % the oscillators, at 100 % card C, between them a fusion)");
             setGraph (std::make_unique<MorphGraph> (h));
             // Copper and rose (the V2 MORPH direction); a synthesis rack, never an FX module.
-            Faceplate f;
-            // V3 palette: muted terracotta and burnt copper; the whole rack face.
-            f.enamel = juce::Colour (0xff87503b);
-            f.stripes = { juce::Colour (0xffa8664c), juce::Colour (0xffc88462), juce::Colour (0xffd9a14a) };
-            f.glow = juce::Colour (0xffffb48f);
-            f.glassTop = juce::Colour (0xff261f1c);
-            f.glassBottom = juce::Colour (0xff1d1816);
-            f.subtitle = "SYNTH  /  SPECTRAL MORPH";
-            f.fullBleed = true;
+            // V5: copper-earth enamel and the woven spectral paths (a synthesis rack).
+            const auto& identity = synthIdentity (SynthRack::morph);
+            auto f = faceplateFromIdentity (identity);
             setFaceplate (f);
+            setAccent (identity.motifInk);
         }
 
     protected:

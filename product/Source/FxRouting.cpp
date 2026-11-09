@@ -1,4 +1,5 @@
 #include "FxRouting.h"
+#include "FxIdentity.h"
 #include "FxPresets.h"
 #include "FxRack.h"
 #include "AnalogEngine.h"
@@ -19,7 +20,7 @@ namespace
 {
     // The approved routing's palette (ANDOR_LINEAR_ROUTING_SETTINGS_MENU_APPROVAL).
     const juce::Colour ink { 0xff313532 }, soft { 0xff716d65 }, weak { 0xff9c9489 }, edge { 0xffd6cdc1 }, line { 0xffded5c9 };
-    const juce::Colour wire { 0xffb9ada0 }, wireStrong { 0xff9fb3a8 }, sage { 0xff8caaa0 }, warm { 0xffbc7d51 }, green { 0xff658276 };
+    const juce::Colour wire { 0xffa3978a }, wireStrong { 0xff9fb3a8 }, sage { 0xff8caaa0 }, warm { 0xffbc7d51 }, green { 0xff658276 };
 
     juce::Font font (float size, fonts::Weight weight = fonts::Weight::regular, float tracking = 0.0f) { return fonts::make (size, weight, tracking); }
 
@@ -71,25 +72,8 @@ namespace
 
 juce::Colour fxAccent (Type type)
 {
-    // The V2 family hues (docs/FX_RACK_V2_AUDIT.md): a tile's edge, a rack's arcs and enamel.
-    switch (type)
-    {
-        case Type::drive: return juce::Colour (0xffae6847);
-        case Type::movement: return juce::Colour (0xff759aae);
-        case Type::echo: return juce::Colour (0xff468f87);
-        case Type::space: return juce::Colour (0xff8b9180);   // (V3: spore, as the SPACE macro)
-        case Type::spread: return juce::Colour (0xff65a9b5);
-        case Type::compressor: return juce::Colour (0xff77836b);
-        case Type::eq: return juce::Colour (0xffa18a55);
-        case Type::filter: return juce::Colour (0xff688a77);
-        case Type::phaser: return juce::Colour (0xff6f8293);   // (V3: slate)
-        case Type::flanger: return juce::Colour (0xff7295a2);
-        case Type::shifter: return juce::Colour (0xff7d8789);   // (V3: aged metal)
-        case Type::convolution: return juce::Colour (0xff847b61);
-        case Type::utility: return juce::Colour (0xff8c8d8a);
-        case Type::retro: return juce::Colour (0xffb5603c);
-        default: return juce::Colour (0xff9a9488);
-    }
+    // V5: the device's enamel (docs/VISUAL_IDENTITY_INDEX.md) - one hue per device everywhere.
+    return visualIdentityFor (type).enamel;
 }
 
 juce::Path fxIcon (Type type)
@@ -193,6 +177,150 @@ public:
 private:
     Kind kind;
 };
+
+//==============================================================================
+/** V5: a tile's small real knob - the instrument's own knob, on the same parameter as the
+    effect's rack (a SliderAttachment: automation, undo and every other view follow it). It
+    takes its own mouse (a drag on it never drags the tile); its value shows while hovered or
+    turned. */
+class FxRoutingView::TileKnob final : public juce::Slider
+{
+public:
+    TileKnob (FxRoutingView& v, osp::plugin::InstrumentHost& host, fx::InstanceId tile, juce::String parameter, juce::String caption, juce::Colour arc)
+        : juce::Slider (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox), view (v), owner (tile), parameterId (std::move (parameter)), label (std::move (caption))
+    {
+        getProperties().set ("mini", true);
+        getProperties().set ("arc", static_cast<juce::int64> (arc.getARGB()));
+        setRotaryParameters (osp::plugin::OspLookAndFeel::rotaryStart, osp::plugin::OspLookAndFeel::rotaryEnd, true);
+        setTitle (label);
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        if (auto* p = host.apvts().getParameter (parameterId))
+        {
+            attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (host.apvts(), parameterId, *this);
+            setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
+            setTooltip (p->getName (64));
+            param = p;
+        }
+        onValueChange = [this] { view.repaint(); };
+    }
+    void mouseEnter (const juce::MouseEvent& e) override
+    {
+        juce::Slider::mouseEnter (e);
+        view.repaint();
+    }
+    void mouseExit (const juce::MouseEvent& e) override
+    {
+        juce::Slider::mouseExit (e);
+        view.repaint();
+    }
+    /** What the tile writes under the knob: its caption, or its value while touched. */
+    juce::String shownText() const
+    {
+        if ((isMouseOverOrDragging() || hasKeyboardFocus (false)) && param != nullptr)
+            return param->getCurrentValueAsText();
+        return label;
+    }
+
+    FxRoutingView& view;
+    fx::InstanceId owner;
+    juce::String parameterId, label;
+    juce::RangedAudioParameter* param = nullptr;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+};
+
+namespace
+{
+    struct TileControl
+    {
+        juce::String id, label;
+    };
+
+    /** A tile's knobs (V5 §3.3): the device's most useful real parameters, never new ones -
+        those its mode actually uses; a missing one is skipped, not invented. */
+    std::vector<TileControl> tileControlsFor (osp::plugin::InstrumentHost& host, InstanceId id)
+    {
+        std::vector<TileControl> c;
+        auto add = [&] (const juce::String& pid, const char* label) {
+            if (host.apvts().getParameter (pid) != nullptr && c.size() < 3)
+                c.push_back ({ pid, label });
+        };
+        switch (id.type)
+        {
+            case Type::movement:
+            {
+                add ("motion", "Amount");
+                switch (juce::roundToInt (host.parameterValue ("movement.mode")))
+                {
+                    case 0: add ("movement.drift.speed", "Speed"); add ("movement.drift.pitch", "Pitch"); break;
+                    case 1: add ("movement.tape.wow", "Wow"); add ("movement.tape.flutter", "Flutter"); break;
+                    case 2: add ("movement.chorus.rate", "Rate"); add ("movement.chorus.width", "Depth"); break;
+                    case 3: add ("movement.pulse.rate", "Rate"); add ("movement.pulse.shape", "Shape"); break;
+                    default: add ("movement.shaper.smooth", "Smooth"); break;
+                }
+                return c;
+            }
+            case Type::echo:
+                add (host.parameterValue ("echo.sync") >= 0.5f ? "echo.division" : "echo.time", "Time");
+                add ("echo.feedback", "Feed");
+                add ("echo", "Mix");
+                return c;
+            case Type::space:
+                add ("space.size", "Size");
+                add ("space.decay", "Decay");
+                add ("space", "Mix");
+                return c;
+            case Type::drive:
+                add ("drive", "Drive");
+                add ("drive.tone", "Tone");
+                add ("drive.body", "Body");
+                return c;
+            default: break;
+        }
+        // The new effects: their quick settings' first three, with short captions.
+        static const std::map<juce::String, const char*> shortLabels {
+            { "FEEDBACK", "Feed" }, { "THRESHOLD", "Thresh" }, { "CHARACTER", "Char" }, { "BALANCE", "Pan" }, { "LOW MID", "Lo Mid" },
+            { "HIGH MID", "Hi Mid" }, { "AMOUNT", "Amount" }, { "OUTPUT", "Out" }, { "INPUT", "In" },
+        };
+        for (const auto& q : quickControls (host, id))
+        {
+            const auto it = shortLabels.find (q.caption);
+            const auto label = it != shortLabels.end() ? juce::String (it->second) : q.caption.substring (0, 1) + q.caption.substring (1).toLowerCase();
+            if (host.apvts().getParameter (q.id) != nullptr && c.size() < 3)
+                c.push_back ({ q.id, label });
+        }
+        return c;
+    }
+
+    /** A tile's mode line: the mode it plays (or the effect's kind when it has none). */
+    juce::String tileModeText (osp::plugin::InstrumentHost& host, InstanceId id, const juce::String& subtitle)
+    {
+        juce::String modeId = id.type == Type::movement ? juce::String ("movement.mode") : quickModeId (id);
+        if (id.type == Type::filter)
+            modeId = juce::String ("analog.fx.") + fx::typeKey (id.type) + "." + juce::String (id.slot + 1) + ".type";
+        if (modeId.isNotEmpty())
+            if (auto* p = host.apvts().getParameter (modeId))
+                return p->getCurrentValueAsText().toUpperCase();
+        if (id.type == Type::eq)
+            return "4 BANDS";   // (no mode: what it is)
+        if (id.type == Type::utility)
+            return "GAIN / WIDTH";
+        return subtitle.upToFirstOccurrenceOf (juce::String::fromUTF8 (" \xc2\xb7"), false, false).toUpperCase();
+    }
+
+    /** The tile's regions at a scale (V5 §3.2): the motif's zone, the text's left. */
+    struct TileGeometry
+    {
+        juce::Rectangle<float> pattern;
+        float textX = 0.0f;
+    };
+    TileGeometry tileGeometry (juce::Rectangle<float> r, float b, bool stacked)
+    {
+        TileGeometry t;
+        t.pattern = r.withWidth (std::round ((stacked ? 0.22f : 0.25f) * r.getWidth()));
+        t.textX = t.pattern.getRight() + 8.0f * b;
+        return t;
+    }
+}
 
 //==============================================================================
 /** + ADD EFFECT's library: categories, a search, each effect's state (IN CHAIN, + to add,
@@ -301,10 +429,27 @@ public:
                 g.setColour (juce::Colour (0xffe3ebe3));
                 g.fillRoundedRectangle (row.bounds.toFloat(), 5.0f);
             }
-            auto icon = fxIcon (type);
-            icon.applyTransform (icon.getTransformToScaleToFit (juce::Rectangle<float> (static_cast<float> (row.bounds.getX() + 8), static_cast<float> (row.bounds.getY() + 10), 18.0f, 18.0f), true));
-            g.setColour (fxAccent (type).withAlpha (enabled ? 1.0f : 0.5f));
-            g.strokePath (icon, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            {
+                // V5: the device's own enamel and motif (its tile and rack in miniature).
+                const auto& identity = visualIdentityFor (type);
+                const auto swatch = juce::Rectangle<float> (static_cast<float> (row.bounds.getX() + 5), static_cast<float> (row.bounds.getY() + 6), 26.0f, 26.0f);
+                juce::Graphics::ScopedSaveState thumb (g);
+                if (! enabled)
+                    g.beginTransparencyLayer (0.5f);
+                g.setColour (identity.enamel);
+                g.fillRoundedRectangle (swatch, 5.0f);
+                {
+                    juce::Graphics::ScopedSaveState clip (g);
+                    juce::Path rounded;
+                    rounded.addRoundedRectangle (swatch, 5.0f);
+                    g.reduceClipRegion (rounded);
+                    paintFxMotif (g, identity.motif, swatch.reduced (3.0f), identity, MotifScale::thumb);
+                }
+                g.setColour (identity.edge);
+                g.drawRoundedRectangle (swatch.reduced (0.5f), 5.0f, 1.0f);
+                if (! enabled)
+                    g.endTransparencyLayer();
+            }
             g.setColour (ink.withAlpha (enabled ? 1.0f : 0.5f));
             g.setFont (font (10.5f, fonts::Weight::semibold, 0.04f));
             g.drawText (fx::typeName (type), row.bounds.withTrimmedLeft (36).withHeight (20).translated (0, 3), juce::Justification::centredLeft, false);
@@ -876,18 +1021,25 @@ namespace
     // a parallel lane; 18 px wire gaps; two rows 26 px apart.
     void scaleMetrics (int& tileW, int& tileH, int& stackedH, int& gapW, int& stackGap, int& branch, int& rowGap, float b)
     {
-        tileW = juce::roundToInt (150.0f * b);
-        tileH = juce::roundToInt (72.0f * b);
-        stackedH = juce::roundToInt (66.0f * b);
-        gapW = juce::roundToInt (18.0f * b);
+        // V5: the miniature hardware tiles 192 x 84 (a parallel lane's 60: name and mode only).
+        tileW = juce::roundToInt (192.0f * b);
+        tileH = juce::roundToInt (84.0f * b);
+        stackedH = juce::roundToInt (60.0f * b);
+        gapW = juce::roundToInt (22.0f * b);
         stackGap = juce::roundToInt (8.0f * b);
-        branch = juce::roundToInt (16.0f * b);
-        rowGap = juce::roundToInt (26.0f * b);
+        branch = juce::roundToInt (18.0f * b);
+        rowGap = juce::roundToInt (28.0f * b);
     }
     constexpr int outWBase = 78, outHBase = 28, contWBase = 66, contHBase = 22, lead = 26;
 }
 
 void FxRoutingView::layoutChain()
+{
+    projectRoute();
+    placeTileKnobs();
+}
+
+void FxRoutingView::projectRoute()
 {
     // The board is a pure projection of the route (fx::Graph): it never edits it. Readability
     // first: the largest tiles (at a small window, larger in design units) that fit in one row,
@@ -1034,7 +1186,9 @@ bool FxRoutingView::layoutAttempt (const fx::Graph& g, float scale, const std::v
         // Two rows: the most even split that fits.
         split = -1;
         int best = std::numeric_limits<int>::max();
-        const int row1Avail = area.getRight() - contW - 14 - left, row2Avail = outLeft - 22 - (area.getX() + contW + 14);
+        // (both rows on one column grid: from the later of their starts)
+        const int base = std::max (left, area.getX() + contW + 14);
+        const int row1Avail = area.getRight() - contW - 14 - base, row2Avail = outLeft - 22 - base;
         for (int s = 1; s < count; ++s)
         {
             const int w1 = widthOf (0, s), w2 = widthOf (s, count);
@@ -1140,6 +1294,21 @@ bool FxRoutingView::layoutAttempt (const fx::Graph& g, float scale, const std::v
         walk (node);
     };
 
+    // The spread (extra space in each top-level gap) and, for two rows, the block's left.
+    int spread = 0, blockLeft = left;
+    {
+        const int base = std::max (left, contIn.getRight() + 14);
+        const int availRow = two ? std::min (area.getRight() - contW - 14, outLeft - 22) - base : outLeft - 22 - left;
+        const int widest = two ? std::max (widthOf (0, split), widthOf (split, count)) : widthOf (0, count);
+        const int most = two ? std::max (split, count - split) : count;
+        if (most > 1)
+            spread = juce::jlimit (0, juce::roundToInt (26.0f * scale), (availRow - widest) / (most - 1));
+        if (two)
+        {
+            const int blockW = widest + spread * (most - 1);
+            blockLeft = base + std::max (0, (availRow - blockW) / 2);
+        }
+    }
     for (int row = 0; row < (two ? 2 : 1); ++row)
     {
         const int from = row == 0 ? 0 : split, to = row == 0 ? split : count;
@@ -1147,9 +1316,9 @@ bool FxRoutingView::layoutAttempt (const fx::Graph& g, float scale, const std::v
         const int rowH = row == 0 ? h1 : h2;
         const int rowLeft = row == 0 ? left : contIn.getRight() + 14;
         const int rowRight = (two && row == 0) ? contOut.getX() - 14 : outLeft - 22;
-        // One row: centred between the mixer's wire and OUTPUT; two: left-aligned, so the
-        // second row reads on from the first.
-        int x = two ? rowLeft : rowLeft + (rowRight - rowLeft - widthOf (from, to)) / 2;
+        // The rows share one column grid, centred, the top-level gaps opened a little where
+        // there is room (V5: a balanced board, not tiles stranded at one end).
+        int x = two ? blockLeft : rowLeft + (rowRight - rowLeft - (widthOf (from, to) + spread * std::max (0, to - from - 1))) / 2;
         const int gapTop = rr.centreY - rowH / 2 - 4, gapH = rowH + 8;
         int prevRight = row == 0 ? area.getX() : contIn.getRight() + 2;
         for (int i = from; i < to; ++i)
@@ -1170,7 +1339,7 @@ bool FxRoutingView::layoutAttempt (const fx::Graph& g, float scale, const std::v
                 placeNode (g.chain[static_cast<std::size_t> (it.first)], {}, it.first, x, rr.centreY, false);
             x += it.size.x;
             prevRight = x;
-            x += m.gapW;
+            x += m.gapW + spread;
         }
         // The row's last gap: to CONT. 2 (row 1 of two) or to OUTPUT.
         const int end = (two && row == 0) ? contOut.getX() - 2 : outputBox.getX() - 2;
@@ -1179,6 +1348,75 @@ bool FxRoutingView::layoutAttempt (const fx::Graph& g, float scale, const std::v
             gapList.push_back ({ {}, index, juce::Rectangle<int> (prevRight + 2, gapTop, std::max (6, end - prevRight - 4), gapH) });
     }
     return true;
+}
+
+void FxRoutingView::placeTileKnobs()
+{
+    // Each full-size tile's knobs (a parallel lane's compact tile has none: its click opens the
+    // quick settings). Kept across layouts when the tile and parameter are the same, so a
+    // knob is never rebuilt under the hand.
+    std::vector<std::unique_ptr<TileKnob>> next;
+    const float b = metrics.b;
+    for (const auto& t : placed)
+    {
+        if (t.stacked)
+            continue;
+        const auto controls = tileControlsFor (host, t.id);
+        if (controls.empty())
+            continue;
+        const auto r = t.bounds.toFloat();
+        const auto geo = tileGeometry (r, b, false);
+        const float right = r.getRight() - 6.0f * b;
+        const float cw = (right - geo.textX + 6.0f * b) / static_cast<float> (controls.size());
+        const int side = juce::roundToInt (30.0f * b);
+        for (std::size_t i = 0; i < controls.size(); ++i)
+        {
+            const auto& c = controls[i];
+            std::unique_ptr<TileKnob> k;
+            for (auto& old : tileKnobs)
+                if (old != nullptr && old->owner == t.id && old->parameterId == c.id)
+                {
+                    k = std::move (old);
+                    break;
+                }
+            if (k == nullptr)
+            {
+                k = std::make_unique<TileKnob> (*this, host, t.id, c.id, c.label, visualIdentityFor (t.id.type).motifInk);
+                addAndMakeVisible (*k);
+            }
+            k->label = c.label;
+            const float cx = geo.textX - 6.0f * b + cw * (static_cast<float> (i) + 0.5f);
+            k->setBounds (juce::Rectangle<int> (side, side).withCentre ({ juce::roundToInt (cx), juce::roundToInt (r.getY() + 55.0f * b) }));
+            k->setAlpha (t.bypassed ? 0.55f : 1.0f);
+            next.push_back (std::move (k));
+        }
+    }
+    for (auto& old : tileKnobs)
+        if (old != nullptr)
+            removeChildComponent (old.get());
+    tileKnobs = std::move (next);
+    // (the popovers stay over the board)
+    if (library != nullptr && library->isVisible())
+        library->toFront (false);
+    if (quick != nullptr)
+        quick->toFront (false);
+}
+
+juce::StringArray FxRoutingView::tileKnobParameters (InstanceId id) const
+{
+    juce::StringArray ids;
+    for (const auto& k : tileKnobs)
+        if (k->owner == id)
+            ids.add (k->parameterId);
+    return ids;
+}
+
+juce::Slider* FxRoutingView::tileKnob (InstanceId id, const juce::String& parameterId) const
+{
+    for (const auto& k : tileKnobs)
+        if (k->owner == id && k->parameterId == parameterId)
+            return k.get();
+    return nullptr;
 }
 
 int FxRoutingView::tileAt (juce::Point<int> p) const
@@ -1265,7 +1503,7 @@ void FxRoutingView::paint (juce::Graphics& g)
 
     // The wires: one line per row, from the mixer (row 1) to OUTPUT (the last row); between
     // two rows, CONT. 2 and FROM 1 and the quiet return between them.
-    const float wireWidth = 1.3f;
+    const float wireWidth = 1.6f;
     g.setColour (wire);
     for (const auto& row : rows)
         g.fillRect (juce::Rectangle<float> (static_cast<float> (row.left), static_cast<float> (row.centreY) - 0.5f * wireWidth, static_cast<float> (row.right - row.left), wireWidth));
@@ -1323,9 +1561,17 @@ void FxRoutingView::paint (juce::Graphics& g)
         g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ x0 + inset, gy }));
         g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ x1 - inset, gy }));
         // (its name above the stage, clear of the lanes)
-        g.setFont (font (9.5f * metrics.b, fonts::Weight::semibold, 0.08f));
-        g.setColour (juce::Colour (0xff7d8c82));
-        g.drawText (grp.split ? "SPLIT" : "PARALLEL", juce::Rectangle<float> (x0, static_cast<float> (grp.bounds.getY()) - 14.0f, x1 - x0, 12.0f), juce::Justification::centred, false);
+        {
+            const auto f = font (9.5f * metrics.b, fonts::Weight::semibold, 0.08f);
+            const juce::String word (grp.split ? "SPLIT" : "PARALLEL");
+            const float tw = juce::GlyphArrangement::getStringWidth (f, word) + 12.0f;
+            const auto pill = juce::Rectangle<float> (tw, 14.0f).withCentre ({ 0.5f * (x0 + x1), static_cast<float> (grp.bounds.getY()) - 9.0f });
+            g.setColour (juce::Colour (0xfff5f0e8));
+            g.fillRoundedRectangle (pill, 7.0f);
+            g.setFont (f);
+            g.setColour (juce::Colour (0xff6f8075));
+            g.drawText (word, pill, juce::Justification::centred, false);
+        }
     }
     // The gaps: an arrowhead on the wire (the drop target, while dragging, a +).
     for (int i = 0; i < static_cast<int> (gapList.size()); ++i)
@@ -1457,123 +1703,154 @@ void FxRoutingView::paintMixer (juce::Graphics& g) const
     g.drawFittedText (juce::String::fromUTF8 ("A + B + C \xe2\x86\x92 one shared FX path"), area.withTrimmedTop (10).withHeight (15), juce::Justification::centredLeft, 1, 0.85f);
 }
 
-void FxRoutingView::paintTile (juce::Graphics& g, const Tile& t) const
+void FxRoutingView::paintTile (juce::Graphics& g, const Tile& t, bool ghost) const
 {
-    const auto accent = fxAccent (t.id.type);
+    // V5 PATTERNED HARDWARE: the device in miniature - its enamel, its motif in the left
+    // quarter, the name bold and clear, its mode, its real knobs, its status light (the
+    // effect's real ON), the same identity as its rack.
+    const auto& id = visualIdentityFor (t.id.type);
     const auto r = t.bounds.toFloat();
-    const float alpha = t.bypassed ? 0.55f : 1.0f;
+    const float b = metrics.b, radius = 8.0f * b;
     const bool isSelected = selected && *selected == t.id;
-    const bool beingDragged = dragging && pressed && *pressed == t.id;
+    const bool beingDragged = ! ghost && dragging && pressed && *pressed == t.id;
+    const bool hover = ! ghost && hovered && *hovered == t.id;
+    const auto geo = tileGeometry (r, b, t.stacked);
     juce::Graphics::ScopedSaveState state (g);
-    g.setOpacity (beingDragged ? 0.36f : 1.0f);
-    g.setColour (juce::Colour (0x16504639));
-    g.fillRoundedRectangle (r.translated (0.0f, 2.0f), 7.0f);
-    const bool hover = hovered && *hovered == t.id;
-    g.setGradientFill (juce::ColourGradient (hover ? juce::Colour (0xfffffaf3) : juce::Colour (0xfffbf8f1), 0.0f, r.getY(), hover ? juce::Colour (0xfff0e9de) : juce::Colour (0xffeee7dd), 0.0f, r.getBottom(), false));
-    g.fillRoundedRectangle (r, 7.0f);
-    g.setColour (hover ? juce::Colour (0xffaaaea4) : juce::Colour (0xffccc3b7));
-    g.drawRoundedRectangle (r.reduced (0.5f), 7.0f, 1.0f);
+    if (beingDragged)
+        g.beginTransparencyLayer (0.36f);
+    g.setColour (juce::Colours::black.withAlpha (hover ? 0.20f : 0.15f));
+    g.fillRoundedRectangle (r.translated (0.0f, (hover ? 2.5f : 2.0f) * b), radius);
+    juce::Path face;
+    face.addRoundedRectangle (r, radius);
     {
         juce::Graphics::ScopedSaveState clip (g);
-        juce::Path rounded;
-        rounded.addRoundedRectangle (r, 7.0f);
-        g.reduceClipRegion (rounded);
-        g.setColour (accent.withMultipliedAlpha (alpha));
-        g.fillRect (r.withWidth (3.0f));
+        g.reduceClipRegion (face);
+        g.setGradientFill (juce::ColourGradient (id.enamel.brighter (hover ? 0.10f : 0.06f), 0.0f, r.getY(), id.enamel.darker (0.07f), 0.0f, r.getBottom(), false));
+        g.fillRect (r);
+        // The motif: the left quarter, fading into the enamel toward the name.
+        for (int i = -1; i < 6; ++i)
+        {
+            const float solid = 0.6f * geo.pattern.getWidth(), stepW = (geo.pattern.getWidth() - solid + 10.0f * b) / 6.0f;
+            const auto strip = i < 0 ? geo.pattern.withWidth (solid) : juce::Rectangle<float> (geo.pattern.getX() + solid + stepW * static_cast<float> (i), r.getY(), stepW, r.getHeight());
+            juce::Graphics::ScopedSaveState s (g);
+            g.reduceClipRegion (strip.getSmallestIntegerContainer());
+            g.beginTransparencyLayer (i < 0 ? 1.0f : 1.0f - (static_cast<float> (i) + 0.5f) / 6.0f);
+            paintFxMotif (g, id.motif, geo.pattern.withTrimmedTop (3.0f * b).withTrimmedBottom (3.0f * b).withWidth (geo.pattern.getWidth() + 10.0f * b), id, MotifScale::mini);
+            g.endTransparencyLayer();
+        }
+        if (t.bypassed)
+        {
+            // Bypassed: the face greyed under a cream veil, still in its place.
+            g.setColour (juce::Colour (0xfff2ece3).withAlpha (0.42f));
+            g.fillRect (r);
+        }
     }
-    // Icon (its row, with the bypass light), the name across the tile, what it is set to.
-    const float b = metrics.b;
-    const float iconSide = (t.stacked ? 22.0f : 24.0f) * b;
-    const float padX = 12.0f * b, padTop = (t.stacked ? 7.0f : 9.0f) * b;
-    const auto iconBox = juce::Rectangle<float> (iconSide, iconSide).withPosition (r.getX() + padX, r.getY() + padTop);
-    g.setColour (accent.withAlpha (0.11f * alpha + 0.02f));
-    g.fillRoundedRectangle (iconBox, 5.0f * b);
-    auto icon = fxIcon (t.id.type);
-    icon.applyTransform (icon.getTransformToScaleToFit (iconBox.reduced (4.5f * b), true));
-    g.setColour (accent.withMultipliedAlpha (alpha));
-    g.strokePath (icon, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    juce::String name = fx::typeName (t.id.type);
-    if (! fx::isLegacy (t.id.type) && fx::capacity[static_cast<std::size_t> (t.id.type)] > 1)
+    g.setColour (juce::Colours::white.withAlpha (0.16f));
+    g.drawRoundedRectangle (r.reduced (1.0f).withTrimmedBottom (1.0f), radius - 1.0f, 0.8f);
+    g.setColour (id.edge.withAlpha (0.85f));
+    g.drawRoundedRectangle (r.reduced (0.5f), radius, 1.0f);
+
+    // The name, the mode.
+    juce::String name = id.tileName;
+    if (! fx::isLegacy (t.id.type) && t.id.slot > 0)
         name << " " << (t.id.slot + 1);
-    const float nameH = (t.stacked ? 16.0f : 17.0f) * b, subH = (t.stacked ? 13.0f : 14.0f) * b;
-    const auto nameBox = juce::Rectangle<float> (r.getX() + padX, iconBox.getBottom() + (t.stacked ? 3.0f : 4.5f) * b, r.getWidth() - padX - 8.0f * b, nameH);
-    g.setColour (juce::Colour (0xff363a37).withMultipliedAlpha (alpha));
-    g.setFont (font ((t.stacked ? 13.0f : 13.5f) * b, fonts::Weight::semibold, 0.035f));
-    g.drawFittedText (name, nameBox.getSmallestIntegerContainer(), juce::Justification::centredLeft, 1, 0.9f);
-    g.setColour (juce::Colour (0xff8d8378).withMultipliedAlpha (alpha));
-    g.setFont (font (10.5f * b));
-    g.drawText (t.bypassed ? juce::String ("Bypassed") : subtitleOf (t.id), juce::Rectangle<float> (nameBox.getX(), nameBox.getBottom(), nameBox.getWidth(), subH),
-                juce::Justification::centredLeft, true);
-    // The bypass light (its own hit target: clicking the tile never flips the sound).
-    const auto light = t.light.toFloat().withSizeKeepingCentre (8.0f, 8.0f);
+    const float textRight = r.getRight() - 30.0f * b;
+    const float nameY = t.stacked ? r.getCentreY() - 16.0f * b : r.getY() + 9.0f * b;
+    g.setColour (id.text.withMultipliedAlpha (t.bypassed ? 0.7f : 1.0f));
+    g.setFont (font ((t.stacked ? 13.0f : 13.5f) * b, fonts::Weight::bold, 0.06f));
+    g.drawFittedText (name, juce::Rectangle<float> (geo.textX, nameY, textRight - geo.textX, 17.0f * b).getSmallestIntegerContainer(), juce::Justification::centredLeft, 1, 0.88f);
+    g.setColour (id.mutedText.withMultipliedAlpha (t.bypassed ? 0.8f : 1.0f));
+    g.setFont (font (10.5f * b, fonts::Weight::semibold, 0.08f));
+    g.drawText (t.bypassed ? juce::String ("BYPASSED") : tileModeText (host, t.id, subtitleOf (t.id)),
+                juce::Rectangle<float> (geo.textX, nameY + 17.0f * b, r.getRight() - 8.0f * b - geo.textX, 13.0f * b), juce::Justification::centredLeft, true);
+    // Its knobs' captions (their values while touched).
+    if (! ghost)
+        for (const auto& k : tileKnobs)
+            if (k->owner == t.id)
+            {
+                const auto kb = k->getBounds().toFloat();
+                const bool live = k->isMouseOverOrDragging() || k->hasKeyboardFocus (false);
+                g.setColour (live ? id.text : id.mutedText);
+                g.setFont (font (9.5f * b, live ? fonts::Weight::semibold : fonts::Weight::medium, 0.02f));
+                g.drawText (k->shownText(), juce::Rectangle<float> (kb.getCentreX() - 30.0f * b, kb.getBottom() - 2.0f * b, 60.0f * b, 12.0f * b), juce::Justification::centred, false);
+            }
+
+    // The status light: the effect's real ON (its own hit target: clicking the tile never flips it).
+    const auto light = t.light.toFloat().withSizeKeepingCentre (8.5f * b, 8.5f * b);
+    g.setColour (juce::Colours::black.withAlpha (0.30f));
+    g.fillEllipse (light.expanded (2.0f * b));
     if (t.bypassed)
     {
-        g.setColour (juce::Colour (0xffb8b2a9));
-        g.drawEllipse (light, 1.2f);
+        g.setColour (id.enamel.darker (0.45f));
+        g.fillEllipse (light);
+        g.setColour (id.mutedText.withAlpha (0.5f));
+        g.drawEllipse (light.reduced (0.5f), 1.0f);
     }
     else
     {
-        g.setColour (juce::Colour (0xff6798b2).withAlpha (0.25f));
-        g.fillEllipse (light.expanded (2.0f));
-        g.setColour (juce::Colour (0xff6798b2));
+        g.setColour (id.statusActive.withAlpha (0.30f));
+        g.fillEllipse (light.expanded (2.5f * b));
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white, light.getX(), light.getY(), id.statusActive.darker (0.08f), light.getRight(), light.getBottom(), false));
         g.fillEllipse (light);
     }
+    if (beingDragged)
+        g.endTransparencyLayer();
     if (isSelected)
     {
         g.setColour (sage);
-        g.drawRoundedRectangle (r.expanded (2.5f), 9.0f, 1.5f);
+        g.drawRoundedRectangle (r.expanded (3.0f), radius + 3.0f, 2.0f);
     }
     // While dragging over it: STACK (a drop here makes the two parallel).
-    const bool target = dragging && dropTile >= 0 && placed[static_cast<std::size_t> (dropTile)].id == t.id;
+    const bool target = ! ghost && dragging && dropTile >= 0 && placed[static_cast<std::size_t> (dropTile)].id == t.id;
     if (target)
     {
-        g.setColour (juce::Colour (0xede1efe6));
-        g.fillRoundedRectangle (r.reduced (1.0f), 6.0f);
+        g.setColour (juce::Colour (0xe8f1ece2));
+        g.fillRoundedRectangle (r.reduced (1.0f), radius - 1.0f);
         juce::Path dash;
         const float dashes[] { 4.0f, 3.0f };
         juce::Path outline;
-        outline.addRoundedRectangle (r.reduced (1.0f), 6.0f);
+        outline.addRoundedRectangle (r.reduced (1.0f), radius - 1.0f);
         juce::PathStrokeType (1.5f).createDashedStroke (dash, outline, dashes, 2);
         g.setColour (juce::Colour (0xff739589));
         g.fillPath (dash);
         g.setColour (juce::Colour (0xff416a55));
-        g.setFont (font (10.5f, fonts::Weight::semibold, 0.045f));
+        g.setFont (font (10.5f * b, fonts::Weight::semibold, 0.045f));
         g.drawText ("STACK IN PARALLEL", r, juce::Justification::centred, false);
     }
 }
 
 void FxRoutingView::paintSummary (juce::Graphics& g, const Summary& sum) const
 {
-    // A group summary: two cards fanned behind the face (a stack), the count, what it is, how
-    // many are on; selected when one of its effects is.
+    // A group summary (V5): a neutral graphite enamel card on a fanned stack, its members'
+    // colours in bands at its left, the count, what it is, how many are on.
     const auto r = sum.bounds.toFloat();
-    const float b = metrics.b;
+    const float b = metrics.b, radius = 8.0f * b;
+    const juce::Colour face (0xff6d6962), bone (0xfff5eddf);
     for (int layer = 2; layer >= 1; --layer)
     {
         const auto back = r.translated (3.0f * static_cast<float> (layer), -3.0f * static_cast<float> (layer));
-        g.setColour (juce::Colour (0xfff3ede4));
-        g.fillRoundedRectangle (back, 7.0f);
-        g.setColour (juce::Colour (0xffd3cabe));
-        g.drawRoundedRectangle (back.reduced (0.5f), 7.0f, 1.0f);
+        g.setColour (face.brighter (0.25f * static_cast<float> (layer)));
+        g.fillRoundedRectangle (back, radius);
+        g.setColour (face.darker (0.3f));
+        g.drawRoundedRectangle (back.reduced (0.5f), radius, 1.0f);
     }
     const bool hover = hovered && std::find (sum.members.begin(), sum.members.end(), *hovered) != sum.members.end();
-    g.setColour (juce::Colour (0x16504639));
-    g.fillRoundedRectangle (r.translated (0.0f, 2.0f), 7.0f);
-    g.setGradientFill (juce::ColourGradient (hover ? juce::Colour (0xfffffaf3) : juce::Colour (0xfffbf8f1), 0.0f, r.getY(), juce::Colour (0xffeee7dd), 0.0f, r.getBottom(), false));
-    g.fillRoundedRectangle (r, 7.0f);
-    g.setColour (juce::Colour (0xffbdb3a6));
-    g.drawRoundedRectangle (r.reduced (0.5f), 7.0f, 1.0f);
-    // The members' colours along the left edge, a band each.
+    g.setColour (juce::Colours::black.withAlpha (0.15f));
+    g.fillRoundedRectangle (r.translated (0.0f, 2.0f), radius);
+    g.setGradientFill (juce::ColourGradient (face.brighter (hover ? 0.12f : 0.06f), 0.0f, r.getY(), face.darker (0.08f), 0.0f, r.getBottom(), false));
+    g.fillRoundedRectangle (r, radius);
+    g.setColour (face.darker (0.45f));
+    g.drawRoundedRectangle (r.reduced (0.5f), radius, 1.0f);
     {
         juce::Graphics::ScopedSaveState clip (g);
         juce::Path rounded;
-        rounded.addRoundedRectangle (r, 7.0f);
+        rounded.addRoundedRectangle (r, radius);
         g.reduceClipRegion (rounded);
         const float band = r.getHeight() / static_cast<float> (std::max<std::size_t> (1, sum.members.size()));
         for (std::size_t i = 0; i < sum.members.size(); ++i)
         {
             g.setColour (fxAccent (sum.members[i].type));
-            g.fillRect (juce::Rectangle<float> (r.getX(), r.getY() + band * static_cast<float> (i), 3.0f, band));
+            g.fillRect (juce::Rectangle<float> (r.getX(), r.getY() + band * static_cast<float> (i), 10.0f * b, band));
         }
     }
     int on = 0;
@@ -1600,12 +1877,12 @@ void FxRoutingView::paintSummary (juce::Graphics& g, const Summary& sum) const
         }
         on += bypassed ? 0 : 1;
     }
-    const float padX = 12.0f * b;
-    g.setColour (juce::Colour (0xff363a37));
+    const float padX = 20.0f * b;
+    g.setColour (bone);
     g.setFont (font (13.5f * b, fonts::Weight::semibold, 0.035f));
     const juce::String title = juce::String (static_cast<int> (sum.members.size())) + (sum.members.size() == 1 ? " EFFECT" : " EFFECTS");
     g.drawText (title, juce::Rectangle<float> (r.getX() + padX, r.getY() + 10.0f * b, r.getWidth() - padX - 30.0f * b, 18.0f * b), juce::Justification::centredLeft, false);
-    g.setColour (juce::Colour (0xff8d8378));
+    g.setColour (bone.withAlpha (0.72f));
     g.setFont (font (10.5f * b));
     const auto dot = juce::String::fromUTF8 (" \xc2\xb7 ");
     juce::StringArray names;
@@ -1613,7 +1890,7 @@ void FxRoutingView::paintSummary (juce::Graphics& g, const Summary& sum) const
         names.add (juce::String (fx::typeName (id.type)).toLowerCase().replaceSection (0, 1, juce::String (fx::typeName (id.type)).substring (0, 1)));
     const juce::String what = sum.group ? juce::String ("Parallel") + dot + juce::String (sum.lanes) + " lanes" : names.joinIntoString (dot);
     g.drawText (what, juce::Rectangle<float> (r.getX() + padX, r.getY() + 29.0f * b, r.getWidth() - padX - 8.0f, 14.0f * b), juce::Justification::centredLeft, true);
-    g.setColour (on == static_cast<int> (sum.members.size()) ? juce::Colour (0xff5f7d70) : juce::Colour (0xff9a7a5c));
+    g.setColour (on == static_cast<int> (sum.members.size()) ? juce::Colour (0xffcfe2d4) : juce::Colour (0xfff0c99a));
     g.drawText (juce::String (on) + " of " + juce::String (static_cast<int> (sum.members.size())) + " on" + dot + juce::String::fromUTF8 ("open \xe2\x96\xbe"),
                 juce::Rectangle<float> (r.getX() + padX, r.getY() + 44.0f * b, r.getWidth() - padX - 8.0f, 14.0f * b), juce::Justification::centredLeft, true);
     if (selected && std::find (sum.members.begin(), sum.members.end(), *selected) != sum.members.end())
@@ -1657,8 +1934,9 @@ void FxRoutingView::paintOverChildren (juce::Graphics& g)
         ghost.bounds = juce::Rectangle<int> (metrics.tileW, metrics.tileH).withCentre (dragAt);
         ghost.light = juce::Rectangle<int> (24, 24).withCentre ({ ghost.bounds.getRight() - 14, ghost.bounds.getY() + 14 });
         juce::Graphics::ScopedSaveState s (g);
-        g.setOpacity (0.85f);
-        paintTile (g, ghost);
+        g.beginTransparencyLayer (0.9f);
+        paintTile (g, ghost, true);
+        g.endTransparencyLayer();
     }
 }
 
