@@ -1009,7 +1009,11 @@ void Synth::monoGoTo (int note, bool retrigger, float velocity, int channel) noe
     lastMonoPitch = note;
 }
 
-void Synth::setPitchBend (float value) noexcept { bend = std::clamp (value, -1.0f, 1.0f); }
+void Synth::setPitchBend (float value) noexcept
+{
+    bend = std::clamp (value, -1.0f, 1.0f);
+    subOsc.setBend (bend);   // (SUB follows the same wheel: MIDI's reaches it on its own)
+}
 void Synth::setModWheel (float value) noexcept
 {
     wheel = std::clamp (value, 0.0f, 1.0f);

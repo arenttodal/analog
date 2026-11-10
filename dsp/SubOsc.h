@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -42,6 +43,8 @@ public:
     void reset() noexcept;
     void setSettings (const SubSettings& s) noexcept;
     void setBendRange (double semitones) noexcept { bendRange = semitones; }
+    /** The pitch wheel without MIDI (the instrument's on-screen wheel), -1..1 of the bend range. */
+    void setBend (float wheel) noexcept { bendSemitones = bendRange * static_cast<double> (std::clamp (wheel, -1.0f, 1.0f)); }
     const SubSettings& settingsNow() const noexcept { return settings; }
 
     /** One MIDI message of the musician's own input (note on / off, sustain, bend, 120, 121, 123). */

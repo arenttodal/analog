@@ -384,3 +384,17 @@ TEST_CASE ("SUB-05: CLASSIC with SUB on: SUB is added dry, the old signal is unt
         worst = std::max (worst, std::abs (both.left[i] - old.left[i] - subAlone.left[i]));
     CHECK (worst < 2.0e-6f);
 }
+
+TEST_CASE ("SUB: the on-screen pitch wheel bends SUB as MIDI's does", "[sub][v6]")
+{
+    auto owned = std::make_unique<Synth>();
+    Synth& s = *owned;
+    s.prepare (48000.0, 256, 4);
+    auto p = withSub (measurementPatch());
+    p.bendRangeSemitones = 12.0;
+    s.setPatch (p);
+    s.reset();
+    s.setPitchBend (1.0f);   // (an octave up, no MIDI)
+    const auto c = renderBoth (s, 0.8, {}, { on (0, 60, 100) });
+    CHECK (std::abs (frequencyByCrossings (c.mono(), 48000.0, 0.2, 0.8) - 130.81) < 1.0);   // C2 an octave up: C3
+}
