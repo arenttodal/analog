@@ -77,13 +77,29 @@ All of them are listed in [PARAMETER_REGISTRY.md](PARAMETER_REGISTRY.md).
     realtime cases (no allocation in each new path);
   - plugin: `[v6][reimagined]`, `[v6][sub]`, `[v6][hybrid2]`, `[v6][mainsend]`;
   - the bindings test covers every new parameter (each moves the sound in its context).
-- **CI (macOS with pluginval at strictness 10, and Windows):** it had been red since gate 0 on
-  two test-side issues, fixed in `ee0e5ab`:
+- **CI (Linux, macOS with pluginval at strictness 10, Windows):** it had been red since gate 0
+  on two test-side issues, fixed in `ee0e5ab`:
   - the baseline demanded exact hashes recorded on Linux only;
   - test Synths on the stack overflowed Windows' 1 MB stack.
 
-  pluginval (VST3 and AU) passed on every run, and the installers were built each time. See
-  the latest run for the current state.
+  From `ee0e5ab`, all three jobs are green, including pluginval (VST3 and AU), the AU
+  validation, and the macOS and Windows installers.
+- **OSP's own suites** (unit, integration, regression, plugin, visual reference, example
+  product) pass with the opt-in arp housing: 10 / 10.
+- **An independent review** of the engine and routing found nine issues, all fixed with tests
+  in `338a74b`:
+  1. On SEND, an insert group placed before SPACE silenced it.
+  2. With one path, SUB arrived early by a latent CUSTOM route's latency.
+  3. A note right after ALL SOUND OFF was dropped.
+  4. An FX chain that did not fit its tab moved settings before being refused.
+  5. Loading the same recording into C2 again left it "loading".
+  6. The sends switched in a single step and kept stale decimator history.
+  7. With FOLLOW off, a silent layer held a note.
+  8. A SEND with no spatial processor was counted in the reported latency.
+  9. SUB reached CUSTOM's effects during the duck into MAIN + SEND.
+
+  It found no real-time safety issue. SUB also follows the on-screen pitch wheel now
+  (`872aa6b`).
 
 ## DAW work that needs a person
 
