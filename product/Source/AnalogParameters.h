@@ -209,6 +209,12 @@ namespace andor::analog::params
     inline const juce::String hybrid2NoiseTone = "analog.hybrid2.noise.tone";
     inline const juce::String hybrid2NoiseMovement = "analog.hybrid2.noise.movement";
     inline const juce::String hybrid2NoiseKeys = "analog.hybrid2.noise.keys";
+    /** State version 17 (Cinematic V6 gate 4): each card's SEND, heard only with a MAIN + SEND
+        route (card C's: both its layers'; SUB has none, by design). */
+    inline const juce::String sendA = "analog.send.a";
+    inline const juce::String sendB = "analog.send.b";
+    inline const juce::String sendC = "analog.send.c";
+    void addSendsTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends card C's second layer's parameters (after SUB's). */
     void addHybrid2To (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends SUB's parameters (after the FX library's: Product's addParameters). */

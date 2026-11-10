@@ -850,6 +850,14 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     for (const auto* id : { &params::subWave, &params::subOctave, &params::subGrit, &params::subLevel, &params::subLowKey, &params::subHighKey,
                             &params::subResponse, &params::subTaperStart, &params::subTaperSlope })
         setups[*id] = [] (ShellProcessor& q) { setValue (q, params::subEnabled, 1.0f); };
+    // The cards' sends act in a MAIN + SEND route (Cinematic V6 gate 4), card C heard (its
+    // second layer) and SPACE's room on SEND.
+    for (const auto* id : { &params::sendA, &params::sendB, &params::sendC })
+        setups[*id] = [] (ShellProcessor& q) {
+            dynamic_cast<AnalogEngine&> (q.productEngine()).setFxRoute (andor::analog::fx::mainSendGraph (andor::analog::fx::classicGraph()));
+            setValue (q, params::hybrid2Enabled, 1.0f);
+            setValue (q, "space", 80.0f);
+        };
     int checkedBound = 0, checkedUnbound = 0, checkedFx = 0;
     for (auto* base : p.getParameters())
     {
@@ -5940,7 +5948,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 16);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer)
+        CHECK (xml->getIntAttribute ("productVersion") == 17);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8152,7 +8160,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 16);
+    CHECK (xml->getIntAttribute ("productVersion") == 17);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -8587,5 +8595,185 @@ TEST_CASE ("analog: V6 gate 3 screenshots - card C with one layer, two, and its 
         andor::analog::showHybridLayer (p, 2);
         setValue (p, params::hybrid2Type, 0.0f);   // C2: SAMPLE, empty
         shoot ("g3-6-layer2-sample-empty", false);
+    }
+}
+
+//==============================================================================
+// Cinematic V6 gate 4: MAIN + SEND (docs/CINEMATIC_V6_GATE4.md) - opt-in only.
+
+TEST_CASE ("analog: MAIN + SEND - only by the musician's choice; tabs, the mixer's sends, SEND for spatial effects, back to one path", "[v6][mainsend][ui]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    CHECK (! engine.fxRoute().custom);   // (CLASSIC: opening the view changes nothing)
+    view->setTab (1);
+    CHECK (view->tab() == 0);   // (no tabs on one path)
+
+    // The explicit conversion: CLASSIC's inserts on MAIN, ECHO || SPACE on SEND, card C at 25 %.
+    REQUIRE (view->useMainSend());
+    const auto route = engine.fxRoute();
+    CHECK (route.mainSend);
+    CHECK (fx::mainText (route) == "v1 custom fx drive.1 on fx movement.1 on");
+    CHECK (std::abs (p.parameterValue (params::sendC) - 25.0f) < 0.01f);
+    CHECK (p.parameterValue (params::sendA) == 0.0f);
+    CHECK (view->tiles().size() == 2);   // MAIN's two
+
+    // SEND: its chain on the board, the mixer's knobs the cards' sends.
+    view->setTab (1);
+    CHECK (view->tab() == 1);
+    CHECK (view->levelKnob (2)->getTitle() == "Card C send");
+    CHECK (view->tiles().size() == 2);   // ECHO || SPACE
+    view->setTab (0);
+    CHECK (view->levelKnob (2)->getTitle() == "Card C level");
+
+    // A spatial effect added on MAIN goes on SEND; an insert stays on MAIN.
+    REQUIRE (view->insertNew (fx::Type::convolution));
+    CHECK (view->tab() == 1);
+    CHECK (fx::contains (fx::Graph { true, engine.fxRoute().send, false, {} }, { fx::Type::convolution, 0 }));
+    view->setTab (0);
+    REQUIRE (view->insertNew (fx::Type::eq));
+    CHECK (fx::contains (fx::Graph { true, engine.fxRoute().chain, false, {} }, { fx::Type::eq, 0 }));
+    // OVERVIEW edits nothing.
+    view->setTab (2);
+    const auto before = engine.fxRoute();
+    CHECK (! view->moveTo ({ fx::Type::drive, 0 }, {}, 0));
+    CHECK (engine.fxRoute() == before);
+
+    // Back to one path: MAIN then SEND in series, CUSTOM; the tabs gone.
+    REQUIRE (view->useSinglePath());
+    CHECK (! engine.fxRoute().mainSend);
+    CHECK (engine.fxRoute().custom);
+    CHECK (view->tab() == 0);
+    // ... undo returns MAIN + SEND.
+    p.undo().undo();
+    CHECK (engine.fxRoute().mainSend);
+    ui.setSourceViewShown (false);
+}
+
+TEST_CASE ("analog: MAIN + SEND - saved as schema 2 and recalled; CLASSIC and CUSTOM sessions stay schema 1, never upgraded", "[v6][mainsend][state]")
+{
+    namespace fx = andor::analog::fx;
+    auto stateOf = [] (ShellProcessor& p) {
+        juce::MemoryBlock block;
+        p.getStateInformation (block);
+        return block;
+    };
+    // A CUSTOM route (schema 1) stays one path.
+    juce::MemoryBlock custom;
+    {
+        ShellProcessor p;
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        auto g = fx::classicGraph();
+        g.custom = true;
+        REQUIRE (engine.setFxRoute (g));
+        setValue (p, params::sendC, 60.0f);   // (a send set, heard nowhere: one path)
+        custom = stateOf (p);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (custom.getData(), static_cast<int> (custom.getSize()));
+        const auto* routing = findElement (*xml, "FxRouting");
+        REQUIRE (routing != nullptr);
+        CHECK (routing->getIntAttribute ("schema") == 1);
+    }
+    {
+        ShellProcessor q;
+        q.setStateInformation (custom.getData(), static_cast<int> (custom.getSize()));
+        const auto g = dynamic_cast<AnalogEngine&> (q.productEngine()).fxRoute();
+        CHECK (g.custom);
+        CHECK (! g.mainSend);
+    }
+    // MAIN + SEND: schema 2, mode, its two chains; recalled exactly.
+    juce::MemoryBlock both;
+    fx::Graph saved;
+    {
+        ShellProcessor p;
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        saved = fx::mainSendGraph (fx::classicGraph());
+        saved.send.insert (saved.send.begin(), fx::Node::effect ({ fx::Type::eq, 1 }));
+        REQUIRE (engine.setFxRoute (saved));
+        setValue (p, params::sendA, 40.0f);
+        both = stateOf (p);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (both.getData(), static_cast<int> (both.getSize()));
+        const auto* routing = findElement (*xml, "FxRouting");
+        REQUIRE (routing != nullptr);
+        CHECK (routing->getIntAttribute ("schema") == 2);
+        CHECK (routing->getStringAttribute ("mode") == "mainSend");
+        CHECK (routing->getStringAttribute ("main").isNotEmpty());
+        CHECK (routing->getStringAttribute ("send").contains ("space.1"));
+    }
+    {
+        ShellProcessor q;
+        q.setStateInformation (both.getData(), static_cast<int> (both.getSize()));
+        CHECK (dynamic_cast<AnalogEngine&> (q.productEngine()).fxRoute() == saved);
+        CHECK (std::abs (q.parameterValue (params::sendA) - 40.0f) < 0.01f);
+    }
+}
+
+TEST_CASE ("analog: MAIN + SEND - through the plugin, card C's send reaches SEND's room and card A's level stays its own", "[v6][mainsend]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    REQUIRE (engine.setFxRoute (fx::mainSendGraph (fx::classicGraph())));
+    setValue (p, "space", 80.0f);
+    setValue (p, "echo", 0.0f);
+    setValue (p, params::hybrid2Enabled, 1.0f);   // (card C sounds: its second layer, an oscillator)
+    const std::vector<Note> shortNote { { 0, 60, 100 }, { 4800, 60, 0 } };
+    const auto dry = renderShell (p, 1.5, shortNote, false);
+    setValue (p, params::sendC, 100.0f);
+    const auto wet = renderShell (p, 1.5, shortNote, false);
+    // The room after the note: louder with card C sent (its tail is SEND's alone).
+    auto tail = [] (const juce::AudioBuffer<float>& b) {
+        double sum = 0.0;
+        for (int i = 48000; i < b.getNumSamples(); ++i)
+            sum += static_cast<double> (b.getSample (0, i)) * b.getSample (0, i);
+        return std::sqrt (sum / (b.getNumSamples() - 48000));
+    };
+    CHECK (tail (wet) > 2.0 * tail (dry) + 1.0e-5);
+}
+
+TEST_CASE ("analog: V6 gate 4 screenshots - FX ROUTING's MAIN, SEND and OVERVIEW (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v6-g4]")
+{
+    namespace fx = andor::analog::fx;
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    for (const int width : { 1448, 869 })
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+        ui.setSourceViewShown (true);
+        auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+        REQUIRE (view != nullptr);
+        auto shoot = [&] (const juce::String& name) {
+            ui.refreshNow();
+            view->resized();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        shoot ("g4-1-classic");
+        REQUIRE (view->useMainSend());
+        view->insertNew (fx::Type::eq);   // (an EQ on MAIN after MOVEMENT)
+        view->setTab (1);
+        view->select (std::nullopt);
+        shoot ("g4-3-send");
+        view->setTab (0);
+        view->select (std::nullopt);
+        shoot ("g4-2-main");
+        view->setTab (2);
+        shoot ("g4-4-overview");
+        ui.setSourceViewShown (false);
     }
 }

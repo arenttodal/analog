@@ -287,3 +287,14 @@ imported sound) is the engine's `Hybrid2Source` state child. Not modulation dest
 | `analog.hybrid2.noise.tone` | % | 0..100 | 100 | NOISE's tone |
 | `analog.hybrid2.noise.movement` | % | 0..100 | 0 | NOISE's level drift |
 | `analog.hybrid2.noise.keys` | % | 0..100 | 0 | NOISE's tone follows the key |
+
+## State version 17 (Cinematic V6 gate 4): the cards' sends
+
+Appended after card C's second layer's (version hint 32). Heard only with a MAIN + SEND route
+(FX ROUTING's gear: Use MAIN + SEND…). SUB has none, by design.
+
+| ID | Type | Range | Default | Use |
+|---|---|---|---|---|
+| `analog.send.a` | % | 0..100 | 0 | how much of card A reaches SEND (before the voice filter) |
+| `analog.send.b` | % | 0..100 | 0 | card B's |
+| `analog.send.c` | % | 0..100 | 0 | card C's (both its layers) |

@@ -5,6 +5,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <optional>
 
 namespace andor::analog
@@ -96,6 +97,17 @@ public:
     bool insertNew (fx::Type type);
     bool remove (fx::InstanceId id);
 
+    /** Cinematic V6 gate 4: a MAIN + SEND route's tabs (0 MAIN, 1 SEND, 2 OVERVIEW): the
+        board shows MAIN's or SEND's chain (edited in place), or both in miniature; the mixer's
+        knobs are the cards' levels on MAIN and their sends on SEND. Interface only. */
+    int tab() const noexcept { return currentTab; }
+    void setTab (int index);
+    juce::Rectangle<int> tabBounds (int index) const noexcept { return tabAreas[static_cast<std::size_t> (std::clamp (index, 0, 2))]; }
+    /** The musician's explicit conversion (gear): to MAIN + SEND (CLASSIC's inserts on MAIN, its
+        ECHO and SPACE on SEND; card C sent at 25 % when nothing is sent yet), and back. */
+    bool useMainSend();
+    bool useSinglePath();
+
     juce::PopupMenu settingsMenu();
     /** FX CHAIN presets (the gear): the route and its new effects' settings, as a file. */
     bool saveChain (const juce::String& name);
@@ -181,6 +193,11 @@ private:
     juce::Point<int> dragAt;
     int dropGap = -1, dropTile = -1;   ///< (indices into gapList / placed while dragging)
     juce::String shown;
+    int currentTab = 0;
+    std::array<juce::Rectangle<int>, 3> tabAreas;
+    void bindMixer();
+    void paintTabs (juce::Graphics&) const;
+    void paintOverview (juce::Graphics&) const;
 };
 
 /** The routing view for ShellProduct::sourceAreaView. */

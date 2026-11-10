@@ -360,7 +360,7 @@ public:
     std::vector<Row> rows() const
     {
         std::vector<Row> out;
-        const auto g = view.route();
+        const auto g = view.engine.fxRoute();   // (MAIN + SEND: both paths hold the pool)
         const auto query = search.getText().trim().toUpperCase();
         int y = 70 - scroll;
         juce::String category;
@@ -570,16 +570,11 @@ FxRoutingView::FxRoutingView (osp::plugin::InstrumentHost& h) : host (h), engine
         s->getProperties().set ("mini", true);
         s->getProperties().set ("arc", static_cast<juce::int64> (mixerTileColour (i).getARGB()));
         s->setRotaryParameters (osp::plugin::OspLookAndFeel::rotaryStart, osp::plugin::OspLookAndFeel::rotaryEnd, true);
-        s->setTitle (juce::String ("Card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i)) + " level");
-        if (auto* p = host.apvts().getParameter (levelIds[i]))
-        {
-            levelAttachments[static_cast<std::size_t> (i)] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (host.apvts(), levelIds[i], *s);
-            s->setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
-            s->setTooltip (p->getName (64));
-        }
         s->onValueChange = [this] { repaint (mixerArea); };
         addAndMakeVisible (*s);
     }
+    juce::ignoreUnused (levelIds);
+    bindMixer();
 
     engine.onFxRouteChanged = [safe = juce::Component::SafePointer<FxRoutingView> (this)] {
         if (safe != nullptr)
@@ -596,16 +591,111 @@ FxRoutingView::~FxRoutingView()
     engine.onFxRouteChanged = nullptr;
 }
 
-fx::Graph FxRoutingView::route() const { return engine.fxRoute(); }
+fx::Graph FxRoutingView::route() const
+{
+    // MAIN + SEND: the board is the tab's chain, as a route of its own (OVERVIEW: none).
+    auto g = engine.fxRoute();
+    if (! g.mainSend)
+        return g;
+    fx::Graph view;
+    view.custom = true;
+    if (currentTab == 0)
+        view.chain = g.chain;
+    else if (currentTab == 1)
+        view.chain = g.send;
+    return view;
+}
 
 bool FxRoutingView::apply (const fx::Graph& next, const juce::String& what)
 {
-    auto now = route();
-    if (next == now)
+    const auto now = engine.fxRoute();
+    // An edit of a MAIN + SEND tab is that chain's (Restore original: the whole route).
+    fx::Graph target = next;
+    if (now.mainSend && next.custom && ! next.mainSend)
+    {
+        if (currentTab == 2)
+            return false;   // (OVERVIEW edits nothing)
+        target = now;
+        (currentTab == 1 ? target.send : target.chain) = next.chain;
+    }
+    if (target == now || ! fx::validate (target).empty())
         return false;
     auto& undo = host.undo();
     undo.beginNewTransaction (what);
-    const bool done = undo.perform (new RouteEdit (engine, now, next), what);
+    const bool done = undo.perform (new RouteEdit (engine, now, target), what);
+    if (! engine.fxRoute().mainSend && currentTab != 0)
+        setTab (0);
+    layoutChain();
+    repaint();
+    return done;
+}
+
+void FxRoutingView::bindMixer()
+{
+    // MAIN (and one path): the cards' levels; SEND: their sends.
+    const bool sends = currentTab == 1 && engine.fxRoute().mainSend;
+    const juce::String ids[3] { sends ? params::sendA : params::osc1Level, sends ? params::sendB : params::osc2Level, sends ? params::sendC : juce::String ("layerB.level") };
+    for (int i = 0; i < 3; ++i)
+    {
+        auto& s = levels[static_cast<std::size_t> (i)];
+        levelAttachments[static_cast<std::size_t> (i)].reset();
+        s->setTitle (juce::String ("Card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i)) + (sends ? " send" : " level"));
+        if (auto* p = host.apvts().getParameter (ids[i]))
+        {
+            levelAttachments[static_cast<std::size_t> (i)] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (host.apvts(), ids[i], *s);
+            s->setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
+            s->setTooltip (sends ? juce::String ("How much of card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i))
+                                       + " reaches SEND (taken before the filter; card C: both its layers)"
+                                 : p->getName (64));
+        }
+    }
+    repaint (mixerArea);
+}
+
+void FxRoutingView::setTab (int index)
+{
+    index = std::clamp (index, 0, 2);
+    if (! engine.fxRoute().mainSend)
+        index = 0;
+    if (index == currentTab)
+        return;
+    currentTab = index;
+    showQuick (std::nullopt);
+    showLibrary (false);
+    select (std::nullopt);
+    bindMixer();
+    layoutChain();
+    repaint();
+}
+
+bool FxRoutingView::useMainSend()
+{
+    const auto now = engine.fxRoute();
+    if (now.mainSend)
+        return false;
+    const auto next = fx::mainSendGraph (now);
+    if (! next.mainSend || ! apply (next, "Use MAIN + SEND"))
+        return false;
+    // Conservative sends: card C at 25 % when nothing is sent yet (the dry is untouched).
+    if (host.parameterValue (params::sendA) <= 0.0f && host.parameterValue (params::sendB) <= 0.0f && host.parameterValue (params::sendC) <= 0.0f)
+        if (auto* p = host.apvts().getParameter (params::sendC))
+            p->setValueNotifyingHost (p->convertTo0to1 (25.0f));
+    setTab (0);
+    return true;
+}
+
+bool FxRoutingView::useSinglePath()
+{
+    const auto now = engine.fxRoute();
+    if (! now.mainSend)
+        return false;
+    const auto next = fx::singlePathGraph (now);
+    if (! fx::validate (next).empty())
+        return false;
+    auto& undo = host.undo();
+    undo.beginNewTransaction ("Back to one path");
+    const bool done = undo.perform (new RouteEdit (engine, now, next), "Back to one path");
+    setTab (0);
     layoutChain();
     repaint();
     return done;
@@ -683,11 +773,15 @@ bool FxRoutingView::remove (InstanceId id)
 
 bool FxRoutingView::insertNew (Type type)
 {
+    // MAIN + SEND: a spatial effect goes on SEND (MAIN holds inserts only).
+    if (engine.fxRoute().mainSend && (fx::isSpatial (type) ? currentTab != 1 : currentTab == 2))
+        setTab (fx::isSpatial (type) ? 1 : 0);   // (OVERVIEW: an insert goes on MAIN)
     auto g = route();
-    // A free slot of its pool.
+    // A free slot of its pool (in the whole route: MAIN's and SEND's).
+    const auto whole = engine.fxRoute();
     std::optional<InstanceId> id;
     for (int s = 0; s < fx::capacity[static_cast<std::size_t> (type)] && ! id; ++s)
-        if (! fx::contains (g, { type, s }))
+        if (! fx::contains (whole, { type, s }))
             id = InstanceId { type, s };
     if (! id || ! fx::implemented (type))
         return false;
@@ -710,6 +804,11 @@ juce::PopupMenu FxRoutingView::settingsMenu()
     juce::PopupMenu m;
     const bool custom = route().custom;
     m.addItem ("Restore original", custom, false, [this] { restoreOriginal(); });
+    // Cinematic V6 gate 4: MAIN + SEND, only by this explicit choice (never on load).
+    if (engine.fxRoute().mainSend)
+        m.addItem ("Back to one path", [this] { useSinglePath(); });
+    else
+        m.addItem (juce::String::fromUTF8 ("Use MAIN + SEND\xe2\x80\xa6"), [this] { useMainSend(); });
     m.addSeparator();
     // FX CHAIN presets: the route and its new effects' settings (never the instrument's).
     m.addItem ("Save FX chain...", [safe = juce::Component::SafePointer<FxRoutingView> (this)] {
@@ -928,6 +1027,9 @@ juce::String FxRoutingView::signature() const
 
 void FxRoutingView::timerCallback()
 {
+    // (A session or preset left MAIN + SEND: back to its one path.)
+    if (currentTab != 0 && ! engine.fxRoute().mainSend)
+        setTab (0);
     // (The window's scale changes the board's tile size: a pure re-projection.)
     if (std::abs (juce::Component::getApproximateScaleFactorForComponent (this) - layoutScale) > 0.01f)
     {
@@ -958,6 +1060,12 @@ void FxRoutingView::resized()
     header.removeFromRight (statusWidth);
     header.removeFromRight (16);
     add->setBounds (header.removeFromRight (116).withSizeKeepingCentre (116, 28));
+    {
+        // MAIN | SEND | OVERVIEW: a compact segmented key after ROUTING (MAIN + SEND only).
+        const int x0 = headerArea.getX() + 120, w = 74, h = 24;
+        for (int i = 0; i < 3; ++i)
+            tabAreas[static_cast<std::size_t> (i)] = juce::Rectangle<int> (x0 + i * w, headerArea.getCentreY() - h / 2, w, h);
+    }
     inner.removeFromTop (14);
     // The mixer: about a fifth (V4: 21 %, knobs in place of the sliders), never so narrow that
     // a card's name and its knob collide.
@@ -1442,8 +1550,10 @@ void FxRoutingView::paint (juce::Graphics& g)
         const auto statusArea = juce::Rectangle<int> (add->getRight() + 8, headerArea.getY(), gear->getX() - 10 - add->getRight() - 8, headerArea.getHeight());
         g.setColour (custom ? warm.darker (0.12f) : green);
         g.setFont (font (11.5f * std::min (mixerScale, 1.15f), fonts::Weight::semibold, 0.05f));
-        g.drawText (custom ? "CUSTOM" : "CLASSIC", statusArea, juce::Justification::centredRight, false);
+        const bool mainSend = engine.fxRoute().mainSend;
+        g.drawText (mainSend ? "MAIN + SEND" : (custom ? "CUSTOM" : "CLASSIC"), statusArea, juce::Justification::centredRight, false);
     }
+    paintTabs (g);
     g.setColour (juce::Colour (0xffe5dbcf));
     g.fillRect (juce::Rectangle<int> (headerArea.getX(), headerArea.getBottom() + 4, headerArea.getWidth(), 1));
 
@@ -1583,7 +1693,9 @@ void FxRoutingView::paintMixer (juce::Graphics& g) const
     const float k = mixerScale;
     const char* names[3] { "OSC 1", "OSC 2", "HYBRID" };
     const juce::String kinds[3] { textOf (host, params::osc1Model), textOf (host, params::osc2Model), textOf (host, params::hybridType) };
-    const juce::String levelIds[3] { params::osc1Level, params::osc2Level, "layerB.level" };
+    const bool sends = currentTab == 1 && engine.fxRoute().mainSend;
+    const juce::String levelIds[3] { sends ? params::sendA : params::osc1Level, sends ? params::sendB : params::osc2Level,
+                                     sends ? params::sendC : juce::String ("layerB.level") };
     for (int i = 0; i < 3; ++i)
     {
         const auto row = mixerRow (i);
@@ -1834,8 +1946,115 @@ void FxRoutingView::showSummaryMenu (int index)
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (sum.bounds)));
 }
 
+void FxRoutingView::paintTabs (juce::Graphics& g) const
+{
+    if (! engine.fxRoute().mainSend)
+        return;
+    const char* names[3] { "MAIN", "SEND", "OVERVIEW" };
+    const auto all = tabAreas[0].getUnion (tabAreas[2]).toFloat();
+    g.setColour (juce::Colour (0xffece5da));
+    g.fillRoundedRectangle (all, 6.0f);
+    g.setColour (edge);
+    g.drawRoundedRectangle (all.reduced (0.5f), 6.0f, 1.0f);
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto r = tabAreas[static_cast<std::size_t> (i)].toFloat();
+        const bool on = i == currentTab;
+        if (on)
+        {
+            g.setColour (juce::Colour (0xfffbf8f2));
+            g.fillRoundedRectangle (r.reduced (2.0f), 5.0f);
+            g.setColour (edge.darker (0.05f));
+            g.drawRoundedRectangle (r.reduced (2.5f), 5.0f, 1.0f);
+        }
+        else if (i > 0 && i - 1 != currentTab)
+        {
+            g.setColour (edge);
+            g.fillRect (juce::Rectangle<float> (r.getX(), r.getY() + 6.0f, 1.0f, r.getHeight() - 12.0f));
+        }
+        g.setColour (on ? ink : soft);
+        g.setFont (font (10.5f, fonts::Weight::semibold, 0.08f));
+        g.drawText (names[i], r, juce::Justification::centred, false);
+    }
+}
+
+void FxRoutingView::paintOverview (juce::Graphics& g) const
+{
+    // Both paths in miniature, read left to right: MAIN (the cards' levels into its inserts,
+    // OUTPUT) and SEND (the cards' sends into its wet chain, back to OUTPUT).
+    const auto full = engine.fxRoute();
+    auto area = zoneArea.reduced (0, 8);
+    g.setColour (juce::Colour (0xfff7f2ea));
+    g.fillRect (zoneArea.withTrimmedLeft (-28));
+    const int laneH = std::min (96, area.getHeight() / 2 - 10);
+    auto lane = [&] (juce::Rectangle<int> r, const char* title, const std::vector<fx::Node>& chain, const juce::String& feed) {
+        g.setColour (juce::Colour (0xfffbf8f2));
+        g.fillRoundedRectangle (r.toFloat(), 10.0f);
+        g.setColour (edge);
+        g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 10.0f, 1.0f);
+        auto inner = r.reduced (16, 0);
+        g.setColour (ink);
+        g.setFont (font (13.0f, fonts::Weight::semibold, 0.08f));
+        g.drawText (title, inner.removeFromLeft (64), juce::Justification::centredLeft, false);
+        g.setColour (soft);
+        g.setFont (font (11.0f, fonts::Weight::medium, 0.04f));
+        const int feedW = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (11.0f, fonts::Weight::medium, 0.04f), feed)) + 12;
+        g.drawText (feed, inner.removeFromLeft (feedW), juce::Justification::centredLeft, false);
+        const float cy = static_cast<float> (r.getCentreY());
+        g.setColour (wire);
+        g.drawLine (static_cast<float> (inner.getX()), cy, static_cast<float> (inner.getRight() - 64), cy, 1.4f);
+        auto chip = [&] (const juce::String& text, juce::Colour accent) {
+            const int w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (11.0f, fonts::Weight::semibold, 0.05f), text)) + 30;
+            auto c = inner.removeFromLeft (w).withSizeKeepingCentre (w, 30).toFloat();
+            inner.removeFromLeft (12);
+            g.setColour (juce::Colour (0xfffdfbf7));
+            g.fillRoundedRectangle (c, 6.0f);
+            g.setColour (edge.darker (0.05f));
+            g.drawRoundedRectangle (c.reduced (0.5f), 6.0f, 1.0f);
+            g.setColour (accent);
+            g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ c.getX() + 12.0f, c.getCentreY() }));
+            g.setColour (ink);
+            g.setFont (font (11.0f, fonts::Weight::semibold, 0.05f));
+            g.drawText (text, c.withTrimmedLeft (20.0f), juce::Justification::centredLeft, false);
+        };
+        std::function<void (const std::vector<fx::Node>&)> walk = [&] (const std::vector<fx::Node>& c) {
+            for (const auto& n : c)
+            {
+                if (n.kind == fx::Node::Kind::effect)
+                    chip (fx::typeName (n.fx.type), fxAccent (n.fx.type));
+                else
+                {
+                    juce::String names;
+                    std::vector<fx::InstanceId> ids;
+                    for (const auto& l : n.lanes)
+                        for (const auto& id : fx::instancesOf (fx::Graph { true, l, false, {} }))
+                            ids.push_back (id);
+                    for (const auto& id : ids)
+                        names << (names.isEmpty() ? "" : juce::String::fromUTF8 (" \xe2\x80\x96 ")) << fx::typeName (id.type);
+                    chip (names, ids.empty() ? sage : fxAccent (ids.front().type));
+                }
+            }
+        };
+        if (chain.empty())
+            chip ("NOTHING", weak);
+        walk (chain);
+        g.setColour (soft);
+        g.setFont (font (11.0f, fonts::Weight::semibold, 0.08f));
+        g.drawText ("OUTPUT", r.withLeft (r.getRight() - 76), juce::Justification::centred, false);
+    };
+    const auto percent = [this] (const juce::String& id) { return juce::String (juce::roundToInt (host.parameterValue (id))) + "%"; };
+    const juce::String feed = "A " + percent (params::sendA) + juce::String::fromUTF8 (" \xc2\xb7 B ") + percent (params::sendB)
+                              + juce::String::fromUTF8 (" \xc2\xb7 C ") + percent (params::sendC);
+    area = area.withSizeKeepingCentre (area.getWidth(), 2 * laneH + 16);
+    lane (area.removeFromTop (laneH), "MAIN", full.chain, "A B C");
+    area.removeFromTop (16);
+    lane (area.removeFromTop (laneH), "SEND", full.send, feed);
+}
+
 void FxRoutingView::paintOverChildren (juce::Graphics& g)
 {
+    if (currentTab == 2 && engine.fxRoute().mainSend)
+        paintOverview (g);
     // The dragged tile follows the pointer (a light copy).
     if (dragging && pressed)
     {
@@ -1854,6 +2073,13 @@ void FxRoutingView::paintOverChildren (juce::Graphics& g)
 void FxRoutingView::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    if (engine.fxRoute().mainSend)
+        for (int t = 0; t < 3; ++t)
+            if (tabAreas[static_cast<std::size_t> (t)].contains (e.getPosition()))
+            {
+                setTab (t);
+                return;
+            }
     if (library != nullptr && library->isVisible() && ! library->getBounds().contains (e.getPosition()))
         showLibrary (false);
     if (quick != nullptr && tileAt (e.getPosition()) < 0)

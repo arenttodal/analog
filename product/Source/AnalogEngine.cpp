@@ -129,7 +129,16 @@ void AnalogEngine::saveState (juce::XmlElement& state) const
     // State version 12: the FX route, only once it is CUSTOM (absent: CLASSIC, as every session
     // and preset from before is).
     const std::lock_guard<std::mutex> lock (routeMutex);
-    if (route.custom)
+    if (route.mainSend)
+    {
+        // Cinematic V6 gate 4: MAIN + SEND (schema 2), only ever by the musician's own choice.
+        auto* fx = state.createNewChildElement ("FxRouting");
+        fx->setAttribute ("schema", 2);
+        fx->setAttribute ("mode", "mainSend");
+        fx->setAttribute ("main", juce::String (andor::analog::fx::mainText (route)));
+        fx->setAttribute ("send", juce::String (andor::analog::fx::sendText (route)));
+    }
+    else if (route.custom)
     {
         auto* fx = state.createNewChildElement ("FxRouting");
         fx->setAttribute ("schema", andor::analog::fx::Graph::schema);
@@ -176,8 +185,13 @@ void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File
     if (const auto* fx = state.getChildByName ("FxRouting"))
     {
         andor::analog::fx::Graph read;
-        if (andor::analog::fx::fromText (fx->getStringAttribute ("graph").toStdString(), read))
-            saved = read;
+        if (fx->getIntAttribute ("schema", 1) == 2 && fx->getStringAttribute ("mode") == "mainSend")
+        {
+            if (andor::analog::fx::fromMainSend (fx->getStringAttribute ("main").toStdString(), fx->getStringAttribute ("send").toStdString(), read))
+                saved = read;
+        }
+        else if (andor::analog::fx::fromText (fx->getStringAttribute ("graph").toStdString(), read))
+            saved = read;   // (schema 1: CLASSIC or CUSTOM, exactly as saved; never upgraded)
     }
     if (! setFxRoute (saved))
         setFxRoute (andor::analog::fx::classicGraph());

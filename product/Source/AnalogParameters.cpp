@@ -94,6 +94,8 @@ namespace
         iSubEnabled, iSubWave, iSubOctave, iSubGrit, iSubLevel, iSubLowKey, iSubHighKey, iSubResponse, iSubTaperStart, iSubTaperSlope,
         // State version 16 (Cinematic V6): card C's second layer.
         iHybrid2Enabled, iHybrid2Type, iHybrid2Level, iHybrid2Octave, iHybrid2Coarse, iHybrid2Fine, iHybrid2Velo, iHybrid2Model, iHybrid2Wave, iHybrid2Width, iHybrid2DcoSaw, iHybrid2DcoPulse, iHybrid2DcoSub, iHybrid2DcoPwmSource, iHybrid2DcoPwmDepth, iHybrid2WideWave, iHybrid2WideShape, iHybrid2WideSpread, iHybrid2NoiseColor, iHybrid2NoiseTone, iHybrid2NoiseMovement, iHybrid2NoiseKeys,
+        // State version 17: the cards' sends.
+        iSendA, iSendB, iSendC,
         count
     };
 
@@ -201,6 +203,9 @@ namespace
                 l.add (*id);
             // State version 16: card C's second layer.
             for (const auto* id : { &hybrid2Enabled, &hybrid2Type, &hybrid2Level, &hybrid2Octave, &hybrid2Coarse, &hybrid2Fine, &hybrid2Velo, &hybrid2Model, &hybrid2Wave, &hybrid2Width, &hybrid2DcoSaw, &hybrid2DcoPulse, &hybrid2DcoSub, &hybrid2DcoPwmSource, &hybrid2DcoPwmDepth, &hybrid2WideWave, &hybrid2WideShape, &hybrid2WideSpread, &hybrid2NoiseColor, &hybrid2NoiseTone, &hybrid2NoiseMovement, &hybrid2NoiseKeys })
+                l.add (*id);
+            // State version 17: the cards' sends.
+            for (const auto* id : { &sendA, &sendB, &sendC })
                 l.add (*id);
             return l;
         }();
@@ -816,6 +821,15 @@ void addHybrid2To (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percent (hybrid2NoiseKeys, "Hybrid 2 Noise Keys", d.noiseKeys);
 }
 
+void addSendsTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 17 (Cinematic V6 gate 4): 0 in a new instrument and every session from
+    // before, and heard only once the musician chooses a MAIN + SEND route.
+    for (const auto& [id, title] : { std::pair<const juce::String*, const char*> { &sendA, "Send A" }, { &sendB, "Send B" }, { &sendC, "Send C" } })
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (juce::ParameterID { *id, 32 }, title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f,
+                                                                              juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
+}
+
 const std::vector<osp::mod::ProductDest>& modulationDestinations()
 {
     static const std::vector<osp::mod::ProductDest> list = [] {
@@ -1164,6 +1178,9 @@ Patch Reader::readWith (const float* raw) const noexcept
         h.noiseMovement = 0.01 * v (iHybrid2NoiseMovement);
         h.noiseKeys = 0.01 * v (iHybrid2NoiseKeys);
     }
+    p.sendA = 0.01 * v (iSendA);
+    p.sendB = 0.01 * v (iSendB);
+    p.sendC = 0.01 * v (iSendC);
     p.granular = on (iSourceMode);
     p.grains.position = 0.01 * v (iGrainPosition);
     p.grains.sizeSeconds = 0.001 * v (iGrainSize);
@@ -1497,6 +1514,9 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (iHybrid2NoiseMovement, 100.0 * h.noiseMovement);
         put (iHybrid2NoiseKeys, 100.0 * h.noiseKeys);
     }
+    put (iSendA, 100.0 * p.sendA);
+    put (iSendB, 100.0 * p.sendB);
+    put (iSendC, 100.0 * p.sendC);
     put (iSourceMode, p.granular ? 1.0 : 0.0);
     put (iGrainPosition, 100.0 * p.grains.position);
     put (iGrainSize, 1000.0 * p.grains.sizeSeconds);

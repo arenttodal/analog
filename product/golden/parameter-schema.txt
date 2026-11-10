@@ -574,3 +574,6 @@ analog.hybrid2.noise.color v31 choice "Hybrid 2 Noise Color" label="" range=0.00
 analog.hybrid2.noise.tone v31 float "Hybrid 2 Noise Tone" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.hybrid2.noise.movement v31 float "Hybrid 2 Noise Movement" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.hybrid2.noise.keys v31 float "Hybrid 2 Noise Keys" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.send.a v32 float "Send A" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.send.b v32 float "Send B" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.send.c v32 float "Send C" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
