@@ -59,8 +59,11 @@ in 1.0. Each card's REIMAGINED transforms whatever its own part contains.
 
 - **`[reimagined][v6]` (DSP), RI-01 and RI-02, all four live modes:** a card heard alone sounds
   the same (max difference < 1e-6) whatever the other card's REIMAGINED is set to. Also checked:
-  each card's REIMAGINED changes its own card; both at 0 % are bit-identical to the plain voice;
-  the mix stage's level weighting.
+  each card's REIMAGINED changes its own card; each card's mode settings are heard (this caught
+  card B's second engine set left unprepared, fixed before the gate closed); both at 0 % are
+  bit-identical to the plain voice; the mix stage's level weighting.
+- **The bindings test:** every one of card B's REIMAGINED parameters moves the sound in its
+  context, as card A's do.
 - **`[v6][reimagined]` (plugin):** card B's parameters are read by the engine; version 13
   states migrate; version 14 states keep the cards apart; card B's fifth knob is REIMAGINED; VELO
   is in B's well in CLASSIC, DCO and WIDE, and not in the knob row.

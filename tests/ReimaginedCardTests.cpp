@@ -136,3 +136,27 @@ TEST_CASE ("reimagined per card: KALEIDOSCOPE's shared stage weighs each card's 
     s.setPatch (p);
     CHECK (s.kaleidoscopeAmount() == 0.0);
 }
+
+TEST_CASE ("reimagined per card: each card's mode settings are its own and heard (its engines are prepared)", "[reimagined][v6]")
+{
+    // (Card B's TAPE FRAME / TOYBOX / MIRAGE are a second set per voice: unprepared, their
+    // settings would do nothing.)
+    for (const int card : { 0, 1 })
+    {
+        INFO ("card " << (card == 0 ? "A" : "B"));
+        Patch p = twoCards();
+        (card == 0 ? p.osc2Heard : p.osc1Heard) = false;
+        (card == 0 ? p.reimagined : p.reimagined2) = 0.8;
+        auto& s = card == 0 ? p.reimaginedSettings : p.reimaginedSettings2;
+        s.mode = osp::ReimaginedMode::toybox;
+        s.toybox.motion = 0.15;
+        const auto slow = play (p);
+        s.toybox.motion = 0.85;
+        CHECK (maxDifference (slow, play (p)) > 1.0e-2f);
+        s.mode = osp::ReimaginedMode::tapeFrame;
+        s.tapeFrame.age = 0.1;
+        const auto young = play (p);
+        s.tapeFrame.age = 0.9;
+        CHECK (maxDifference (young, play (p)) > 1.0e-3f);
+    }
+}

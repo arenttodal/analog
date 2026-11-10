@@ -228,6 +228,12 @@ namespace
                 c.reimaginedSettings.mode = m;
             };
         };
+        auto reimaginedModeB = [] (osp::ReimaginedMode m) {   // (card B's own, state version 14)
+            return [m] (Patch& c) {
+                c.reimagined2 = 0.8;
+                c.reimaginedSettings2.mode = m;
+            };
+        };
         auto granular = [] (Patch& c) { c.granular = true; };
         auto granular2 = [] (Patch& c) { c.granular2 = true; };   // (card B's own, state version 8)
         auto abyss = [] (Patch& c) { c.effects.spaceEngine = osp::SpaceEngine::abyss; };   // (ABYSS's own: heard on ABYSS)
@@ -278,6 +284,28 @@ namespace
             { "layerA.reimagined.mirage.clock", reimaginedMode (osp::ReimaginedMode::mirage) },
             { "layerA.reimagined.mirage.filter", reimaginedMode (osp::ReimaginedMode::mirage) },
             { "layerA.reimagined.mirage.tone", reimaginedMode (osp::ReimaginedMode::mirage) },
+            // Card B's own REIMAGINED (the shell's layer C): its mode settings, heard while it plays.
+            { "layerC.reimagined", [] (Patch& c) { c.reimaginedSettings2.mode = osp::ReimaginedMode::kaleidoscope; } },
+            { "layerC.reimagined.mode", reimaginedModeB (osp::ReimaginedMode::kaleidoscope) },
+            { "layerC.reimagined.kaleidoscope.focus", reimaginedModeB (osp::ReimaginedMode::kaleidoscope) },
+            { "layerC.reimagined.kaleidoscope.spread", reimaginedModeB (osp::ReimaginedMode::kaleidoscope) },
+            { "layerC.reimagined.tapeFrame.age", reimaginedModeB (osp::ReimaginedMode::tapeFrame) },
+            { "layerC.reimagined.tapeFrame.stability", reimaginedModeB (osp::ReimaginedMode::tapeFrame) },
+            { "layerC.reimagined.tapeFrame.frame", [] (Patch& c) {
+                  c.granular2 = true;   // FRAME is the tape's length: heard as card B's grains follow it
+                  c.reimagined2 = 0.8;
+                  c.reimaginedSettings2.mode = osp::ReimaginedMode::tapeFrame;
+              } },
+            { "layerC.reimagined.toybox.motion", reimaginedModeB (osp::ReimaginedMode::toybox) },
+            { "layerC.reimagined.toybox.digital", reimaginedModeB (osp::ReimaginedMode::toybox) },
+            { "layerC.reimagined.toybox.play", [] (Patch& c) {
+                  c.granular2 = true;   // PLAY is how its heads move: heard as card B's grains follow them
+                  c.reimagined2 = 0.8;
+                  c.reimaginedSettings2.mode = osp::ReimaginedMode::toybox;
+              } },
+            { "layerC.reimagined.mirage.clock", reimaginedModeB (osp::ReimaginedMode::mirage) },
+            { "layerC.reimagined.mirage.filter", reimaginedModeB (osp::ReimaginedMode::mirage) },
+            { "layerC.reimagined.mirage.tone", reimaginedModeB (osp::ReimaginedMode::mirage) },
             { "layerA.granular.position", granular },
             { "layerA.granular.size", granular },
             { "layerA.granular.density", granular },
@@ -5882,7 +5910,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 13);   // (13: RETRO's parameters appended)
+        CHECK (xml->getIntAttribute ("productVersion") == 14);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.

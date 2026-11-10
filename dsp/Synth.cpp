@@ -126,6 +126,9 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.tapeFrame.prepare (internalRate);
         v.toybox.prepare (internalRate);
         v.mirage.prepare (internalRate);
+        v.tapeFrame2.prepare (internalRate);   // (card B's own, state version 14)
+        v.toybox2.prepare (internalRate);
+        v.mirage2.prepare (internalRate);
         v.highPass.prepare (internalRate);
         v.organic.prepare (internalRate);
         for (auto& z : v.zones)
