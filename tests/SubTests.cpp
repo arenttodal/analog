@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 using namespace testutil;
 
@@ -94,7 +95,8 @@ namespace
 
 TEST_CASE ("SUB-01: SUB sustains the chord the musician holds, not the arpeggiator's notes", "[sub][v6]")
 {
-    Synth s;
+    auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& s = *sOwned;
     s.prepare (48000.0, 256, 4);
     s.setPatch (withSub (measurementPatch()));
     s.reset();
@@ -110,7 +112,8 @@ TEST_CASE ("SUB-01: SUB sustains the chord the musician holds, not the arpeggiat
 
     // SUB alone (the voices given nothing): a steady chord, at the chord's pitch two octaves
     // down (C1 is 32.7 Hz: the lowest note's crossings).
-    Synth alone;
+    auto aloneOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& alone = *aloneOwned;
     alone.prepare (48000.0, 256, 4);
     auto p = withSub (measurementPatch());
     alone.setPatch (p);
@@ -119,7 +122,8 @@ TEST_CASE ("SUB-01: SUB sustains the chord the musician holds, not the arpeggiat
     CHECK (out.rms (0.1, 0.35) > 0.02);
     CHECK (std::abs (out.rms (0.1, 0.35) - out.rms (0.4, 0.65)) < 0.15 * out.rms (0.1, 0.35));
     // A single key: its pitch.
-    Synth one;
+    auto oneOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& one = *oneOwned;
     one.prepare (48000.0, 256, 4);
     one.setPatch (p);
     one.reset();
@@ -177,7 +181,8 @@ TEST_CASE ("SUB-01: the keys released, SUB's voices end; the pedal holds them; A
 
 TEST_CASE ("SUB-02: dragging the range while keys are held: keys join and leave smoothly, none stuck", "[sub][v6]")
 {
-    Synth s;
+    auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& s = *sOwned;
     s.prepare (48000.0, 256, 4);
     auto p = withSub (measurementPatch());
     p.sub.lowKey = 48;
@@ -221,7 +226,8 @@ TEST_CASE ("SUB-02: dragging the range while keys are held: keys join and leave 
 
 TEST_CASE ("SUB-02: turning SUB on while keys are held starts them; off fades them", "[sub][v6]")
 {
-    Synth s;
+    auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& s = *sOwned;
     s.prepare (48000.0, 256, 4);
     auto p = measurementPatch();
     s.setPatch (p);
@@ -267,7 +273,8 @@ TEST_CASE ("SUB-03: FLAT and TAPER shape the level against the key; every wave a
             for (const int octave : { -1, -2 })
             {
                 INFO ("wave " << static_cast<int> (wave) << " grit " << grit << " octave " << octave);
-                Synth s;
+                auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+                Synth& s = *sOwned;
                 s.prepare (48000.0, 256, 4);
                 auto p = withSub (measurementPatch());
                 p.sub.wave = wave;
@@ -291,7 +298,8 @@ TEST_CASE ("SUB-03: FLAT and TAPER shape the level against the key; every wave a
 TEST_CASE ("SUB-03: the waves differ, and GRIT adds harmonics", "[sub][v6]")
 {
     auto play = [] (SubSettings::Wave wave, double grit) {
-        Synth s;
+        auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+        Synth& s = *sOwned;
         s.prepare (48000.0, 256, 4);
         auto p = withSub (measurementPatch());
         p.sub.wave = wave;
@@ -311,7 +319,8 @@ TEST_CASE ("SUB-03: the waves differ, and GRIT adds harmonics", "[sub][v6]")
 TEST_CASE ("SUB-04: the oscillators silent, SUB played: no ECHO or SPACE, even at full wet and feedback", "[sub][v6]")
 {
     auto play = [] (bool wet) {
-        Synth s;
+        auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+        Synth& s = *sOwned;
         s.prepare (48000.0, 256, 4);
         auto p = withSub (measurementPatch());
         p.osc1Level = p.osc2Level = 0.0;
@@ -347,7 +356,8 @@ TEST_CASE ("SUB-05: CLASSIC with SUB on: SUB is added dry, the old signal is unt
     const std::vector<Event> notes { on (0, 60, 100), on (6000, 64, 90), off (30000, 60), off (30000, 64) };
     const std::vector<Event> played { on (0, 48, 100), on (6000, 55, 90), off (30000, 48), off (30000, 55) };
     auto play = [&] (const Patch& p, bool withNotes) {
-        Synth s;
+        auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+        Synth& s = *sOwned;
         s.prepare (48000.0, 256, 4);
         s.setPatch (p);
         s.reset();
@@ -356,7 +366,8 @@ TEST_CASE ("SUB-05: CLASSIC with SUB on: SUB is added dry, the old signal is unt
     const auto old = play (patch(), true);
     // SUB off: the musician's keys reach it, nothing changes (bit for bit the voices alone).
     {
-        Synth s;
+        auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+        Synth& s = *sOwned;
         s.prepare (48000.0, 256, 4);
         s.setPatch (patch());
         s.reset();

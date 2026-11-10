@@ -37,7 +37,8 @@ using namespace testutil;
 TEST_CASE ("realtime: rendering, events and patch changes never allocate", "[realtime]")
 {
     const auto& list = factoryPatches();
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     synth.setPatch (list[0].patch);
     synth.reset();
@@ -69,7 +70,8 @@ TEST_CASE ("realtime: rendering, events and patch changes never allocate", "[rea
 
 TEST_CASE ("realtime: GRANULAR, the REIMAGINED modes, MOVEMENT, DRIVE and KEY DNA never allocate", "[realtime][live]")
 {
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     auto p = factoryPatches()[0].patch;
     p.granular = true;
@@ -120,7 +122,8 @@ TEST_CASE ("realtime: modulation (routes, a product control, controllers, reset)
     settings.routes[2] = { mod::Source::vel, mod::Dest::ampRelease, 0.4, true, -1 };
     settings.routes[3] = { mod::Source::cc1, mod::Dest::panA, 0.4, true, -1 };
     settings.routes[4] = { mod::Source::modWheel, mod::Dest::drive, 0.4, true, -1 };
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     synth.setPatch (factoryPatches()[1].patch);
     synth.setControlModulator (&tone);
@@ -152,7 +155,8 @@ TEST_CASE ("realtime: modulation (routes, a product control, controllers, reset)
 
 TEST_CASE ("realtime: the oscillator models, RING, the OTA, the high-pass and the chorus never allocate", "[realtime][models]")
 {
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     Patch p;
     synth.setPatch (p);
@@ -211,7 +215,8 @@ TEST_CASE ("realtime: ORGANIC (notes, loops, a recording replaced while it plays
         return m;
     };
     const auto a = make (220.0), b = make (330.0);
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     Patch p;
     synth.setPatch (p);
@@ -252,7 +257,8 @@ TEST_CASE ("realtime: MORPH (live: IMPRINT, FUSE, WEAVE, every carrier and card 
     audio.channels = { x };
     auto model = std::make_shared<osp::InstrumentModel>();
     model->original.source = std::make_shared<osp::PlaybackSource> (audio, 57.0, 4);
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     Patch p;
     p.morph.enabled = true;
@@ -310,7 +316,8 @@ TEST_CASE ("realtime: an imported sample source (zones, loops, swaps) never allo
     }
     b.zones = { a.zones[1], a.zones[4] };
     auto patch = measurementPatch();
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     synth.setPatch (patch);
     synth.setSampleSource (&a);
@@ -336,7 +343,8 @@ TEST_CASE ("realtime: an imported sample source (zones, loops, swaps) never allo
 
 TEST_CASE ("realtime: three engines (each card's EQ and M / S, OSC 3, NOISE, the hybrid's type switching) never allocate", "[realtime][threeengines]")
 {
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     Patch p;
     synth.setPatch (p);
@@ -427,7 +435,8 @@ TEST_CASE ("realtime: every new effect - RETRO in each personality, switched mid
 
 TEST_CASE ("realtime: SUB's keys, range, settings and controllers never allocate (RT-01)", "[realtime][sub][v6]")
 {
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     auto p = factoryPatches()[0].patch;
     p.sub.enabled = true;
@@ -482,7 +491,8 @@ TEST_CASE ("realtime: card C's second layer (its types, its source swapped mid-n
         return s;
     };
     const auto a = makeSource (440.0), b = makeSource (330.0);
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     auto p = factoryPatches()[0].patch;
     p.hybrid2.enabled = true;
@@ -520,7 +530,8 @@ TEST_CASE ("realtime: MAIN + SEND (the cards' sends, SEND's wet chain, SUB on MA
     g.chain = { fx::Node::effect ({ fx::Type::drive, 0 }), fx::Node::effect ({ fx::Type::eq, 0 }) };
     g.send = { fx::Node::effect ({ fx::Type::eq, 1 }), fx::Node::parallel ({ fx::Node::effect ({ fx::Type::echo, 0 }) }, { fx::Node::effect ({ fx::Type::space, 0 }) }, fx::Law::send),
                fx::Node::effect ({ fx::Type::convolution, 0 }) };
-    Synth synth;
+    auto synthOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& synth = *synthOwned;
     synth.prepare (48000.0, 512, 4);
     auto p = factoryPatches()[0].patch;
     p.sub.enabled = true;

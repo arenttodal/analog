@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 using namespace testutil;
 
@@ -117,7 +118,8 @@ TEST_CASE ("reimagined per card: both cards at 0 % render exactly as before the 
 
 TEST_CASE ("reimagined per card: KALEIDOSCOPE's shared stage weighs each card's amount by how loud the card is heard", "[reimagined][v6]")
 {
-    Synth s;
+    auto sOwned = std::make_unique<Synth>();   // (on the heap: a Synth is larger than some platforms' stacks)
+    Synth& s = *sOwned;
     s.prepare (48000.0, 512, 4);
     Patch p = twoCards();
     p.reimaginedSettings.mode = p.reimaginedSettings2.mode = osp::ReimaginedMode::kaleidoscope;
