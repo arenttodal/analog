@@ -587,6 +587,12 @@ private:
 
     // Oversampled mix and decimation.
     std::vector<float> mixL, mixR, halfL, halfR;
+    // Cinematic V6 gate 4: the cards' sends (MAIN + SEND only), at the internal rate, then the host's.
+    std::vector<float> sendMixL, sendMixR, sendHalfL, sendHalfR, sendOutL, sendOutR;
+    HalfBandDecimator sendStage1L, sendStage1R, sendStage2L, sendStage2R;
+    bool sendTaps = false;            ///< this chunk: the voices add their sends
+    float* tapL = nullptr;            ///< (renderVoice's: where this chunk's sends go)
+    float* tapR = nullptr;
     HalfBandDecimator stage1L, stage1R, stage2L, stage2R;
 
     // GRANULAR's KEY DNA, REIMAGINED's live parts.

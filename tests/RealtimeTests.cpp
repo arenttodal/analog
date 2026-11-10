@@ -510,3 +510,43 @@ TEST_CASE ("realtime: card C's second layer (its types, its source swapped mid-n
     synth.setSampleSource2 (nullptr);
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: MAIN + SEND (the cards' sends, SEND's wet chain, SUB on MAIN) never allocates", "[realtime][mainsend][v6]")
+{
+    namespace fx = andor::analog::fx;
+    fx::Graph g;
+    g.custom = true;
+    g.mainSend = true;
+    g.chain = { fx::Node::effect ({ fx::Type::drive, 0 }), fx::Node::effect ({ fx::Type::eq, 0 }) };
+    g.send = { fx::Node::effect ({ fx::Type::eq, 1 }), fx::Node::parallel ({ fx::Node::effect ({ fx::Type::echo, 0 }) }, { fx::Node::effect ({ fx::Type::space, 0 }) }, fx::Law::send),
+               fx::Node::effect ({ fx::Type::convolution, 0 }) };
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    auto p = factoryPatches()[0].patch;
+    p.sub.enabled = true;
+    p.hybrid2.enabled = true;
+    synth.setPatch (p);
+    synth.setFxGraph (fx::compile (g, 1));
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    synth.render (left.data(), right.data(), 512);   // (the route taken)
+    counting = true;
+    for (int block = 0; block < 200; ++block)
+    {
+        p.sendA = (block % 5) / 4.0;
+        p.sendB = (block % 3) / 2.0;
+        p.sendC = block % 7 == 0 ? 0.0 : 0.8;
+        p.space = (block % 11) / 10.0;
+        synth.setPatch (p);
+        const std::uint8_t keyOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t keyOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 30) % 48), 0 };
+        synth.handleMidi (keyOn, 3);
+        synth.handleSubMidi (keyOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (keyOff, 3);
+        synth.handleSubMidi (keyOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

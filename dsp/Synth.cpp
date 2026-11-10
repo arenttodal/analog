@@ -87,6 +87,12 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     mixR.assign (internalBlock, 0.0f);
     halfL.assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
     halfR.assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
+    for (auto* b : { &sendMixL, &sendMixR })
+        b->assign (internalBlock, 0.0f);
+    for (auto* b : { &sendHalfL, &sendHalfR })
+        b->assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
+    for (auto* b : { &sendOutL, &sendOutR })
+        b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
 
     // 2x -> 1x: flat to 0.42 fs, -96 dB from 0.58 fs (what folds back lands above 0.42 fs).
     stage2L.design (0.08, 96.0);
@@ -94,6 +100,10 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     // 4x -> 2x: only what would fold below 0.42 fs needs rejecting.
     stage1L.design (0.29, 96.0);
     stage1R.design (0.29, 96.0);
+    for (auto* d : { &sendStage2L, &sendStage2R })
+        d->design (0.08, 96.0);
+    for (auto* d : { &sendStage1L, &sendStage1R })
+        d->design (0.29, 96.0);
     double delay = 0.0;
     if (oversampling >= 2)
         delay += stage2L.latency() / 2.0;
@@ -230,7 +240,7 @@ void Synth::reset() noexcept
         v.phase2 = start.nextDouble();
         v.noise.reseed (osp::Prng::deriveSeed (current.seed, static_cast<std::uint64_t> (v.slot), 0x4e4fu));
     }
-    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R })
+    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R, &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R })
         d->reset();
     osp::Macros macros;
     macros.life = macros.reimagined = 0.0;
@@ -1071,7 +1081,7 @@ void Synth::allSoundOff() noexcept
         v.stoppedAt = clock;
     }
     // What is still in the decimators and the DC blocker goes too (the effects' tails stay).
-    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R })
+    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R, &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R })
         d->reset();
     std::fill (mixL.begin(), mixL.end(), 0.0f);
     std::fill (mixR.begin(), mixR.end(), 0.0f);
@@ -2217,7 +2227,7 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             const float env = v.env.next();
             scratchEnv[ks] = env;
             scratchSource[ks] = sourceSample (v, env, scratchPolyMod[ks]);
-            if (modes)
+            if (modes || sendTaps)
             {
                 scratchA[ks] = v.lastA;
                 scratchB[ks] = v.lastB;
@@ -2296,11 +2306,23 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             }
             v.outGain += 0.004f * (v.outGainTarget - v.outGain);
             float out = y * scratchAmp[ks] * v.outGain;
+            const float fadeGain = v.fade > 0 ? static_cast<float> (v.fade) / static_cast<float> (fadeLength) : 1.0f;
             if (v.fade > 0)
-                out *= static_cast<float> (v.fade) / static_cast<float> (fadeLength);
+                out *= fadeGain;
             const int at = done + k;
             left[at] += out * v.panL;
             right[at] += out * v.panR;
+            if (sendTaps)
+            {
+                // The cards' sends (MAIN + SEND): each card's own part as it reaches the filter,
+                // shaped by the note's AMP, level and place - never filtered (the FILTER macro is
+                // MAIN's). Card C's part is both its layers'.
+                const float tap = (static_cast<float> (p.sendA) * scratchA[ks] + static_cast<float> (p.sendB) * scratchB[ks]
+                                   + static_cast<float> (p.sendC) * scratchC[ks])
+                                  * scratchAmp[ks] * v.outGain * fadeGain;
+                tapL[at] += tap * v.panL;
+                tapR[at] += tap * v.panR;
+            }
             if (v.fade > 0 && --v.fade == 0)
             {
                 // The stolen note has faded: the waiting one starts with the next sample. (Its
@@ -2426,6 +2448,15 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     const int total = numSamples * oversampling;
     std::fill (mixL.begin(), mixL.begin() + total, 0.0f);
     std::fill (mixR.begin(), mixR.begin() + total, 0.0f);
+    // Cinematic V6 gate 4: a MAIN + SEND route hears the cards' sends (taken before the voice
+    // filter). Any other route: none of this runs.
+    const bool mainSend = router.wantsSend();
+    sendTaps = mainSend && (current.sendA > 0.0 || current.sendB > 0.0 || current.sendC > 0.0);
+    if (sendTaps)
+    {
+        std::fill (sendMixL.begin(), sendMixL.begin() + total, 0.0f);
+        std::fill (sendMixR.begin(), sendMixR.begin() + total, 0.0f);
+    }
 
     int pos = 0;
     while (pos < numSamples)
@@ -2437,6 +2468,8 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         }
         const int chunk = std::min (controlCountdown, numSamples - pos);
         const int from = pos * oversampling, count = chunk * oversampling;
+        tapL = sendMixL.data() + from;
+        tapR = sendMixR.data() + from;
         for (auto& v : voices)
             if (v.active)
                 renderVoice (v, mixL.data() + from, mixR.data() + from, count);
@@ -2490,11 +2523,39 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
             }
             kaleidoscopeStage.process (left[i], right[i]);
         }
-    router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
-    // SUB: after every effect, before the output gain and guard - dry by construction (it is
-    // never any effect's input). Nothing sounding: not a sample touched.
-    if (subOsc.sounding())
-        subOsc.render (left, right, numSamples);
+    if (mainSend)
+    {
+        // The sends down to the host rate (their own decimators: the same filters as the mix).
+        if (sendTaps)
+        {
+            if (oversampling == 4)
+                for (int i = 0; i < 2 * numSamples; ++i)
+                {
+                    sendHalfL[static_cast<std::size_t> (i)] = sendStage1L.process (sendMixL[static_cast<std::size_t> (2 * i)], sendMixL[static_cast<std::size_t> (2 * i + 1)]);
+                    sendHalfR[static_cast<std::size_t> (i)] = sendStage1R.process (sendMixR[static_cast<std::size_t> (2 * i)], sendMixR[static_cast<std::size_t> (2 * i + 1)]);
+                }
+            const float* sL = oversampling == 4 ? sendHalfL.data() : sendMixL.data();
+            const float* sR = oversampling == 4 ? sendHalfR.data() : sendMixR.data();
+            for (int i = 0; i < numSamples; ++i)
+            {
+                sendOutL[static_cast<std::size_t> (i)] = oversampling == 1 ? sL[i] : sendStage2L.process (sL[2 * i], sL[2 * i + 1]);
+                sendOutR[static_cast<std::size_t> (i)] = oversampling == 1 ? sR[i] : sendStage2R.process (sR[2 * i], sR[2 * i + 1]);
+            }
+        }
+        // SUB joins MAIN before its inserts (never SEND: it has no send, and SEND's input is the
+        // cards' sends alone).
+        if (subOsc.sounding())
+            subOsc.render (left, right, numSamples);
+        router.process (effects, left, right, numSamples, sendTaps ? sendOutL.data() : nullptr, sendTaps ? sendOutR.data() : nullptr);
+    }
+    else
+    {
+        router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
+        // SUB: after every effect, before the output gain and guard - dry by construction (it is
+        // never any effect's input). Nothing sounding: not a sample touched.
+        if (subOsc.sounding())
+            subOsc.render (left, right, numSamples);
+    }
     const float out = math::dbToGain (current.outputDb);
     for (int i = 0; i < numSamples; ++i)
     {

@@ -74,8 +74,16 @@ public:
     /** Audio thread: the new effects' settings (taken by value; no allocation). */
     void setSettings (const Settings& settings) noexcept;
 
-    /** Audio thread: one block, in place, after the voices (the PostProcessor's slot). */
-    void process (osp::PostProcessor& legacy, float* left, float* right, int numSamples) noexcept;
+    /** Audio thread: one block, in place, after the voices (the PostProcessor's slot). With a
+        MAIN + SEND route, `sendLeft` / `sendRight` are the cards' sends (taken before the voice
+        filter; null: none this block): MAIN runs on left / right, SEND on a copy of the sends,
+        and SEND's wet return joins MAIN, the two aligned to the slower. */
+    void process (osp::PostProcessor& legacy, float* left, float* right, int numSamples, const float* sendLeft = nullptr,
+                  const float* sendRight = nullptr) noexcept;
+    /** Audio thread: the route playing (or about to) is MAIN + SEND: the voices' sends are wanted. */
+    bool wantsSend() const noexcept { return (current != nullptr && current->graph.mainSend) || (waiting != nullptr && waiting->graph.mainSend); }
+    /** The route now playing is MAIN + SEND (any thread). */
+    bool playingMainSend() const noexcept { return mainSendNow.load (std::memory_order_relaxed); }
 
     /** The route now playing is CUSTOM (any thread; for the interface and tests). */
     bool playingCustom() const noexcept { return customNow.load (std::memory_order_relaxed); }
@@ -99,9 +107,12 @@ private:
     };
 
     void runCustom (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n) noexcept;
-    void runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group) noexcept;
+    /** Returns whether what leaves the chain is wet (SEND's root: a spatial processor ran). */
+    bool runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group, bool wet = false) noexcept;
     void runEffect (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth) noexcept;
-    void runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group) noexcept;
+    bool runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group, bool wet) noexcept;
+    void runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n, const float* sendLeft, const float* sendRight) noexcept;
+    void applySettings() noexcept;
     int chainLatency (const std::vector<Node>& chain) const noexcept;
     int effectLatency (InstanceId id) const noexcept;
 
@@ -118,6 +129,10 @@ private:
     float duck = 1.0f, duckStep = 0.004f;
     bool ducking = false, played = false;
     Settings settings;
+    bool sendRoot = false;   ///< running SEND's chain: its spatial processors give their wet alone
+    std::vector<float> sendL, sendR;   ///< SEND's working copy of the sends
+    AlignLine mainAlign, sendAlign;    ///< MAIN and SEND met at the slower one's latency
+    std::atomic<bool> mainSendNow { false };
     std::atomic<bool> customNow { false };
     std::atomic<int> latencyNow { 0 };
 };

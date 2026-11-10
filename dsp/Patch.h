@@ -350,6 +350,10 @@ struct Patch
     double hybridNoiseKeys = 0.0;
     /** State version 16 (Cinematic V6 gate 3): card C's second layer. */
     Hybrid2Settings hybrid2;
+    /** State version 17 (Cinematic V6 gate 4): each card's SEND (0..1) - heard only with a MAIN +
+        SEND route, which feeds its SEND chain with them, taken before the voice filter. Card C's
+        is both its layers'. Never SUB's (it has none). */
+    double sendA = 0.0, sendB = 0.0, sendC = 0.0;
 };
 
 } // namespace andor::analog

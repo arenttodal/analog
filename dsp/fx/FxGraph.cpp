@@ -271,7 +271,10 @@ namespace
     };
 }
 
-bool Graph::operator== (const Graph& o) const { return custom == o.custom && sameNodes (chain, o.chain); }
+bool Graph::operator== (const Graph& o) const
+{
+    return custom == o.custom && sameNodes (chain, o.chain) && mainSend == o.mainSend && sameNodes (send, o.send);
+}
 
 Graph classicGraph()
 {
@@ -285,6 +288,8 @@ std::vector<InstanceId> instancesOf (const Graph& g)
 {
     std::vector<InstanceId> out;
     collect (g.chain, out);
+    if (g.mainSend)
+        collect (g.send, out);
     return out;
 }
 
@@ -300,6 +305,20 @@ std::string validate (const Graph& g)
 {
     if (auto why = check (g.chain, 0); ! why.empty())
         return why;
+    if (g.mainSend)
+    {
+        if (! g.custom)
+            return "MAIN + SEND is a route of its own";
+        if (auto why = check (g.send, 0); ! why.empty())
+            return why;
+        std::vector<InstanceId> main;
+        collect (g.chain, main);
+        for (const auto& id : main)
+            if (isSpatial (id.type))
+                return std::string (typeName (id.type)) + " belongs on SEND";
+    }
+    else if (! g.send.empty())
+        return "Only MAIN + SEND has a SEND chain";
     const auto all = instancesOf (g);
     if (static_cast<int> (all.size()) > maxEffects)
         return "At most " + std::to_string (maxEffects) + " effects";
@@ -330,6 +349,90 @@ bool fromText (const std::string& text, Graph& g)
     Graph read;
     read.custom = mode == "custom";
     if (! r.chain (read.chain, false, 0) || ! validate (read).empty())
+        return false;
+    g = std::move (read);
+    return true;
+}
+
+namespace
+{
+    /** The chain without its spatial processors (a group losing a lane dissolves into the other). */
+    void splitSpatial (const std::vector<Node>& chain, std::vector<Node>& inserts, std::vector<Node>& spatial)
+    {
+        for (const auto& n : chain)
+        {
+            if (n.kind == Node::Kind::effect)
+            {
+                (isSpatial (n.fx.type) ? spatial : inserts).push_back (n);
+                continue;
+            }
+            // A group: wholly spatial lanes go to SEND (the group kept), the rest stays.
+            bool allSpatial = true, anySpatial = false;
+            std::vector<InstanceId> ids;
+            for (const auto& lane : n.lanes)
+                collect (lane, ids);
+            for (const auto& id : ids)
+            {
+                allSpatial = allSpatial && isSpatial (id.type);
+                anySpatial = anySpatial || isSpatial (id.type);
+            }
+            if (allSpatial)
+                spatial.push_back (n);
+            else if (! anySpatial)
+                inserts.push_back (n);
+            else
+                for (const auto& lane : n.lanes)
+                    splitSpatial (lane, inserts, spatial);
+        }
+    }
+
+    std::string chainText (const std::vector<Node>& chain)
+    {
+        Graph g;
+        g.custom = true;
+        g.chain = chain;
+        return toText (g);
+    }
+}
+
+Graph mainSendGraph (const Graph& from)
+{
+    if (from.mainSend)
+        return from;
+    Graph g;
+    g.custom = true;
+    g.mainSend = true;
+    splitSpatial (from.custom ? from.chain : classicGraph().chain, g.chain, g.send);
+    // On SEND, CLASSIC's group of wet sends sums their wet (its law's meaning there).
+    return validate (g).empty() ? g : Graph {};
+}
+
+Graph singlePathGraph (const Graph& from)
+{
+    if (! from.mainSend)
+        return from;
+    Graph g;
+    g.custom = true;
+    g.chain = from.chain;
+    for (const auto& n : from.send)
+        g.chain.push_back (n);
+    return g;
+}
+
+std::string mainText (const Graph& g) { return chainText (g.chain); }
+std::string sendText (const Graph& g) { return chainText (g.send); }
+
+bool fromMainSend (const std::string& main, const std::string& send, Graph& g)
+{
+    Graph a, b;
+    if (! fromText (main, a) || ! fromText (send, b) || ! a.custom || ! b.custom)
+        return false;
+    Graph read;
+    read.custom = true;
+    read.mainSend = true;
+    read.chain = std::move (a.chain);
+    read.send = std::move (b.chain);
+    if (! validate (read).empty())
         return false;
     g = std::move (read);
     return true;

@@ -86,11 +86,21 @@ struct Node
     static Node splitter (SplitKind kind, std::vector<std::vector<Node>> lanes);
 };
 
+/** The spatial / time-tail processors (Cinematic V6): in MAIN + SEND they live on SEND only. */
+constexpr bool isSpatial (Type t) noexcept { return t == Type::echo || t == Type::space || t == Type::convolution; }
+
 struct Graph
 {
     static constexpr int schema = 1;
     bool custom = false;
     std::vector<Node> chain;
+    /** Cinematic V6 gate 4 (state schema 2, opt-in only): MAIN + SEND. `chain` is then MAIN (the
+        dry insert chain: no spatial processor) and `send` the SEND chain, fed only by the cards'
+        own sends (taken before the voice filter) and returning strictly wet: its ECHO, SPACE
+        and CONVOLUTION give their wet alone, a lane without one of them adds nothing, and a
+        SEND without one returns silence. Each processor belongs to one of the two. */
+    bool mainSend = false;
+    std::vector<Node> send;
 
     bool operator== (const Graph& o) const;
     bool operator!= (const Graph& o) const { return ! (*this == o); }
@@ -98,6 +108,17 @@ struct Graph
 
 /** CLASSIC as drawn: DRIVE -> MOVEMENT -> (ECHO || SPACE), the pair a SEND group. */
 Graph classicGraph();
+/** MAIN + SEND as it starts (the user's explicit conversion of `from`): MAIN keeps `from`'s
+    insert-safe effects in their order (CLASSIC: DRIVE -> MOVEMENT); SEND takes its spatial ones
+    (CLASSIC: ECHO || SPACE, summed). A route already MAIN + SEND is returned as it is. */
+Graph mainSendGraph (const Graph& from);
+/** Back to one path (the user's choice): MAIN then SEND's processors in series as CUSTOM
+    (CLASSIC's shape when it is DRIVE, MOVEMENT, ECHO || SPACE). */
+Graph singlePathGraph (const Graph& from);
+/** Schema 2's saved form: each chain as a schema 1 CUSTOM text. */
+std::string mainText (const Graph& g);
+std::string sendText (const Graph& g);
+bool fromMainSend (const std::string& main, const std::string& send, Graph& g);
 
 /** Every effect the graph holds, in order. */
 std::vector<InstanceId> instancesOf (const Graph& g);
