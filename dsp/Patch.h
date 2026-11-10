@@ -254,8 +254,13 @@ struct Patch
 
     // REIMAGINED: ANDOR OSP's modes on the live sound (KALEIDOSCOPE, TAPE FRAME, TOYBOX,
     // MIRAGE; MOSAIC needs a recording's harmonic analysis and leaves the sound unchanged).
-    double reimagined = 0.0;      ///< 0..1
+    double reimagined = 0.0;      ///< 0..1 (card A's: OSC 1; the instrument's `reimagined`)
     osp::ReimaginedSettings reimaginedSettings;
+    /** State version 14 (Cinematic V6): card B's (OSC 2's) own REIMAGINED, independent of
+        A's: its amount (0..1) and mode (ANDOR OSP's layerC.reimagined*). Card C is never
+        transformed by either. */
+    double reimagined2 = 0.0;
+    osp::ReimaginedSettings reimaginedSettings2;
 
     // ANDOR OSP's macros and effects on the mix, with its own settings (`effects`):
     // DRIVE (tube, tape, crunch), MOVEMENT (DRIFT in the voices; TAPE, CHORUS, PULSE, SHAPER

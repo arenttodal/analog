@@ -87,6 +87,9 @@ namespace
         iMoveBMode, iMoveBDriftSpeed, iMoveBDriftPitch, iMoveBDriftTone, iMoveBTapeWow, iMoveBTapeFlutter, iMoveBTapeWear,
         iMoveBChorusRate, iMoveBChorusWidth, iMoveBChorusStereo, iMoveBPulseRate, iMoveBPulseShape, iMoveBPulseStereo,
         iMoveBShaperPattern, iMoveBShaperRate, iMoveBShaperTarget, iMoveBShaperSmooth, iMoveBShaperCustom,
+        // State version 14 (Cinematic V6): card B's own REIMAGINED (ANDOR OSP's layerC.reimagined*).
+        iReimagined2, iReimaginedMode2, iKaleidoscopeFocus2, iKaleidoscopeSpread2, iTapeFrameAge2, iTapeFrameStability2, iTapeFrameLength2,
+        iToyboxMotion2, iToyboxDigital2, iToyboxPlay2, iMirageClock2, iMirageFilter2, iMirageTone2,
         count
     };
 
@@ -183,6 +186,11 @@ namespace
                     l.add (movementLaneId (lane, name));
             for (const auto& name : movementSettingNames())
                 l.add (movementBPrefix + name);
+            // State version 14: card B's REIMAGINED (the shell's layer C, ANDOR OSP's own IDs).
+            l.add (osp::plugin::InstrumentHost::reimaginedParameterId (2));
+            for (const char* name : { "mode", "kaleidoscope.focus", "kaleidoscope.spread", "tapeFrame.age", "tapeFrame.stability", "tapeFrame.frame",
+                                      "toybox.motion", "toybox.digital", "toybox.play", "mirage.clock", "mirage.filter", "mirage.tone" })
+                l.add (osp::plugin::InstrumentHost::reimaginedModeParameterId (2, name));
             return l;
         }();
         jassert (withCards.size() == count);
@@ -1009,6 +1017,13 @@ Patch Reader::readWith (const float* raw) const noexcept
     r.tapeFrame = { 0.01 * v (iTapeFrameAge), 0.01 * v (iTapeFrameStability), static_cast<osp::TapeFrameLength> (index (iTapeFrameLength, 3)) };
     r.toybox = { 0.01 * v (iToyboxMotion), 0.01 * v (iToyboxDigital), static_cast<osp::ToyboxPlay> (index (iToyboxPlay, 3)) };
     r.mirage = { 0.01 * v (iMirageClock), 0.01 * v (iMirageFilter), static_cast<osp::MirageTone> (index (iMirageTone, 2)) };
+    p.reimagined2 = 0.01 * v (iReimagined2);
+    auto& r2 = p.reimaginedSettings2;
+    r2.mode = osp::reimagined::modeFromIndex (index (iReimaginedMode2, osp::reimaginedModeCount));
+    r2.kaleidoscope = { 0.01 * v (iKaleidoscopeFocus2), 0.01 * v (iKaleidoscopeSpread2) };
+    r2.tapeFrame = { 0.01 * v (iTapeFrameAge2), 0.01 * v (iTapeFrameStability2), static_cast<osp::TapeFrameLength> (index (iTapeFrameLength2, 3)) };
+    r2.toybox = { 0.01 * v (iToyboxMotion2), 0.01 * v (iToyboxDigital2), static_cast<osp::ToyboxPlay> (index (iToyboxPlay2, 3)) };
+    r2.mirage = { 0.01 * v (iMirageClock2), 0.01 * v (iMirageFilter2), static_cast<osp::MirageTone> (index (iMirageTone2, 2)) };
     p.granular = on (iSourceMode);
     p.grains.position = 0.01 * v (iGrainPosition);
     p.grains.sizeSeconds = 0.001 * v (iGrainSize);
@@ -1291,6 +1306,22 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iMirageClock, 100.0 * r.mirage.clock);
     put (iMirageFilter, 100.0 * r.mirage.filter);
     put (iMirageTone, static_cast<int> (r.mirage.tone));
+    {
+        const auto& r2 = p.reimaginedSettings2;
+        put (iReimagined2, 100.0 * p.reimagined2);
+        put (iReimaginedMode2, static_cast<int> (r2.mode));
+        put (iKaleidoscopeFocus2, 100.0 * r2.kaleidoscope.focus);
+        put (iKaleidoscopeSpread2, 100.0 * r2.kaleidoscope.spread);
+        put (iTapeFrameAge2, 100.0 * r2.tapeFrame.age);
+        put (iTapeFrameStability2, 100.0 * r2.tapeFrame.stability);
+        put (iTapeFrameLength2, static_cast<int> (r2.tapeFrame.frame));
+        put (iToyboxMotion2, 100.0 * r2.toybox.motion);
+        put (iToyboxDigital2, 100.0 * r2.toybox.digital);
+        put (iToyboxPlay2, static_cast<int> (r2.toybox.play));
+        put (iMirageClock2, 100.0 * r2.mirage.clock);
+        put (iMirageFilter2, 100.0 * r2.mirage.filter);
+        put (iMirageTone2, static_cast<int> (r2.mirage.tone));
+    }
     put (iSourceMode, p.granular ? 1.0 : 0.0);
     put (iGrainPosition, 100.0 * p.grains.position);
     put (iGrainSize, 1000.0 * p.grains.sizeSeconds);

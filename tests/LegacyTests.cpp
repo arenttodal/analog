@@ -79,8 +79,9 @@ namespace
             p.grains2 = p.grains;
         });
         edge ("kaleidoscope", [] (Patch& p) {
-            p.reimagined = 0.7;
-            p.reimaginedSettings.mode = osp::ReimaginedMode::kaleidoscope;
+            // (state version 14: one amount on both oscillator cards, as an older patch opens)
+            p.reimagined = p.reimagined2 = 0.7;
+            p.reimaginedSettings.mode = p.reimaginedSettings2.mode = osp::ReimaginedMode::kaleidoscope;
         });
         edge ("analog-full-noise", [] (Patch& p) {
             p.analogAmount = 1.0;

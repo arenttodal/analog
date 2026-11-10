@@ -858,7 +858,17 @@ osp::keydna::Settings keyDnaOf (const FactoryPatch& f)
 
 const std::vector<FactoryPatch>& factoryPatches()
 {
-    static const std::vector<FactoryPatch> list = build();
+    static const std::vector<FactoryPatch> list = [] {
+        auto l = build();
+        // State version 14: the sounds made with one REIMAGINED for the analog pair give each
+        // oscillator card that amount and mode, each its own (as an older session is opened).
+        for (auto& f : l)
+        {
+            f.patch.reimagined2 = f.patch.reimagined;
+            f.patch.reimaginedSettings2 = f.patch.reimaginedSettings;
+        }
+        return l;
+    }();
     return list;
 }
 

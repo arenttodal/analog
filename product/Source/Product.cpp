@@ -139,6 +139,18 @@ namespace
             host.setParameterValue (p::morphEnabled, 0.0f);
     }
 
+    /** Version 14 (Cinematic V6): each oscillator card has its own REIMAGINED. Before, one
+        amount and mode transformed the analog pair together: both cards now get that amount
+        and mode, each on its own (card C is no longer transformed). */
+    void migrateFromVersion13 (osp::plugin::InstrumentHost& host)
+    {
+        using Host = osp::plugin::InstrumentHost;
+        host.setParameterValue (Host::reimaginedParameterId (2), host.parameterValue (Host::reimaginedParameterId (0)));
+        for (const char* name : { "mode", "kaleidoscope.focus", "kaleidoscope.spread", "tapeFrame.age", "tapeFrame.stability", "tapeFrame.frame",
+                                  "toybox.motion", "toybox.digital", "toybox.play", "mirage.clock", "mirage.filter", "mirage.tone" })
+            host.setParameterValue (Host::reimaginedModeParameterId (2, name), host.parameterValue (Host::reimaginedModeParameterId (0, name)));
+    }
+
     void migrateFromVersion7 (osp::plugin::InstrumentHost& host)
     {
         using Host = osp::plugin::InstrumentHost;
@@ -391,8 +403,8 @@ const ProductInfo& productInfo()
             // Every card the same first four (DETUNE, TUNE, OCT, LEVEL), its fifth its own.
             if (layer == 0)
                 k = { K { ap::osc1Fine, "DETUNE" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" }, K { ap::osc1Level, "LEVEL" }, K {} };
-            else if (layer == 2)   // (REIMAGINED processes the analog pair: card A's, never twice)
-                k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K { ap::osc2Velo, "VELO" } };
+            else if (layer == 2)   // (Cinematic V6: its own REIMAGINED fifth, as card A's; its VELO in its well)
+                k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K {} };
             else
             {
                 // Card C by its type.
@@ -447,7 +459,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 13;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate)
+        p.stateVersion = 14;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -481,6 +493,8 @@ const ProductInfo& productInfo()
                     if (auto* parameter = host.apvts().getParameter (id))
                         parameter->setValueNotifyingHost (parameter->getDefaultValue());
             }
+            if (from < 14)
+                migrateFromVersion13 (host);
         };
         return p;
     }();

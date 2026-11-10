@@ -202,6 +202,8 @@ public:
     int latencySamples() const noexcept { return latency; }
     int oversamplingFactor() const noexcept { return oversampling; }
     double sampleRate() const noexcept { return hostRate; }
+    /** Tests: the amount KALEIDOSCOPE's stage on the mix is set to (the cards', level-weighted). */
+    double kaleidoscopeAmount() const noexcept { return kaleidoscopeStage.amount(); }
 
     /** A voice's gate and pitch, for tests and the display (the slot's own view). */
     struct VoiceView
@@ -385,18 +387,24 @@ private:
         float cloud2 = 0.0f, grainMix2 = 0.0f;   ///< card B's (as cloud and grainMix)
         bool grainsPlay = false;      ///< GRANULAR: the grains are the voice's source
         float cloud = 0.0f;           ///< KALEIDOSCOPE's remapped grains under the oscillators (ONE SHOT)
-        double grainStep = 1.0;       ///< the grains' read speed (REIMAGINED's wow)
+        double grainStep = 1.0;       ///< card A's grains' read speed (its REIMAGINED's wow)
+        double grainStep2 = 1.0;      ///< card B's (state version 14: its own REIMAGINED)
         float grainMix = 0.0f;        ///< ONE SHOT -> GRANULAR, glided (a switch never clicks)
-        float saturationDrive = 1.0f, doubling = 0.0f;
+        float saturationDrive = 1.0f, doubling = 0.0f;     ///< card A's KALEIDOSCOPE
+        float saturationDrive2 = 1.0f, doubling2 = 0.0f;   ///< card B's (state version 14)
+        float lastA = 0.0f, lastB = 0.0f, lastC = 0.0f;    ///< this sample's three parts after the cards' own stages
         double notePitch = 60.0;      ///< the pitch it plays now (MIDI note), for the mode engines
         double doublingPhase = 0.0, doublingDelay = 0.0, doublingTarget = 0.0;   ///< (delays in samples)
-        // TAPE FRAME, TOYBOX, MIRAGE: the one this note started with (or none).
-        osp::TapeFrameEngine tapeFrame;
-        osp::ToyboxEngine toybox;
-        osp::MirageEngine mirage;
-        osp::ReimaginedVoiceEngine* modeEngine = nullptr;
+        // TAPE FRAME, TOYBOX, MIRAGE: the one each card's note started with (or none). State
+        // version 14: card A's and card B's each on its own part (card C is never transformed).
+        osp::TapeFrameEngine tapeFrame, tapeFrame2;
+        osp::ToyboxEngine toybox, toybox2;
+        osp::MirageEngine mirage, mirage2;
+        osp::ReimaginedVoiceEngine* modeEngine = nullptr;    ///< card A's
+        osp::ReimaginedVoiceEngine* modeEngine2 = nullptr;   ///< card B's
         int modeCountdown = 0;
-        double modeFactor = 1.0;      ///< the mode's read-speed factor (wow, self-modulation)
+        double modeFactor = 1.0;      ///< card A's mode's read-speed factor (wow, self-modulation)
+        double modeFactor2 = 1.0;     ///< card B's
         osp::mod::LfoState lfo;       ///< LFO 1 with POLY voices: this note's own
         // Modulation: this note's sources, and its patch where routes move its controls.
         osp::mod::VoiceState mod;
@@ -443,7 +451,10 @@ private:
     void glideDrift (std::array<double, 4>& from, std::array<double, 4>& to, std::array<double, 4>& now, int& countdown, int& segment, osp::Prng& rng,
                      const std::array<double, 4>& depth, double rateHz) noexcept;
     void startModeEngine (Voice& v) noexcept;
-    osp::ReimaginedControl modeControl (const Voice& v) const noexcept;
+    osp::ReimaginedControl modeControl (const Voice& v, int card = 0) const noexcept;
+    /** The level-weighted REIMAGINED for what is shared by the voice and the mix (the drift,
+        KALEIDOSCOPE's stage): each card's KALEIDOSCOPE amount by how loud the card is heard. */
+    double sharedKaleidoscope (const Patch& p, double* focus = nullptr, double* spread = nullptr) const noexcept;
     /** Renders `count` oversampled samples of a voice, adding them (panned) to left/right. */
     void renderVoice (Voice& v, float* left, float* right, int count) noexcept;
     void publishFilterTaps() noexcept;
@@ -563,6 +574,7 @@ private:
     int resonanceModel = 0, stageCountdown = 0;
     // One interval of a voice: its source, the mode engine's output, the envelopes and Poly Mod.
     std::array<float, modeInterval> scratchSource {}, scratchL {}, scratchR {}, scratchEnv {}, scratchPolyMod {};
+    std::array<float, modeInterval> scratchA {}, scratchB {}, scratchC {};   ///< the cards' parts while a mode engine runs
     std::array<float, modeInterval> scratchAmp {};
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 

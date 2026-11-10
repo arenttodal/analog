@@ -209,6 +209,16 @@ namespace
                           width = knob (ids.width, "WIDTH", "The pulse's width"),
                           lfoPw = knob (ids.lfoWidth, "LFO PW", "LFO 1's sweep of the pulse width"), nullptr, nullptr };
             }
+            // Cinematic V6: OSC 2's fifth card knob is its own REIMAGINED; its VELO lives here,
+            // after the timbre (in a free cell, or one more along the foot).
+            if (slot == 2)
+            {
+                auto* velo = knob (params::osc2Velo, "VELO", "How much OSC 2's level follows velocity (0: as set)");
+                if (cells[3] == nullptr)
+                    cells[3] = velo;
+                else
+                    cells[static_cast<std::size_t> (cellCount++)] = velo;
+            }
             if (ids.keyTrack.isNotEmpty())
             {
                 keyTrack = switchFor (ids.keyTrack, "KEY", "OSC 2 follows the keys (off: a fixed pitch, a drone or an FM source)");
@@ -231,8 +241,8 @@ namespace
             else
                 modelSelector->setBounds (w - 12 - 92, 6, 92, 22);
             const auto b = band().reduced (8, 4);
-            const int cellWidth = b.getWidth() / static_cast<int> (cells.size());
-            for (std::size_t i = 0; i < cells.size(); ++i)
+            const int cellWidth = b.getWidth() / cellCount;
+            for (std::size_t i = 0; i < static_cast<std::size_t> (cellCount); ++i)
                 if (auto* c = cells[i])
                 {
                     auto cell = juce::Rectangle<int> (b.getX() + static_cast<int> (i) * cellWidth, b.getY(), cellWidth, b.getHeight());
@@ -347,7 +357,8 @@ namespace
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;
         std::unique_ptr<juce::Component> switchPair;
-        std::array<juce::Component*, 5> cells {};
+        std::array<juce::Component*, 6> cells {};
+        int cellCount = 5;   // (OSC 2 with a full timbre row: six, VELO the last)
         juce::Component *width = nullptr, *lfoPw = nullptr, *pwm = nullptr, *pwmSource = nullptr, *shape = nullptr, *spread = nullptr, *waveSelector = nullptr;
         WellSwitch *keyTrack = nullptr, *lowFreq = nullptr;
     };

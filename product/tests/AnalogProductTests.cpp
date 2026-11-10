@@ -10,6 +10,7 @@
 #include "Binding.h"
 #include "CeramicSkin.h"
 #include "FactoryPatches.h"
+#include "AnalogWellOverlays.h"
 #include "MacroPopups.h"
 #include "RackControls.h"
 #include "ParameterRack.h"
@@ -8065,4 +8066,127 @@ TEST_CASE ("analog: V6 gate 0 - every factory sound and FX route renders as at 1
     CHECK (compared == 2 * (static_cast<int> (factoryPatches().size()) + 2));   // (every factory sound + 2 routes, at two rates)
     INFO ("hashes compared on " << platform << ": " << hashed);
     CHECK (hashed == compared);
+}
+
+TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined*); older states give both cards theirs; VELO in B's well", "[analog][v6][reimagined]")
+{
+    using Host = osp::plugin::InstrumentHost;
+    const auto ampB = Host::reimaginedParameterId (2), modeB = Host::reimaginedModeParameterId (2, "mode");
+    REQUIRE (ampB == "layerC.reimagined");
+
+    // The engine reads card B's own amount and mode (bound: automatable, its popover opens).
+    {
+        ShellProcessor p;
+        CHECK (osp::plugin::binding::anyBound ({ ampB }, p.boundParameters()));
+        CHECK (osp::plugin::binding::anyBound ({ modeB }, p.boundParameters()));
+        CHECK (osp::plugin::binding::anyBound ({ Host::reimaginedModeParameterId (2, "toybox.motion") }, p.boundParameters()));
+    }
+
+    // A state from before (version 13): one REIMAGINED for the pair becomes both cards'.
+    juce::MemoryBlock session;
+    {
+        ShellProcessor old;
+        setValue (old, "reimagined", 40.0f);
+        setValue (old, Host::reimaginedModeParameterId (0, "mode"), 2.0f);   // TOYBOX
+        setValue (old, Host::reimaginedModeParameterId (0, "toybox.motion"), 70.0f);
+        setValue (old, ampB, 0.0f);
+        old.getStateInformation (session);
+    }
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    CHECK (xml->getIntAttribute ("productVersion") == 14);
+    xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
+    juce::MemoryBlock v13;
+    juce::AudioProcessor::copyXmlToBinary (*xml, v13);
+    {
+        ShellProcessor q;
+        q.setStateInformation (v13.getData(), static_cast<int> (v13.getSize()));
+        CHECK (q.parameterValue ("reimagined") == Approx (40.0f).margin (0.01f));
+        CHECK (q.parameterValue (ampB) == Approx (40.0f).margin (0.01f));
+        CHECK (juce::roundToInt (q.parameterValue (modeB)) == 2);
+        CHECK (q.parameterValue (Host::reimaginedModeParameterId (2, "toybox.motion")) == Approx (70.0f).margin (0.01f));
+    }
+    // A version 14 state keeps the cards apart.
+    {
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        CHECK (q.parameterValue ("reimagined") == Approx (40.0f).margin (0.01f));
+        CHECK (q.parameterValue (ampB) == Approx (0.0f).margin (0.01f));
+    }
+
+    // The cards: B's fifth knob is its REIMAGINED; its VELO is in its well, every model.
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    auto hasControlFor = [] (juce::Component& root, const juce::String& id, bool outsideWell = false) {
+        bool found = false;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+            if (outsideWell && &c != &root && dynamic_cast<osp::plugin::WellOverlay*> (&c) != nullptr)
+                return;   // (the well's own controls)
+            if (osp::plugin::binding::tagsOf (c).contains (id) || c.getProperties()["paramId"].toString() == id)
+                found = true;
+            for (auto* child : c.getChildren())
+                walk (*child);
+        };
+        walk (root);
+        return found;
+    };
+    CHECK (hasControlFor (ui.engineCard (2), ampB, true));
+    CHECK_FALSE (hasControlFor (ui.engineCard (2), params::osc2Velo, true));   // (not in the knob row: in the well)
+    CHECK (hasControlFor (ui.engineCard (0), "reimagined"));
+    for (const float model : { 0.0f, 1.0f, 2.0f })   // CLASSIC, DCO, WIDE
+    {
+        INFO ("OSC 2 model " << model);
+        setValue (p, params::osc2Model, model);
+        auto overlay = andor::analog::createOscillatorOverlay (p, 2, 2);
+        overlay->setBounds (0, 0, 420, 260);
+        CHECK (hasControlFor (*overlay, params::osc2Velo));
+        auto overlayA = andor::analog::createOscillatorOverlay (p, 1, 0);
+        CHECK_FALSE (hasControlFor (*overlayA, params::osc2Velo));
+    }
+}
+
+TEST_CASE ("analog: V6 gate 1 screenshots - each oscillator card's own REIMAGINED, B's popover, B's well with VELO (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v6-g1]")
+{
+    using Host = osp::plugin::InstrumentHost;
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    for (const int width : { 1448, 869 })
+    {
+        ShellProcessor p;
+        setValue (p, "reimagined", 40.0f);   // A: KALEIDOSCOPE 40 %
+        setValue (p, Host::reimaginedParameterId (2), 70.0f);   // B: TAPE FRAME 70 %
+        setValue (p, Host::reimaginedModeParameterId (2, "mode"), 1.0f);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+        auto shoot = [&] (const juce::String& name) {
+            ui.refreshNow();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        shoot ("g1-1-cards");
+        ui.openPopup (andor::shell::ShellEditor::reimaginedPopup + 2);   // B's modes, above its REIMAGINED name
+        shoot ("g1-2-b-popover");
+        ui.closePopup();
+        if (auto* overlay = ui.engineCard (2).wellOverlayComponent())
+        {
+            overlay->setRevealedForTest (true);
+            shoot ("g1-3-b-well-velo");
+            setValue (p, params::osc2Model, 1.0f);   // DCO: a full row, VELO the sixth
+            ui.refreshNow();
+            if (auto* dco = ui.engineCard (2).wellOverlayComponent())
+                dco->setRevealedForTest (true);
+            shoot ("g1-4-b-well-dco-velo");
+        }
+    }
 }
