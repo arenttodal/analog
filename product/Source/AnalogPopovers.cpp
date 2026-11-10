@@ -216,6 +216,10 @@ namespace
             add (std::move (t), weight, toggleHeight);
         }
 
+        /** One of the product's own controls in the last row (`h` high). */
+        void custom (std::unique_ptr<juce::Component> c, float weight, int h) { add (std::move (c), weight, h); }
+        juce::Colour accentColour() const noexcept { return accent; }
+
         juce::Point<int> cardSize() const override
         {
             int h = headerTop + bottom;
@@ -452,6 +456,215 @@ namespace
         p->knob (organicRoot, "ROOT");
         return p;
     }
+}
+
+namespace
+{
+    /**
+        SUB's RANGE: a small keybed of the played keys (C1 .. C8) with the range lit and two
+        handles, its low and high keys. A press takes the nearer handle and drags it; arrow
+        keys move the low key (with Shift, the high one). The two never cross.
+    */
+    class RangeKeybed final : public juce::Component, public juce::SettableTooltipClient
+    {
+    public:
+        static constexpr int firstKey = 24, lastKey = 108;   // C1 .. C8
+
+        RangeKeybed (InstrumentHost& h, juce::Colour accentColour)
+            : host (h), accent (accentColour),
+              low (*h.apvts().getParameter (params::subLowKey), [this] (float) { repaint(); }, &h.undo()),
+              high (*h.apvts().getParameter (params::subHighKey), [this] (float) { repaint(); }, &h.undo())
+        {
+            setTitle ("Sub range");
+            setTooltip ("The keys SUB answers: drag either end (arrow keys: the low end; with Shift, the high end)");
+            setWantsKeyboardFocus (true);
+            setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+            binding::tag (*this, params::subLowKey);
+            low.sendInitialUpdate();
+            high.sendInitialUpdate();
+        }
+
+        int lowKey() const { return juce::roundToInt (host.parameterValue (params::subLowKey)); }
+        int highKey() const { return juce::roundToInt (host.parameterValue (params::subHighKey)); }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto bed = keybed();
+            const int lo = lowKey(), hi = highKey();
+            // The white keys, those in the range lit; then the black keys over them.
+            const auto whites = whiteCount();
+            const float w = bed.getWidth() / static_cast<float> (whites);
+            int index = 0;
+            for (int k = firstKey; k <= lastKey; ++k)
+            {
+                if (isBlack (k))
+                    continue;
+                const auto r = juce::Rectangle<float> (bed.getX() + static_cast<float> (index++) * w, bed.getY(), w, bed.getHeight()).reduced (0.5f, 0.0f);
+                const bool in = k >= lo && k <= hi;
+                g.setColour (in ? accent.interpolatedWith (juce::Colours::white, 0.72f) : juce::Colour (0xfff7f4ee));
+                g.fillRoundedRectangle (r, 1.5f);
+                g.setColour (palette::hairline);
+                g.drawRoundedRectangle (r, 1.5f, 0.6f);
+            }
+            for (int k = firstKey; k <= lastKey; ++k)
+                if (isBlack (k))
+                {
+                    const auto r = keyArea (k);
+                    const bool in = k >= lo && k <= hi;
+                    g.setColour (in ? accent.darker (0.55f) : juce::Colour (0xff3a3835));
+                    g.fillRoundedRectangle (r, 1.0f);
+                }
+            // C labels under the bed, quietly.
+            g.setFont (fonts::label (8.5f));
+            g.setColour (palette::textDim);
+            for (int k = firstKey; k <= lastKey; k += 12)
+                g.drawText ("C" + juce::String (k / 12 - 1), keyArea (k).withY (bed.getBottom() + 1.0f).withHeight (10.0f).expanded (6.0f, 0.0f),
+                            juce::Justification::centred, false);
+            // The two handles: a bar over each end of the range, a cap above.
+            for (const int which : { 0, 1 })
+            {
+                const int key = std::clamp (which == 0 ? lo : hi, firstKey, lastKey);
+                const auto k = keyArea (key);
+                const float x = which == 0 ? k.getX() : k.getRight();
+                const bool active = dragging == which || (dragging < 0 && hovered == which);
+                g.setColour (accent.withAlpha (active ? 1.0f : 0.85f));
+                g.fillRoundedRectangle (juce::Rectangle<float> (x - 1.25f, bed.getY() - 3.0f, 2.5f, bed.getHeight() + 3.0f), 1.0f);
+                g.fillRoundedRectangle (juce::Rectangle<float> (which == 0 ? x - 1.25f : x - 7.25f, bed.getY() - 7.0f, 8.5f, 5.0f), 1.5f);
+            }
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (accent.withAlpha (0.5f));
+                g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 3.0f, 1.0f);
+            }
+        }
+
+        void mouseMove (const juce::MouseEvent& e) override
+        {
+            const int now = nearerHandle (e.position.x);
+            if (now != hovered)
+            {
+                hovered = now;
+                repaint();
+            }
+        }
+        void mouseExit (const juce::MouseEvent&) override
+        {
+            hovered = -1;
+            repaint();
+        }
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            dragging = nearerHandle (e.position.x);
+            (dragging == 0 ? low : high).beginGesture();
+            dragTo (e.position.x);
+        }
+        void mouseDrag (const juce::MouseEvent& e) override { dragTo (e.position.x); }
+        void mouseUp (const juce::MouseEvent&) override
+        {
+            if (dragging >= 0)
+                (dragging == 0 ? low : high).endGesture();
+            dragging = -1;
+            repaint();
+        }
+        bool keyPressed (const juce::KeyPress& k) override
+        {
+            const int step = k == juce::KeyPress::leftKey ? -1 : k == juce::KeyPress::rightKey ? 1 : 0;
+            if (step == 0)
+                return false;
+            if (k.getModifiers().isShiftDown())
+                high.setValueAsCompleteGesture (static_cast<float> (std::clamp (highKey() + step, lowKey(), 127)));
+            else
+                low.setValueAsCompleteGesture (static_cast<float> (std::clamp (lowKey() + step, 0, highKey())));
+            return true;
+        }
+
+        /** Tests: where a key is drawn (local coordinates). */
+        juce::Rectangle<float> keyArea (int key) const
+        {
+            const auto bed = keybed();
+            const float w = bed.getWidth() / static_cast<float> (whiteCount());
+            int whitesBefore = 0;
+            for (int k = firstKey; k < key; ++k)
+                whitesBefore += isBlack (k) ? 0 : 1;
+            if (! isBlack (key))
+                return { bed.getX() + static_cast<float> (whitesBefore) * w, bed.getY(), w, bed.getHeight() };
+            return { bed.getX() + static_cast<float> (whitesBefore) * w - 0.32f * w, bed.getY(), 0.64f * w, 0.6f * bed.getHeight() };
+        }
+
+    private:
+        static bool isBlack (int key) noexcept
+        {
+            const int n = key % 12;
+            return n == 1 || n == 3 || n == 6 || n == 8 || n == 10;
+        }
+        static int whiteCount() noexcept
+        {
+            int n = 0;
+            for (int k = firstKey; k <= lastKey; ++k)
+                n += isBlack (k) ? 0 : 1;
+            return n;
+        }
+        juce::Rectangle<float> keybed() const { return getLocalBounds().toFloat().reduced (4.0f, 0.0f).withTrimmedTop (9.0f).withTrimmedBottom (12.0f); }
+
+        /** The key under `x` (a black key where one is drawn, else the white key's column). */
+        int keyAt (float x) const
+        {
+            for (int k = firstKey; k <= lastKey; ++k)
+                if (isBlack (k) && x >= keyArea (k).getX() && x < keyArea (k).getRight())
+                    return k;
+            for (int k = firstKey; k <= lastKey; ++k)
+                if (! isBlack (k) && x < keyArea (k).getRight())
+                    return k;
+            return lastKey;
+        }
+        int nearerHandle (float x) const
+        {
+            const auto l = keyArea (std::clamp (lowKey(), firstKey, lastKey)).getX();
+            const auto h = keyArea (std::clamp (highKey(), firstKey, lastKey)).getRight();
+            return std::abs (x - l) <= std::abs (x - h) ? 0 : 1;
+        }
+        void dragTo (float x)
+        {
+            const int key = keyAt (x);
+            if (dragging == 0)
+                low.setValueAsPartOfGesture (static_cast<float> (std::min (key, highKey())));
+            else if (dragging == 1)
+                high.setValueAsPartOfGesture (static_cast<float> (std::max (key, lowKey())));
+        }
+
+        InstrumentHost& host;
+        juce::Colour accent;
+        juce::ParameterAttachment low, high;
+        int dragging = -1, hovered = -1;
+    };
+}
+
+std::unique_ptr<MiniPanel> createSubPopover (InstrumentHost& host)
+{
+    // SUB (Cinematic V6 gate 2): what it plays (WAVE, OCT), how it sounds (GRIT, LEVEL), which
+    // keys (RANGE) and how the high ones speak (FLAT / TAPER).
+    using namespace params;
+    auto p = std::make_unique<AnalogPanel> (host, "SUB", 360, 2);
+    auto* panel = p.get();
+    p->row ("WAVE");
+    p->segments (subWave, { "SINE", "TRI", "SQUARE", "SAW" }, 1.0f, "SUB's wave (band-limited)");
+    p->row ({});
+    p->segments (subOctave, { "-1", "-2" }, 1.4f, "One or two octaves below the key");
+    p->knob (subGrit, "GRIT");
+    p->knob (subLevel, "LEVEL");
+    p->row ("RANGE");
+    p->captionFrom ([&host] {
+        auto name = [&host] (const juce::String& id) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (host.parameterValue (id)), true, true, 4); };
+        return "RANGE  " + name (subLowKey) + " - " + name (subHighKey);
+    });
+    p->custom (std::make_unique<RangeKeybed> (host, panel->accentColour()), 1.0f, 48);
+    p->row ({});
+    p->segments (subResponse, { "FLAT", "TAPER" }, 1.0f, "FLAT: every key the same. TAPER: quieter above its start (the low end stays full)");
+    p->row ("TAPER");
+    p->showWhen ([panel] { return panel->choiceIndex (subResponse) == 1; });
+    p->knob (subTaperStart, "FROM");
+    p->knob (subTaperSlope, "dB / OCT");
+    return p;
 }
 
 std::unique_ptr<MiniPanel> createMacroPopover (int macro, InstrumentHost& host)

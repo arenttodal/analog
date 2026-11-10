@@ -8223,3 +8223,174 @@ TEST_CASE ("analog: V6 gate 1 screenshots - each oscillator card's own REIMAGINE
         }
     }
 }
+
+//==============================================================================
+// Cinematic V6 gate 2: SUB in the arpeggiator's housing (docs/CINEMATIC_V6_GATE2.md).
+
+TEST_CASE ("analog: SUB plays the keys held under the arpeggiator, not its notes (SUB-01, through the plugin)", "[v6][sub]")
+{
+    ShellProcessor p;
+    setValue (p, "arp.enabled", 1.0f);
+    setValue (p, params::subEnabled, 1.0f);
+    p.prepareToPlay (rate, block);
+    juce::AudioBuffer<float> buffer (2, block);
+    const auto& synth = dynamic_cast<AnalogEngine&> (p.productEngine()).synthForTest();
+    int fewest = 99, most = 0;
+    for (int b = 0; b < 60; ++b)
+    {
+        juce::MidiBuffer midi;
+        if (b == 0)
+            for (const int key : { 48, 52, 55 })
+                midi.addEvent (juce::MidiMessage::noteOn (1, key, static_cast<juce::uint8> (100)), 0);
+        p.processBlock (buffer, midi);
+        if (b > 4)
+        {
+            fewest = std::min (fewest, synth.sub().activeVoices());
+            most = std::max (most, synth.sub().activeVoices());
+        }
+    }
+    // The arpeggiator plays one note at a time; SUB holds the three keys the whole while.
+    CHECK (fewest == 3);
+    CHECK (most == 3);
+    std::vector<int> keys;
+    for (int i = 0; i < SubOsc::maxVoices; ++i)
+        if (synth.sub().voiceKey (i) >= 0)
+            keys.push_back (synth.sub().voiceKey (i));
+    std::sort (keys.begin(), keys.end());
+    CHECK (keys == std::vector<int> { 48, 52, 55 });
+    int sounding = 0;
+    for (int s = 0; s < Synth::maxVoices; ++s)
+        sounding += synth.voiceView (s).held ? 1 : 0;
+    CHECK (sounding <= 1);   // (the arpeggiator's one note)
+
+    // The keys come up: SUB lets go.
+    juce::MidiBuffer up;
+    for (const int key : { 48, 52, 55 })
+        up.addEvent (juce::MidiMessage::noteOff (1, key), 0);
+    p.processBlock (buffer, up);
+    CHECK (synth.sub().activeVoices() == 0);
+}
+
+TEST_CASE ("analog: SUB's row in the arpeggiator's housing: its light switches SUB, the row opens its popover; ANDOR OSP's housing unchanged", "[v6][sub]")
+{
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    auto& housing = ui.arpHousing();
+    REQUIRE (housing.hasSecondRow());
+    // Two rows of the same height, no inset; the housing keeps its size (105 x 64 at 1448).
+    CHECK (std::abs (housing.secondRowArea().getHeight() - 0.5f * static_cast<float> (housing.getHeight())) < 0.51f);
+    CHECK (housing.getWidth() <= 110);
+
+    auto click = [&] (juce::Point<float> at) {
+        const auto pos = at;
+        juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), pos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &housing, &housing,
+                            juce::Time::getCurrentTime(), pos, juce::Time::getCurrentTime(), 1, false);
+        housing.mouseDown (e);
+    };
+    // The lower light: SUB on, then off (arp untouched).
+    CHECK (p.parameterValue (params::subEnabled) < 0.5f);
+    click (housing.secondLightArea().getCentre());
+    CHECK (p.parameterValue (params::subEnabled) > 0.5f);
+    CHECK (housing.isSecondRowOn());
+    CHECK (p.parameterValue ("arp.enabled") < 0.5f);
+    click (housing.secondLightArea().getCentre());
+    CHECK (p.parameterValue (params::subEnabled) < 0.5f);
+    // The upper light is still the arpeggiator's.
+    click (housing.lightArea().getCentre());
+    CHECK (p.parameterValue ("arp.enabled") > 0.5f);
+    CHECK (p.parameterValue (params::subEnabled) < 0.5f);
+
+    // The rest of the lower row: SUB's popover, above the housing; the same press as the
+    // outside-click watch sees it keeps it open; again: closed.
+    const auto rowPoint = housing.secondRowArea().getCentre();
+    click (rowPoint);
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::arpCompanionPopup);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    CHECK (ui.openPopupPanel()->getBoundsInParent().getBottom() - osp::plugin::MiniPanel::shadowMargin <= housing.getY());
+    click (rowPoint);
+    CHECK (ui.openPopupIndex() == -1);
+
+    // The popover's RANGE: dragging the low handle moves analog.sub.lowKey (never past the high).
+    click (rowPoint);
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    juce::Component* bed = nullptr;
+    for (auto* c : ui.openPopupPanel()->getChildren())
+        if (c->getTitle() == "Sub range")
+            bed = c;
+    REQUIRE (bed != nullptr);
+    CHECK (juce::roundToInt (p.parameterValue (params::subLowKey)) == 48);
+    auto drag = [&] (float fromX, float toX) {
+        const float y = 0.6f * static_cast<float> (bed->getHeight());
+        auto event = [&] (float x) {
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), { x, y }, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, bed, bed,
+                                     juce::Time::getCurrentTime(), { fromX, y }, juce::Time::getCurrentTime(), 1, false);
+        };
+        bed->mouseDown (event (fromX));
+        bed->mouseDrag (event (toX));
+        bed->mouseUp (event (toX));
+    };
+    // C3 (48) is the 15th white key from C1: the low handle sits at its left edge.
+    const float width = static_cast<float> (bed->getWidth()) - 8.0f;
+    const float white = width / 50.0f;   // (C1 .. C8: 50 white keys)
+    drag (4.0f + 14.0f * white, 4.0f + 7.5f * white);   // to C2's column
+    CHECK (juce::roundToInt (p.parameterValue (params::subLowKey)) == 36);
+    drag (4.0f + 7.0f * white, 4.0f + 49.5f * white);   // past the high key: stops at it
+    CHECK (juce::roundToInt (p.parameterValue (params::subLowKey)) == juce::roundToInt (p.parameterValue (params::subHighKey)));
+    ui.closePopup();
+
+    // The reference rendering (ANDOR OSP's own housing): no second row.
+    {
+        ShellProcessor reference;
+        reference.showReferenceMacros();
+        std::unique_ptr<juce::AudioProcessorEditor> plain (reference.createEditorIfNeeded());
+        CHECK (! dynamic_cast<andor::shell::ShellEditor&> (*plain).arpHousing().hasSecondRow());
+    }
+}
+
+TEST_CASE ("analog: V6 gate 2 screenshots - the arp / sub housing and SUB's popover (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v6-g2]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    for (const int width : { 1448, 869 })
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+        auto shoot = [&] (const juce::String& name) {
+            ui.refreshNow();
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+            // The housing alone, larger.
+            const auto housing = ui.getLocalArea (&ui.arpHousing(), ui.arpHousing().getLocalBounds()).expanded (24);
+            const auto crop = editor->createComponentSnapshot (housing, true, 3.0f);
+            const auto cropFile = out.getChildFile (name + "-housing-" + juce::String (width) + ".png");
+            cropFile.deleteFile();
+            juce::FileOutputStream cropStream (cropFile);
+            juce::PNGImageFormat().writeImageToStream (crop, cropStream);
+        };
+        shoot ("g2-1-housing-off");
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, params::subEnabled, 1.0f);
+        shoot ("g2-2-housing-on");
+        ui.openPopup (andor::shell::ShellEditor::arpCompanionPopup);
+        shoot ("g2-3-sub-popover");
+        ui.closePopup();
+        setValue (p, params::subResponse, 0.0f);   // FLAT: the TAPER row folds away
+        setValue (p, params::subWave, 3.0f);
+        setValue (p, params::subLowKey, 36.0f);
+        setValue (p, params::subHighKey, 72.0f);
+        ui.openPopup (andor::shell::ShellEditor::arpCompanionPopup);
+        shoot ("g2-4-sub-popover-flat");
+        ui.closePopup();
+    }
+}

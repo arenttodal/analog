@@ -240,3 +240,21 @@ before release: they would have duplicated these card controls.
 Modulation destinations appended (after §C's 72, same order rule): OSC 1/2 SUB, OSC 1/2 PWM
 DEPTH, OSC 1/2 SHAPE, OSC 1/2 SPREAD, RING MOD, MORPH, MORPH TEXTURE,
 MORPH ATTACK, MORPH FORMANTS, MORPH DETAIL (all per voice).
+
+## State version 15 (Cinematic V6 gate 2): SUB
+
+Appended after the FX library's parameters (version hint 30). Nothing to migrate: SUB is
+off, and a state from before loads with it off. Not modulation destinations.
+
+| ID | Type | Range | Default | Use |
+|---|---|---|---|---|
+| `analog.sub.enabled` | bool | | off | SUB on (its light in the arpeggiator's housing) |
+| `analog.sub.wave` | choice | Sine, Triangle, Square, Saw | Sine | the wave (square and saw band-limited) |
+| `analog.sub.octave` | choice | −1, −2 | −2 | octaves below the played key |
+| `analog.sub.grit` | % | 0..100 | 0 | soft saturation, its new harmonics tamed |
+| `analog.sub.level` | dB | −48..0 | −18 | SUB's level (a single key at full velocity) |
+| `analog.sub.lowKey` | key | 0..127 | 48 (C3) | the lowest played key SUB answers |
+| `analog.sub.highKey` | key | 0..127 | 84 (C6) | the highest (never below the low key) |
+| `analog.sub.response` | choice | Flat, Taper | Taper | every key alike, or quieter above the taper's start |
+| `analog.sub.taperStart` | key | 0..127 | 60 (C4) | where TAPER starts |
+| `analog.sub.taperSlope` | dB/oct | 0..12 | 6 | how fast TAPER falls |

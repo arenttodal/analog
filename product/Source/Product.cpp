@@ -448,6 +448,8 @@ const ProductInfo& productInfo()
         // ...shown as a GRANULAR on / off key (the grain cloud, lit in the card's colour): the
         // oscillator plays as it is unless lit. Card C keeps its mode menu (ANDOR OSP's symbols).
         p.generatorGranularToggle = true;
+        // Cinematic V6 gate 2: SUB in the arpeggiator's housing ("arp" above, "sub" below).
+        p.arpCompanion = { "sub", andor::analog::params::subEnabled, [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSubPopover (host); } };
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();

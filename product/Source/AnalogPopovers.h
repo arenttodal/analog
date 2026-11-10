@@ -14,4 +14,7 @@ namespace andor::analog
     (MacroPopups). MORPH is the instrument's too. */
 std::unique_ptr<osp::plugin::MiniPanel> createMacroPopover (int macro, osp::plugin::InstrumentHost& host);
 
+/** SUB's settings (Cinematic V6 gate 2), opened from its row in the arpeggiator's housing. */
+std::unique_ptr<osp::plugin::MiniPanel> createSubPopover (osp::plugin::InstrumentHost& host);
+
 } // namespace andor::analog
