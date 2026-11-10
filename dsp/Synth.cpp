@@ -133,6 +133,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.organic.prepare (internalRate);
         for (auto& z : v.zones)
             z.prepare (internalRate);
+        for (auto& z : v.c2.zones)
+            z.prepare (internalRate);
         v.eqA.prepare (internalRate);
         v.eqB.prepare (internalRate);
         v.eqC.prepare (internalRate);
@@ -585,11 +587,24 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.hybridColour = v.hybridTone = 0.0f;
         v.hybridMove = v.hybridMoveTarget = 1.0f;
         v.hybridMoveCountdown = 0;
+        v.c2.line.reset();
+        v.c2.phase = 0.0;
+        v.c2.colour = v.c2.tone = 0.0f;
+        v.c2.move = v.c2.moveTarget = 1.0f;
+        v.c2.moveCountdown = 0;
+        v.c2.noise.reseed (osp::Prng::deriveSeed (v.seed, 0x4332u, 0));   // (card C's second layer's NOISE: its own sequence)
         for (auto* x : { &v.extra1, &v.extra2, &v.extra3 })
         {
             x->subSign = 1.0f;
             x->tilt = 0.0f;
             for (auto& side : x->sides)
+                side = sidePhases.nextDouble();
+        }
+        {
+            // (After the three slots: their side phases as before.)
+            v.c2.extra.subSign = 1.0f;
+            v.c2.extra.tilt = 0.0f;
+            for (auto& side : v.c2.extra.sides)
                 side = sidePhases.nextDouble();
         }
         v.noiseColour = 0.0f;
@@ -692,6 +707,23 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
             v.organic.start (organicSource, current.organic.start, current.organic.reverse);
         else
             v.organic.stop();
+        // Card C's second layer: its own source's zones (a file or an instrument patch).
+        for (auto& z : v.c2.zones)
+            z.stop();
+        v.c2.zoneCount = 0;
+        if (const auto& h = current.hybrid2; (v.cards & 4) != 0 && h.enabled && sampleSource2 != nullptr
+                                             && (h.type == HybridType::sample || h.type == HybridType::instrumentPatch))
+        {
+            std::array<int, SampleSource::maxLayers> picked {};
+            const int velocity127 = std::clamp (static_cast<int> (std::lround (v.velocity * 127.0f)), 1, 127);
+            v.c2.zoneCount = sampleSource2->select (v.note, velocity127, picked);
+            for (int i = 0; i < v.c2.zoneCount; ++i)
+            {
+                const auto& zone = sampleSource2->zones[static_cast<std::size_t> (picked[static_cast<std::size_t> (i)])];
+                v.c2.zones[static_cast<std::size_t> (i)].start (&zone);
+                v.c2.zoneGains[static_cast<std::size_t> (i)] = zone.gain * sampleSource2->gain;
+            }
+        }
         v.morph.start (v.seed);
         v.morphCountdown = 0;
         v.layerGainsFresh = true;
@@ -747,6 +779,16 @@ void Synth::setSampleSource (const SampleSource* source) noexcept
     sampleSource = source;
 }
 
+void Synth::setSampleSource2 (const SampleSource* source) noexcept
+{
+    if (source == sampleSource2)
+        return;
+    for (auto& v : voices)
+        for (int i = 0; i < v.c2.zoneCount; ++i)
+            v.c2.zones[static_cast<std::size_t> (i)].captureTail (v.c2.zoneSteps[static_cast<std::size_t> (i)]);
+    sampleSource2 = source;
+}
+
 bool Synth::organicPlaying (const Voice& v) noexcept
 {
     if (v.organic.playing())
@@ -754,13 +796,16 @@ bool Synth::organicPlaying (const Voice& v) noexcept
     for (int i = 0; i < v.zoneCount; ++i)
         if (v.zones[static_cast<std::size_t> (i)].playing())
             return true;
+    for (int i = 0; i < v.c2.zoneCount; ++i)
+        if (v.c2.zones[static_cast<std::size_t> (i)].playing())
+            return true;
     return false;
 }
 
 void Synth::releaseVoice (Voice& v) noexcept
 {
     // FOLLOW off: a note playing a recording lets it play out before it is released.
-    if (! current.organic.follow && organicPlaying (v) && v.organicGain > 0.0f)
+    if (! current.organic.follow && organicPlaying (v) && (v.organicGain > 0.0f || v.c2.gain > 0.0f))
     {
         v.releaseWhenPlayedOut = true;
         return;
@@ -1276,7 +1321,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
             v.hybridMoveTarget = static_cast<float> (1.0 - movement * v.hybridNoise.nextDouble());
         }
     }
-    v.organicOn = ! v.organic.finished() || zonesOn || generating;
+    controlLayer2 (v, p, common, lfoNow);   // (card C's second layer: off, nothing)
+    v.organicOn = ! v.organic.finished() || zonesOn || generating || v.c2.on;
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
                     && ! v.organicOn;
     // MORPH: whenever this note sounds both the oscillators and card C (whatever C plays:
@@ -1410,6 +1456,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.gain2 *= v.oscLayerGain;
         v.gainNoise *= v.oscLayerGain;
         v.organicGain *= v.organicLayerGain;
+        v.c2.gain *= v.organicLayerGain;
         v.outGainTarget = velocityGain * voiceGain * math::dbToGain (static_cast<float> (v.driftOut[2]));
     }
     else
@@ -1700,21 +1747,28 @@ void Synth::planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept
     auto& plan = slot == 1 ? v.plan1 : (slot == 2 ? v.plan2 : v.plan3);
     auto& x = slot == 1 ? v.extra1 : (slot == 2 ? v.extra2 : v.extra3);
     const auto model = slot == 1 ? p.osc1Model : (slot == 2 ? p.osc2Model : p.osc3Model);
+    const auto& d = drift[static_cast<std::size_t> (v.slot)];
+    const auto classicWaves = slot == 1 ? osc::wavesOf (p.osc1Wave) : osc::wavesOf (slot == 2 ? p.osc2Wave : p.osc3Wave);
+    planModel (plan, x, model, classicWaves, slot == 1 ? p.dco1 : (slot == 2 ? p.dco2 : p.dco3), slot == 1 ? p.wide1 : (slot == 2 ? p.wide2 : p.wide3),
+               p.analogAmount, slot == 1 ? d.width1 : d.width2, dt);   // (OSC 3: OSC 2's tolerance)
+}
+
+void Synth::planModel (osc::SlotPlan& plan, osc::SlotExtra& x, OscModel model, osc::Waves classicWaves, const DcoSettings& c, const WideSettings& w,
+                       double analogAmount, double tolerance, double dt) noexcept
+{
     plan = {};
     plan.model = model;
     if (model == OscModel::classic)
     {
-        plan.waves = slot == 1 ? osc::wavesOf (p.osc1Wave) : osc::wavesOf (slot == 2 ? p.osc2Wave : p.osc3Wave);
+        plan.waves = classicWaves;
         return;
     }
     if (model == OscModel::dco)
     {
-        const auto& c = slot == 1 ? p.dco1 : (slot == 2 ? p.dco2 : p.dco3);
         plan.waves = osc::wavesOf (c);
         plan.subLevel = static_cast<float> (std::clamp (c.subLevel, 0.0, 1.0));
         return;
     }
-    const auto& w = slot == 1 ? p.wide1 : (slot == 2 ? p.wide2 : p.wide3);
     plan.waves = osc::wavesOf (w.wave);
     plan.squareWidth = w.wave == WideWave::square;
     plan.superSaw = w.wave == WideWave::superSaw;
@@ -1733,11 +1787,99 @@ void Synth::planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept
     plan.tilt = shape < 0.999;
     if (plan.tilt)
     {
-        const auto& d = drift[static_cast<std::size_t> (v.slot)];
-        const double spread = 1.0 + 0.1 * std::clamp (p.analogAmount, 0.0, 1.0) * (slot == 1 ? d.width1 : d.width2);   // (OSC 3: OSC 2's tolerance)
+        const double spread = 1.0 + 0.1 * std::clamp (analogAmount, 0.0, 1.0) * tolerance;
         const double corner = std::min (0.45, dt * 4.0 * std::pow (64.0, shape) * spread);
         x.tiltCoef = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * corner));
     }
+}
+
+void Synth::controlLayer2 (Voice& v, const Patch& p, double common, float lfoNow) noexcept
+{
+    // Cinematic V6 gate 3: card C's second layer, on card C's lane and its M / S. Its own
+    // pitch (OCT, TUNE, DETUNE), LEVEL and VELO; its share of the A / C mix is card C's.
+    auto& c = v.c2;
+    const auto& h = p.hybrid2;
+    const bool loaded = h.type == HybridType::sample || h.type == HybridType::instrumentPatch;
+    bool zonesOn = false;
+    const double note = common + 12.0 * h.octave + h.coarse + h.fineCents / 100.0;
+    for (int i = 0; i < c.zoneCount; ++i)
+    {
+        auto& zone = c.zones[static_cast<std::size_t> (i)];
+        if (zone.playing())
+            c.zoneSteps[static_cast<std::size_t> (i)] = zone.stepFor (note - p.tuneSemitones);
+        zonesOn = zonesOn || ! zone.finished();
+    }
+    const bool generating = h.enabled && (v.cards & 4) != 0 && ! loaded;
+    c.on = generating || zonesOn;
+    if (! c.on)
+    {
+        c.gain = 0.0f;
+        return;
+    }
+    c.gen = generating ? h.type : HybridType::sample;
+    c.gain = h.enabled && (v.cards & 4) != 0 && p.organic.heard && h.levelDb > -47.99 ? math::dbToGain (static_cast<float> (h.levelDb)) : 0.0f;
+    if (h.velo > 0.0)
+        c.gain *= static_cast<float> (1.0 - h.velo + h.velo * static_cast<double> (v.velocity * v.velocity));
+    if (c.gen == HybridType::oscillator)
+    {
+        c.dt = std::clamp (math::noteToHz (note) / internalRate, 1.0e-9, 0.45);
+        c.width = static_cast<float> (std::clamp (h.width, 0.02, 0.98));
+        const auto& d = drift[static_cast<std::size_t> (v.slot)];
+        planModel (c.plan, c.extra, h.model, osc::wavesOf (h.wave), h.dco, h.wide, p.analogAmount, d.width2, c.dt);
+        if (h.model == OscModel::dco)
+        {
+            const float depthNow = 0.45f * static_cast<float> (std::clamp (h.dco.pwmDepth, 0.0, 1.0));
+            c.pwm = h.dco.pwmSource == PwmSource::lfo ? depthNow * lfoNow * v.lfoFade : 0.0f;
+            c.pwmEnv = h.dco.pwmSource == PwmSource::env ? depthNow : 0.0f;
+        }
+        else
+            c.pwm = c.pwmEnv = 0.0f;
+    }
+    else if (c.gen == HybridType::noise)
+    {
+        const double keyed = std::exp2 (std::clamp (h.noiseKeys, 0.0, 1.0) * (common - 60.0) / 12.0);
+        const double toneHz = std::min (0.45 * internalRate, 200.0 * std::pow (90.0, std::clamp (h.noiseTone, 0.0, 1.0)) * keyed);
+        c.toneCoef = h.noiseTone >= 0.999 && h.noiseKeys <= 0.0 ? 1.0f : static_cast<float> (1.0 - std::exp (-2.0 * math::pi * toneHz / internalRate));
+        if (--c.moveCountdown <= 0)
+        {
+            c.moveCountdown = 24;
+            c.moveTarget = static_cast<float> (1.0 - std::clamp (h.noiseMovement, 0.0, 1.0) * c.noise.nextDouble());
+        }
+    }
+}
+
+float Synth::layer2Sample (Voice& v, const Patch& p, float envValue) noexcept
+{
+    auto& c = v.c2;
+    float out = 0.0f;
+    for (int i = 0; i < c.zoneCount; ++i)
+        out += c.zoneGains[static_cast<std::size_t> (i)] * c.zones[static_cast<std::size_t> (i)].next (c.zoneSteps[static_cast<std::size_t> (i)], p.organic.loop);
+    if (c.gen == HybridType::oscillator)
+    {
+        double wrap = -1.0;
+        const float width = std::clamp (c.width + c.pwm + c.pwmEnv * envValue, 0.02f, 0.98f);
+        if (c.plan.model == OscModel::classic)
+        {
+            c.phase = osc::walk (c.phase, c.dt, width, c.plan.waves, 1.0, 0.0, c.line, wrap);
+            out += c.line.end (osc::naive (c.plan.waves, c.phase, width));
+        }
+        else
+            out += osc::renderModel (c.phase, c.line, c.extra, c.plan, c.dt, width, -1.0, wrap);
+    }
+    else if (c.gen == HybridType::noise)
+    {
+        float n = static_cast<float> (c.noise.bipolar());
+        if (p.hybrid2.noiseColor == NoiseColor::juno)
+        {
+            const float k = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * 5000.0 / internalRate));
+            c.colour += k * (n - c.colour);
+            n = c.colour * 1.36f;
+        }
+        c.tone += c.toneCoef * (n - c.tone);
+        c.move += 0.0005f * (c.moveTarget - c.move);
+        out += 0.8f * c.tone * c.move;
+    }
+    return out;
 }
 
 float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& polyMod) noexcept
@@ -1818,7 +1960,9 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
             source += v.zoneGains[static_cast<std::size_t> (i)] * v.zones[static_cast<std::size_t> (i)].next (v.zoneSteps[static_cast<std::size_t> (i)], p.organic.loop);
         if (v.hybridGen != HybridType::sample)
             source += hybridSample (v, envValue);
-        const float o = v.organicGain * source;
+        float o = v.organicGain * source;
+        if (v.c2.on)
+            o += v.c2.gain * layer2Sample (v, p, envValue);   // (card C's second layer, in card C's part)
         if (v.morphOn)
         {
             // The carrier (BOTH: the levelled pair, ring included) into the morph; MORPH ONLY
@@ -2176,6 +2320,10 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                 for (auto& z : v.zones)   // (the note is over: its zones are not read again)
                     z.stop();
                 v.zoneCount = 0;
+                for (auto& z : v.c2.zones)
+                    z.stop();
+                v.c2.zoneCount = 0;
+                v.c2.on = false;
                 // (`clock` is this control period's first host sample.)
                 v.stoppedAt = clock + static_cast<std::uint64_t> (at / oversampling);
                 if (v.modeEngine != nullptr)

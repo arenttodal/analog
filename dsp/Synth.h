@@ -187,6 +187,10 @@ public:
         same lifetime contract as setOrganic (the old one is not read after this returns).
         Real-time safe. */
     void setSampleSource (const SampleSource* source) noexcept;
+    /** Cinematic V6 gate 3: card C's second layer's own loaded source (a file or an instrument
+        patch; null: none), with the same lifetime contract as setSampleSource. */
+    void setSampleSource2 (const SampleSource* source) noexcept;
+    const SampleSource* sampleSource2Now() const noexcept { return sampleSource2; }
     const SampleSource* sampleSourceInUse() const noexcept { return sampleSource; }
     /** The imported source's zones sounding now, over every voice (tests, the status line). */
     int sampleZonesSounding() const noexcept
@@ -371,6 +375,26 @@ private:
         osp::Prng hybridNoise { 1 };
         float hybridColour = 0.0f, hybridTone = 0.0f, hybridToneCoef = 1.0f, hybridMove = 1.0f, hybridMoveTarget = 1.0f;
         int hybridMoveCountdown = 0;
+        // Cinematic V6 gate 3: card C's second layer (C2), its own generator and zones, summed
+        // into card C's part (Patch::hybrid2).
+        struct Layer2
+        {
+            bool on = false;          ///< sounding (or its zones fading)
+            HybridType gen = HybridType::oscillator;   ///< oscillator / noise: generated; else its zones
+            double phase = 0.0, dt = 0.0;
+            BlepLine line;
+            osc::SlotExtra extra;
+            osc::SlotPlan plan;
+            float width = 0.5f, pwm = 0.0f, pwmEnv = 0.0f;
+            osp::Prng noise { 1 };
+            float colour = 0.0f, tone = 0.0f, toneCoef = 1.0f, move = 1.0f, moveTarget = 1.0f;
+            int moveCountdown = 0;
+            std::array<ZonePlayer, SampleSource::maxLayers> zones;
+            std::array<double, SampleSource::maxLayers> zoneSteps {};
+            std::array<float, SampleSource::maxLayers> zoneGains {};
+            int zoneCount = 0;
+            float gain = 0.0f;        ///< LEVEL x VELO x card C's M / S and its share of the mix
+        } c2;
 
         // Control rate: what each sample starts from.
         double dt1 = 0.0, dt2 = 0.0;
@@ -489,6 +513,10 @@ private:
     void applyPolyphonyLimit() noexcept;
     /** A slot's plan for the control period (its model's sums and extras). */
     void planSlot (Voice& v, int slot, const Patch& p, double dt) noexcept;
+    static void planModel (osc::SlotPlan& plan, osc::SlotExtra& x, OscModel model, osc::Waves classicWaves, const DcoSettings& c, const WideSettings& w,
+                           double analogAmount, double tolerance, double dt) noexcept;
+    void controlLayer2 (Voice& v, const Patch& p, double common, float lfoNow) noexcept;
+    float layer2Sample (Voice& v, const Patch& p, float envValue) noexcept;
     /** One sample of OSC 1 and OSC 2 and their mix for a voice playing any model pair. */
     float modelPairSample (Voice& v, const Patch& p, float envValue, float& polyMod) noexcept;
 
@@ -585,6 +613,7 @@ private:
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
     const osp::InstrumentModel* organicSource = nullptr;
+    const SampleSource* sampleSource2 = nullptr;   ///< card C's second layer's (Patch::hybrid2)
     const SampleSource* sampleSource = nullptr;
     /** ORGANIC's part is sounding in a voice (its recording or an imported source's zones). */
     static bool organicPlaying (const Voice& v) noexcept;

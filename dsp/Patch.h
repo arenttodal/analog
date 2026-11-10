@@ -76,6 +76,30 @@ struct OrganicSettings
     double blend = 0.5;
 };
 
+/** Cinematic V6 gate 3: card C's second layer (C2). It is summed into card C's own part: card
+    C's M / S, its LOOP / FOLLOW, its EQ and DAMPEN, MORPH, the filter and every effect hear C1
+    and C2 together. Its own: what it plays (OSC, NOISE, or its loaded source: a file or an
+    instrument patch), its LEVEL, pitch and VELO. Off: not a sample of it, not a cycle spent. */
+struct Hybrid2Settings
+{
+    bool enabled = false;
+    HybridType type = HybridType::oscillator;
+    double levelDb = 0.0;         ///< -48 dB and below: silent
+    int octave = 0;
+    double coarse = 0.0;          ///< semitones
+    double fineCents = 0.0;
+    double velo = 0.0;            ///< 0..1: how much its level follows velocity
+    // OSCILLATOR: the slots' models and code (as OSC 3).
+    OscModel model = OscModel::classic;
+    Osc2Wave wave = Osc2Wave::saw;
+    double width = 0.5;
+    DcoSettings dco;
+    WideSettings wide;
+    // NOISE (as card C's NOISE).
+    NoiseColor noiseColor = NoiseColor::white;
+    double noiseTone = 1.0, noiseMovement = 0.0, noiseKeys = 0.0;
+};
+
 /** MORPH: the recording turned into the chosen analog carrier. */
 struct MorphSettings
 {
@@ -324,6 +348,8 @@ struct Patch
     double osc2Velo = 0.0, hybridVelo = 0.0;
     /** NOISE's KEYS: how far its TONE follows the key (0: fixed; 1: an octave per octave from C4). */
     double hybridNoiseKeys = 0.0;
+    /** State version 16 (Cinematic V6 gate 3): card C's second layer. */
+    Hybrid2Settings hybrid2;
 };
 
 } // namespace andor::analog

@@ -464,3 +464,49 @@ TEST_CASE ("realtime: SUB's keys, range, settings and controllers never allocate
     for (std::size_t i = 0; i < left.size(); ++i)
         CHECK ((std::isfinite (left[i]) && (left[i] == 0.0f || std::abs (left[i]) > 1.0e-30f)));
 }
+
+TEST_CASE ("realtime: card C's second layer (its types, its source swapped mid-note) never allocates", "[realtime][hybrid2][v6]")
+{
+    auto makeSource = [] (double hz) {
+        osp::AudioData audio;
+        audio.sampleRate = 44100.0;
+        std::vector<float> x (44100);
+        for (std::size_t i = 0; i < x.size(); ++i)
+            x[i] = static_cast<float> (0.4 * std::sin (6.283185307179586 * hz * static_cast<double> (i) / 44100.0));
+        audio.channels.assign (1, x);
+        SampleSource s;
+        SampleZone z;
+        z.audio = std::make_shared<osp::PlaybackSource> (audio, 69.0, 4);
+        z.root = 69.0;
+        s.zones.push_back (z);
+        return s;
+    };
+    const auto a = makeSource (440.0), b = makeSource (330.0);
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    auto p = factoryPatches()[0].patch;
+    p.hybrid2.enabled = true;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 300; ++block)
+    {
+        p.hybrid2.type = static_cast<HybridType> (block / 9 % 4);
+        p.hybrid2.model = static_cast<OscModel> (block / 5 % 3);
+        p.hybrid2.enabled = block % 40 < 35;
+        p.morph.enabled = block % 60 < 30;
+        synth.setPatch (p);
+        if (block % 13 == 0)
+            synth.setSampleSource2 (block % 26 == 0 ? &a : (block % 39 == 0 ? nullptr : &b));
+        const std::uint8_t keyOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t keyOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 30) % 48), 0 };
+        synth.handleMidi (keyOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (keyOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    synth.setSampleSource2 (nullptr);
+    CHECK (allocations.load() == 0);
+}
