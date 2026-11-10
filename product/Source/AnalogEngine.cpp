@@ -336,25 +336,22 @@ void AnalogEngine::loadHybrid2 (std::unique_ptr<juce::XmlElement> definition, ju
 void AnalogEngine::loadHybrid2File (const juce::File& recording, const juce::File& assetFolder)
 {
     {
+        // (Its state stays the current source's until the recording is ready: loading the same
+        // file again then changes nothing and never hangs on "loading".)
         const std::lock_guard<std::mutex> lock (source2Mutex);
-        source2State = {};
-        source2State.name = recording.getFileNameWithoutExtension();
-        source2State.loading = true;
+        source2FileLoading = true;
     }
     sourceLoader.addJob ([this, recording, assetFolder] {
         auto made = import::makeFileDefinition (recording, assetFolder);
         juce::MessageManager::callAsync ([this, xml = std::shared_ptr<juce::XmlElement> (made.xml.release()), assetFolder, alive = std::weak_ptr<int> (lifetime)] {
             if (alive.expired())
                 return;
-            if (xml != nullptr)
-                setHybrid2Definition (std::make_unique<juce::XmlElement> (*xml), assetFolder);
-            else
             {
                 const std::lock_guard<std::mutex> lock (source2Mutex);
-                source2State.loading = false;
-                source2State.loaded = true;
-                source2State.unreadable.add (source2State.name);
+                source2FileLoading = false;
             }
+            if (xml != nullptr)
+                setHybrid2Definition (std::make_unique<juce::XmlElement> (*xml), assetFolder);
         });
     });
 }
@@ -368,7 +365,9 @@ std::unique_ptr<juce::XmlElement> AnalogEngine::hybrid2Definition() const
 AnalogEngine::SampleSourceState AnalogEngine::hybrid2State() const
 {
     const std::lock_guard<std::mutex> lock (source2Mutex);
-    return source2State;
+    auto state = source2State;
+    state.loading = state.loading || source2FileLoading;
+    return state;
 }
 
 bool AnalogEngine::waitForHybrid2 (int timeoutMs) const
@@ -378,7 +377,7 @@ bool AnalogEngine::waitForHybrid2 (int timeoutMs) const
     {
         {
             const std::lock_guard<std::mutex> lock (source2Mutex);
-            if (! source2State.loading)
+            if (! source2State.loading && ! source2FileLoading)
                 return true;
         }
         juce::Thread::sleep (5);

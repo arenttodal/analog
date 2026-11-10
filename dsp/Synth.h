@@ -591,6 +591,13 @@ private:
     std::vector<float> sendMixL, sendMixR, sendHalfL, sendHalfR, sendOutL, sendOutR;
     HalfBandDecimator sendStage1L, sendStage1R, sendStage2L, sendStage2R;
     bool sendTaps = false;            ///< this chunk: the voices add their sends
+    bool sendWas = false;             ///< (the last block's: its decimators cleared when the sends start again)
+    std::array<float, 3> sendFrom {}, sendTo {};   ///< the cards' sends across this block (a ramp: never a step)
+    int tapBase = 0, tapTotal = 1;    ///< (renderVoice's: where this chunk sits in the block, internal samples)
+    // SUB with one path: held back by the route's latency, so it meets the voices the host aligns.
+    fx::AlignLine subDelay;
+    std::vector<float> subL, subR;
+    int subTail = 0;
     float* tapL = nullptr;            ///< (renderVoice's: where this chunk's sends go)
     float* tapR = nullptr;
     HalfBandDecimator stage1L, stage1R, stage2L, stage2R;
@@ -623,6 +630,8 @@ private:
     const SampleSource* sampleSource = nullptr;
     /** ORGANIC's part is sounding in a voice (its recording or an imported source's zones). */
     static bool organicPlaying (const Voice& v) noexcept;
+    /** FOLLOW off: a layer of card C that is heard is still playing out (each layer by its own gain). */
+    static bool heardPlayingOut (const Voice& v) noexcept;
     float lastNoise = 0.0f;   ///< this sample's noise in the voice's mix (MORPH takes the pair without it)
     std::unique_ptr<morph::LiveMorph::Shared> morphShared;   ///< MORPH's transforms and windows (every voice's)
     JunoChorus chorus;            ///< state version 4: the chorus after the voices (off: bit-exact bypass)

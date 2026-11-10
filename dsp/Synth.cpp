@@ -93,6 +93,9 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         b->assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
     for (auto* b : { &sendOutL, &sendOutR })
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    subL.assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    subR.assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    subDelay.allocate (fx::CompiledGraph::alignCapacity);
 
     // 2x -> 1x: flat to 0.42 fs, -96 dB from 0.58 fs (what folds back lands above 0.42 fs).
     stage2L.design (0.08, 96.0);
@@ -257,6 +260,10 @@ void Synth::reset() noexcept
     chorus.reset();
     kaleidoscopeStage.reset();
     subOsc.reset();
+    subDelay.clear();
+    subTail = 0;
+    sendWas = false;
+    sendFrom = sendTo = {};
     dcL = dcR = 0.0f;
     dcStateL = dcStateR = 0.0f;
     sounding.store (0, std::memory_order_relaxed);
@@ -812,10 +819,22 @@ bool Synth::organicPlaying (const Voice& v) noexcept
     return false;
 }
 
+bool Synth::heardPlayingOut (const Voice& v) noexcept
+{
+    // Each layer by its own gain: a silent layer never holds a note that another one ends.
+    bool first = v.organic.playing();
+    for (int i = 0; i < v.zoneCount && ! first; ++i)
+        first = v.zones[static_cast<std::size_t> (i)].playing();
+    bool second = false;
+    for (int i = 0; i < v.c2.zoneCount && ! second; ++i)
+        second = v.c2.zones[static_cast<std::size_t> (i)].playing();
+    return (first && v.organicGain > 0.0f) || (second && v.c2.gain > 0.0f);
+}
+
 void Synth::releaseVoice (Voice& v) noexcept
 {
     // FOLLOW off: a note playing a recording lets it play out before it is released.
-    if (! current.organic.follow && organicPlaying (v) && (v.organicGain > 0.0f || v.c2.gain > 0.0f))
+    if (! current.organic.follow && heardPlayingOut (v))
     {
         v.releaseWhenPlayedOut = true;
         return;
@@ -1730,7 +1749,7 @@ void Synth::controlUpdate() noexcept
             continue;
         v.pitch += (v.pitchTarget - v.pitch) * glideCoef;
         v.ageSeconds += seconds;
-        if (v.releaseWhenPlayedOut && ! organicPlaying (v))
+        if (v.releaseWhenPlayedOut && ! heardPlayingOut (v))
             releaseVoice (v);   // (FOLLOW off: the recording has played out)
         updateDrift (v);
         float lfoNow = lfoValue;
@@ -1867,7 +1886,7 @@ float Synth::layer2Sample (Voice& v, const Patch& p, float envValue) noexcept
     auto& c = v.c2;
     float out = 0.0f;
     for (int i = 0; i < c.zoneCount; ++i)
-        out += c.zoneGains[static_cast<std::size_t> (i)] * c.zones[static_cast<std::size_t> (i)].next (c.zoneSteps[static_cast<std::size_t> (i)], p.organic.loop);
+        out += c.zoneGains[static_cast<std::size_t> (i)] * c.zones[static_cast<std::size_t> (i)].next (c.zoneSteps[static_cast<std::size_t> (i)], (v.held || v.sustained) && p.organic.loop);
     if (c.gen == HybridType::oscillator)
     {
         double wrap = -1.0;
@@ -2321,9 +2340,10 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                 // The cards' sends (MAIN + SEND): each card's own part as it reaches the filter,
                 // shaped by the note's AMP, level and place - never filtered (the FILTER macro is
                 // MAIN's). Card C's part is both its layers'.
-                const float tap = (static_cast<float> (p.sendA) * scratchA[ks] + static_cast<float> (p.sendB) * scratchB[ks]
-                                   + static_cast<float> (p.sendC) * scratchC[ks])
-                                  * scratchAmp[ks] * v.outGain * fadeGain;
+                const float t = static_cast<float> (tapBase + at) / static_cast<float> (tapTotal);
+                const float sA = sendFrom[0] + t * (sendTo[0] - sendFrom[0]), sB = sendFrom[1] + t * (sendTo[1] - sendFrom[1]),
+                            sC = sendFrom[2] + t * (sendTo[2] - sendFrom[2]);
+                const float tap = (sA * scratchA[ks] + sB * scratchB[ks] + sC * scratchC[ks]) * scratchAmp[ks] * v.outGain * fadeGain;
                 tapL[at] += tap * v.panL;
                 tapR[at] += tap * v.panR;
             }
@@ -2455,7 +2475,18 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     // Cinematic V6 gate 4: a MAIN + SEND route hears the cards' sends (taken before the voice
     // filter). Any other route: none of this runs.
     const bool mainSend = router.wantsSend();
-    sendTaps = mainSend && (current.sendA > 0.0 || current.sendB > 0.0 || current.sendC > 0.0);
+    // The sends ramp across the block from where the last one ended (a move never clicks), and
+    // run on until they have faded to nothing.
+    sendFrom = sendTo;
+    sendTo = { static_cast<float> (current.sendA), static_cast<float> (current.sendB), static_cast<float> (current.sendC) };
+    if (! mainSend)
+        sendFrom = sendTo = {};
+    sendTaps = mainSend && (sendTo[0] > 0.0f || sendTo[1] > 0.0f || sendTo[2] > 0.0f || sendFrom[0] > 0.0f || sendFrom[1] > 0.0f || sendFrom[2] > 0.0f);
+    if (sendTaps && ! sendWas)
+        for (auto* d : { &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R })
+            d->reset();   // (nothing left over from the last time they ran)
+    sendWas = sendTaps;
+    tapTotal = std::max (1, total);
     if (sendTaps)
     {
         std::fill (sendMixL.begin(), sendMixL.begin() + total, 0.0f);
@@ -2474,6 +2505,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         const int from = pos * oversampling, count = chunk * oversampling;
         tapL = sendMixL.data() + from;
         tapR = sendMixR.data() + from;
+        tapBase = from;
         for (auto& v : voices)
             if (v.active)
                 renderVoice (v, mixL.data() + from, mixR.data() + from, count);
@@ -2546,19 +2578,43 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
                 sendOutR[static_cast<std::size_t> (i)] = oversampling == 1 ? sR[i] : sendStage2R.process (sR[2 * i], sR[2 * i + 1]);
             }
         }
-        // SUB joins MAIN before its inserts (never SEND: it has no send, and SEND's input is the
-        // cards' sends alone).
-        if (subOsc.sounding())
-            subOsc.render (left, right, numSamples);
-        router.process (effects, left, right, numSamples, sendTaps ? sendOutL.data() : nullptr, sendTaps ? sendOutR.data() : nullptr);
     }
+    // SUB joins MAIN before its inserts only once MAIN + SEND is the route playing (never while
+    // one path still ducks out; never SEND: it has no send, SEND's input is the cards' sends).
+    const bool subOnMain = mainSend && router.mainSendPlaying();
+    if (subOnMain && subOsc.sounding())
+        subOsc.render (left, right, numSamples);
+    if (mainSend)
+        router.process (effects, left, right, numSamples, sendTaps ? sendOutL.data() : nullptr, sendTaps ? sendOutR.data() : nullptr);
     else
-    {
         router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
+    if (! subOnMain)
+    {
         // SUB: after every effect, before the output gain and guard - dry by construction (it is
-        // never any effect's input). Nothing sounding: not a sample touched.
-        if (subOsc.sounding())
-            subOsc.render (left, right, numSamples);
+        // never any effect's input). Held back by the route's latency (a CUSTOM route's latent
+        // effects), so it meets the voices the host aligns. Nothing sounding: not a sample touched.
+        const int lag = std::min (router.latencySamples(), fx::CompiledGraph::alignCapacity - 1);
+        if (lag <= 0)
+        {
+            if (subOsc.sounding())
+                subOsc.render (left, right, numSamples);
+            subTail = 0;
+        }
+        else if (subOsc.sounding() || subTail > 0)
+        {
+            const bool sounding = subOsc.sounding();
+            std::fill (subL.begin(), subL.begin() + numSamples, 0.0f);
+            std::fill (subR.begin(), subR.begin() + numSamples, 0.0f);
+            if (sounding)
+                subOsc.render (subL.data(), subR.data(), numSamples);
+            subDelay.run (subL.data(), subR.data(), numSamples, lag);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                left[i] += subL[static_cast<std::size_t> (i)];
+                right[i] += subR[static_cast<std::size_t> (i)];
+            }
+            subTail = sounding ? lag : std::max (0, subTail - numSamples);
+        }
     }
     const float out = math::dbToGain (current.outputDb);
     for (int i = 0; i < numSamples; ++i)

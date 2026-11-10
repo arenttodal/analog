@@ -398,3 +398,26 @@ TEST_CASE ("SUB: the on-screen pitch wheel bends SUB as MIDI's does", "[sub][v6]
     const auto c = renderBoth (s, 0.8, {}, { on (0, 60, 100) });
     CHECK (std::abs (frequencyByCrossings (c.mono(), 48000.0, 0.2, 0.8) - 130.81) < 1.0);   // C2 an octave up: C3
 }
+
+TEST_CASE ("SUB: a note right after ALL SOUND OFF plays (only the voices sounding then are cut)", "[sub][v6]")
+{
+    SubOsc sub;
+    sub.prepare (48000.0);
+    SubSettings set;
+    set.enabled = true;
+    sub.setSettings (set);
+    std::vector<float> l (4800), r (4800);
+    const std::uint8_t a[3] { 0x90, 60, 100 }, allOff[3] { 0xb0, 120, 0 }, b[3] { 0x90, 64, 100 };
+    sub.handleMidi (a, 3);
+    sub.render (l.data(), r.data(), 4800);
+    sub.handleMidi (allOff, 3);
+    sub.handleMidi (b, 3);   // (the same block: a host's panic, then a new note)
+    std::fill (l.begin(), l.end(), 0.0f);
+    sub.render (l.data(), r.data(), 4800);
+    CHECK (sub.activeVoices() == 1);
+    CHECK ((sub.voiceKey (0) == 64 || sub.voiceKey (1) == 64));
+    float peak = 0.0f;
+    for (std::size_t i = 2400; i < l.size(); ++i)
+        peak = std::max (peak, std::abs (l[i]));
+    CHECK (peak > 0.01f);
+}

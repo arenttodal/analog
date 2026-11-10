@@ -259,6 +259,7 @@ private:
     const LoadedSource* source2Playing = nullptr;      ///< audio thread
     std::shared_ptr<const SampleSource> source2Loaded;   ///< its picture
     static void outlineOf (const SampleSource* source, std::vector<float>& cycle);
+    bool source2FileLoading = false;   ///< (a recording being made into its source: under source2Mutex)
     std::shared_ptr<int> lifetime = std::make_shared<int> (0);   ///< (the loader's answers on the message thread check it)
     void loadHybrid2 (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation);
 };

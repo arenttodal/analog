@@ -82,6 +82,8 @@ public:
                   const float* sendRight = nullptr) noexcept;
     /** Audio thread: the route playing (or about to) is MAIN + SEND: the voices' sends are wanted. */
     bool wantsSend() const noexcept { return (current != nullptr && current->graph.mainSend) || (waiting != nullptr && waiting->graph.mainSend); }
+    /** Audio thread: the route playing this block is MAIN + SEND (not one still ducking out). */
+    bool mainSendPlaying() const noexcept { return current != nullptr && current->graph.mainSend && waiting == nullptr; }
     /** The route now playing is MAIN + SEND (any thread). */
     bool playingMainSend() const noexcept { return mainSendNow.load (std::memory_order_relaxed); }
 
@@ -108,9 +110,12 @@ private:
 
     void runCustom (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n) noexcept;
     /** Returns whether what leaves the chain is wet (SEND's root: a spatial processor ran). */
-    bool runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group, bool wet = false) noexcept;
+    /** (SEND's root: `ahead`, a spatial processor follows this chain, so what it gives is still
+        heard through it; else only what is already wet may leave.) */
+    bool runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group, bool wet = false,
+                   bool ahead = false) noexcept;
     void runEffect (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth) noexcept;
-    bool runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group, bool wet) noexcept;
+    bool runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group, bool wet, bool ahead) noexcept;
     void runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n, const float* sendLeft, const float* sendRight) noexcept;
     void applySettings() noexcept;
     int chainLatency (const std::vector<Node>& chain) const noexcept;

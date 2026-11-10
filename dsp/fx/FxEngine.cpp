@@ -44,6 +44,28 @@ void AlignLine::run (float* left, float* right, int n, int delay) noexcept
 namespace
 {
     /** A group's alignment lines, pre-order (the order the engine walks them). */
+    bool hasSpatial (const std::vector<Node>& chain) noexcept;
+
+    /** Whether a node is, or holds, a spatial processor (no allocation). */
+    bool nodeHasSpatial (const Node& n) noexcept
+    {
+        if (n.kind == Node::Kind::effect)
+            return isSpatial (n.fx.type);
+        for (const auto& lane : n.lanes)
+            if (hasSpatial (lane))
+                return true;
+        return false;
+    }
+
+    /** Whether `chain` holds a spatial processor anywhere (no allocation). */
+    bool hasSpatial (const std::vector<Node>& chain) noexcept
+    {
+        for (const auto& n : chain)
+            if (nodeHasSpatial (n))
+                return true;
+        return false;
+    }
+
     /** Whether `chain` holds `id` (no allocation: the audio thread asks). */
     bool holds (const std::vector<Node>& chain, InstanceId id) noexcept
     {
@@ -282,7 +304,8 @@ void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, i
     mainSendNow.store (current != nullptr && current->graph.mainSend, std::memory_order_relaxed);
     int latency = 0;
     if (current != nullptr && current->graph.custom)
-        latency = current->graph.mainSend ? std::max (chainLatency (current->graph.chain), chainLatency (current->graph.send)) : chainLatency (current->graph.chain);
+        latency = current->graph.mainSend && hasSpatial (current->graph.send) ? std::max (chainLatency (current->graph.chain), chainLatency (current->graph.send))
+                                                                              : chainLatency (current->graph.chain);   // (a SEND without a spatial processor returns nothing: not waited for)
     latencyNow.store (latency, std::memory_order_relaxed);
 }
 
@@ -337,11 +360,16 @@ void FxEngine::runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, 
         std::fill (sendL.begin(), sendL.begin() + n, 0.0f);
         std::fill (sendR.begin(), sendR.begin() + n, 0.0f);
     }
+    if (! hasSpatial (g.graph.send))
+        return;   // (a SEND with no spatial processor returns nothing, and is not waited for)
     sendRoot = true;
     const bool wet = runChain (legacy, g.graph.send, sendL.data(), sendR.data(), n, 0, group);
     sendRoot = false;
     if (! wet)
-        return;   // (a SEND with no spatial processor returns nothing)
+    {
+        std::fill (sendL.begin(), sendL.begin() + n, 0.0f);   // (its spatial processors bypassed: nothing wet this block)
+        std::fill (sendR.begin(), sendR.begin() + n, 0.0f);
+    }
     // The two met at the slower path's latency.
     const int lm = chainLatency (g.graph.chain), ls = chainLatency (g.graph.send), most = std::max (lm, ls);
     if (most > lm)
@@ -355,17 +383,25 @@ void FxEngine::runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, 
     }
 }
 
-bool FxEngine::runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group, bool wet) noexcept
+bool FxEngine::runChain (osp::PostProcessor& legacy, const std::vector<Node>& chain, float* left, float* right, int n, int depth, int& group, bool wet,
+                         bool ahead) noexcept
 {
-    for (const auto& node : chain)
+    for (std::size_t i = 0; i < chain.size(); ++i)
     {
+        const auto& node = chain[i];
         if (node.kind == Node::Kind::effect)
         {
             runEffect (legacy, node, left, right, n, depth);
             wet = wet || (sendRoot && isSpatial (node.fx.type));
         }
         else
-            wet = runGroup (legacy, node, left, right, n, depth, group, wet) || wet;
+        {
+            // (SEND: a spatial processor later in this chain, or after it, still hears this group.)
+            bool later = ahead;
+            for (std::size_t j = i + 1; j < chain.size() && sendRoot && ! later; ++j)
+                later = nodeHasSpatial (chain[j]);
+            wet = runGroup (legacy, node, left, right, n, depth, group, wet, later) || wet;
+        }
     }
     return wet;
 }
@@ -528,7 +564,7 @@ void FxEngine::runEffect (osp::PostProcessor& legacy, const Node& node, float* l
     }
 }
 
-bool FxEngine::runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group, bool wet) noexcept
+bool FxEngine::runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group, bool wet, bool ahead) noexcept
 {
     auto& b = buffers[static_cast<std::size_t> (depth)];
     const auto bytes = sizeof (float) * static_cast<std::size_t> (n);
@@ -560,12 +596,12 @@ bool FxEngine::runGroup (osp::PostProcessor& legacy, const Node& node, float* le
     {
         std::memcpy (b.workL.data(), b.inL.data(), bytes);
         std::memcpy (b.workR.data(), b.inR.data(), bytes);
-        const bool laneWet = runChain (legacy, node.lanes[lane], b.workL.data(), b.workR.data(), n, depth + 1, group, wet);
+        const bool laneWet = runChain (legacy, node.lanes[lane], b.workL.data(), b.workR.data(), n, depth + 1, group, wet, ahead);
         if (base >= 0)
             current->aligns[static_cast<std::size_t> (base) + lane].run (b.workL.data(), b.workR.data(), n, slowest - chainLatency (node.lanes[lane]));
         anyWet = anyWet || laneWet;
-        if (sendRoot && ! laneWet)
-            continue;
+        if (sendRoot && ! laneWet && ! ahead)
+            continue;   // (nothing spatial after it: its dry never returns)
         const float g = node.gains[lane];
         if (send)
             for (int i = 0; i < n; ++i)

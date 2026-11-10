@@ -67,6 +67,7 @@ private:
         double phase = 0.0;
         float env = 0.0f;          ///< 0..1
         bool releasing = false;
+        bool killed = false;       ///< ALL SOUND OFF: this voice's quick fade (a later note is its own)
         float gain = 0.0f, gainTarget = 0.0f;   ///< range x response x velocity, glided
         float velocity = 1.0f;
         std::uint64_t age = 0;
@@ -92,7 +93,6 @@ private:
     // GRIT's tone and the subsonic guard (two one-pole high-passes at ~25 Hz).
     float toneCoef = 1.0f, toneState = 0.0f;
     float hpCoef = 0.0f, hp1x = 0.0f, hp1y = 0.0f, hp2x = 0.0f, hp2y = 0.0f;
-    bool killing = false;   ///< ALL SOUND OFF: a quick fade, then silence
 };
 
 } // namespace andor::analog

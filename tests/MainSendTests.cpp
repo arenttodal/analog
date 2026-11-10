@@ -216,3 +216,62 @@ TEST_CASE ("MAIN + SEND: a latent processor on SEND - the route reports it, MAIN
     // (RETRO's latency, if it has one at this rate: MAIN is held back to meet it.)
     CHECK (latency >= 0);
 }
+
+TEST_CASE ("MAIN + SEND (review fix): an insert group before SPACE on SEND shapes what SPACE hears - never silences it", "[mainsend][v6]")
+{
+    Patch p = twoCards();
+    p.sendC = 1.0;
+    p.fx.eq[0].on = false;      // (bypassed inserts: the group passes the send as it is)
+    p.fx.filter[0].on = false;
+    const auto spaceOnly = mainSend ({}, { effect (fx::Type::space) });
+    const auto grouped = mainSend ({}, { fx::Node::parallel ({ effect (fx::Type::eq) }, { effect (fx::Type::filter) }), effect (fx::Type::space) });
+    const auto a = play (p, &spaceOnly), b = play (p, &grouped);
+    CHECK (b.rms (1.0, 2.0) > 1.0e-3);   // (the room after the release: SPACE heard the group's output)
+    CHECK (std::abs (b.rms (1.0, 2.0) - a.rms (1.0, 2.0)) < 0.1 * a.rms (1.0, 2.0));
+    // ... while a group with nothing spatial after it returns only its wet lane.
+    const auto lastGroup = mainSend ({}, { fx::Node::parallel ({ effect (fx::Type::eq) }, { effect (fx::Type::space) }, fx::Law::send) });
+    CHECK (maxDifference (play (p, &lastGroup), a) < 1.0e-5f);
+}
+
+TEST_CASE ("SUB (review fix): with one path, SUB meets the voices at a latent route's latency", "[mainsend][v6][sub]")
+{
+    // A CUSTOM route with a latent effect (whichever of them has latency at this rate).
+    Patch p = measurementPatch();
+    p.osc1Level = 0.0;
+    p.space = 0.0;
+    p.sub.enabled = true;
+    for (const auto type : { fx::Type::convolution, fx::Type::retro, fx::Type::shifter, fx::Type::flanger })
+    {
+        fx::Graph g;
+        g.custom = true;
+        g.chain = { effect (type) };
+        auto owned = makeSynth (p);
+        owned->setFxGraph (fx::compile (g, 1));
+        std::vector<float> l (512), r (512);
+        owned->render (l.data(), r.data(), 512);
+        const int lag = owned->fxEngine().latencySamples();
+        if (lag <= 0)
+            continue;
+        INFO ("latent effect " << fx::typeName (type) << ", " << lag << " samples");
+        auto onset = [&p] (const fx::Graph* graph) {
+            auto s = makeSynth (p);
+            if (graph != nullptr)
+                s->setFxGraph (fx::compile (*graph, 1));
+            std::vector<float> warm (512), warmR (512);
+            s->render (warm.data(), warmR.data(), 512);
+            const std::uint8_t keyOn[3] { 0x90, 60, 127 };
+            s->handleSubMidi (keyOn, 3);
+            std::vector<float> out (24000), outR (24000);
+            s->render (out.data(), outR.data(), 24000);
+            for (int i = 0; i < 24000; ++i)
+                if (std::abs (out[static_cast<std::size_t> (i)]) > 1.0e-4f)
+                    return i;
+            return -1;
+        };
+        const int dry = onset (nullptr), routed = onset (&g);
+        REQUIRE (dry >= 0);
+        CHECK (std::abs (routed - (dry + lag)) <= 1);
+        return;
+    }
+    WARN ("no latent effect at this rate: nothing to align");
+}

@@ -850,6 +850,20 @@ bool FxRoutingView::loadChain (const juce::File& file)
     fx::Graph next;
     if (xml == nullptr || ! fx::fromText (xml->getStringAttribute ("graph").toStdString(), next) || ! fx::validate (next).empty())
         return false;   // (an unreadable chain changes nothing: checked before any setting moves)
+    {
+        // MAIN + SEND: the chain must fit the tab it lands on (no spatial effect on MAIN, none
+        // the other path holds; OVERVIEW takes none) - refused before any setting moves.
+        const auto now = engine.fxRoute();
+        if (now.mainSend)
+        {
+            if (currentTab == 2)
+                return false;
+            auto target = now;
+            (currentTab == 1 ? target.send : target.chain) = next.chain;
+            if (! fx::validate (target).empty())
+                return false;
+        }
+    }
     if (! fxpresets::chainFromXml (host, *xml, next))
         return false;
     next.custom = true;

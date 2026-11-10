@@ -231,3 +231,19 @@ TEST_CASE ("MORPH-01: MORPH hears card C as a whole - C2 alone (C1 empty) is mor
     plain.morph.enabled = false;
     CHECK (maxDifference (play (off, chord), play (plain, chord)) == 0.0f);
 }
+
+TEST_CASE ("C2 (review fix): FOLLOW off holds a note only for a layer that is heard", "[hybrid2][v6]")
+{
+    // C1 silent (LEVEL -48 dB) with a long recording; C2 an audible oscillator: the release is
+    // not held back by C1's silent recording.
+    Patch p = cardCOnly();
+    p.organic.follow = false;
+    p.organic.levelDb = -48.0;
+    p.hybridType = HybridType::instrumentPatch;
+    p.hybrid2.enabled = true;
+    p.hybrid2.type = HybridType::oscillator;
+    p.ampRelease = 0.01;
+    const auto longTone = oneZone (440.0, 69.0, 4.0);
+    const auto out = play (p, { on (0, 69, 100), off (2400, 69) }, 1.0, &longTone, nullptr);
+    CHECK (out.rms (0.5, 1.0) < 1.0e-4);   // (released at once: C2 stops, C1 was never heard)
+}

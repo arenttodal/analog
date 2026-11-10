@@ -49,7 +49,6 @@ void SubOsc::reset() noexcept
     held.fill (0);
     sustained.fill (false);
     pedal = false;
-    killing = false;
     bendSemitones = 0.0;
     toneState = hp1x = hp1y = hp2x = hp2y = 0.0f;
 }
@@ -102,6 +101,7 @@ void SubOsc::startKey (int key, float velocity) noexcept
     const bool fresh = chosen->key < 0;
     chosen->key = key;
     chosen->releasing = false;
+    chosen->killed = false;
     chosen->velocity = velocity;
     chosen->age = ++clock;
     chosen->gainTarget = keyGain (key) * velocityGain (velocity);
@@ -203,7 +203,10 @@ void SubOsc::handleMidi (const std::uint8_t* data, int size) noexcept
             held.fill (0);
             sustained.fill (false);
             releaseAll();
-            killing = killing || controller == 120;
+            if (controller == 120)
+                for (auto& v : voices)
+                    if (v.key >= 0)
+                        v.killed = true;   // (only these: a note after it plays as usual)
         }
         else if (controller == 121)   // RESET ALL CONTROLLERS
         {
@@ -275,7 +278,6 @@ void SubOsc::render (float* left, float* right, int n) noexcept
 {
     if (! sounding())
     {
-        killing = false;
         hp1x = hp1y = hp2x = hp2y = toneState = 0.0f;
         return;
     }
@@ -297,7 +299,7 @@ void SubOsc::render (float* left, float* right, int n) noexcept
             auto& v = voices[i];
             if (v.key < 0)
                 continue;
-            if (killing)
+            if (v.killed)
                 v.env *= quickCoef;
             else if (v.releasing)
                 v.env *= releaseCoef;
@@ -305,7 +307,7 @@ void SubOsc::render (float* left, float* right, int n) noexcept
                 v.env = std::min (1.0f, v.env + attackStep);
             v.gain += rangeCoef * (v.gainTarget - v.gain);
             sum += sample (v, increments[i]) * v.env * v.gain;
-            if ((v.releasing || killing) && v.env < 1.0e-5f)
+            if (v.releasing && v.env < 1.0e-5f)
                 v = Voice {};
         }
         if (grit > 0.0)
@@ -327,11 +329,6 @@ void SubOsc::render (float* left, float* right, int n) noexcept
         left[s] += hp2y;
         right[s] += hp2y;
     }
-    bool any = false;
-    for (const auto& v : voices)
-        any = any || v.key >= 0;
-    if (! any)
-        killing = false;
 }
 
 } // namespace andor::analog

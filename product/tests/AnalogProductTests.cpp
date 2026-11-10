@@ -8785,3 +8785,50 @@ TEST_CASE ("analog: V6 gate 4 screenshots - FX ROUTING's MAIN, SEND and OVERVIEW
         ui.setSourceViewShown (false);
     }
 }
+
+TEST_CASE ("analog: MAIN + SEND (review fixes) - a chain that does not fit its tab is refused before a setting moves; the same C2 source again stays loaded", "[v6][mainsend][hybrid2]")
+{
+    namespace fx = andor::analog::fx;
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+
+    // A saved chain holding CONVOLUTION at a MIX of its own.
+    Scratch scratch;
+    fx::Graph withConv;
+    withConv.custom = true;
+    withConv.chain = { fx::Node::effect ({ fx::Type::convolution, 0 }) };
+    setValue (p, "analog.fx.conv.1.mix", 80.0f);
+    const auto xml = andor::analog::fxpresets::chainToXml (p, withConv, "conv");
+    REQUIRE (xml != nullptr);
+    const auto file = scratch.dir.getChildFile ("conv.xml");
+    REQUIRE (xml->writeTo (file));
+    setValue (p, "analog.fx.conv.1.mix", 30.0f);
+
+    // On MAIN it does not fit (CONVOLUTION belongs on SEND): refused, the MIX untouched.
+    REQUIRE (view->useMainSend());
+    const auto before = engine.fxRoute();
+    CHECK (! view->loadChain (file));
+    CHECK (engine.fxRoute() == before);
+    CHECK (std::abs (p.parameterValue ("analog.fx.conv.1.mix") - 30.0f) < 0.01f);
+    // On SEND it fits.
+    view->setTab (1);
+    CHECK (view->loadChain (file));
+    CHECK (std::abs (p.parameterValue ("analog.fx.conv.1.mix") - 80.0f) < 0.01f);
+    ui.setSourceViewShown (false);
+
+    // C2's source set again to the same definition: stays loaded, never "loading".
+    const auto rec = writeRecording (scratch.dir, "again.wav", 60, 1.0);
+    const auto made = andor::analog::import::makeFileDefinition (rec, scratch.dir.getChildFile ("Imported"));
+    REQUIRE (made.xml != nullptr);
+    engine.setHybrid2Definition (std::make_unique<juce::XmlElement> (*made.xml), scratch.dir.getChildFile ("Imported"));
+    REQUIRE (engine.waitForHybrid2 (10000));
+    engine.setHybrid2Definition (std::make_unique<juce::XmlElement> (*made.xml), scratch.dir.getChildFile ("Imported"));
+    CHECK (! engine.hybrid2State().loading);
+    CHECK (engine.hybrid2State().loaded);
+}
