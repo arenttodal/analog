@@ -64,6 +64,11 @@ juce::Array<int> savedLaneGroups (const juce::var& manifest);
 Definition makeDefinition (const juce::var& manifest, const juce::Array<int>& groups, const juce::String& name, const juce::File& sampleFolder,
                            const juce::File& assetFolder);
 
+/** One recording as a source (Cinematic V6 gate 3: card C's second layer's SAMPLE): one zone over
+    every key, rooted where its pitch was found (else C4), copied into `assetFolder` by its content.
+    Loader thread (it decodes and analyses). Null xml: the file could not be read or stored. */
+Definition makeFileDefinition (const juce::File& recording, const juce::File& assetFolder);
+
 /** A definition into a playable source, its recordings from `assetFolder` (or their paths). */
 LoadResult loadDefinition (const juce::XmlElement& definition, const juce::File& assetFolder);
 

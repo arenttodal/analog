@@ -419,6 +419,31 @@ namespace
             c.hybridType = HybridType::noise;
             c.hybridNoiseTone = 0.4;   // (KEYS moves the tone: heard below full brightness)
         };
+        // State version 16: card C's second layer (on, as an oscillator by default; each model's
+        // and type's settings in that model or type).
+        auto c2 = [] (HybridType type, OscModel m, std::function<void (Patch&)> more = {}) {
+            return [type, m, more] (Patch& c) {
+                c.hybrid2.enabled = true;
+                c.hybrid2.type = type;
+                c.hybrid2.model = m;
+                c.hybrid2.wave = Osc2Wave::all;
+                if (more != nullptr)
+                    more (c);
+            };
+        };
+        for (const auto& id : { params::hybrid2Type, params::hybrid2Level, params::hybrid2Octave, params::hybrid2Coarse, params::hybrid2Fine, params::hybrid2Velo,
+                                params::hybrid2Model, params::hybrid2Wave, params::hybrid2Width })
+            modes[id] = c2 (HybridType::oscillator, OscModel::classic);
+        for (const auto& id : { params::hybrid2DcoSaw, params::hybrid2DcoPulse, params::hybrid2DcoSub })
+            modes[id] = c2 (HybridType::oscillator, OscModel::dco);
+        modes[params::hybrid2DcoPwmSource] = c2 (HybridType::oscillator, OscModel::dco, [] (Patch& c) { c.hybrid2.dco.pulse = true; c.hybrid2.dco.pwmDepth = 0.6; });
+        modes[params::hybrid2DcoPwmDepth] = c2 (HybridType::oscillator, OscModel::dco, [] (Patch& c) { c.hybrid2.dco.pulse = true; c.hybrid2.dco.pwmSource = PwmSource::lfo; });
+        for (const auto& id : { params::hybrid2WideWave, params::hybrid2WideShape })
+            modes[id] = c2 (HybridType::oscillator, OscModel::wide);
+        modes[params::hybrid2WideSpread] = c2 (HybridType::oscillator, OscModel::wide, [] (Patch& c) { c.hybrid2.wide.wave = WideWave::superSaw; });
+        for (const auto& id : { params::hybrid2NoiseColor, params::hybrid2NoiseTone, params::hybrid2NoiseMovement })
+            modes[id] = c2 (HybridType::noise, OscModel::classic);
+        modes[params::hybrid2NoiseKeys] = c2 (HybridType::noise, OscModel::classic, [] (Patch& c) { c.hybrid2.noiseTone = 0.4; });
         modes[params::otaCharacter] = [] (Patch& c) {
             c.filterModel = FilterModel::ota;
             c.resonance = 0.6;
@@ -5915,7 +5940,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 15);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB)
+        CHECK (xml->getIntAttribute ("productVersion") == 16);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8127,7 +8152,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 15);
+    CHECK (xml->getIntAttribute ("productVersion") == 16);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -8392,5 +8417,175 @@ TEST_CASE ("analog: V6 gate 2 screenshots - the arp / sub housing and SUB's popo
         ui.openPopup (andor::shell::ShellEditor::arpCompanionPopup);
         shoot ("g2-4-sub-popover-flat");
         ui.closePopup();
+    }
+}
+
+//==============================================================================
+// Cinematic V6 gate 3: card C's second layer (C2), inside card C (docs/CINEMATIC_V6_GATE3.md).
+
+namespace
+{
+    juce::Component* findTitled (juce::Component& root, const juce::String& title)
+    {
+        if (root.getTitle() == title)
+            return &root;
+        for (auto* c : root.getChildren())
+            if (auto* found = findTitled (*c, title))
+                return found;
+        return nullptr;
+    }
+
+    void clickAt (juce::Component& c, juce::Point<float> at)
+    {
+        juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), at, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c,
+                            juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false);
+        c.mouseUp (e);
+    }
+
+    juce::StringArray cardCKnobs (ShellProcessor& p)
+    {
+        juce::StringArray ids;
+        for (const auto& k : p.product().cardControls (1, p))
+            ids.add (k.parameterId);
+        return ids;
+    }
+}
+
+TEST_CASE ("analog: card C's second layer - off by default, + adds it, 1 / 2 rebind the well and the knob row, x removes it (C2-03, UI)", "[v6][hybrid2]")
+{
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    const auto oneLayerKnobs = cardCKnobs (p);
+    CHECK (andor::analog::hybridLayerShown (p) == 1);
+    CHECK (andor::analog::hybridOverlayKey (p) == "hybrid/0/empty");   // (exactly the key it always had)
+    CHECK (p.parameterValue (params::hybrid2Enabled) < 0.5f);
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    auto layerKeys = [&ui]() -> juce::Component* {
+        auto* overlay = ui.engineCard (1).wellOverlayComponent();
+        return overlay != nullptr ? findTitled (*overlay, "Hybrid layers") : nullptr;
+    };
+    REQUIRE (layerKeys() != nullptr);
+    CHECK (layerKeys()->getWidth() == 22);   // one key: +
+    CHECK (layerKeys()->getParentComponent() != ui.engineCard (1).wellOverlayComponent());   // (in the revealed layer: shown on hover only)
+
+    // + : the second layer on, shown; the knob row its own.
+    clickAt (*layerKeys(), { 11.0f, 11.0f });
+    CHECK (p.parameterValue (params::hybrid2Enabled) > 0.5f);
+    CHECK (andor::analog::hybridLayerShown (p) == 2);
+    CHECK (cardCKnobs (p) == juce::StringArray { params::hybrid2Fine, params::hybrid2Coarse, params::hybrid2Octave, params::hybrid2Level, params::hybrid2Velo });
+    ui.refreshNow();
+    REQUIRE (layerKeys() != nullptr);
+    CHECK (layerKeys()->getWidth() == 3 * 22 + 2 * 4);   // 1, 2, x
+    CHECK (layerKeys()->getParentComponent() == ui.engineCard (1).wellOverlayComponent());   // (always shown with two layers)
+
+    // 1 : the first layer's, exactly as before.
+    clickAt (*layerKeys(), { 11.0f, 11.0f });
+    CHECK (andor::analog::hybridLayerShown (p) == 1);
+    CHECK (cardCKnobs (p) == oneLayerKnobs);
+    ui.refreshNow();
+    CHECK (layerKeys()->getWidth() == 2 * 22 + 4);   // 1, 2
+    // 2 then x : removed, back to one layer (its settings kept for next time).
+    clickAt (*layerKeys(), { 37.0f, 11.0f });
+    CHECK (andor::analog::hybridLayerShown (p) == 2);
+    setValue (p, params::hybrid2Type, 2.0f);   // NOISE: its knob row
+    CHECK (cardCKnobs (p)[0] == params::hybrid2NoiseTone);
+    ui.refreshNow();
+    clickAt (*layerKeys(), { 63.0f, 11.0f });
+    CHECK (p.parameterValue (params::hybrid2Enabled) < 0.5f);
+    CHECK (andor::analog::hybridLayerShown (p) == 1);
+    CHECK (cardCKnobs (p) == oneLayerKnobs);
+    CHECK (juce::roundToInt (p.parameterValue (params::hybrid2Type)) == 2);
+}
+
+TEST_CASE ("analog: card C's second layer's own recording - rooted at its pitch, kept apart from C1's, saved and recalled, heard", "[v6][hybrid2]")
+{
+    Scratch scratch;
+    const auto file = writeRecording (scratch.dir, "layer2.wav", 57, 1.5);
+    const auto store = scratch.dir.getChildFile ("Imported");
+    const auto made = andor::analog::import::makeFileDefinition (file, store);
+    REQUIRE (made.xml != nullptr);
+    const auto* zone = made.xml->getChildByName ("Zone");
+    REQUIRE (zone != nullptr);
+    CHECK (std::abs (zone->getDoubleAttribute ("root") - 57.0) < 0.3);   // (A3: found by its pitch)
+    CHECK (store.getChildFile (zone->getStringAttribute ("asset")).existsAsFile());
+
+    juce::MemoryBlock session;
+    {
+        ShellProcessor p;
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        engine.setHybrid2Definition (std::make_unique<juce::XmlElement> (*made.xml), store);
+        REQUIRE (engine.waitForHybrid2 (10000));
+        CHECK (engine.hybrid2State().loaded);
+        CHECK (engine.hybrid2State().missing.isEmpty());
+        CHECK (engine.sampleSourceDefinition() == nullptr);   // (C1's own untouched)
+        setValue (p, params::hybrid2Enabled, 1.0f);
+        setValue (p, params::hybrid2Type, 0.0f);   // SAMPLE
+        setValue (p, "layerA.level", -48.0f);   // (the oscillators out: card C heard alone)
+        const auto heard = renderShell (p, 0.5, { { 0, 57, 100 } }, false);
+        CHECK (rmsOf (heard) > 1.0e-3);
+        setValue (p, params::hybrid2Enabled, 0.0f);
+        CHECK (rmsOf (renderShell (p, 0.5, { { 0, 57, 100 } }, false)) < 0.2 * rmsOf (heard));
+        setValue (p, params::hybrid2Enabled, 1.0f);
+        p.getStateInformation (session);
+    }
+    {
+        ShellProcessor q;
+        q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+        auto& engine = dynamic_cast<AnalogEngine&> (q.productEngine());
+        const auto recalled = engine.hybrid2Definition();
+        REQUIRE (recalled != nullptr);
+        CHECK (recalled->isEquivalentTo (made.xml.get(), false));
+        CHECK (q.parameterValue (params::hybrid2Enabled) > 0.5f);
+    }
+}
+
+TEST_CASE ("analog: V6 gate 3 screenshots - card C with one layer, two, and its second shown (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-v6-g3]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    for (const int width : { 1448, 869 })
+    {
+        ShellProcessor p;
+        setValue (p, params::hybridType, 1.0f);   // C1: OSC 3
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+        auto shoot = [&] (const juce::String& name, bool revealed) {
+            ui.refreshNow();
+            if (auto* overlay = ui.engineCard (1).wellOverlayComponent())
+                overlay->setRevealedForTest (revealed);
+            const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+            const auto card = ui.getLocalArea (&ui.engineCard (1), ui.engineCard (1).getLocalBounds());
+            const auto crop = editor->createComponentSnapshot (card, true, 2.0f);
+            const auto cropFile = out.getChildFile (name + "-card-" + juce::String (width) + ".png");
+            cropFile.deleteFile();
+            juce::FileOutputStream cropStream (cropFile);
+            juce::PNGImageFormat().writeImageToStream (crop, cropStream);
+        };
+        shoot ("g3-1-one-layer", false);
+        shoot ("g3-2-one-layer-hover", true);
+        setValue (p, params::hybrid2Enabled, 1.0f);
+        andor::analog::showHybridLayer (p, 2);
+        setValue (p, params::hybrid2Type, 2.0f);   // C2: NOISE
+        shoot ("g3-3-layer2-noise", true);
+        setValue (p, params::hybrid2Type, 1.0f);   // C2: an oscillator, WIDE
+        setValue (p, params::hybrid2Model, 2.0f);
+        shoot ("g3-4-layer2-osc", true);
+        andor::analog::showHybridLayer (p, 1);
+        shoot ("g3-5-two-layers-1-shown", false);
+        andor::analog::showHybridLayer (p, 2);
+        setValue (p, params::hybrid2Type, 0.0f);   // C2: SAMPLE, empty
+        shoot ("g3-6-layer2-sample-empty", false);
     }
 }

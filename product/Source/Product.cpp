@@ -315,6 +315,7 @@ const ProductInfo& productInfo()
             andor::analog::params::addTo (layout);
             andor::analog::fxparams::addTo (layout);   // (state version 12: the FX library's slots, appended)
             andor::analog::params::addSubTo (layout);   // (state version 15: SUB, appended)
+            andor::analog::params::addHybrid2To (layout);   // (state version 16: card C's second layer, appended)
         };
         p.installFactoryPresets = installFactoryPresets;
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
@@ -365,7 +366,9 @@ const ProductInfo& productInfo()
         p.cardModifiersShown = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)
                 return false;
-            const int type = juce::roundToInt (host.parameterValue (andor::analog::params::hybridType));
+            // (Card C's modifiers are both layers': LOOP and FOLLOW act on the second's zones too.)
+            const bool second = andor::analog::hybridLayerShown (host) == 2;
+            const int type = juce::roundToInt (host.parameterValue (second ? andor::analog::params::hybrid2Type : andor::analog::params::hybridType));
             return type == static_cast<int> (andor::analog::HybridType::sample) || type == static_cast<int> (andor::analog::HybridType::instrumentPatch);
         };
         // ... as a compact row of icon keys at the top-left of card C's dark well (its foot free,
@@ -394,6 +397,8 @@ const ProductInfo& productInfo()
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)
                 return 0xf;
+            if (andor::analog::hybridLayerShown (host) == 2)
+                return 1 | 4 | 8;   // (the second layer's zones: LINK, LOOP, FOLLOW - they never play backwards)
             const int type = juce::roundToInt (host.parameterValue (andor::analog::params::hybridType));
             return type == static_cast<int> (andor::analog::HybridType::instrumentPatch) ? (1 | 4 | 8) : 0xf;
         };
@@ -406,6 +411,17 @@ const ProductInfo& productInfo()
                 k = { K { ap::osc1Fine, "DETUNE" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" }, K { ap::osc1Level, "LEVEL" }, K {} };
             else if (layer == 2)   // (Cinematic V6: its own REIMAGINED fifth, as card A's; its VELO in its well)
                 k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K {} };
+            else if (andor::analog::hybridLayerShown (host) == 2)
+            {
+                // Card C's second layer (its keys in the well choose it): its own, by its type.
+                using andor::analog::HybridType;
+                const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (ap::hybrid2Type)), 0, 3));
+                const K level { ap::hybrid2Level, "LEVEL" }, velo { ap::hybrid2Velo, "VELO" };
+                if (type == HybridType::noise)
+                    k = { K { ap::hybrid2NoiseTone, "TONE" }, K { ap::hybrid2NoiseMovement, "MOVEMENT" }, K { ap::hybrid2NoiseKeys, "KEYS" }, level, velo };
+                else
+                    k = { K { ap::hybrid2Fine, "DETUNE" }, K { ap::hybrid2Coarse, "TUNE" }, K { ap::hybrid2Octave, "OCT" }, level, velo };
+            }
             else
             {
                 // Card C by its type.
@@ -462,7 +478,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 15;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate)
+        p.stateVersion = 16;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);

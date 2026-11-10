@@ -121,6 +121,11 @@ void AnalogEngine::saveState (juce::XmlElement& state) const
         if (sourceDefinition != nullptr)
             state.addChildElement (new juce::XmlElement (*sourceDefinition));
     }
+    {
+        const std::lock_guard<std::mutex> lock (source2Mutex);
+        if (source2Definition != nullptr)
+            state.createNewChildElement ("Hybrid2Source")->addChildElement (new juce::XmlElement (*source2Definition));
+    }
     // State version 12: the FX route, only once it is CUSTOM (absent: CLASSIC, as every session
     // and preset from before is).
     const std::lock_guard<std::mutex> lock (routeMutex);
@@ -162,6 +167,10 @@ void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File
 {
     const auto* definition = state.getChildByName ("SampleSource");
     setSampleSourceDefinition (definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr, assetFolder.getChildFile ("Imported"));
+    // State version 16: card C's second layer's own source (absent: none).
+    const auto* layer2 = state.getChildByName ("Hybrid2Source");
+    const auto* definition2 = layer2 != nullptr ? layer2->getChildByName ("SampleSource") : nullptr;
+    setHybrid2Definition (definition2 != nullptr ? std::make_unique<juce::XmlElement> (*definition2) : nullptr, assetFolder.getChildFile ("Imported"));
     // The FX route (state version 12): absent or unreadable, CLASSIC.
     auto saved = andor::analog::fx::classicGraph();
     if (const auto* fx = state.getChildByName ("FxRouting"))
@@ -258,6 +267,111 @@ bool AnalogEngine::waitForSampleSource (int timeoutMs) const
     return false;
 }
 
+void AnalogEngine::setHybrid2Definition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder)
+{
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock (source2Mutex);
+        const bool same = (definition == nullptr && source2Definition == nullptr)
+                          || (definition != nullptr && source2Definition != nullptr && definition->isEquivalentTo (source2Definition.get(), false));
+        if (same && ! (source2State.loaded && (! source2State.missing.isEmpty() || ! source2State.unreadable.isEmpty())))
+            return;
+        source2Definition = definition != nullptr ? std::make_unique<juce::XmlElement> (*definition) : nullptr;
+        generation = ++source2Generation;
+        source2State = {};
+        source2Loaded.reset();
+        if (source2Definition != nullptr)
+        {
+            source2State.name = source2Definition->getStringAttribute ("name");
+            source2State.loading = true;
+        }
+    }
+    if (definition == nullptr)
+    {
+        auto none = std::make_shared<LoadedSource>();
+        none->generation = generation;
+        const std::lock_guard<std::mutex> lock (source2Mutex);
+        source2Exchange.publish (std::move (none));
+        source2Exchange.collectGarbage();
+        return;
+    }
+    sourceLoader.addJob ([this, d = std::make_shared<juce::XmlElement> (*definition), assetFolder, generation] {
+        loadHybrid2 (std::make_unique<juce::XmlElement> (*d), assetFolder, generation);
+    });
+}
+
+void AnalogEngine::loadHybrid2 (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation)
+{
+    auto result = import::loadDefinition (*definition, assetFolder);
+    auto loaded = std::make_shared<LoadedSource>();
+    loaded->generation = generation;
+    loaded->source = result.source;
+    const std::lock_guard<std::mutex> lock (source2Mutex);
+    if (generation != source2Generation)
+        return;
+    source2State.loading = false;
+    source2State.loaded = true;
+    source2State.missing = result.missing;
+    source2State.unreadable = result.unreadable;
+    source2State.zones = result.zones;
+    source2Loaded = result.source;
+    source2Exchange.publish (std::move (loaded));
+    source2Exchange.collectGarbage();
+}
+
+void AnalogEngine::loadHybrid2File (const juce::File& recording, const juce::File& assetFolder)
+{
+    {
+        const std::lock_guard<std::mutex> lock (source2Mutex);
+        source2State = {};
+        source2State.name = recording.getFileNameWithoutExtension();
+        source2State.loading = true;
+    }
+    sourceLoader.addJob ([this, recording, assetFolder] {
+        auto made = import::makeFileDefinition (recording, assetFolder);
+        juce::MessageManager::callAsync ([this, xml = std::shared_ptr<juce::XmlElement> (made.xml.release()), assetFolder, alive = std::weak_ptr<int> (lifetime)] {
+            if (alive.expired())
+                return;
+            if (xml != nullptr)
+                setHybrid2Definition (std::make_unique<juce::XmlElement> (*xml), assetFolder);
+            else
+            {
+                const std::lock_guard<std::mutex> lock (source2Mutex);
+                source2State.loading = false;
+                source2State.loaded = true;
+                source2State.unreadable.add (source2State.name);
+            }
+        });
+    });
+}
+
+std::unique_ptr<juce::XmlElement> AnalogEngine::hybrid2Definition() const
+{
+    const std::lock_guard<std::mutex> lock (source2Mutex);
+    return source2Definition != nullptr ? std::make_unique<juce::XmlElement> (*source2Definition) : nullptr;
+}
+
+AnalogEngine::SampleSourceState AnalogEngine::hybrid2State() const
+{
+    const std::lock_guard<std::mutex> lock (source2Mutex);
+    return source2State;
+}
+
+bool AnalogEngine::waitForHybrid2 (int timeoutMs) const
+{
+    const auto until = juce::Time::getMillisecondCounter() + static_cast<juce::uint32> (timeoutMs);
+    while (juce::Time::getMillisecondCounter() < until)
+    {
+        {
+            const std::lock_guard<std::mutex> lock (source2Mutex);
+            if (! source2State.loading)
+                return true;
+        }
+        juce::Thread::sleep (5);
+    }
+    return false;
+}
+
 void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin::LoadedInstrument> source)
 {
     if (layer != 1)
@@ -320,6 +434,12 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     }
     if (sourcePlaying != nullptr)
         sourceExchange.publishOldestInUse (sourcePlaying->generation);
+    // Card C's second layer's own source (its zones play only while it is on and plays it).
+    if (const auto* next = source2Exchange.takePending())
+        source2Playing = next;
+    synth.setSampleSource2 (source2Playing != nullptr ? source2Playing->source.get() : nullptr);
+    if (source2Playing != nullptr)
+        source2Exchange.publishOldestInUse (source2Playing->generation);
     const int total = buffer.getNumSamples();
     if (! prepared || total <= 0 || buffer.getNumChannels() == 0)
         return;
@@ -525,6 +645,22 @@ juce::String AnalogEngine::engineSourceName (int layer) const
 {
     if (layer != 1)
         return {};
+    if (layer2Shown())
+    {
+        switch (layer2Type())
+        {
+            case HybridType::oscillator: return "OSC";
+            case HybridType::noise: return "NOISE";
+            case HybridType::sample:
+            case HybridType::instrumentPatch: break;
+        }
+        const std::lock_guard<std::mutex> lock (source2Mutex);
+        if (source2Definition == nullptr)
+            return layer2Type() == HybridType::sample ? juce::String ("SAMPLE") : juce::String ("INSTRUMENT PATCH");
+        const auto collection = source2Definition->getStringAttribute ("collection");
+        const auto name = source2Definition->getStringAttribute ("name");
+        return collection.isNotEmpty() ? collection + juce::String::fromUTF8 (" \xc2\xb7 ") + name : name;
+    }
     switch (hybridType())
     {
         case HybridType::oscillator: return "OSC 3";
@@ -544,6 +680,18 @@ juce::String AnalogEngine::engineSourcePlaceholder (int layer) const
 {
     if (layer != 1)
         return {};
+    if (layer2Shown())
+    {
+        const auto type = layer2Type();
+        if (type != HybridType::sample && type != HybridType::instrumentPatch)
+            return {};
+        const std::lock_guard<std::mutex> lock (source2Mutex);
+        if (source2State.loading)
+            return {};
+        if (source2Definition == nullptr)
+            return type == HybridType::sample ? "ADD SAMPLE\nCLICK TO BROWSE" : "CHOOSE A SOUND\nSOUNDS";
+        return {};
+    }
     if (hybridType() == HybridType::sample && ! recordingPublished.load())
         return "ADD SAMPLE\nDROP OR BROWSE";
     if (hybridType() == HybridType::instrumentPatch)
@@ -559,13 +707,101 @@ void AnalogEngine::removeEngineSource (int layer)
 {
     if (layer != 1)
         return;
+    if (layer2Shown())
+    {
+        setHybrid2Definition (nullptr, {});   // (the second layer's own source: the first's stays)
+        return;
+    }
     if (hybridType() == HybridType::instrumentPatch)
         setSampleSourceDefinition (nullptr, {});
     setHybridType (HybridType::sample);   // (card C back to its SAMPLE: a recording, or the empty card)
 }
 
+void AnalogEngine::outlineOf (const SampleSource* source, std::vector<float>& cycle)
+{
+    cycle.clear();
+    if (source == nullptr)
+        return;
+    const osp::PlaybackSource* longest = nullptr;
+    for (const auto& z : source->zones)
+        if (z.audio != nullptr && (longest == nullptr || z.audio->numFrames() > longest->numFrames()))
+            longest = z.audio.get();
+    if (longest == nullptr)
+        return;
+    constexpr int points = 256;
+    const auto frames = longest->numFrames();
+    for (int i = 0; i < points; ++i)
+    {
+        float peak = 0.0f;
+        const auto a = frames * i / points, b = std::max (a + 1, frames * (i + 1) / points);
+        for (auto f = a; f < b; f += std::max<std::int64_t> (1, (b - a) / 64))
+            for (int ch = 0; ch < longest->numChannels(); ++ch)
+                peak = std::max (peak, std::abs (longest->channelData (ch)[f]));
+        cycle.push_back (i % 2 == 0 ? peak : -peak);
+    }
+    // (Shown full height: the outline's shape, not its loudness.)
+    float top = 1.0e-6f;
+    for (const float v : cycle)
+        top = std::max (top, std::abs (v));
+    for (auto& v : cycle)
+        v /= top;
+}
+
+bool AnalogEngine::layer2Shown() const
+{
+    if (state == nullptr)
+        return false;
+    const auto* on = state->getRawParameterValue (params::hybrid2Enabled);
+    return on != nullptr && on->load() >= 0.5f && static_cast<int> (state->state.getProperty ("analogHybridLayer", 1)) == 2;
+}
+
+HybridType AnalogEngine::layer2Type() const
+{
+    const auto* type = state != nullptr ? state->getRawParameterValue (params::hybrid2Type) : nullptr;
+    return static_cast<HybridType> (std::clamp (juce::roundToInt (type != nullptr ? type->load() : 1.0f), 0, 3));
+}
+
 bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
 {
+    if (layer == 1 && layer2Shown())
+    {
+        // Card C's second layer: its oscillator, its noise, or its own source's outline.
+        const auto type = layer2Type();
+        if (type == HybridType::sample || type == HybridType::instrumentPatch)
+        {
+            std::shared_ptr<const SampleSource> source;
+            {
+                const std::lock_guard<std::mutex> lock (source2Mutex);
+                source = source2Loaded;
+            }
+            outlineOf (source.get(), cycle);
+            if (cycle.empty() && engineSourcePlaceholder (1).isNotEmpty())
+                cycle.assign (2, 0.0f);
+            return true;
+        }
+        params::Reader r;
+        r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));
+        auto p = r.read();
+        const auto& h = p.hybrid2;
+        if (type == HybridType::noise)
+        {
+            p.hybridNoiseColor = h.noiseColor;
+            p.hybridNoiseTone = h.noiseTone;
+            p.hybridNoiseMovement = h.noiseMovement;
+            p.hybridNoiseKeys = h.noiseKeys;
+            cycle = noisePictureOf (p);
+            return true;
+        }
+        p.osc2Model = h.model;
+        p.osc2Wave = h.wave;
+        p.dco2 = h.dco;
+        p.wide2 = h.wide;
+        p.osc2Width = h.width;
+        p.osc2Octave = h.octave;
+        p.osc2Coarse = h.coarse;
+        cycle = oscillatorPictureOf (p, 2);
+        return true;
+    }
     if (layer == 1 && engineSourcePlaceholder (1).isNotEmpty())
     {
         // A stand-in: a recording's outline in general (swells, a long tail), drawn faint.
@@ -608,32 +844,7 @@ bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTree
             const std::lock_guard<std::mutex> lock (sourceMutex);
             source = sourceLoaded;
         }
-        cycle.clear();
-        if (source == nullptr)
-            return true;
-        const osp::PlaybackSource* longest = nullptr;
-        for (const auto& z : source->zones)
-            if (z.audio != nullptr && (longest == nullptr || z.audio->numFrames() > longest->numFrames()))
-                longest = z.audio.get();
-        if (longest == nullptr)
-            return true;
-        constexpr int points = 256;
-        const auto frames = longest->numFrames();
-        for (int i = 0; i < points; ++i)
-        {
-            float peak = 0.0f;
-            const auto a = frames * i / points, b = std::max (a + 1, frames * (i + 1) / points);
-            for (auto f = a; f < b; f += std::max<std::int64_t> (1, (b - a) / 64))
-                for (int ch = 0; ch < longest->numChannels(); ++ch)
-                    peak = std::max (peak, std::abs (longest->channelData (ch)[f]));
-            cycle.push_back (i % 2 == 0 ? peak : -peak);
-        }
-        // (Shown full height: the outline's shape, not its loudness.)
-        float top = 1.0e-6f;
-        for (const float v : cycle)
-            top = std::max (top, std::abs (v));
-        for (auto& v : cycle)
-            v /= top;
+        outlineOf (source.get(), cycle);
         return true;
     }
     params::Reader r;

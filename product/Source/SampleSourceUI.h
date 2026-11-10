@@ -24,10 +24,11 @@ std::unique_ptr<osp::plugin::MiniPanel> createSoundPopover (osp::plugin::Instrum
 void runKontaktImport (osp::plugin::InstrumentHost& host);
 /** Card C as an INSTRUMENT PATCH: plays this imported sound (its definition, from the import's
     record). Only the hybrid changes: OSC 1, OSC 2, the filter and the effects stay as they are. */
-void chooseSound (osp::plugin::InstrumentHost& host, const juce::XmlElement& definition);
+void chooseSound (osp::plugin::InstrumentHost& host, const juce::XmlElement& definition, int layer = 1);
 /** The imported sounds as a menu under `target` (card C's well): pick one, import a Kontakt
     patch, or remove it. */
-void showSoundMenu (osp::plugin::InstrumentHost& host, juce::Component& target);
+/** (Cinematic V6 gate 3: `layer` 2 lists and sets card C's second layer's own sound.) */
+void showSoundMenu (osp::plugin::InstrumentHost& host, juce::Component& target, int layer = 1);
 /** What card C plays as an INSTRUMENT PATCH, in words (its name, or how to choose one). */
 juce::String instrumentPatchName (osp::plugin::InstrumentHost& host);
 

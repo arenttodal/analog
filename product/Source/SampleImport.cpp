@@ -1,5 +1,7 @@
 #include "SampleImport.h"
 
+#include "analysis/Analyzer.h"
+
 #include <juce_cryptography/juce_cryptography.h>
 
 namespace andor::analog::import
@@ -113,6 +115,49 @@ juce::String storeAsset (const juce::File& recording, const juce::File& assetFol
     if (! target.existsAsFile() && ! recording.copyFileTo (target))
         return {};
     return name;
+}
+
+Definition makeFileDefinition (const juce::File& recording, const juce::File& assetFolder)
+{
+    Definition result;
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (recording));
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
+        return result;
+    // Its root: the pitch analysis' (ANDOR OSP's), else C4.
+    double root = 60.0;
+    {
+        const auto frames = static_cast<int> (std::min<juce::int64> (reader->lengthInSamples, static_cast<juce::int64> (reader->sampleRate * 20.0)));
+        juce::AudioBuffer<float> buffer (static_cast<int> (reader->numChannels), frames);
+        if (reader->read (&buffer, 0, frames, 0, true, true))
+        {
+            osp::AudioData audio;
+            audio.sampleRate = reader->sampleRate;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                audio.channels.emplace_back (buffer.getReadPointer (ch), buffer.getReadPointer (ch) + frames);
+            const auto analysis = osp::Analyzer::analyse (audio);
+            if (analysis.pitch.detected && analysis.pitch.midiNote >= 0)
+                root = analysis.pitch.midiNote + analysis.pitch.centsOffset / 100.0;
+        }
+    }
+    const auto asset = storeAsset (recording, assetFolder);
+    if (asset.isEmpty())
+        return result;
+    auto xml = std::make_unique<juce::XmlElement> (sourceType);
+    xml->setAttribute ("schemaVersion", SampleSource::schemaVersion);
+    xml->setAttribute ("name", recording.getFileNameWithoutExtension());
+    xml->setAttribute ("kind", "file");
+    auto* e = xml->createNewChildElement (zoneType);
+    e->setAttribute ("file", recording.getFileName());
+    e->setAttribute ("asset", asset);
+    e->setAttribute ("root", root);
+    e->setAttribute ("keyLo", 0);
+    e->setAttribute ("keyHi", 127);
+    e->setAttribute ("velLo", 1);
+    e->setAttribute ("velHi", 127);
+    result.xml = std::move (xml);
+    return result;
 }
 
 Definition makeDefinition (const juce::var& manifest, const juce::Array<int>& groups, const juce::String& name, const juce::File& sampleFolder,

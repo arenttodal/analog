@@ -258,3 +258,32 @@ off, and a state from before loads with it off. Not modulation destinations.
 | `analog.sub.response` | choice | Flat, Taper | Taper | every key alike, or quieter above the taper's start |
 | `analog.sub.taperStart` | key | 0..127 | 60 (C4) | where TAPER starts |
 | `analog.sub.taperSlope` | dB/oct | 0..12 | 6 | how fast TAPER falls |
+
+## State version 16 (Cinematic V6 gate 3): card C's second layer
+
+Appended after SUB's (version hint 31). C2 is off by default. Its own source (a recording or an
+imported sound) is the engine's `Hybrid2Source` state child. Not modulation destinations.
+
+| ID | Type | Range | Default | Use |
+|---|---|---|---|---|
+| `analog.hybrid2.enabled` | bool | | off | the second layer on (card C's + / ×) |
+| `analog.hybrid2.type` | choice | Sample, Oscillator, Noise, Instrument Patch | Oscillator | what it plays (Sample / Instrument Patch: its own loaded source) |
+| `analog.hybrid2.level` | dB | −48..+6 | 0 | its level (−48: silent) |
+| `analog.hybrid2.octave` | oct | −3..3 | 0 | its pitch |
+| `analog.hybrid2.coarse` | st | −12..12 | 0 | its pitch |
+| `analog.hybrid2.fine` | ct | −100..100 | 0 | its pitch |
+| `analog.hybrid2.velo` | % | 0..100 | 0 | how much its level follows velocity |
+| `analog.hybrid2.osc.model` | choice | Classic, DCO, Wide | Classic | as an oscillator |
+| `analog.hybrid2.osc.wave` | choice | Saw .. All | Saw | CLASSIC's wave |
+| `analog.hybrid2.osc.width` | % | 2..98 | 50 | pulse width |
+| `analog.hybrid2.osc.dco.saw` / `.pulse` | bool | | on / off | DCO's waves |
+| `analog.hybrid2.osc.dco.subLevel` | % | 0..100 | 0 | DCO's sub |
+| `analog.hybrid2.osc.dco.pwmSource` | choice | Manual, LFO, Env | Manual | DCO's PWM |
+| `analog.hybrid2.osc.dco.pwmDepth` | % | 0..100 | 0 | DCO's PWM |
+| `analog.hybrid2.osc.wide.wave` | choice | Saw, Pulse, Triangle, Square, Super Saw | Saw | WIDE's wave |
+| `analog.hybrid2.osc.wide.shape` | % | 0..100 | 50 | WIDE's edge |
+| `analog.hybrid2.osc.wide.spread` | % | 0..100 | 0 | SUPER SAW's detune |
+| `analog.hybrid2.noise.color` | choice | White, Juno | White | as NOISE |
+| `analog.hybrid2.noise.tone` | % | 0..100 | 100 | NOISE's tone |
+| `analog.hybrid2.noise.movement` | % | 0..100 | 0 | NOISE's level drift |
+| `analog.hybrid2.noise.keys` | % | 0..100 | 0 | NOISE's tone follows the key |

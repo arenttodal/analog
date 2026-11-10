@@ -48,7 +48,14 @@ public:
     /** Card C's type (analog.hybrid.type): only the selected one plays. Message thread. */
     HybridType hybridType() const noexcept;
     void setHybridType (HybridType type);
-    bool engineSourceIsPeriodic (int layer) const override { return layer == 1 && hybridType() == HybridType::oscillator; }
+    bool engineSourceIsPeriodic (int layer) const override
+    {
+        return layer == 1 && (layer2Shown() ? layer2Type() == HybridType::oscillator : hybridType() == HybridType::oscillator);
+    }
+    /** Cinematic V6 gate 3: card C shows its second layer (its 2 key, while the layer is on):
+        the card's heading, picture, stand-in and Remove are the second layer's then. */
+    bool layer2Shown() const;
+    HybridType layer2Type() const;
     /** Card C empty (a SAMPLE without a recording, an INSTRUMENT PATCH without a sound): a full
         card with a faint stand-in picture and what to do. */
     juce::String engineSourcePlaceholder (int layer) const override;
@@ -134,6 +141,18 @@ public:
     /** Tests: waits until the definition in use has loaded (and reached the synth on the next
         block). True when it did within the time. */
     bool waitForSampleSource (int timeoutMs) const;
+
+    // Cinematic V6 gate 3: card C's second layer's own source (a file or an instrument patch),
+    // kept apart from C1's: choosing one never replaces the other's. Saved as the engine's
+    // Hybrid2Source child.
+    /** Message thread: its definition (null: none), its recordings in `assetFolder`. */
+    void setHybrid2Definition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder);
+    std::unique_ptr<juce::XmlElement> hybrid2Definition() const;
+    SampleSourceState hybrid2State() const;
+    bool waitForHybrid2 (int timeoutMs) const;
+    /** Message thread: a recording for it (one zone over every key, rooted at its analysed
+        pitch), copied into `assetFolder`; decoded and analysed on the loader thread. */
+    void loadHybrid2File (const juce::File& recording, const juce::File& assetFolder);
     /** ORGANIC's card while the imported source plays: its collection and sound ("Bukkehorn 4.5
         · A8 Voxx"), its picture (sourcePicture, layer 1). */
     juce::String engineSourceName (int layer) const override;
@@ -231,6 +250,17 @@ private:
     const LoadedSource* sourcePlaying = nullptr;       ///< audio thread
     juce::ThreadPool sourceLoader { 1 };
     void loadSampleSource (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation);
+    // Card C's second layer's (as the above, its own).
+    mutable std::mutex source2Mutex;
+    std::unique_ptr<juce::XmlElement> source2Definition;
+    SampleSourceState source2State;
+    std::uint64_t source2Generation = 0;
+    osp::ModelExchange<LoadedSource> source2Exchange;
+    const LoadedSource* source2Playing = nullptr;      ///< audio thread
+    std::shared_ptr<const SampleSource> source2Loaded;   ///< its picture
+    static void outlineOf (const SampleSource* source, std::vector<float>& cycle);
+    std::shared_ptr<int> lifetime = std::make_shared<int> (0);   ///< (the loader's answers on the message thread check it)
+    void loadHybrid2 (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation);
 };
 
 } // namespace andor::analog

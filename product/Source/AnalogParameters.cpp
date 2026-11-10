@@ -92,6 +92,8 @@ namespace
         iToyboxMotion2, iToyboxDigital2, iToyboxPlay2, iMirageClock2, iMirageFilter2, iMirageTone2,
         // State version 15 (Cinematic V6): SUB.
         iSubEnabled, iSubWave, iSubOctave, iSubGrit, iSubLevel, iSubLowKey, iSubHighKey, iSubResponse, iSubTaperStart, iSubTaperSlope,
+        // State version 16 (Cinematic V6): card C's second layer.
+        iHybrid2Enabled, iHybrid2Type, iHybrid2Level, iHybrid2Octave, iHybrid2Coarse, iHybrid2Fine, iHybrid2Velo, iHybrid2Model, iHybrid2Wave, iHybrid2Width, iHybrid2DcoSaw, iHybrid2DcoPulse, iHybrid2DcoSub, iHybrid2DcoPwmSource, iHybrid2DcoPwmDepth, iHybrid2WideWave, iHybrid2WideShape, iHybrid2WideSpread, iHybrid2NoiseColor, iHybrid2NoiseTone, iHybrid2NoiseMovement, iHybrid2NoiseKeys,
         count
     };
 
@@ -196,6 +198,9 @@ namespace
             // State version 15: SUB.
             for (const auto* id : { &subEnabled, &subWave, &subOctave, &subGrit, &subLevel, &subLowKey, &subHighKey, &subResponse, &subTaperStart,
                                     &subTaperSlope })
+                l.add (*id);
+            // State version 16: card C's second layer.
+            for (const auto* id : { &hybrid2Enabled, &hybrid2Type, &hybrid2Level, &hybrid2Octave, &hybrid2Coarse, &hybrid2Fine, &hybrid2Velo, &hybrid2Model, &hybrid2Wave, &hybrid2Width, &hybrid2DcoSaw, &hybrid2DcoPulse, &hybrid2DcoSub, &hybrid2DcoPwmSource, &hybrid2DcoPwmDepth, &hybrid2WideWave, &hybrid2WideShape, &hybrid2WideSpread, &hybrid2NoiseColor, &hybrid2NoiseTone, &hybrid2NoiseMovement, &hybrid2NoiseKeys })
                 l.add (*id);
             return l;
         }();
@@ -748,6 +753,69 @@ void addSubTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
         Attributes().withLabel ("dB/oct").withStringFromValueFunction ([] (float v, int) { return juce::String (v, 1) + " dB/oct"; })));
 }
 
+void addHybrid2To (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 16 (Cinematic V6 gate 3): card C's second layer, off in a new instrument and
+    // in every session from before. Its controls as card C's own (the same ranges and texts).
+    using Attributes = juce::AudioParameterFloatAttributes;
+    const Hybrid2Settings d;
+    auto v31 = [] (const juce::String& name) { return juce::ParameterID { name, 31 }; };
+    auto percent = [&] (const juce::String& name, const char* title, double value) {
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v31 (name), title, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                                              static_cast<float> (100.0 * value),
+                                                                              Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    auto choice = [&] (const juce::String& name, const char* title, juce::StringArray items, int value) {
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v31 (name), title, items, value));
+    };
+    auto onOff = [&] (const juce::String& name, const char* title, bool value) {
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v31 (name), title, value));
+    };
+    auto integer = [&] (const juce::String& name, const char* title, int lo, int hi, int value, const char* unit) {
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterInt> (v31 (name), title, lo, hi, value,
+                                                                            juce::AudioParameterIntAttributes().withLabel (unit).withStringFromValueFunction ([unit] (int v, int) {
+                                                                                return (v > 0 ? "+" : "") + juce::String (v) + " " + unit;
+                                                                            })));
+    };
+    onOff (hybrid2Enabled, "Hybrid 2 On", d.enabled);
+    choice (hybrid2Type, "Hybrid 2 Type", { "Sample", "Oscillator", "Noise", "Instrument Patch" }, static_cast<int> (d.type));
+    {
+        // LEVEL as a card's (ANDOR OSP's layer LEVEL: -48 dB is silence, +6 dB at the top).
+        juce::NormalisableRange<float> range (-48.0f, 6.0f, 0.1f);
+        range.setSkewForCentre (-12.0f);
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (
+            v31 (hybrid2Level), "Hybrid 2 Level", range, static_cast<float> (d.levelDb),
+            Attributes().withLabel ("dB").withStringFromValueFunction ([] (float v, int) {
+                return v <= -47.99f ? juce::String ("-inf dB") : (v > 0.0f ? "+" : "") + juce::String (v, 1) + " dB";
+            })));
+    }
+    integer (hybrid2Octave, "Hybrid 2 Octave", -3, 3, d.octave, "oct");
+    integer (hybrid2Coarse, "Hybrid 2 Coarse", -12, 12, static_cast<int> (d.coarse), "st");
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v31 (hybrid2Fine), "Hybrid 2 Fine", juce::NormalisableRange<float> (-100.0f, 100.0f, 0.01f),
+                                                                          static_cast<float> (d.fineCents),
+                                                                          Attributes().withLabel ("ct").withStringFromValueFunction ([] (float v, int) {
+                                                                              return signedText (v, "ct", 0);
+                                                                          })));
+    percent (hybrid2Velo, "Hybrid 2 Velocity", d.velo);
+    choice (hybrid2Model, "Hybrid 2 Osc Model", { "Classic", "DCO", "Wide" }, static_cast<int> (d.model));
+    choice (hybrid2Wave, "Hybrid 2 Osc Wave", { "Saw", "Triangle", "Pulse", "Saw+Tri", "Saw+Pulse", "Tri+Pulse", "All" }, static_cast<int> (d.wave));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v31 (hybrid2Width), "Hybrid 2 Osc Pulse Width", juce::NormalisableRange<float> (2.0f, 98.0f, 0.1f),
+                                                                          static_cast<float> (100.0 * d.width),
+                                                                          Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    onOff (hybrid2DcoSaw, "Hybrid 2 DCO Saw", d.dco.saw);
+    onOff (hybrid2DcoPulse, "Hybrid 2 DCO Pulse", d.dco.pulse);
+    percent (hybrid2DcoSub, "Hybrid 2 DCO Sub", d.dco.subLevel);
+    choice (hybrid2DcoPwmSource, "Hybrid 2 DCO PWM Source", { "Manual", "LFO", "Env" }, static_cast<int> (d.dco.pwmSource));
+    percent (hybrid2DcoPwmDepth, "Hybrid 2 DCO PWM Depth", d.dco.pwmDepth);
+    choice (hybrid2WideWave, "Hybrid 2 Wide Wave", { "Saw", "Pulse", "Triangle", "Square", "Super Saw" }, static_cast<int> (d.wide.wave));
+    percent (hybrid2WideShape, "Hybrid 2 Wide Shape", d.wide.shape);
+    percent (hybrid2WideSpread, "Hybrid 2 Super Saw Spread", d.wide.spread);
+    choice (hybrid2NoiseColor, "Hybrid 2 Noise Color", { "White", "Juno" }, static_cast<int> (d.noiseColor));
+    percent (hybrid2NoiseTone, "Hybrid 2 Noise Tone", d.noiseTone);
+    percent (hybrid2NoiseMovement, "Hybrid 2 Noise Movement", d.noiseMovement);
+    percent (hybrid2NoiseKeys, "Hybrid 2 Noise Keys", d.noiseKeys);
+}
+
 const std::vector<osp::mod::ProductDest>& modulationDestinations()
 {
     static const std::vector<osp::mod::ProductDest> list = [] {
@@ -1071,6 +1139,31 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.sub.taper = index (iSubResponse, 2) == 1;
     p.sub.taperStart = juce::roundToInt (v (iSubTaperStart));
     p.sub.taperDbPerOctave = v (iSubTaperSlope);
+    {
+        auto& h = p.hybrid2;
+        h.enabled = on (iHybrid2Enabled);
+        h.type = static_cast<HybridType> (index (iHybrid2Type, 4));
+        h.levelDb = v (iHybrid2Level);
+        h.octave = juce::roundToInt (v (iHybrid2Octave));
+        h.coarse = std::round (v (iHybrid2Coarse));
+        h.fineCents = v (iHybrid2Fine);
+        h.velo = 0.01 * v (iHybrid2Velo);
+        h.model = static_cast<OscModel> (index (iHybrid2Model, 3));
+        h.wave = static_cast<Osc2Wave> (index (iHybrid2Wave, 7));
+        h.width = 0.01 * v (iHybrid2Width);
+        h.dco.saw = on (iHybrid2DcoSaw);
+        h.dco.pulse = on (iHybrid2DcoPulse);
+        h.dco.subLevel = 0.01 * v (iHybrid2DcoSub);
+        h.dco.pwmSource = static_cast<PwmSource> (index (iHybrid2DcoPwmSource, 3));
+        h.dco.pwmDepth = 0.01 * v (iHybrid2DcoPwmDepth);
+        h.wide.wave = static_cast<WideWave> (index (iHybrid2WideWave, 5));
+        h.wide.shape = 0.01 * v (iHybrid2WideShape);
+        h.wide.spread = 0.01 * v (iHybrid2WideSpread);
+        h.noiseColor = static_cast<NoiseColor> (index (iHybrid2NoiseColor, 2));
+        h.noiseTone = 0.01 * v (iHybrid2NoiseTone);
+        h.noiseMovement = 0.01 * v (iHybrid2NoiseMovement);
+        h.noiseKeys = 0.01 * v (iHybrid2NoiseKeys);
+    }
     p.granular = on (iSourceMode);
     p.grains.position = 0.01 * v (iGrainPosition);
     p.grains.sizeSeconds = 0.001 * v (iGrainSize);
@@ -1379,6 +1472,31 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iSubResponse, p.sub.taper ? 1 : 0);
     put (iSubTaperStart, p.sub.taperStart);
     put (iSubTaperSlope, p.sub.taperDbPerOctave);
+    {
+        const auto& h = p.hybrid2;
+        put (iHybrid2Enabled, h.enabled ? 1.0 : 0.0);
+        put (iHybrid2Type, static_cast<int> (h.type));
+        put (iHybrid2Level, h.levelDb);
+        put (iHybrid2Octave, h.octave);
+        put (iHybrid2Coarse, h.coarse);
+        put (iHybrid2Fine, h.fineCents);
+        put (iHybrid2Velo, 100.0 * h.velo);
+        put (iHybrid2Model, static_cast<int> (h.model));
+        put (iHybrid2Wave, static_cast<int> (h.wave));
+        put (iHybrid2Width, 100.0 * h.width);
+        put (iHybrid2DcoSaw, h.dco.saw ? 1.0 : 0.0);
+        put (iHybrid2DcoPulse, h.dco.pulse ? 1.0 : 0.0);
+        put (iHybrid2DcoSub, 100.0 * h.dco.subLevel);
+        put (iHybrid2DcoPwmSource, static_cast<int> (h.dco.pwmSource));
+        put (iHybrid2DcoPwmDepth, 100.0 * h.dco.pwmDepth);
+        put (iHybrid2WideWave, static_cast<int> (h.wide.wave));
+        put (iHybrid2WideShape, 100.0 * h.wide.shape);
+        put (iHybrid2WideSpread, 100.0 * h.wide.spread);
+        put (iHybrid2NoiseColor, static_cast<int> (h.noiseColor));
+        put (iHybrid2NoiseTone, 100.0 * h.noiseTone);
+        put (iHybrid2NoiseMovement, 100.0 * h.noiseMovement);
+        put (iHybrid2NoiseKeys, 100.0 * h.noiseKeys);
+    }
     put (iSourceMode, p.granular ? 1.0 : 0.0);
     put (iGrainPosition, 100.0 * p.grains.position);
     put (iGrainSize, 1000.0 * p.grains.sizeSeconds);

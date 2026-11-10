@@ -552,3 +552,25 @@ analog.sub.highKey v30 int "Sub High Key" label="" range=0.0000..127.0000/1.0000
 analog.sub.response v30 choice "Sub Response" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=FLAT|FLAT|TAPER [FLAT|TAPER]
 analog.sub.taperStart v30 int "Sub Taper Start" label="" range=0.0000..127.0000/1.0000 skew=1.00000 default=60.0000 steps=128 texts=C-1|E4|G9
 analog.sub.taperSlope v30 float "Sub Taper Slope" label="dB/oct" range=0.0000..12.0000/0.1000 skew=1.00000 default=6.0000 steps=2147483647 texts=0.0 dB/oct|6.0 dB/oct|12.0 dB/oct
+analog.hybrid2.enabled v31 bool "Hybrid 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.hybrid2.type v31 choice "Hybrid 2 Type" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=1.0000 steps=4 texts=Sample|Noise|Instrument Patch [Sample|Oscillator|Noise|Instrument Patch]
+analog.hybrid2.level v31 float "Hybrid 2 Level" label="dB" range=-48.0000..6.0000/0.1000 skew=1.70951 default=0.0000 steps=2147483647 texts=-inf dB|-12.0 dB|+6.0 dB
+analog.hybrid2.octave v31 int "Hybrid 2 Octave" label="oct" range=-3.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=-3 oct|0 oct|+3 oct
+analog.hybrid2.coarse v31 int "Hybrid 2 Coarse" label="st" range=-12.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=25 texts=-12 st|0 st|+12 st
+analog.hybrid2.fine v31 float "Hybrid 2 Fine" label="ct" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 ct|0 ct|+100 ct
+analog.hybrid2.velo v31 float "Hybrid 2 Velocity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid2.osc.model v31 choice "Hybrid 2 Osc Model" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Classic|DCO|Wide [Classic|DCO|Wide]
+analog.hybrid2.osc.wave v31 choice "Hybrid 2 Osc Wave" label="" range=0.0000..6.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=Saw|Saw+Tri|All [Saw|Triangle|Pulse|Saw+Tri|Saw+Pulse|Tri+Pulse|All]
+analog.hybrid2.osc.width v31 float "Hybrid 2 Osc Pulse Width" label="%" range=2.0000..98.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=2 %|50 %|98 %
+analog.hybrid2.osc.dco.saw v31 bool "Hybrid 2 DCO Saw" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.hybrid2.osc.dco.pulse v31 bool "Hybrid 2 DCO Pulse" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.hybrid2.osc.dco.subLevel v31 float "Hybrid 2 DCO Sub" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid2.osc.dco.pwmSource v31 choice "Hybrid 2 DCO PWM Source" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Manual|LFO|Env [Manual|LFO|Env]
+analog.hybrid2.osc.dco.pwmDepth v31 float "Hybrid 2 DCO PWM Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid2.osc.wide.wave v31 choice "Hybrid 2 Wide Wave" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Saw|Triangle|Super Saw [Saw|Pulse|Triangle|Square|Super Saw]
+analog.hybrid2.osc.wide.shape v31 float "Hybrid 2 Wide Shape" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid2.osc.wide.spread v31 float "Hybrid 2 Super Saw Spread" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid2.noise.color v31 choice "Hybrid 2 Noise Color" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=White|White|Juno [White|Juno]
+analog.hybrid2.noise.tone v31 float "Hybrid 2 Noise Tone" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid2.noise.movement v31 float "Hybrid 2 Noise Movement" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.hybrid2.noise.keys v31 float "Hybrid 2 Noise Keys" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %

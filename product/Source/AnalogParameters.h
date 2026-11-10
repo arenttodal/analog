@@ -184,6 +184,33 @@ namespace andor::analog::params
     inline const juce::String subResponse = "analog.sub.response";
     inline const juce::String subTaperStart = "analog.sub.taperStart";
     inline const juce::String subTaperSlope = "analog.sub.taperSlope";
+    /** State version 16 (Cinematic V6 gate 3): card C's second layer (C2), summed into card C's
+        part (Patch::hybrid2). Its own source (a file or an instrument patch) is the engine's
+        Hybrid2Source state child. */
+    inline const juce::String hybrid2Enabled = "analog.hybrid2.enabled";
+    inline const juce::String hybrid2Type = "analog.hybrid2.type";
+    inline const juce::String hybrid2Level = "analog.hybrid2.level";
+    inline const juce::String hybrid2Octave = "analog.hybrid2.octave";
+    inline const juce::String hybrid2Coarse = "analog.hybrid2.coarse";
+    inline const juce::String hybrid2Fine = "analog.hybrid2.fine";
+    inline const juce::String hybrid2Velo = "analog.hybrid2.velo";
+    inline const juce::String hybrid2Model = "analog.hybrid2.osc.model";
+    inline const juce::String hybrid2Wave = "analog.hybrid2.osc.wave";
+    inline const juce::String hybrid2Width = "analog.hybrid2.osc.width";
+    inline const juce::String hybrid2DcoSaw = "analog.hybrid2.osc.dco.saw";
+    inline const juce::String hybrid2DcoPulse = "analog.hybrid2.osc.dco.pulse";
+    inline const juce::String hybrid2DcoSub = "analog.hybrid2.osc.dco.subLevel";
+    inline const juce::String hybrid2DcoPwmSource = "analog.hybrid2.osc.dco.pwmSource";
+    inline const juce::String hybrid2DcoPwmDepth = "analog.hybrid2.osc.dco.pwmDepth";
+    inline const juce::String hybrid2WideWave = "analog.hybrid2.osc.wide.wave";
+    inline const juce::String hybrid2WideShape = "analog.hybrid2.osc.wide.shape";
+    inline const juce::String hybrid2WideSpread = "analog.hybrid2.osc.wide.spread";
+    inline const juce::String hybrid2NoiseColor = "analog.hybrid2.noise.color";
+    inline const juce::String hybrid2NoiseTone = "analog.hybrid2.noise.tone";
+    inline const juce::String hybrid2NoiseMovement = "analog.hybrid2.noise.movement";
+    inline const juce::String hybrid2NoiseKeys = "analog.hybrid2.noise.keys";
+    /** Appends card C's second layer's parameters (after SUB's). */
+    void addHybrid2To (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends SUB's parameters (after the FX library's: Product's addParameters). */
     void addSubTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     inline juce::String movementLaneId (int lane, const char* name) { return (lane == 0 ? movementAPrefix : movementBPrefix) + name; }
@@ -223,7 +250,7 @@ namespace andor::analog::params
         double keyDnaCardAmount() const noexcept;
 
         // Modulation (real-time safe).
-        static constexpr int maxValues = 384;
+        static constexpr int maxValues = 448;
         using Values = std::array<float, maxValues>;
         /** Every raw value now, in the reader's order. */
         void snapshot (Values& raw) const noexcept;

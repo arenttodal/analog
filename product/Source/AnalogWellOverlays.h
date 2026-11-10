@@ -41,5 +41,9 @@ juce::String oscillatorOverlayKey (osp::plugin::InstrumentHost& host, int slot);
 */
 std::unique_ptr<osp::plugin::WellOverlay> createHybridOverlay (osp::plugin::InstrumentHost& host);
 juce::String hybridOverlayKey (osp::plugin::InstrumentHost& host);
+/** Cinematic V6 gate 3: which of card C's layers the well and the knob row show (1, or 2 while
+    the second layer is on). An interface choice, saved with the session's view. */
+int hybridLayerShown (osp::plugin::InstrumentHost& host);
+void showHybridLayer (osp::plugin::InstrumentHost& host, int layer);
 
 } // namespace andor::analog

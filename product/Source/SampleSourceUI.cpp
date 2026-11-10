@@ -1,6 +1,7 @@
 #include "SampleSourceUI.h"
 
 #include "AnalogEngine.h"
+#include "AnalogParameters.h"
 #include "Design.h"
 #include "OspLookAndFeel.h"
 #include "KontaktImport.h"
@@ -203,8 +204,16 @@ namespace
     }
 }
 
-void chooseSound (InstrumentHost& host, const juce::XmlElement& definition)
+void chooseSound (InstrumentHost& host, const juce::XmlElement& definition, int layer)
 {
+    if (auto* engine = engineOf (host); engine != nullptr && layer == 2)
+    {
+        // Card C's second layer: its own sound (card C's first keeps its own).
+        engine->setHybrid2Definition (std::make_unique<juce::XmlElement> (definition), importFolder (host));
+        if (auto* type = host.apvts().getParameter (params::hybrid2Type))
+            type->setValueNotifyingHost (type->convertTo0to1 (static_cast<float> (HybridType::instrumentPatch)));
+        return;
+    }
     if (auto* engine = engineOf (host))
     {
         engine->setSampleSourceDefinition (std::make_unique<juce::XmlElement> (definition), importFolder (host));
@@ -220,7 +229,7 @@ juce::String instrumentPatchName (InstrumentHost& host)
     return "CHOOSE A SOUND";
 }
 
-void showSoundMenu (InstrumentHost& host, juce::Component& target)
+void showSoundMenu (InstrumentHost& host, juce::Component& target, int layer)
 {
     auto* engine = engineOf (host);
     if (engine == nullptr)
@@ -230,7 +239,9 @@ void showSoundMenu (InstrumentHost& host, juce::Component& target)
     juce::String current;
     // The sounds of the import the current one came from (its record), or of every import kept.
     std::vector<juce::File> records;
-    if (const auto definition = engine->sampleSourceDefinition())
+    const auto inUse = layer == 2 ? engine->hybrid2Definition() : engine->sampleSourceDefinition();
+    // (The second layer's own recording is not an import's: every import's sounds then.)
+    if (const auto& definition = inUse; definition != nullptr && (layer == 1 || definition->getStringAttribute ("import").isNotEmpty()))
     {
         current = definition->getStringAttribute ("name");
         records.push_back (importFolder (host).getChildFile (definition->getStringAttribute ("import")));
@@ -253,17 +264,22 @@ void showSoundMenu (InstrumentHost& host, juce::Component& target)
         menu.addItem (-3, "No imported sounds yet", false, false);
     menu.addSeparator();
     menu.addItem (-1, juce::String::fromUTF8 ("Import Kontakt patch\xe2\x80\xa6"));
-    menu.addItem (-2, "Remove", engine->sampleSourceDefinition() != nullptr);
+    menu.addItem (-2, "Remove", inUse != nullptr);
     auto shared = std::make_shared<std::vector<std::unique_ptr<juce::XmlElement>>> (std::move (sounds));
     auto* h = &host;
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target), [h, shared] (int picked) {
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target), [h, shared, layer] (int picked) {
         if (picked > 0 && picked <= static_cast<int> (shared->size()))
-            chooseSound (*h, *(*shared)[static_cast<std::size_t> (picked - 1)]);
+            chooseSound (*h, *(*shared)[static_cast<std::size_t> (picked - 1)], layer);
         else if (picked == -1)
             runKontaktImport (*h);
         else if (picked == -2)
             if (auto* e = engineOf (*h))
-                e->setSampleSourceDefinition (nullptr, {});
+            {
+                if (layer == 2)
+                    e->setHybrid2Definition (nullptr, {});
+                else
+                    e->setSampleSourceDefinition (nullptr, {});
+            }
     });
 }
 
