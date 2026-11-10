@@ -3,6 +3,7 @@
 // interface enables moves the sound while every one it disables does not.
 // (Compiled into andor_analog_tests with the shell's own tests, tests/shell/ShellTests.cpp.)
 
+#include "core/PlatformTag.h"
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
 #include "ArpSection.h"
@@ -7924,4 +7925,140 @@ TEST_CASE ("analog: projects saved by 1.0 open with the same settings and the sa
         for (std::size_t i = 0; i < contour.size(); ++i)
             CHECK (contour[i] == Approx (wanted[static_cast<int> (i)].getDoubleValue()).epsilon (0.005).margin (1.0e-6));
     }
+}
+
+//==============================================================================
+// V6 gate 0: the 1.0 baseline, frozen. Every factory sound through the whole instrument (voice,
+// CLASSIC FX, output), a macro-heavy CLASSIC state and a CUSTOM route through every effect, at
+// 44.1 and 48 kHz: an exact hash per platform and a 16-window RMS contour for every other. The
+// Cinematic V6 work (independent REIMAGINED, SUB, C2, MAIN / SEND) must leave every one of these
+// renders as it is while its own features are off. OSP_UPDATE_GOLDEN=1 records (1.0 only).
+
+namespace
+{
+    juce::File v6BaselinePath() { return productSourceDir().getChildFile ("golden/v6-baseline-renders.txt"); }
+
+    std::vector<std::pair<juce::String, std::function<void (ShellProcessor&)>>> v6BaselineStates()
+    {
+        namespace fx = andor::analog::fx;
+        std::vector<std::pair<juce::String, std::function<void (ShellProcessor&)>>> states;
+        ShellProcessor probe;
+        for (const auto& entry : probe.presetList())
+            states.push_back ({ "preset/" + entry.name, [entry] (ShellProcessor& q) { q.openPresetEntry (entry); } });
+        states.push_back ({ "classic-macros", [] (ShellProcessor& q) {
+                               setValue (q, "drive", 35.0f);
+                               setValue (q, "echo", 40.0f);
+                               setValue (q, "space", 30.0f);
+                               setValue (q, "motion", 45.0f);
+                           } });
+        states.push_back ({ "custom-all", [] (ShellProcessor& q) {
+                               setValue (q, "echo", 40.0f);
+                               setValue (q, "space", 30.0f);
+                               fx::Graph g;
+                               g.custom = true;
+                               for (int t = 0; t < fx::typeCount; ++t)
+                                   g.chain.push_back (fx::Node::effect ({ static_cast<fx::Type> (t), 0 }));
+                               REQUIRE (dynamic_cast<AnalogEngine&> (q.productEngine()).setFxRoute (g));
+                           } });
+        return states;
+    }
+
+    /** renderShell at a sample rate of its own (the phrase's times scaled from 48 kHz). */
+    juce::AudioBuffer<float> renderShellAt (ShellProcessor& p, double sampleRate, double seconds)
+    {
+        p.prepareToPlay (sampleRate, block);
+        const int total = static_cast<int> (seconds * sampleRate);
+        const auto at = [sampleRate] (int sample48) { return static_cast<int> (std::llround (sample48 * sampleRate / 48000.0)); };
+        juce::AudioBuffer<float> out (2, total), buffer (2, block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            juce::MidiBuffer midi;
+            for (const auto& n : phrase)
+                if (const int s = at (n.sample); s >= pos && s < pos + block)
+                    midi.addEvent (n.velocity > 0 ? juce::MidiMessage::noteOn (1, n.note, static_cast<juce::uint8> (n.velocity))
+                                                  : juce::MidiMessage::noteOff (1, n.note),
+                                   s - pos);
+            if (const int s = at (6000); s >= pos && s < pos + block)
+                midi.addEvent (juce::MidiMessage::pitchWheel (1, 12000), s - pos);
+            p.processBlock (buffer, midi);
+            const int n = std::min (block, total - pos);
+            for (int ch = 0; ch < 2; ++ch)
+                out.copyFrom (ch, pos, buffer, ch, 0, n);
+        }
+        return out;
+    }
+
+    juce::String v6HashOf (const juce::AudioBuffer<float>& b)
+    {
+        std::uint64_t h = 1469598103934665603ull;   // (FNV-1a over the samples' bits)
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const float x = b.getSample (ch, i);
+                std::uint32_t bits;
+                std::memcpy (&bits, &x, sizeof bits);
+                h = (h ^ bits) * 1099511628211ull;
+            }
+        return juce::String::toHexString (static_cast<juce::int64> (h)).paddedLeft ('0', 16);
+    }
+}
+
+TEST_CASE ("analog: V6 gate 0 - every factory sound and FX route renders as at 1.0 (hash per platform, contour elsewhere)", "[analog][legacy][v6-baseline]")
+{
+    const auto platform = juce::String (osp::platformTag());
+    const bool update = updatingGoldens();
+    std::map<juce::String, juce::String> stored;   // "kind key" -> line
+    for (const auto& line : juce::StringArray::fromLines (v6BaselinePath().loadFileAsString()))
+    {
+        const auto parts = juce::StringArray::fromTokens (line, " ", "");
+        if (parts.size() >= 2)
+            stored[parts[0] + " " + parts[1]] = line;
+    }
+    juce::StringArray written;
+    int compared = 0, hashed = 0;
+    for (const double r : { 44100.0, 48000.0 })
+    {
+        for (const auto& [name, setUp] : v6BaselineStates())
+        {
+            const auto key = (name + "@" + juce::String (static_cast<int> (r))).replaceCharacter (' ', '_');
+            INFO (key);
+            ShellProcessor q;
+            setUp (q);
+            const auto out = renderShellAt (q, r, 1.0);
+            const auto contour = contourOf (out);
+            const auto hash = v6HashOf (out);
+            if (update)
+            {
+                juce::String line = "rms " + key;
+                for (const double v : contour)
+                    line << " " << juce::String (v, 9);
+                written.add (line);
+                for (const auto& [k, l] : stored)   // (other platforms' hashes kept)
+                    if (k.startsWith ("hash:") && k.endsWith (" " + key) && ! k.startsWith ("hash:" + platform + " "))
+                        written.add (l);
+                written.add ("hash:" + platform + " " + key + " " + hash);
+                continue;
+            }
+            const auto rms = stored.find ("rms " + key);
+            REQUIRE (rms != stored.end());
+            const auto wanted = juce::StringArray::fromTokens (rms->second, " ", "");
+            REQUIRE (wanted.size() == 2 + static_cast<int> (contour.size()));
+            for (std::size_t i = 0; i < contour.size(); ++i)
+                CHECK (contour[i] == Approx (wanted[2 + static_cast<int> (i)].getDoubleValue()).epsilon (0.005).margin (1.0e-6));
+            ++compared;
+            if (const auto h = stored.find ("hash:" + platform + " " + key); h != stored.end())
+            {
+                CHECK (h->second.endsWith (" " + hash));   // (the same platform: bit for bit)
+                ++hashed;
+            }
+        }
+    }
+    if (update)
+    {
+        REQUIRE (v6BaselinePath().replaceWithText (written.joinIntoString ("\n") + "\n", false, false, "\n"));
+        return;
+    }
+    CHECK (compared >= 2 * 46);   // (44 factory sounds + 2 routes, at two rates)
+    INFO ("hashes compared on " << platform << ": " << hashed);
+    CHECK (hashed == compared);
 }
