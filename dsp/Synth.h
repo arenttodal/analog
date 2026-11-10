@@ -171,6 +171,11 @@ public:
     void resetControllers() noexcept;               ///< CC 121
     /** A raw MIDI message (1-3 bytes); anything the synth does not play is ignored. */
     void handleMidi (const std::uint8_t* data, int size) noexcept;
+    /** Cinematic V6 gate 2: one message of the musician's own input (before the arpeggiator),
+        for SUB. It joins the output after the effects (never their input). */
+    void handleSubMidi (const std::uint8_t* data, int size) noexcept { subOsc.handleMidi (data, size); }
+    /** Tests: SUB. */
+    const SubOsc& sub() const noexcept { return subOsc; }
 
     /** ORGANIC's recording (ANDOR OSP's prepared model; null: none). Audio thread. The previous
         one is read no more once this returns: the notes playing it fade it out from a short
@@ -570,6 +575,7 @@ private:
     // KALEIDOSCOPE on the mix: ANDOR OSP's stage, its resonators tuned to the harmonics of
     // the first note of each phrase (two models, so a retune is a new model to it).
     osp::ReimaginedStage kaleidoscopeStage;
+    SubOsc subOsc;   ///< Cinematic V6: after the effects, before the output gain and guard
     std::array<osp::InstrumentModel, 2> resonanceModels;
     int resonanceModel = 0, stageCountdown = 0;
     // One interval of a voice: its source, the mode engine's output, the envelopes and Poly Mod.

@@ -195,6 +195,9 @@ private:
     osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
     osp::ShaperPattern shaperPatternB = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);  ///< MOVEMENT lane B's (audio thread)
     std::vector<float> scratch;
+    /** Cinematic V6 SUB: the musician's own MIDI for this block (before the arpeggiator), from
+        setPlayedKeys(); null: the notes process() is given are the musician's. */
+    const juce::MidiBuffer* playedMidi = nullptr;
     osp::InstrumentEngine::GrainSnapshot grains;   ///< written by process(), read by the card
     osp::InstrumentEngine::GrainSnapshot grains2;  ///< card B's (OSC 2's) grains, as `grains`
     osp::InstrumentEngine::GrainSnapshot organicHeads;   ///< ORGANIC's read heads (card B's playheads), as ANDOR OSP's

@@ -314,6 +314,7 @@ const ProductInfo& productInfo()
         p.addParameters = [] (juce::AudioProcessorValueTreeState::ParameterLayout& layout) {
             andor::analog::params::addTo (layout);
             andor::analog::fxparams::addTo (layout);   // (state version 12: the FX library's slots, appended)
+            andor::analog::params::addSubTo (layout);   // (state version 15: SUB, appended)
         };
         p.installFactoryPresets = installFactoryPresets;
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
@@ -459,7 +460,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 14;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED)
+        p.stateVersion = 15;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);

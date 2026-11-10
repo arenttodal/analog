@@ -820,6 +820,11 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         setValue (q, "layerB.start", 50.0f);
         setValue (q, "layerB.tune", 12.0f);   // (twice as fast: the held notes reach the loop)
     };
+    // SUB's settings act while SUB is on (Cinematic V6 gate 2; the phrase is in its range and
+    // above TAPER's C4).
+    for (const auto* id : { &params::subWave, &params::subOctave, &params::subGrit, &params::subLevel, &params::subLowKey, &params::subHighKey,
+                            &params::subResponse, &params::subTaperStart, &params::subTaperSlope })
+        setups[*id] = [] (ShellProcessor& q) { setValue (q, params::subEnabled, 1.0f); };
     int checkedBound = 0, checkedUnbound = 0, checkedFx = 0;
     for (auto* base : p.getParameters())
     {
@@ -5910,7 +5915,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 14);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED)
+        CHECK (xml->getIntAttribute ("productVersion") == 15);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8122,7 +8127,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 14);
+    CHECK (xml->getIntAttribute ("productVersion") == 15);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);

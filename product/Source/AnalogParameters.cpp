@@ -90,6 +90,8 @@ namespace
         // State version 14 (Cinematic V6): card B's own REIMAGINED (ANDOR OSP's layerC.reimagined*).
         iReimagined2, iReimaginedMode2, iKaleidoscopeFocus2, iKaleidoscopeSpread2, iTapeFrameAge2, iTapeFrameStability2, iTapeFrameLength2,
         iToyboxMotion2, iToyboxDigital2, iToyboxPlay2, iMirageClock2, iMirageFilter2, iMirageTone2,
+        // State version 15 (Cinematic V6): SUB.
+        iSubEnabled, iSubWave, iSubOctave, iSubGrit, iSubLevel, iSubLowKey, iSubHighKey, iSubResponse, iSubTaperStart, iSubTaperSlope,
         count
     };
 
@@ -191,6 +193,10 @@ namespace
             for (const char* name : { "mode", "kaleidoscope.focus", "kaleidoscope.spread", "tapeFrame.age", "tapeFrame.stability", "tapeFrame.frame",
                                       "toybox.motion", "toybox.digital", "toybox.play", "mirage.clock", "mirage.filter", "mirage.tone" })
                 l.add (osp::plugin::InstrumentHost::reimaginedModeParameterId (2, name));
+            // State version 15: SUB.
+            for (const auto* id : { &subEnabled, &subWave, &subOctave, &subGrit, &subLevel, &subLowKey, &subHighKey, &subResponse, &subTaperStart,
+                                    &subTaperSlope })
+                l.add (*id);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -711,6 +717,37 @@ namespace
     }
 }
 
+void addSubTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 15 (Cinematic V6 gate 2): SUB, off in a new instrument and in every session
+    // from before (its parameters missing from a state load at these defaults).
+    using Attributes = juce::AudioParameterFloatAttributes;
+    const SubSettings d;
+    auto v30 = [] (const juce::String& name) { return juce::ParameterID { name, 30 }; };
+    auto keyText = [] (int key, int) { return juce::MidiMessage::getMidiNoteName (key, true, true, 4); };
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v30 (subEnabled), "Sub On", d.enabled));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v30 (subWave), "Sub Wave", juce::StringArray { "SINE", "TRIANGLE", "SQUARE", "SAW" },
+                                                                           static_cast<int> (d.wave)));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v30 (subOctave), "Sub Octave", juce::StringArray { "-1", "-2" }, d.octave <= -2 ? 1 : 0));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (v30 (subGrit), "Sub Grit", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                                          static_cast<float> (100.0 * d.grit),
+                                                                          Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (
+        v30 (subLevel), "Sub Level", juce::NormalisableRange<float> (-48.0f, 0.0f, 0.1f), static_cast<float> (d.levelDb),
+        Attributes().withLabel ("dB").withStringFromValueFunction ([] (float v, int) { return juce::String (v, 1) + " dB"; })));
+    auto key = [&] (const juce::String& name, const juce::String& title, int value) {
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterInt> (v30 (name), title, 0, 127, value,
+                                                                            juce::AudioParameterIntAttributes().withStringFromValueFunction (keyText)));
+    };
+    key (subLowKey, "Sub Low Key", d.lowKey);
+    key (subHighKey, "Sub High Key", d.highKey);
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (v30 (subResponse), "Sub Response", juce::StringArray { "FLAT", "TAPER" }, d.taper ? 1 : 0));
+    key (subTaperStart, "Sub Taper Start", d.taperStart);
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (
+        v30 (subTaperSlope), "Sub Taper Slope", juce::NormalisableRange<float> (0.0f, 12.0f, 0.1f), static_cast<float> (d.taperDbPerOctave),
+        Attributes().withLabel ("dB/oct").withStringFromValueFunction ([] (float v, int) { return juce::String (v, 1) + " dB/oct"; })));
+}
+
 const std::vector<osp::mod::ProductDest>& modulationDestinations()
 {
     static const std::vector<osp::mod::ProductDest> list = [] {
@@ -1024,6 +1061,16 @@ Patch Reader::readWith (const float* raw) const noexcept
     r2.tapeFrame = { 0.01 * v (iTapeFrameAge2), 0.01 * v (iTapeFrameStability2), static_cast<osp::TapeFrameLength> (index (iTapeFrameLength2, 3)) };
     r2.toybox = { 0.01 * v (iToyboxMotion2), 0.01 * v (iToyboxDigital2), static_cast<osp::ToyboxPlay> (index (iToyboxPlay2, 3)) };
     r2.mirage = { 0.01 * v (iMirageClock2), 0.01 * v (iMirageFilter2), static_cast<osp::MirageTone> (index (iMirageTone2, 2)) };
+    p.sub.enabled = on (iSubEnabled);
+    p.sub.wave = static_cast<SubSettings::Wave> (index (iSubWave, 4));
+    p.sub.octave = index (iSubOctave, 2) == 0 ? -1 : -2;
+    p.sub.grit = 0.01 * v (iSubGrit);
+    p.sub.levelDb = v (iSubLevel);
+    p.sub.lowKey = juce::roundToInt (v (iSubLowKey));
+    p.sub.highKey = std::max (p.sub.lowKey, juce::roundToInt (v (iSubHighKey)));
+    p.sub.taper = index (iSubResponse, 2) == 1;
+    p.sub.taperStart = juce::roundToInt (v (iSubTaperStart));
+    p.sub.taperDbPerOctave = v (iSubTaperSlope);
     p.granular = on (iSourceMode);
     p.grains.position = 0.01 * v (iGrainPosition);
     p.grains.sizeSeconds = 0.001 * v (iGrainSize);
@@ -1322,6 +1369,16 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (iMirageFilter2, 100.0 * r2.mirage.filter);
         put (iMirageTone2, static_cast<int> (r2.mirage.tone));
     }
+    put (iSubEnabled, p.sub.enabled ? 1.0 : 0.0);
+    put (iSubWave, static_cast<int> (p.sub.wave));
+    put (iSubOctave, p.sub.octave <= -2 ? 1 : 0);
+    put (iSubGrit, 100.0 * p.sub.grit);
+    put (iSubLevel, p.sub.levelDb);
+    put (iSubLowKey, p.sub.lowKey);
+    put (iSubHighKey, p.sub.highKey);
+    put (iSubResponse, p.sub.taper ? 1 : 0);
+    put (iSubTaperStart, p.sub.taperStart);
+    put (iSubTaperSlope, p.sub.taperDbPerOctave);
     put (iSourceMode, p.granular ? 1.0 : 0.0);
     put (iGrainPosition, 100.0 * p.grains.position);
     put (iGrainSize, 1000.0 * p.grains.sizeSeconds);

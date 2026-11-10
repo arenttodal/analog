@@ -172,6 +172,20 @@ namespace andor::analog::params
     inline const juce::String movementBPrefix = "analog.movement.b.";
     /** A lane's own (0 A, 1 B): "on", "level", "sync", "pulse.division", "phase"; for lane B
         also every MOVEMENT setting's name. */
+    /** State version 15 (Cinematic V6 gate 2): SUB, an independent polyphonic sub oscillator on
+        the musician's own keys, joined after the effects (docs/CINEMATIC_V6_GATE2.md). */
+    inline const juce::String subEnabled = "analog.sub.enabled";
+    inline const juce::String subWave = "analog.sub.wave";
+    inline const juce::String subOctave = "analog.sub.octave";
+    inline const juce::String subGrit = "analog.sub.grit";
+    inline const juce::String subLevel = "analog.sub.level";
+    inline const juce::String subLowKey = "analog.sub.lowKey";
+    inline const juce::String subHighKey = "analog.sub.highKey";
+    inline const juce::String subResponse = "analog.sub.response";
+    inline const juce::String subTaperStart = "analog.sub.taperStart";
+    inline const juce::String subTaperSlope = "analog.sub.taperSlope";
+    /** Appends SUB's parameters (after the FX library's: Product's addParameters). */
+    void addSubTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     inline juce::String movementLaneId (int lane, const char* name) { return (lane == 0 ? movementAPrefix : movementBPrefix) + name; }
     /** MOVEMENT's settings' names (each lane has them all: lane A as "movement." + name). */
     const juce::StringArray& movementSettingNames();

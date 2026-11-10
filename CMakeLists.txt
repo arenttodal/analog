@@ -51,6 +51,7 @@ add_library(analog_dsp STATIC
     dsp/morph/LiveMorph.cpp
     dsp/LiveGranulator.cpp
     dsp/Synth.cpp
+    dsp/SubOsc.cpp
     dsp/fx/FxGraph.cpp
     dsp/fx/FxEngine.cpp
     dsp/fx/FxProcessors.cpp
@@ -80,6 +81,7 @@ if(OSP_BUILD_TESTS)
         tests/FxEffectTests.cpp
         tests/FxRetroTests.cpp
         tests/ReimaginedCardTests.cpp
+        tests/SubTests.cpp
         tests/RealtimeTests.cpp
         tests/LiveTests.cpp
         tests/ModulationTests.cpp

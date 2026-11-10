@@ -5,6 +5,7 @@
 #include "SampleImport.h"
 
 #include "Oscillator.h"
+#include <utility>
 
 namespace andor::analog
 {
@@ -299,6 +300,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // the old before this returns; it is freed on the message side once newer ones are in use).
     if (const auto* next = sourceExchange.takePending())
         sourcePlaying = next;
+    const auto* playedThisBlock = std::exchange (playedMidi, nullptr);   // (this callback's only)
     // Card C plays only its selected type: the recording as a SAMPLE, the imported zones as an
     // INSTRUMENT PATCH (OSC 3 and NOISE are the voices' own). The others stay loaded, silent.
     {
@@ -375,16 +377,34 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : scratch.data();
     // Render up to each event, apply it there, go on: notes and controllers land on their
     // own samples (MidiBuffer iterates in time order).
+    // SUB plays the musician's own keys (before the arpeggiator): those events are merged in
+    // at their own samples, a played event first where both land on one sample.
+    const auto& played = playedThisBlock != nullptr ? *playedThisBlock : midi;
     int done = 0;
-    for (const auto m : midi)
+    auto renderTo = [&] (int samplePosition)
     {
-        const int at = std::clamp (m.samplePosition, 0, total);
+        const int at = std::clamp (samplePosition, 0, total);
         if (at > done)
         {
             synth.render (left + done, right + done, at - done);
             done = at;
         }
+    };
+    auto p = played.cbegin();
+    for (const auto m : midi)
+    {
+        for (; p != played.cend() && (*p).samplePosition <= m.samplePosition; ++p)
+        {
+            renderTo ((*p).samplePosition);
+            synth.handleSubMidi ((*p).data, (*p).numBytes);
+        }
+        renderTo (m.samplePosition);
         synth.handleMidi (m.data, m.numBytes);
+    }
+    for (; p != played.cend(); ++p)
+    {
+        renderTo ((*p).samplePosition);
+        synth.handleSubMidi ((*p).data, (*p).numBytes);
     }
     if (done < total)
         synth.render (left + done, right + done, total - done);
@@ -405,6 +425,7 @@ void AnalogEngine::setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& pla
 {
     // VEL and NOTE on the shared stages follow the musician's keys, not the arpeggiator's.
     synth.setPlayedKeysOnly (arpeggiating);
+    playedMidi = &played;   // (SUB: read by the process() that follows, in this callback)
     if (arpeggiating)
         for (const auto m : played)
             if (m.numBytes >= 3 && (m.data[0] & 0xf0) == 0x90 && m.data[2] > 0)

@@ -7,6 +7,7 @@
 #include "engine/ReimaginedModes.h"
 #include "engine/Shaping.h"
 #include "fx/FxSettings.h"
+#include "SubOsc.h"
 
 #include <algorithm>
 #include <cmath>
@@ -261,6 +262,8 @@ struct Patch
         transformed by either. */
     double reimagined2 = 0.0;
     osp::ReimaginedSettings reimaginedSettings2;
+    /** Cinematic V6 gate 2: SUB, the independent sub-bass on the played keys (off: silent). */
+    SubSettings sub;
 
     // ANDOR OSP's macros and effects on the mix, with its own settings (`effects`):
     // DRIVE (tube, tape, crunch), MOVEMENT (DRIFT in the voices; TAPE, CHORUS, PULSE, SHAPER

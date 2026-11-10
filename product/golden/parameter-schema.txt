@@ -542,3 +542,13 @@ analog.fx.retro.2.codec.stereo v29 choice "FX RETRO 2 Codec Stereo" label="" ran
 analog.fx.retro.2.codec.artifact v29 float "FX RETRO 2 Artifact" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.fx.retro.2.codec.ambience v29 float "FX RETRO 2 Artifact Ambience" label="%" range=0.0000..100.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.fx.retro.2.seed v29 float "FX RETRO 2 Seed" label="#" range=0.0000..999.0000/0.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=0|500|999
+analog.sub.enabled v30 bool "Sub On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.sub.wave v30 choice "Sub Wave" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=SINE|SQUARE|SAW [SINE|TRIANGLE|SQUARE|SAW]
+analog.sub.octave v30 choice "Sub Octave" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=-1|-1|-2 [-1|-2]
+analog.sub.grit v30 float "Sub Grit" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.sub.level v30 float "Sub Level" label="dB" range=-48.0000..0.0000/0.1000 skew=1.00000 default=-18.0000 steps=2147483647 texts=-48.0 dB|-24.0 dB|0.0 dB
+analog.sub.lowKey v30 int "Sub Low Key" label="" range=0.0000..127.0000/1.0000 skew=1.00000 default=48.0000 steps=128 texts=C-1|E4|G9
+analog.sub.highKey v30 int "Sub High Key" label="" range=0.0000..127.0000/1.0000 skew=1.00000 default=84.0000 steps=128 texts=C-1|E4|G9
+analog.sub.response v30 choice "Sub Response" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=FLAT|FLAT|TAPER [FLAT|TAPER]
+analog.sub.taperStart v30 int "Sub Taper Start" label="" range=0.0000..127.0000/1.0000 skew=1.00000 default=60.0000 steps=128 texts=C-1|E4|G9
+analog.sub.taperSlope v30 float "Sub Taper Slope" label="dB/oct" range=0.0000..12.0000/0.1000 skew=1.00000 default=6.0000 steps=2147483647 texts=0.0 dB/oct|6.0 dB/oct|12.0 dB/oct

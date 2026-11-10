@@ -424,3 +424,43 @@ TEST_CASE ("realtime: every new effect - RETRO in each personality, switched mid
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: SUB's keys, range, settings and controllers never allocate (RT-01)", "[realtime][sub][v6]")
+{
+    Synth synth;
+    synth.prepare (48000.0, 512, 4);
+    auto p = factoryPatches()[0].patch;
+    p.sub.enabled = true;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    counting = true;
+    for (int block = 0; block < 300; ++block)
+    {
+        p.sub.wave = static_cast<SubSettings::Wave> (block / 7 % 4);
+        p.sub.grit = (block % 11) / 10.0;
+        p.sub.lowKey = 36 + block % 13;
+        p.sub.highKey = 70 + block % 17;
+        p.sub.taper = block % 3 != 0;
+        p.sub.enabled = block % 50 < 45;
+        synth.setPatch (p);
+        const std::uint8_t keyOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t keyOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 30) % 48), 0 };
+        const std::uint8_t pedal[3] { 0xb0, 64, static_cast<std::uint8_t> (block % 40 < 20 ? 127 : 0) };
+        const std::uint8_t bend[3] { 0xe0, 0, static_cast<std::uint8_t> (block % 128) };
+        const std::uint8_t allOff[3] { 0xb0, static_cast<std::uint8_t> (block % 2 == 0 ? 123 : 120), 0 };
+        synth.handleSubMidi (keyOn, 3);
+        synth.handleMidi (keyOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleSubMidi (keyOff, 3);
+        synth.handleSubMidi (pedal, 3);
+        synth.handleSubMidi (bend, 3);
+        if (block % 37 == 0)
+            synth.handleSubMidi (allOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+    for (std::size_t i = 0; i < left.size(); ++i)
+        CHECK ((std::isfinite (left[i]) && (left[i] == 0.0f || std::abs (left[i]) > 1.0e-30f)));
+}

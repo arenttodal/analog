@@ -156,6 +156,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         m.resonanceHz.assign (static_cast<std::size_t> (osp::ReimaginedStage::resonators), 261.6);
     }
     kaleidoscopeStage.prepare (hostRate, 0x6b616c65ull);
+    subOsc.prepare (hostRate);
     lfoCurve = osp::mod::compileCurve (osp::mod::defaultLfoCurve());
 
     effects.prepare (hostRate, maxBlock, 1);
@@ -243,6 +244,7 @@ void Synth::reset() noexcept
     router.reset();
     chorus.reset();
     kaleidoscopeStage.reset();
+    subOsc.reset();
     dcL = dcR = 0.0f;
     dcStateL = dcStateR = 0.0f;
     sounding.store (0, std::memory_order_relaxed);
@@ -290,6 +292,9 @@ void Synth::setPatch (const Patch& patch) noexcept
     double focus = 0.5, spread = 0.5;
     kaleidoscopeStage.setAmount (sharedKaleidoscope (current, &focus, &spread));
     kaleidoscopeStage.setShape (focus, spread);
+    if (! (current.sub == subOsc.settingsNow()))
+        subOsc.setSettings (current.sub);
+    subOsc.setBendRange (current.bendRangeSemitones);
 }
 
 double Synth::sharedKaleidoscope (const Patch& p, double* focus, double* spread) const noexcept
@@ -2338,6 +2343,10 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
             kaleidoscopeStage.process (left[i], right[i]);
         }
     router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
+    // SUB: after every effect, before the output gain and guard - dry by construction (it is
+    // never any effect's input). Nothing sounding: not a sample touched.
+    if (subOsc.sounding())
+        subOsc.render (left, right, numSamples);
     const float out = math::dbToGain (current.outputDb);
     for (int i = 0; i < numSamples; ++i)
     {
