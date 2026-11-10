@@ -507,11 +507,14 @@ TEST_CASE ("analog: the factory presets are installed, listed and load exactly",
     }
     // A second instance does not write them again (same version), and a musician's preset
     // beside them is kept.
+    // (Documents is the real one here: a file left by an earlier run is already listed.)
     const auto own = p.presetFolder().getChildFile ("Mine.andoranalog");
+    const bool existed = own.existsAsFile();
     REQUIRE (p.savePreset (own));
     ShellProcessor q;
     CHECK (own.existsAsFile());
-    CHECK (q.presetList().size() == list.size() + 1);
+    CHECK (q.presetList().size() == list.size() + (existed ? 0 : 1));
+    own.deleteFile();   // (the musician's folder as it was)
 }
 
 TEST_CASE ("analog: a factory update replaces only the factory files it wrote; the musician's stay", "[analog][presets]")
@@ -7943,8 +7946,9 @@ namespace
         namespace fx = andor::analog::fx;
         std::vector<std::pair<juce::String, std::function<void (ShellProcessor&)>>> states;
         ShellProcessor probe;
-        for (const auto& entry : probe.presetList())
-            states.push_back ({ "preset/" + entry.name, [entry] (ShellProcessor& q) { q.openPresetEntry (entry); } });
+        for (const auto& entry : probe.presetList())   // (the factory sounds only: not a musician's own)
+            if (std::any_of (factoryPatches().begin(), factoryPatches().end(), [&entry] (const auto& f) { return entry.name == juce::String (f.name); }))
+                states.push_back ({ "preset/" + entry.name, [entry] (ShellProcessor& q) { q.openPresetEntry (entry); } });
         states.push_back ({ "classic-macros", [] (ShellProcessor& q) {
                                setValue (q, "drive", 35.0f);
                                setValue (q, "echo", 40.0f);
@@ -8058,7 +8062,7 @@ TEST_CASE ("analog: V6 gate 0 - every factory sound and FX route renders as at 1
         REQUIRE (v6BaselinePath().replaceWithText (written.joinIntoString ("\n") + "\n", false, false, "\n"));
         return;
     }
-    CHECK (compared >= 2 * 46);   // (44 factory sounds + 2 routes, at two rates)
+    CHECK (compared == 2 * (static_cast<int> (factoryPatches().size()) + 2));   // (every factory sound + 2 routes, at two rates)
     INFO ("hashes compared on " << platform << ": " << hashed);
     CHECK (hashed == compared);
 }
