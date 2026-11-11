@@ -220,6 +220,15 @@ public:
         return -1;
     }
     double shaperDnaMix() const noexcept { return dnaMix; }
+    /** How many sounding voices carry each profile (unison: one note's voices share one). */
+    std::array<int, 3> shaperDnaVoicesPerProfile() const noexcept
+    {
+        std::array<int, 3> n {};
+        for (const auto& v : voices)
+            if (v.active && ! v.pending)
+                ++n[static_cast<std::size_t> (std::clamp (v.dnaProfile, 0, 2))];
+        return n;
+    }
     double shaperHandoff() const noexcept { return effects.shaperHandoff(); }
     double sampleRate() const noexcept { return hostRate; }
     /** Tests: the amount KALEIDOSCOPE's stage on the mix is set to (the cards', level-weighted). */

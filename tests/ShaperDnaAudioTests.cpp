@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 using namespace testutil;
@@ -328,4 +329,79 @@ TEST_CASE ("DNA-08: SUB stays the foundation - DNA never gates it, the handed-ov
     CHECK (spread (gated) < 0.5 * spread (ungated));   // the SHAPER (lane A, as before) gates SUB
     // DNA: SUB keeps its level, exactly as with no SHAPER at all (after the 40 ms hand-over).
     CHECK (envelopeError (steady, ungated, 0.1, 1.4) < 5.0e-3);
+}
+
+TEST_CASE ("DNA-09: every sounding note-on counts (cards' channels, arpeggiated notes); unison's voices of one note share its profile", "[shaperdna][v8]")
+{
+    // Notes on the cards' channels (the per-card arpeggiator's lanes) are notes like any other:
+    // each its own assignment, in the order they sound.
+    {
+        auto p = withDna (shaperPatch());
+        auto s = makeSynth (p);
+        render (*s, 0.05, { on (0, 60, 100, 1), on (10, 64, 100, 2), on (20, 67, 100, 3), on (30, 71, 100, 1) });
+        CHECK (s->shaperDnaProfileOf (60) == 0);
+        CHECK (s->shaperDnaProfileOf (64) == 1);
+        CHECK (s->shaperDnaProfileOf (67) == 2);
+        CHECK (s->shaperDnaProfileOf (71) == 0);
+        // An arpeggio (each step a note-on of its own): the profiles rotate with the steps.
+        std::vector<Event> steps;
+        for (int i = 0; i < 6; ++i)
+        {
+            steps.push_back (on (i * 2400, 48 + 2 * i, 100));
+            steps.push_back (off (i * 2400 + 2000, 48 + 2 * i));
+        }
+        auto q = makeSynth (p);
+        std::vector<int> seen;
+        for (int i = 0; i < 6; ++i)
+        {
+            render (*q, 0.05, { on (0, 48 + 2 * i, 100) });
+            seen.push_back (q->shaperDnaProfileOf (48 + 2 * i));
+            render (*q, 0.01, { off (0, 48 + 2 * i) });
+        }
+        CHECK (seen == std::vector<int> { 0, 1, 2, 0, 1, 2 });
+    }
+    // Unison: one note's voices share one profile; the next note takes the next.
+    {
+        auto p = withDna (shaperPatch());
+        p.unison = true;
+        p.polyphony = 4;
+        auto s = makeSynth (p);
+        render (*s, 0.05, { on (0, 60, 100) });
+        auto n = s->shaperDnaVoicesPerProfile();
+        CHECK (n[0] >= 2);
+        CHECK (n[1] == 0);
+        CHECK (n[2] == 0);
+    }
+}
+
+TEST_CASE ("CPU-01: SHAPER DNA's cost - 16 voices, 1x and 4x, three profiles, FILTER and BOTH (reported, not asserted)", "[shaperdna][cpu]")
+{
+    for (const int oversampling : { 1, 4 })
+        for (int mode = 0; mode < 4; ++mode)
+        {
+            // 0: DNA off (lane A's SHAPER on the mix), 1: DNA on VOL, 2: FILTER, 3: BOTH.
+            auto p = shaperPatch (mode == 2 ? osp::ShaperTarget::filter : (mode == 3 ? osp::ShaperTarget::both : osp::ShaperTarget::volume));
+            p.polyphony = 16;
+            if (mode > 0)
+            {
+                p = withDna (p);
+                p.shaperDna.rate = { ShaperDnaSettings::follow, static_cast<int> (osp::ShaperRate::eighthTriplet), static_cast<int> (osp::ShaperRate::thirtySecond) };
+                p.shaperDna.pattern = { ShaperDnaSettings::follow, 4, 9 };
+            }
+            auto s = makeSynth (p, 48000.0, oversampling, 512);
+            for (int v = 0; v < 16; ++v)
+            {
+                const std::uint8_t note[3] { 0x90, static_cast<std::uint8_t> (40 + 2 * v), 100 };
+                s->handleMidi (note, 3);
+            }
+            std::vector<float> l (512), r (512);
+            for (int b = 0; b < 20; ++b)
+                s->render (l.data(), r.data(), 512);   // (warm: the hand-over done)
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int b = 0; b < 48000 * 4 / 512; ++b)
+                s->render (l.data(), r.data(), 512);
+            const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+            static const char* names[] { "DNA off", "DNA VOL", "DNA FILTER", "DNA BOTH" };
+            WARN (oversampling << "x, 16 voices, " << names[mode] << ": " << 100.0 * seconds / 4.0 << " % of one core");
+        }
 }

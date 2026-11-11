@@ -2690,17 +2690,27 @@ void Synth::updateShaperDna (int count) noexcept
     {
         const auto uk = static_cast<std::size_t> (k);
         const double q = q0 + dq * k;
+        // The curves at the host rate (as lane A's SHAPER reads them), held across the
+        // oversampled samples between: the notes' 2 ms ramps smooth them. A chunk always starts
+        // on a host sample.
+        const bool evaluate = k % oversampling == 0;
         for (std::size_t i = 0; i < 3; ++i)
         {
-            float s = running ? shaperDna::shapeAt (dnaProfiles[i], q, smooth, phase) : 1.0f;
-            if (dnaFade[i] > 0)
+            if (evaluate)
             {
-                const float old = running ? shaperDna::shapeAt (dnaPrevious[i], q, smooth, phase) : 1.0f;
-                const float w = static_cast<float> (dnaFade[i]) / static_cast<float> (dnaFadeLength);
-                s += w * (old - s);
-                --dnaFade[i];
+                float s = running ? shaperDna::shapeAt (dnaProfiles[i], q, smooth, phase) : 1.0f;
+                if (dnaFade[i] > 0)
+                {
+                    const float old = running ? shaperDna::shapeAt (dnaPrevious[i], q, smooth, phase) : 1.0f;
+                    const float w = static_cast<float> (dnaFade[i]) / static_cast<float> (dnaFadeLength);
+                    s += w * (old - s);
+                }
+                dnaShape[i][uk] = s;
             }
-            dnaShape[i][uk] = s;
+            else
+                dnaShape[i][uk] = dnaShape[i][uk - 1];
+            if (dnaFade[i] > 0)
+                --dnaFade[i];
         }
         dnaAmount += (amountTarget - dnaAmount) * dnaAmountCoef;
         dnaVolDepth += (volumeTarget - dnaVolDepth) * dnaDepthCoef;

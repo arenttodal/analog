@@ -9257,3 +9257,80 @@ TEST_CASE ("GUI-04: card C's layer keys sit under its TYPE dropdown, right-align
                 CHECK (keys->getHeight() <= 28);
             }
 }
+
+TEST_CASE ("SHAPER DNA: write the demo (preset, MIDI, render) - ANALOG_DEMO_DIR", "[.][shaperdna-demo]")
+{
+    // "Held Above": KEY ZONES. A (up to B3) the SHAPER's own THREE at 1/16; B (C4-B4) FIVE at
+    // 1/8; C (C5 and up) BREATH at 1/8T. C5 is held across two chords (C major, then F major):
+    // the held note keeps its triplet breath while the chords below pulse in sixteenths.
+    const char* dir = std::getenv ("ANALOG_DEMO_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    ShellProcessor p;
+    setValue (p, "space", 25.0f);
+    setValue (p, "echo", 0.0f);
+    setValue (p, "motion", 100.0f);
+    setValue (p, "movement.mode", 4.0f);              // SHAPER
+    setValue (p, "movement.shaper.target", 0.0f);     // VOL
+    setValue (p, params::dnaEnabled, 1.0f);
+    setValue (p, params::dnaAssignment, 1.0f);        // KEY ZONES
+    setValue (p, params::dnaProfileId (1, "pattern"), 5.0f);   // FIVE
+    setValue (p, params::dnaProfileId (1, "rate"), 2.0f);      // 1/8
+    setValue (p, params::dnaProfileId (2, "pattern"), 3.0f);   // BREATH
+    setValue (p, params::dnaProfileId (2, "rate"), 3.0f);      // 1/8T
+    REQUIRE (p.savePreset (out.getChildFile ("SHAPER DNA - Held Above.andoranalog")));
+
+    // 120 BPM: a bar is 2 s. C5 held 4 bars; C major for 2 bars, F major for 2.
+    const int bar = 2 * 48000;
+    std::vector<Note> notes { { 0, 72, 96 } };
+    for (const int n : { 48, 52, 55 })
+    {
+        notes.push_back ({ 0, n, 90 });
+        notes.push_back ({ 2 * bar - 200, n, 0 });
+    }
+    for (const int n : { 53, 57, 60 })
+    {
+        notes.push_back ({ 2 * bar, n, 90 });
+        notes.push_back ({ 4 * bar - 200, n, 0 });
+    }
+    notes.push_back ({ 4 * bar - 200, 72, 0 });
+    // The MIDI file (a DAW plays it into the preset).
+    juce::MidiMessageSequence seq;
+    for (const auto& n : notes)
+    {
+        const double ticks = 960.0 * 2.0 * static_cast<double> (n.sample) / 48000.0;   // 960 per quarter at 120 BPM
+        seq.addEvent (n.velocity > 0 ? juce::MidiMessage::noteOn (1, n.note, static_cast<juce::uint8> (n.velocity)) : juce::MidiMessage::noteOff (1, n.note), ticks);
+    }
+    seq.updateMatchedPairs();
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote (960);
+    juce::MidiMessageSequence tempo;
+    tempo.addEvent (juce::MidiMessage::tempoMetaEvent (500000), 0.0);
+    midi.addTrack (tempo);
+    midi.addTrack (seq);
+    {
+        const auto file = out.getChildFile ("SHAPER DNA - Held Above.mid");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        REQUIRE (midi.writeTo (stream));
+    }
+    // The render (no host transport: SHAPER's own clock from the first note), and the same
+    // with DNA off for comparison.
+    auto writeWav = [&] (const juce::AudioBuffer<float>& audio, const juce::String& name) {
+        const auto file = out.getChildFile (name);
+        file.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream (new juce::FileOutputStream (file));
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.get(), 48000.0, 2, 16, {}, 0));
+        REQUIRE (writer != nullptr);
+        stream.release();
+        writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
+    };
+    writeWav (renderShell (p, 9.0, notes, false), "SHAPER DNA - Held Above.wav");
+    ShellProcessor q;
+    REQUIRE (q.loadPreset (out.getChildFile ("SHAPER DNA - Held Above.andoranalog")));
+    CHECK (q.parameterValue (params::dnaEnabled) >= 0.5f);
+    setValue (q, params::dnaEnabled, 0.0f);
+    writeWav (renderShell (q, 9.0, notes, false), "SHAPER DNA - Held Above (DNA off).wav");
+}
