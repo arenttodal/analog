@@ -715,6 +715,13 @@ private:
     void mixExternal (float* left, float* right, int numSamples) noexcept;
     // EXPERIMENT: the external instrument's bus (setExternal) and the GLOBAL MORPH.
     GlobalMorph globalMorph;
+    /** MORPH while card C's loop is heard (AUDIO, BOTH): the loop takes card C's recording from
+        the keys, so the voices' own MORPH has no C; the GLOBAL MORPH between A + B and the loop
+        acts instead, at MORPH's position. Idle (nothing runs) unless both are on. */
+    GlobalMorph rhythmMorph;
+    std::vector<float> rhythmBusL, rhythmBusR, rhythmMorphL, rhythmMorphR;
+    float rhythmMorphNow = 0.0f;
+    bool rhythmMorphRunning = false;
     struct External
     {
         bool active = false, morphOn = false;

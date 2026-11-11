@@ -280,3 +280,63 @@ TEST_CASE ("RHYTHMIC MORPH: CPU (16 held voices; off, AUDIO, BOTH with a route)"
         for (int run = 0; run < 3; ++run)
             WARN ("oversampling " << os << ": off " << measure (off, false, os) << " %, AUDIO " << measure (audio, false, os) << " %, BOTH + route " << measure (both, true, os) << " %");
 }
+
+TEST_CASE ("RHYTHMIC MORPH: MORPH acts on the heard loop - 0 % A + B, 50 % the loop's imprint on A + B, 100 % the loop", "[rhythm][synth][morph]")
+{
+    // A sustained saw on card A and the ticks heard as card C's loop (AUDIO). The keys hand the
+    // recording to the loop, so the voices' own MORPH has no C: the GLOBAL MORPH takes the loop.
+    auto patch = [] (bool rhythmOn, bool morphOn, double position, double osc1) {
+        Patch p = rhythmPatch();
+        p.osc1Level = osc1;
+        p.rhythm.enabled = rhythmOn;
+        p.morph.enabled = morphOn;
+        p.morph.position = position;
+        return p;
+    };
+    const std::vector<Event> held { on (0, 48, 100), off (static_cast<int> (2.6 * rate), 48) };
+    auto play = [&] (const Patch& p) { return render (*loopSynth (p), 3.0, held).left; };
+    const auto aAlone = play (patch (false, false, 0.5, 0.3));      // (A, no loop)
+    const auto beside = play (patch (true, false, 0.5, 0.3));       // MORPH off: A and the loop side by side
+    const auto loopAlone = play (patch (true, false, 0.5, 0.0));    // (the loop, no A)
+    const auto at0 = play (patch (true, true, 0.0, 0.3));
+    const auto at50 = play (patch (true, true, 0.5, 0.3));
+    const auto at100 = play (patch (true, true, 1.0, 0.3));
+    auto distance = [] (const std::vector<float>& x, const std::vector<float>& y) {
+        double d = 0.0, r = 0.0;
+        for (std::size_t i = static_cast<std::size_t> (0.3 * rate); i < static_cast<std::size_t> (2.4 * rate); ++i)
+        {
+            d += std::pow (x[i] - y[i], 2.0);
+            r += std::pow (y[i], 2.0);
+        }
+        return std::sqrt (d / std::max (1.0e-30, r));
+    };
+    INFO ("0 % from A " << distance (at0, aAlone) << "; 100 % from the loop " << distance (at100, loopAlone) << "; 50 % from A " << distance (at50, aAlone)
+                        << ", from A beside the loop " << distance (at50, beside));
+    CHECK (distance (beside, aAlone) > 0.1);       // (the loop is heard with MORPH off, as before)
+    CHECK (distance (at0, aAlone) < 1.0e-3);       // 0 %: A + B alone
+    CHECK (distance (at100, loopAlone) < 1.0e-3);  // 100 %: the loop alone
+    CHECK (distance (at50, aAlone) > 0.1);         // 50 %: neither A ...
+    CHECK (distance (at50, beside) > 0.1);         // ... nor A beside the loop: A in the loop's imprint
+    CHECK (distance (at50, loopAlone) > 0.1);
+    // Between the ticks (the loop silent) A sounds; on them A takes the tick's colour: A's
+    // level moves with the loop's rhythm.
+    double onTicks = 0.0, between = 0.0;
+    for (int k = 2; k < 4; ++k)
+    {
+        onTicks += rmsOf (at50, 0.5 * k + 0.001, 0.5 * k + 0.02);
+        between += rmsOf (at50, 0.5 * k + 0.25, 0.5 * k + 0.45);
+    }
+    INFO ("on the ticks " << onTicks << ", between " << between);
+    CHECK (std::abs (onTicks - between) > 0.1 * between);
+}
+
+TEST_CASE ("RHYTHMIC MORPH: MORPH in MOD is the voices' own (the loop silent) - unchanged", "[rhythm][synth][morph]")
+{
+    Patch p = rhythmPatch (Patch::Rhythm::Audio::mod);
+    p.osc1Level = 0.3;
+    p.morph.enabled = true;
+    Patch noRhythm = p;
+    noRhythm.rhythm.enabled = false;
+    const std::vector<Event> held { on (0, 48, 100), off (static_cast<int> (1.6 * rate), 48) };
+    CHECK (render (*loopSynth (p), 2.0, held).left == render (*loopSynth (noRhythm), 2.0, held).left);
+}

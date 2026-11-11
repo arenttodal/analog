@@ -73,7 +73,7 @@ DAW MIDI ─> shell (per-card arpeggiator lanes: channel 1 + card mask)
    ├─ every event ─────────────> Synth voices (A, B; C-only notes skipped while card C is EXTERNAL)
    │                              └─ voices' sum ─> decimators ─┐
    └─ card C's lane (cards ∋ C) ─> channel 1 ─> ExternalInstrument (hosted VST3, Kontakt)        │
-                                  stereo bus ─> × card C LEVEL · MIX share · MUTE/SOLO ─────────┤
+                                  stereo bus ─> × card C LEVEL · MIX share · MUTE/SOLO ─> the cards' FILTER ─┤
                                                                                                v
                               Synth::mixExternal:  MORPH off: A+B + C   |   MORPH on: GlobalMorph (A+B, C, position)
                                                    (A+B delayed by the instrument's reported latency)
@@ -83,7 +83,18 @@ DAW MIDI ─> shell (per-card arpeggiator lanes: channel 1 + card mask)
 
 - **The integration boundary** is where RHYTHMIC MORPH's loop already joins: after the voices' sum and decimation, at the host rate, before the shared effects.
   - Kontakt goes through ANDOR's chorus and effects like the cards.
-  - It is not filtered per voice, does not join the SEND bus, and is never multiplied by polyphony.
+  - It does not join the SEND bus and is never multiplied by polyphony.
+- **The FILTER macro (added after the first build, on request).** Kontakt's bus goes through the
+  cards' FILTER, as OSC 1 and 2 do: TONE (and whatever moves the cards' cutoff: routes, LFO),
+  RESONANCE, DRIVE, LADDER / OTA with its voicing, the high-pass, key tracking, and the FILTER
+  envelope (AMP's with ENV LINK) at its ENV AMOUNT and velocity.
+  - One stereo filter for the bus, not one per note: Kontakt's notes arrive mixed. Its one
+    envelope opens on a note after silence; a legato overlap does not restart it (the
+    sustain pedal holds it); it tracks the newest key.
+  - It runs at the host rate (the voices' filter runs oversampled), before GLOBAL MORPH and the
+    mix: MORPH on or off, C is the filtered C.
+  - Tests: `EXTERNAL FILTER` (TONE darkens it: brightness 0.108 open, 0.028 at TONE 25;
+    RESONANCE and the OTA change it; the envelope opens from silence only).
 - **Off is off.** With card C on any other type and nothing ever loaded, `Synth::mixExternal` returns at once: the DSP goldens, the legacy hashes and the product's "EXTERNAL not chosen" comparison are bit-identical.
 - **Files:**
   - DSP: `dsp/morph/GlobalMorph.{h,cpp}`, `dsp/Synth.{h,cpp}` (`setExternal`, `mixExternal`), `dsp/Patch.h` (`HybridType::external`).
@@ -212,6 +223,8 @@ For a demo without Kontakt, build `andor_test_instrument` and set `ANDOR_EXTERNA
   - It is one mode. The MORPH rack's method, carrier, texture and other settings do not apply to it; the card says so.
   - FUSE / WEAVE (harmonic fusion, partial interleaving) are not attempted at bus level: a chord has no single pitch to fuse to.
 - **Sends:** Kontakt does not join the SEND bus in MAIN + SEND.
+- **Its FILTER is paraphonic:** one cutoff and one envelope for every note Kontakt plays, at the
+  host rate. While no card voice sounds, the cutoff's modulation holds its last value.
 - **Automation shift:** the card C type parameter gained a fifth choice, so its *normalised* automation value moved. Sessions recall by index; the 1.0 fixtures pass.
 
 ## Recommendation: CONDITIONAL

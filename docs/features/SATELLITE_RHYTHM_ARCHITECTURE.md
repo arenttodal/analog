@@ -159,6 +159,12 @@ There are no allocations (the `realtime` case: cards on and off, modes, notes on
   - MOD: the loop runs silent on the grid and is only felt.
   - BOTH: heard and felt.
   - While the loop is heard (AUDIO, BOTH), the keys hand it the recording. In MOD card C's keys keep playing it, so MORPH keeps its C. That is RHYTHMIC MORPH proper: the recording's own rhythm moves the morph toward the recording (`rhythm_rain_unsynced_modulates_morph.wav`).
+  - **MORPH with the loop heard** (fixed after the first build: MORPH did nothing in AUDIO / BOTH, since the voices had no C left). With MORPH on, the loop and A + B now meet in the GLOBAL MORPH (`dsp/morph/GlobalMorph`, from the Kontakt experiment), at MORPH's position:
+    - 0 %: A + B alone, exactly;
+    - 50 %: A + B in the loop's spectral envelope (its colour and rhythm on the oscillators);
+    - 100 %: the loop alone, exactly.
+    - MORPH off: the loop beside the voices, as before, bit for bit. Switching it crossfades in 10 ms. The MORPH rack's method and carrier do not apply to it (it is the bus-level morph). In MOD, MORPH is the voices' own, unchanged.
+    - Tests: `RHYTHMIC MORPH: MORPH acts on the heard loop*` and `*MORPH in MOD*`.
 - **Hearing the loop:**
   - Gated by card C's notes: the highest AMP among C's voices, so it starts with the attack and ends with the release.
   - At card C's LEVEL, MUTE and SOLO, and at SATELLITE C's place.
@@ -227,6 +233,6 @@ The measurements are analysis, not listening. Nobody has listened to these rende
 5. **Time-stretch.** The loop follows the host by slices on the grid, not by Signalsmith or a phase vocoder: zero latency, transients untouched. Pads or sustained loops that must stretch smoothly would need a real-time stretch with latency. That is a later option, not in V1.
 6. **The loop's routing.** It plays on MAIN only (not C's send), takes SATELLITE C's place but not ORBIT's rear cue, and is gated by card C's notes (it does not run free under the transport alone).
 7. **The analysis is not saved** with the session. It is recomputed when the recording loads (0.39 s for 60 s of audio). HALF / DOUBLE are saved; a manual BPM or downbeat override is not offered in V1.
-8. **MOD keeps the recording on card C's keys** (so MORPH has its C); AUDIO and BOTH hand it to the loop. A product owner may prefer otherwise.
+8. **MOD keeps the recording on card C's keys** (so the voices' MORPH has its C); AUDIO and BOTH hand it to the loop, and there MORPH is the GLOBAL MORPH with the loop. A product owner may prefer otherwise.
 9. **Quick-route depths** (levels −60 %, FILTER +40 %, MORPH +50 %) are first proposals.
 10. **Not validated in a DAW.** Automated tests, headless renders and the measurements above only. No DAW session, host-automation pass or listening test on monitors has been done, and none is claimed.

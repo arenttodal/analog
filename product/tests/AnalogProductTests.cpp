@@ -10013,6 +10013,7 @@ namespace
         {
             const auto at = juce::Point<float> (static_cast<float> (key->getWidth()) - 30.0f, 0.5f * static_cast<float> (key->getHeight()));
             key->mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, key, key, juce::Time(), at, juce::Time(), 1, false));
+            ui->pressAnywhere (key);   // (then the editor's outside-click watcher, as JUCE delivers a press)
         }
     };
 }
@@ -10359,7 +10360,12 @@ namespace
         }
         andor::analog::RhythmPanel* panel() { return dynamic_cast<andor::analog::RhythmPanel*> (ui->openPopupPanel()); }
         void clickLight() { pressAt (*key(), key()->lightArea().getCentre().toFloat()); }
-        void clickName() { pressAt (*key(), { static_cast<float> (key()->getWidth()) - 30.0f, 0.5f * static_cast<float> (key()->getHeight()) }); }
+        void clickName()
+        {
+            auto* k = key();
+            pressAt (*k, { static_cast<float> (k->getWidth()) - 30.0f, 0.5f * static_cast<float> (k->getHeight()) });
+            ui->pressAnywhere (k);   // (then the editor's outside-click watcher, as JUCE delivers a press)
+        }
     };
 }
 
@@ -10952,4 +10958,39 @@ TEST_CASE ("SATELLITE + RHYTHMIC MORPH demo renders (ANALOG_DEMO_DIR)", "[.][dem
         check ("combined_cinematic_satellite_plus_rhythmic_morph.wav", renderDemo (p, head, 17.0, chords));
     }
     out.getChildFile ("renders.txt").replaceWithText (notes);
+}
+
+
+TEST_CASE ("the arp / sub lights: one smooth lens at fractional display scales - no seam cross through it", "[analog][ui][arp-lights]")
+{
+    ShellProcessor p;
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.refreshNow();
+    auto* arp = dynamic_cast<osp::plugin::ArpControl*> (findTitled (*editor, "Arpeggiator"));
+    REQUIRE (arp != nullptr);
+    const auto lens = editor->getLocalArea (arp, arp->secondLightArea().withSizeKeepingCentre (11.0f, 11.0f));
+    for (const float scale : { 1.8f, 2.5f })
+    {
+        INFO ("scale " << scale);
+        // (the whole housing, as the screen draws it; then the lens's pixels)
+        const auto area = editor->getLocalArea (arp, arp->getLocalBounds()).expanded (8);
+        const auto whole = editor->createComponentSnapshot (area, true, scale);
+        const auto shot = whole.getClippedImage (((lens - area.getPosition().toFloat()) * scale).getSmallestIntegerContainer());
+        // The seam was a lighter row and column through the middle: no row or column of the
+        // lens's inner half is much lighter than its neighbours on both sides.
+        auto level = [&shot] (int x, int y) { return shot.getPixelAt (x, y).getPerceivedBrightness(); };
+        const int w = shot.getWidth(), h = shot.getHeight();
+        float worst = 0.0f;
+        for (int y = h / 4 + 1; y < 3 * h / 4 - 1; ++y)
+            for (int x = w / 4 + 1; x < 3 * w / 4 - 1; ++x)
+            {
+                worst = std::max (worst, std::min (level (x, y) - level (x - 1, y), level (x, y) - level (x + 1, y)));
+                worst = std::max (worst, std::min (level (x, y) - level (x, y - 1), level (x, y) - level (x, y + 1)));
+            }
+        INFO ("the lightest seam: " << worst);
+        CHECK (worst < 0.06f);
+    }
 }

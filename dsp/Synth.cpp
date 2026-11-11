@@ -95,6 +95,11 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     voicesDelayR.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
     voicesDelayAt = 0;
     globalMorph.prepare (hostRate, maxBlock);
+    rhythmMorph.prepare (hostRate, maxBlock);
+    for (auto* b : { &rhythmBusL, &rhythmBusR, &rhythmMorphL, &rhythmMorphR })
+        b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    rhythmMorphNow = 0.0f;
+    rhythmMorphRunning = false;
     for (auto& h : externalFilter.highPass)
         h.prepare (hostRate);
     externalFilter.env.setSampleRate (hostRate);
@@ -3117,6 +3122,8 @@ void Synth::mixRhythm (float* left, float* right, int numSamples) noexcept
     if (! rhythmRun || rs.audio == Patch::Rhythm::Audio::mod)
     {
         rhythmGate = 0.0f;
+        rhythmMorphNow = 0.0f;
+        rhythmMorphRunning = false;
         return;
     }
     // Heard while card C's notes sound (their AMP: attack, hold, release), at card C's LEVEL
@@ -3131,14 +3138,55 @@ void Synth::mixRhythm (float* left, float* right, int numSamples) noexcept
         osp::satellite::gains (sat[2].x1, gL, gR);
     const float gateStep = static_cast<float> (1.0 - std::exp (-1.0 / (0.002 * hostRate)));
     const float span = 1.0f / static_cast<float> (std::max (1, numSamples));
-    for (int i = 0; i < numSamples; ++i)
+    // MORPH on: A + B and the loop meet in the GLOBAL MORPH (0: A + B, 50 %: A + B in the loop's
+    // spectral envelope - its rhythm and colour on the oscillators - 100 %: the loop); switching
+    // MORPH crossfades 10 ms. Off: the loop beside the voices, as before, bit for bit.
+    const float morphTarget = current.morph.enabled ? 1.0f : 0.0f;
+    if (morphTarget <= 0.0f && rhythmMorphNow <= 0.0f)
     {
-        const auto ui = static_cast<std::size_t> (i);
-        rhythmGate += gateStep * (gate - rhythmGate);
-        const float t = static_cast<float> (i) * span;
-        const float l = loopGainL + t * (gL - loopGainL), r = loopGainR + t * (gR - loopGainR);
-        left[i] += level * rhythmGate * l * loopL[ui];
-        right[i] += level * rhythmGate * r * loopR[ui];
+        rhythmMorphRunning = false;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto ui = static_cast<std::size_t> (i);
+            rhythmGate += gateStep * (gate - rhythmGate);
+            const float t = static_cast<float> (i) * span;
+            const float l = loopGainL + t * (gL - loopGainL), r = loopGainR + t * (gR - loopGainR);
+            left[i] += level * rhythmGate * l * loopL[ui];
+            right[i] += level * rhythmGate * r * loopR[ui];
+        }
+    }
+    else
+    {
+        if (! rhythmMorphRunning)
+            rhythmMorph.reset();
+        rhythmMorphRunning = true;
+        const float step = static_cast<float> (1.0 / (0.010 * hostRate));
+        for (int at = 0; at < numSamples; at += maxBlock)
+        {
+            const int n = std::min (maxBlock, numSamples - at);
+            for (int i = 0; i < n; ++i)
+            {
+                const auto ui = static_cast<std::size_t> (at + i), k = static_cast<std::size_t> (i);
+                rhythmGate += gateStep * (gate - rhythmGate);
+                const float t = static_cast<float> (at + i) * span;
+                const float l = loopGainL + t * (gL - loopGainL), r = loopGainR + t * (gR - loopGainR);
+                rhythmBusL[k] = level * rhythmGate * l * loopL[ui];
+                rhythmBusR[k] = level * rhythmGate * r * loopR[ui];
+            }
+            std::copy (left + at, left + at + n, rhythmMorphL.begin());
+            std::copy (right + at, right + at + n, rhythmMorphR.begin());
+            rhythmMorph.process (rhythmMorphL.data(), rhythmMorphR.data(), rhythmBusL.data(), rhythmBusR.data(), n, current.morph.position);
+            float m = rhythmMorphNow;
+            for (int i = 0; i < n; ++i)
+            {
+                const auto k = static_cast<std::size_t> (i);
+                m = m < morphTarget ? std::min (morphTarget, m + step) : std::max (morphTarget, m - step);
+                const float plainL = left[at + i] + rhythmBusL[k], plainR = right[at + i] + rhythmBusR[k];
+                left[at + i] = m >= 1.0f ? rhythmMorphL[k] : (1.0f - m) * plainL + m * rhythmMorphL[k];
+                right[at + i] = m >= 1.0f ? rhythmMorphR[k] : (1.0f - m) * plainR + m * rhythmMorphR[k];
+            }
+            rhythmMorphNow = m;
+        }
     }
     loopGainL = gL;
     loopGainR = gR;

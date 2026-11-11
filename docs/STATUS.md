@@ -21,6 +21,12 @@
 >   docs/experiments/KONTAKT_EXTERNAL_MORPH.md). A VST3 host bridge, card C's MIDI lane, a global
 >   C bus and a zero-latency spectral imprint morph, validated with a stand-in VST3. Kontakt and
 >   DAWs are BLOCKED here. Recommendation: CONDITIONAL.
+>   - Fixes after the first test on a Mac:
+>     - Kontakt's bus now goes through the cards' FILTER (TONE, RESONANCE, DRIVE, model, its
+>       envelope);
+>     - SATELLITE's and RHYTHM's panels open: they used to close in the same click (OSP shell);
+>     - MORPH acts in RHYTHM's AUDIO / BOTH, as a GLOBAL MORPH with the loop;
+>     - the arp / sub lights lost a seam cross at fractional display scales (OSP skin).
 >
 > Next: USER MACROS gate 5 (FX-library slot targets, orphan / reconnect), its CPU figures and a
 > draft PR. Not run here: hosts, real input, listening (SATELLITE and RHYTHM included).
