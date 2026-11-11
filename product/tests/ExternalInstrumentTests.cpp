@@ -457,6 +457,84 @@ TEST_CASE ("EXTERNAL G3: MORPH off - C on its own bus at card C's level, once (n
     CHECK (ons == 4);
 }
 
+namespace
+{
+    /** Brightness: the first difference's level against the signal's (a closed filter lowers it). */
+    double brightness (const juce::AudioBuffer<float>& a, double from, double to)
+    {
+        double s = 0.0, d = 0.0;
+        const int x = static_cast<int> (from * testRate), z = std::min (a.getNumSamples(), static_cast<int> (to * testRate));
+        for (int i = std::max (1, x); i < z; ++i)
+        {
+            const double v = a.getSample (0, i), dv = v - a.getSample (0, i - 1);
+            s += v * v;
+            d += dv * dv;
+        }
+        return std::sqrt (d / std::max (1.0e-30, s));
+    }
+}
+
+TEST_CASE ("EXTERNAL FILTER: card C's instrument goes through the cards' FILTER - TONE darkens it, RESONANCE and the model change it", "[external][filter]")
+{
+    SurrogateOverride env;
+    // Twins with A and B silent (what is heard is C), the filter envelope out of the way.
+    auto made = [] (float tone, float resonance, int model) {
+        auto p = std::make_unique<ShellProcessor>();
+        withExternal (*p, true);
+        set (*p, params::envDepth, 0.0f);
+        set (*p, params::tone, tone);
+        set (*p, params::resonance, resonance);
+        set (*p, params::filterModel, static_cast<float> (model));
+        return p;
+    };
+    const std::vector<Key> note { { 0.0, 57, 100 }, { 1.0, 57, 0 } };
+    auto open = made (100.0f, 0.0f, 0), closed = made (25.0f, 0.0f, 0);
+    const auto bright = play (*open, 1.0, note), dark = play (*closed, 1.0, note);
+    const double bOpen = brightness (bright, 0.4, 0.9), bClosed = brightness (dark, 0.4, 0.9);
+    INFO ("brightness open " << bOpen << ", closed " << bClosed << "; level open " << rmsOf (bright, 0.4, 0.9) << ", closed " << rmsOf (dark, 0.4, 0.9));
+    CHECK (rmsOf (bright, 0.4, 0.9) > 0.005);
+    CHECK (bClosed < 0.5 * bOpen);
+    CHECK (rmsOf (dark, 0.4, 0.9) < rmsOf (bright, 0.4, 0.9));
+    // RESONANCE and the model (LADDER / OTA) are heard on it too.
+    auto plain = made (45.0f, 0.0f, 0), resonant = made (45.0f, 90.0f, 0), ota = made (45.0f, 90.0f, 1);
+    const auto a = play (*plain, 1.0, note), b = play (*resonant, 1.0, note), c = play (*ota, 1.0, note);
+    auto differs = [] (const juce::AudioBuffer<float>& x, const juce::AudioBuffer<float>& y) {
+        double d = 0.0, r = 0.0;
+        for (int i = static_cast<int> (0.4 * testRate); i < static_cast<int> (0.9 * testRate); ++i)
+        {
+            d += std::pow (x.getSample (0, i) - y.getSample (0, i), 2.0);
+            r += std::pow (x.getSample (0, i), 2.0);
+        }
+        return std::sqrt (d / std::max (1.0e-30, r));
+    };
+    INFO ("resonance changes it by " << differs (a, b) << ", the OTA (resonant) by " << differs (b, c));
+    CHECK (differs (a, b) > 0.1);
+    CHECK (differs (b, c) > 0.1);   // (at 0 resonance both are a plain 4-pole low-pass: compared resonant)
+}
+
+TEST_CASE ("EXTERNAL FILTER: the FILTER envelope opens on a note after silence, not on a legato overlap; pedal-held notes keep it", "[external][filter]")
+{
+    SurrogateOverride env;
+    ShellProcessor p;
+    withExternal (p, true);
+    set (p, params::tone, 20.0f);
+    set (p, params::envDepth, 48.0f);
+    set (p, params::envLink, 0.0f);
+    set (p, params::filterAttack, 0.001f);
+    set (p, params::filterDecay, 0.2f);
+    set (p, params::filterSustain, 0.0f);
+    set (p, params::filterRelease, 0.05f);
+    std::map<int, float> cutoff;   // (block -> the bus's cutoff, Hz)
+    const auto& synth = engineOf (p).synthForTest();
+    const std::vector<Key> keys { { 0.0, 57, 100 }, { 0.5, 60, 100 }, { 0.6, 57, 0 }, { 1.0, 60, 0 }, { 1.5, 62, 100 }, { 1.9, 62, 0 } };
+    play (p, 2.0, keys, [&] (int block) { cutoff[block] = synth.externalCutoffHz(); });
+    auto at = [&] (double seconds) { return cutoff[static_cast<int> (seconds * testRate / testBlock)]; };
+    INFO ("cutoff (Hz) at 0.03 s " << at (0.03) << ", 0.45 s " << at (0.45) << ", 0.55 s " << at (0.55) << ", 1.53 s " << at (1.53));
+    CHECK (at (0.03) > 4.0 * at (0.45));    // (the envelope opened on the first note and decayed)
+    CHECK (at (0.55) < 1.5 * at (0.45));    // (the legato note did not open it again)
+    CHECK (at (1.53) > 4.0 * at (0.45));    // (a note after silence did)
+}
+
 TEST_CASE ("EXTERNAL G3: C2 is neutral; switching card C away mid-note fades C out with no stuck note", "[external][g3]")
 {
     SurrogateOverride env;

@@ -746,6 +746,8 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         renderTo (m.samplePosition);
         if (! (externalMode && cardCOnly (m)))
             synth.handleMidi (m.data, m.numBytes);
+        if (externalMode && m.numBytes >= 1 && m.data[0] >= 0x80 && m.data[0] < 0xf0 && (synth.cardsFor ((m.data[0] & 0x0f) + 1) & 4) != 0)
+            synth.externalKeyEvent (m.data, m.numBytes);   // (card C's lane: the FILTER's envelope on Kontakt's bus)
     }
     for (; p != played.cend(); ++p)
     {

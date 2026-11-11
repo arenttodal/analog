@@ -259,6 +259,14 @@ public:
         voice and does not join the SEND bus.
     */
     void setExternal (bool active, const float* left, const float* right, int length, float gain, bool morphOn, double position, int latency) noexcept;
+    /**
+        One MIDI event of card C's lane (note on / off, sustain, all notes / sound off), at its
+        place between the render calls: the external instrument's FILTER envelope and key
+        tracking (the bus goes through the cards' FILTER, as OSC 1 and 2 do).
+    */
+    void externalKeyEvent (const std::uint8_t* data, int size) noexcept;
+    /** Tests: the external bus's filter cutoff now (Hz), 0 while it is not running. */
+    float externalCutoffHz() const noexcept { return externalRunning ? externalFilter.cutoffHz : 0.0f; }
     const GlobalMorph& globalMorphState() const noexcept { return globalMorph; }
 
     /** RHYTHMIC MORPH: card C's prepared loop (owned by the caller, alive while set; null: none). */
@@ -717,6 +725,28 @@ private:
         double position = 0.0;
     } external;
     float externalGainNow = 0.0f, externalMorphNow = 0.0f;
+    /** The cards' FILTER on the external bus (stereo): the same model, cutoff, resonance, drive
+        and high-pass as the voices', one envelope for card C's notes (paraphonic: a note after
+        silence starts it, legato overlaps do not), tracking the newest key. Host rate. */
+    struct ExternalFilter
+    {
+        std::array<LadderFilter, 2> ladder {};
+        std::array<OtaFilter, 2> ota {};
+        std::array<VoiceHighPass, 2> highPass {};
+        Envelope env;
+        std::array<std::uint8_t, 128> held {};
+        std::array<bool, 128> sustained {};
+        bool pedal = false;
+        int heldCount = 0, lastKey = 60;
+        float velocity = 1.0f;
+        float baseNote = 135.0f, envDepth = 0.0f, keyTrack = 0.0f, velocityToEnv = 0.0f;
+        float g = 0.0f, k = 0.0f, resonance01 = 0.0f, gainIn = 1.0f, makeUp = 1.0f, otaMakeUp = 1.0f, otaOffset = 0.0f;
+        float cutoffHz = 0.0f;
+        bool otaModel = false, otaWasModel = false, highPassOn = false;
+        int countdown = 0;
+    } externalFilter;
+    void updateExternalFilter() noexcept;   ///< control rate: the cards' filter settings
+    void filterExternal (int n) noexcept;   ///< the bus (externalL / R) through it
     bool externalRunning = false;
     static constexpr int maxExternalLatency = 8192;   ///< samples (an instrument reporting more: not aligned past it)
     std::vector<float> externalL, externalR, morphOutL, morphOutR, voicesDelayL, voicesDelayR;

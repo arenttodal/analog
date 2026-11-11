@@ -95,6 +95,9 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     voicesDelayR.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
     voicesDelayAt = 0;
     globalMorph.prepare (hostRate, maxBlock);
+    for (auto& h : externalFilter.highPass)
+        h.prepare (hostRate);
+    externalFilter.env.setSampleRate (hostRate);
     externalRunning = false;
     externalGainNow = externalMorphNow = 0.0f;
     for (auto* b : { &sendMixL, &sendMixR })
@@ -1909,6 +1912,8 @@ void Synth::controlUpdate() noexcept
         }
         subOsc.setFilterFollow (follow);
     }
+    if (external.active || externalRunning)
+        updateExternalFilter();
 }
 
 //==============================================================================
@@ -2896,6 +2901,13 @@ void Synth::mixExternal (float* left, float* right, int numSamples) noexcept
         return;
     if (! externalRunning)
     {
+        for (auto& f : externalFilter.ladder)
+            f.reset();
+        for (auto& f : externalFilter.ota)
+            f.reset();
+        for (auto& f : externalFilter.highPass)
+            f.reset();
+        updateExternalFilter();
         globalMorph.reset();
         voicesDelayAt = 0;
         std::fill (voicesDelayL.begin(), voicesDelayL.end(), 0.0f);
@@ -2932,6 +2944,7 @@ void Synth::mixExternal (float* left, float* right, int numSamples) noexcept
         externalR[static_cast<std::size_t> (i)] = g * cr;
     }
     externalGainNow = g;
+    filterExternal (n);   // (the cards' FILTER, as OSC 1 and 2 go through it)
     const bool morphing = morphTarget > 0.0f || externalMorphNow > 0.0f;
     if (morphing)
     {
@@ -2953,6 +2966,149 @@ void Synth::mixExternal (float* left, float* right, int numSamples) noexcept
     externalMorphNow = m;
     if (! external.active && externalGainNow <= 0.0f && externalMorphNow <= 0.0f)
         externalRunning = false;   // (faded out: back to the instrument as before)
+}
+
+void Synth::externalKeyEvent (const std::uint8_t* data, int size) noexcept
+{
+    auto& f = externalFilter;
+    if (size < 1)
+        return;
+    const int status = data[0] & 0xf0;
+    auto release = [&f] (int key) {
+        f.heldCount = std::max (0, f.heldCount - 1);
+        if (f.heldCount == 0)
+            f.env.noteOff();
+        (void) key;
+    };
+    if ((status == 0x90 || status == 0x80) && size >= 3)
+    {
+        const int key = data[1] & 0x7f;
+        const auto kk = static_cast<std::size_t> (key);
+        if (status == 0x90 && data[2] > 0)
+        {
+            // A note after silence (or the release) starts the envelope; one over a held note
+            // (legato) does not.
+            if (f.heldCount == 0)
+            {
+                f.velocity = static_cast<float> (data[2]) / 127.0f;
+                f.env.noteOn();
+            }
+            if (f.held[kk] == 0 && ! f.sustained[kk])
+                ++f.heldCount;
+            f.held[kk] = 1;
+            f.sustained[kk] = false;
+            f.lastKey = key;
+        }
+        else if (f.held[kk] != 0)
+        {
+            f.held[kk] = 0;
+            if (f.pedal)
+                f.sustained[kk] = true;
+            else
+                release (key);
+        }
+        return;
+    }
+    if (status == 0xb0 && size >= 3)
+    {
+        const int controller = data[1];
+        if (controller == 64)
+        {
+            f.pedal = data[2] >= 64;
+            if (! f.pedal)
+                for (int key = 0; key < 128; ++key)
+                    if (f.sustained[static_cast<std::size_t> (key)])
+                    {
+                        f.sustained[static_cast<std::size_t> (key)] = false;
+                        release (key);
+                    }
+        }
+        else if (controller == 120 || controller == 123)
+        {
+            f.held.fill (0);
+            f.sustained.fill (false);
+            f.heldCount = 0;
+            f.env.noteOff();
+        }
+    }
+}
+
+void Synth::updateExternalFilter() noexcept
+{
+    // The cards' filter, as SUB follows it: TONE (smoothed) and what moves the cards' cutoff
+    // beyond it; their resonance, drive, model, high-pass; their envelope and amounts.
+    const auto& p = current;
+    auto& f = externalFilter;
+    f.baseNote = toneNote + subCutoffMoved;
+    f.keyTrack = static_cast<float> (p.keyTrack);
+    f.envDepth = static_cast<float> (p.envDepthSemitones);
+    f.velocityToEnv = static_cast<float> (std::clamp (p.velocityToFilter, 0.0, 1.0));
+    if (p.envLink)
+        f.env.setTimes (p.ampAttack, p.ampDecay, p.ampSustain, p.ampRelease);
+    else
+        f.env.setTimes (p.filterAttack, p.filterDecay, p.filterSustain, p.filterRelease);
+    const float resonance = std::clamp (resonanceSmoothed, 0.0f, 1.0f);
+    f.k = std::clamp (4.15f * resonance, 0.0f, 4.2f);
+    f.resonance01 = resonance;
+    f.otaOffset = 0.0f;
+    if (p.otaVoicing == OtaVoicing::juno && p.junoVariant == JunoVariant::juno6)
+    {
+        f.otaOffset = -1.0f;
+        f.resonance01 *= 0.95f;
+    }
+    f.gainIn = driveGain;
+    f.makeUp = (1.0f + 0.35f * f.k) / std::sqrt (driveGain) * math::dbToGain (p.driveTrimDb);
+    f.otaMakeUp = 1.0f / std::sqrt (driveGain) * math::dbToGain (p.driveTrimDb);
+    f.otaModel = p.filterModel == FilterModel::ota;
+    if (f.otaModel != f.otaWasModel)
+    {
+        for (auto& o : f.ota)
+            o.reset();   // (from rest: never a stale state)
+        for (auto& l : f.ladder)
+            l.reset();
+        f.otaWasModel = f.otaModel;
+    }
+    const auto variant = p.otaVoicing == OtaVoicing::jupiter ? HpfVariant::jupiter
+                                                             : (p.junoVariant == JunoVariant::juno6 ? HpfVariant::juno6 : p.junoVariant == JunoVariant::juno60 ? HpfVariant::juno60 : HpfVariant::juno106);
+    f.highPassOn = p.highPass >= 0;
+    for (auto& h : f.highPass)
+        h.setMode (variant, f.highPassOn ? std::clamp (p.highPass, 0, 3) : (variant == HpfVariant::juno106 ? 1 : 0));
+}
+
+void Synth::filterExternal (int n) noexcept
+{
+    auto& f = externalFilter;
+    const auto character = current.otaVoicing == OtaVoicing::jupiter ? OtaCharacter::jupiter : OtaCharacter::juno;
+    const float velocityScale = 1.0f - f.velocityToEnv + f.velocityToEnv * f.velocity;
+    for (int i = 0; i < n; ++i)
+    {
+        const float env = f.env.next();
+        // The cutoff every 8 samples (the envelope moves it): at the host rate, its own g.
+        if (--f.countdown <= 0)
+        {
+            f.countdown = 8;
+            const float note = f.baseNote + f.keyTrack * static_cast<float> (f.lastKey - 60) + env * f.envDepth * velocityScale;
+            const double hz = std::clamp (440.0 * std::exp2 ((static_cast<double> (note) - 69.0) / 12.0), 8.0, 0.45 * hostRate);
+            f.cutoffHz = static_cast<float> (hz);
+            f.g = static_cast<float> (std::tan (math::pi * hz / hostRate));
+        }
+        const auto k = static_cast<std::size_t> (i);
+        float* bus[2] { &externalL[k], &externalR[k] };
+        for (std::size_t ch = 0; ch < 2; ++ch)
+        {
+            float in = *bus[ch] * f.gainIn;
+            if (f.highPassOn)
+                in = f.highPass[ch].process (in);
+            if (f.otaModel)
+            {
+                const float gOta = f.otaOffset != 0.0f ? static_cast<float> (std::tan (math::pi * std::min (0.45 * hostRate, f.cutoffHz * std::exp2 (f.otaOffset / 12.0)) / hostRate))
+                                                       : f.g;
+                *bus[ch] = f.ota[ch].process (in, gOta, f.resonance01, character, current.otaTwoPole) * f.otaMakeUp;
+            }
+            else
+                *bus[ch] = f.ladder[ch].process (in, f.g, f.k, driveBias, driveBiasOffset) * f.makeUp;
+        }
+    }
 }
 
 void Synth::mixRhythm (float* left, float* right, int numSamples) noexcept
