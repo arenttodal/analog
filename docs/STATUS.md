@@ -16,6 +16,12 @@
 >   State version 21; off is bit-identical (the legacy Init hash). Demo renders are in
 >   docs/demos/satellite-rhythm. Open decisions are listed in that document.
 >
+> - EXPERIMENT, Kontakt as card C's external SoundSource + GLOBAL MORPH
+>   (`feature/kontakt-external-morph`, stacked on SATELLITE + RHYTHM;
+>   docs/experiments/KONTAKT_EXTERNAL_MORPH.md). A VST3 host bridge, card C's MIDI lane, a global
+>   C bus and a zero-latency spectral imprint morph, validated with a stand-in VST3. Kontakt and
+>   DAWs are BLOCKED here. Recommendation: CONDITIONAL.
+>
 > Next: USER MACROS gate 5 (FX-library slot targets, orphan / reconnect), its CPU figures and a
 > draft PR. Not run here: hosts, real input, listening (SATELLITE and RHYTHM included).
 

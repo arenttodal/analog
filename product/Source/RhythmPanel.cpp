@@ -37,7 +37,7 @@ namespace
 
     bool cardPlaysRecording (InstrumentHost& host)
     {
-        return static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (params::hybridType)), 0, 3)) == HybridType::sample;
+        return static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (params::hybridType)), 0, 4)) == HybridType::sample;
     }
 
     void setPlain (InstrumentHost& host, const juce::String& id, float value)

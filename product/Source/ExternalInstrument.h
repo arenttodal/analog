@@ -79,6 +79,12 @@ public:
     juce::Component* editorComponent() const noexcept;
 
     State state() const noexcept { return currentState; }
+    /** The hosted plugin (message thread: its parameters, diagnostics, tests); null if none. */
+    juce::AudioPluginInstance* hostedInstance() const noexcept
+    {
+        const auto& live = exchange.latestModel();
+        return live != nullptr ? live->instance.get() : nullptr;
+    }
     juce::String displayName() const { return description.name.isNotEmpty() ? description.name : savedName; }
     juce::String version() const { return description.version; }
     juce::String message() const { return statusMessage; }

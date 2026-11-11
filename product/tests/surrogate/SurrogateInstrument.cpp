@@ -46,6 +46,11 @@ public:
     SurrogateInstrument()
         : juce::AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
     {
+        // Its settings are parameters, so a host sets them as it sets any plugin's (and its
+        // state, in the host's own format, carries them).
+        addParameter (instrumentParam = new juce::AudioParameterChoice (juce::ParameterID { "instrument", 1 }, "Instrument",
+                                                                         juce::StringArray { "LEGATO STRINGS", "EVOLVING PAD" }, 0));
+        addParameter (latencyParam = new juce::AudioParameterInt (juce::ParameterID { "latency", 1 }, "Latency", 0, 4096, 0));
     }
 
     const juce::String getName() const override { return "ANDOR Test Instrument"; }
@@ -69,14 +74,15 @@ public:
         for (auto& v : voices)
             v = Voice {};
         held.clear();
+        latency.store (latencyParam->get());
         setLatencySamples (latency.load());
     }
     void releaseResources() override {}
 
-    int program() const noexcept { return currentProgram.load(); }
+    int program() const noexcept { return instrumentParam->getIndex(); }
     void setProgram (int p)
     {
-        currentProgram.store (juce::jlimit (0, 1, p));
+        instrumentParam->setValueNotifyingHost (instrumentParam->convertTo0to1 (static_cast<float> (juce::jlimit (0, 1, p))));
     }
     juce::String programName() const { return program() == legatoStrings ? "LEGATO STRINGS" : "EVOLVING PAD"; }
 
@@ -114,7 +120,8 @@ public:
         if (auto xml = getXmlFromBinary (data, size); xml != nullptr && xml->hasTagName ("AndorTestInstrument"))
         {
             setProgram (xml->getIntAttribute ("program", 0));
-            latency.store (juce::jlimit (0, 4096, xml->getIntAttribute ("latency", 0)));
+            *latencyParam = juce::jlimit (0, 4096, xml->getIntAttribute ("latency", 0));
+            latency.store (latencyParam->get());
             setLatencySamples (latency.load());
         }
     }
@@ -261,7 +268,8 @@ private:
     double rate = 48000.0, drift = 0.0, level = 1.0;
     std::array<Voice, 8> voices {};
     juce::Array<int> held;
-    std::atomic<int> currentProgram { legatoStrings };
+    juce::AudioParameterChoice* instrumentParam = nullptr;
+    juce::AudioParameterInt* latencyParam = nullptr;
     std::atomic<int> latency { 0 };
     juce::AudioBuffer<float> delayLine;
     int delayPos = 0;

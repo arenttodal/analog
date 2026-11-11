@@ -260,6 +260,139 @@ namespace
     }
 
     /** A transparent area over an empty card C's well: a click browses for a recording. */
+    /**
+        EXPERIMENT (docs/experiments/KONTAKT_EXTERNAL_MORPH.md): card C's well when it is EXTERNAL -
+        the hosted instrument's state in words, LOAD KONTAKT / OPEN KONTAKT / UNLOAD, its activity
+        light, and what MORPH does here (GLOBAL, EXPERIMENTAL). Kontakt's own window does the rest.
+    */
+    class ExternalPanel final : public juce::Component, private juce::Timer
+    {
+    public:
+        ExternalPanel (InstrumentHost& h, juce::Colour accentColour) : host (h), accent (accentColour)
+        {
+            setTitle ("Card C external instrument");
+            auto* engine = engineOf (host);
+            const auto state = engine != nullptr ? engine->externalInstrument().state() : ExternalInstrument::State::empty;
+            const bool ready = state == ExternalInstrument::State::ready;
+            if (ready)
+            {
+                open = std::make_unique<WellAction> ("OPEN KONTAKT", accent);
+                open->setTooltip ("Kontakt's own window: load and set up the instrument there (closing it keeps it playing)");
+                open->onClick = [this] {
+                    if (auto* e = engineOf (host))
+                        e->externalInstrument().openEditor();
+                };
+                addAndMakeVisible (*open);
+                unload = std::make_unique<WellAction> ("UNLOAD", accent);
+                unload->setTooltip ("Remove Kontakt from card C (its notes end; A and B play on)");
+                unload->onClick = [this] {
+                    if (auto* e = engineOf (host))
+                        e->externalInstrument().unload();
+                };
+                addAndMakeVisible (*unload);
+            }
+            else
+            {
+                load = std::make_unique<WellAction> ("LOAD KONTAKT", accent);
+                load->setTooltip ("Host Kontakt (VST3) as card C: it plays card C's notes, and MORPH blends it with A + B");
+                load->onClick = [this] {
+                    if (auto* e = engineOf (host))
+                        e->externalInstrument().loadKontakt();
+                };
+                addAndMakeVisible (*load);
+            }
+            startTimerHz (10);
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds();
+            auto keys = r.withTrimmedTop (std::max (0, r.getHeight() / 2 - 14)).withHeight (28);
+            if (load != nullptr)
+                load->setBounds (keys.withSizeKeepingCentre (std::min (keys.getWidth(), 170), 28));
+            if (open != nullptr)
+            {
+                auto row = keys.withSizeKeepingCentre (std::min (keys.getWidth(), 250), 28);
+                open->setBounds (row.removeFromLeft (150));
+                row.removeFromLeft (8);
+                unload->setBounds (row);
+            }
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto* engine = engineOf (host);
+            if (engine == nullptr)
+                return;
+            const auto& ext = engine->externalInstrument();
+            auto r = getLocalBounds().toFloat();
+            auto top = r.removeFromTop (18.0f);
+            // The state, in words.
+            juce::String line, detail;
+            auto colour = cream.withAlpha (0.85f);
+            switch (ext.state())
+            {
+                case ExternalInstrument::State::ready:
+                    line = ext.displayName() + (ext.version().isNotEmpty() ? "  " + ext.version() : juce::String());
+                    detail = juce::String::fromUTF8 (ext.sounding() ? "LOADED \xc2\xb7 SOUNDING" : "LOADED \xc2\xb7 choose and set up its instrument in OPEN KONTAKT");
+                    break;
+                case ExternalInstrument::State::notInstalled:
+                    line = "KONTAKT NOT FOUND";
+                    detail = ext.message();
+                    colour = juce::Colour (0xffe0a35a);
+                    break;
+                case ExternalInstrument::State::missing:
+                    line = "MISSING: " + ext.displayName();
+                    detail = ext.message();
+                    colour = juce::Colour (0xffe0a35a);
+                    break;
+                case ExternalInstrument::State::failed:
+                    line = "ERROR";
+                    detail = ext.message();
+                    colour = juce::Colour (0xffe07a5a);
+                    break;
+                case ExternalInstrument::State::empty:
+                    line = juce::String::fromUTF8 ("EXTERNAL \xc2\xb7 NO INSTRUMENT");
+                    detail = "Card C plays a Kontakt instrument: LOAD KONTAKT, then choose it in Kontakt's window.";
+                    break;
+            }
+            g.setFont (type::popupLabel (12.0f));
+            g.setColour (colour);
+            g.drawText (line, top.withTrimmedLeft (16.0f), juce::Justification::centredLeft, true);
+            // Its activity light.
+            const auto light = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ top.getX() + 4.5f, top.getCentreY() });
+            g.setColour (ext.sounding() ? accent.brighter (0.2f) : cream.withAlpha (0.12f));
+            g.fillEllipse (light);
+            g.setFont (fonts::label (10.0f));
+            g.setColour (cream.withAlpha (0.6f));
+            g.drawFittedText (detail, r.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2, 1.0f);
+            // MORPH here: GLOBAL, EXPERIMENTAL.
+            auto foot = getLocalBounds().toFloat().removeFromBottom (34.0f);
+            g.setFont (type::popupLabel (10.5f));
+            g.setColour (accent.withAlpha (0.95f));
+            g.drawText (juce::String::fromUTF8 ("MORPH \xc2\xb7 GLOBAL \xc2\xb7 EXPERIMENTAL"), foot.removeFromTop (16.0f), juce::Justification::centredLeft, true);
+            g.setFont (fonts::label (10.0f));
+            g.setColour (cream.withAlpha (0.55f));
+            g.drawText ("Global spectral morph between A+B and Kontakt C (its method controls do not apply).", foot, juce::Justification::centredLeft, true);
+        }
+
+    private:
+        void timerCallback() override
+        {
+            if (auto* engine = engineOf (host))
+                if (const bool now = engine->externalInstrument().sounding(); now != shownSounding)
+                {
+                    shownSounding = now;
+                    repaint();
+                }
+        }
+
+        InstrumentHost& host;
+        juce::Colour accent;
+        std::unique_ptr<WellAction> load, open, unload;
+        bool shownSounding = false;
+    };
+
     class BrowseArea final : public juce::Component, public juce::SettableTooltipClient
     {
     public:
@@ -577,7 +710,7 @@ namespace
     public:
         HybridOverlay (InstrumentHost& h, int layerShown)
             : host (h), layer (layerShown),
-              type (static_cast<HybridType> (std::clamp (juce::roundToInt (h.parameterValue (layerShown == 2 ? params::hybrid2Type : params::hybridType)), 0, 3))),
+              type (static_cast<HybridType> (std::clamp (juce::roundToInt (h.parameterValue (layerShown == 2 ? params::hybrid2Type : params::hybridType)), 0, 4))),
               accent (palette::layer (InstrumentHost::shownLayer (1)))
         {
             const auto& typeId = layer == 2 ? params::hybrid2Type : params::hybridType;
@@ -638,6 +771,11 @@ namespace
                 soundKey->onClick = [this] { showLayer2SampleMenu(); };
                 revealed().addAndMakeVisible (*soundKey);
             }
+            if (type == HybridType::external && layer == 1)
+            {
+                externalPanel = std::make_unique<ExternalPanel> (host, accent);
+                addAndMakeVisible (*externalPanel);
+            }
             if (type == HybridType::sample && layer == 1 && ! empty)
             {
                 // RHYTHMIC MORPH: the recording as a loop and C RHYTHM (its key opens its panel).
@@ -667,6 +805,8 @@ namespace
             typeSelector->setBounds (getWidth() - 12 - 118, 6, 118, 22);
             if (layerKeys != nullptr)
                 layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
+            if (externalPanel != nullptr)
+                externalPanel->setBounds (getLocalBounds().withTrimmedTop (6 + 22 + 10).reduced (14, 8));
             if (rhythmKey != nullptr)
             {
                 // Under the TYPE dropdown, left of the layer keys (their room kept while hidden).
@@ -759,6 +899,7 @@ namespace
         std::unique_ptr<Layer2Browse> browse2;
         std::unique_ptr<LayerKeys> layerKeys;
         std::unique_ptr<RhythmKey> rhythmKey;
+        std::unique_ptr<ExternalPanel> externalPanel;
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::array<juce::Component*, 3> cells {};
     };
@@ -794,6 +935,13 @@ juce::String hybridOverlayKey (InstrumentHost& host)
     const int type = juce::roundToInt (host.parameterValue (layer == 2 ? params::hybrid2Type : params::hybridType));
     juce::String key = "hybrid/" + juce::String (type)
                        + (type == static_cast<int> (HybridType::oscillator) ? "/" + juce::String (modelOf (host, layer == 2 ? 4 : 3)) : juce::String());
+    if (layer == 1 && type == static_cast<int> (HybridType::external))
+    {
+        // (EXPERIMENT: remade when the hosted instrument's state changes)
+        if (auto* engine = engineOf (host))
+            key << "/ext/" << static_cast<int> (engine->externalInstrument().state()) << "/" << engine->externalInstrument().displayName();
+        return key + (two ? "/two" : "");
+    }
     if (layer == 1)
         return key + (hybridEmpty (host) ? "/empty" : "") + (two ? "/two" : "");
     juce::String name;

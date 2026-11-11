@@ -561,6 +561,9 @@ juce::String AnalogEngine::status (const juce::String& topic) const
         case HybridType::oscillator:
         case HybridType::noise: return {};
         case HybridType::instrumentPatch: return sampleSourceState().loaded ? juce::String() : juce::String ("Card C has no instrument patch loaded: nothing to morph with");
+        case HybridType::external:   // (EXPERIMENT: GLOBAL MORPH with the hosted instrument)
+            return external.state() == ExternalInstrument::State::ready ? juce::String()
+                                                                         : juce::String ("Card C's external instrument is not loaded: GLOBAL MORPH stays on A + B");
         case HybridType::sample: break;
     }
     return recordingPublished.load() ? juce::String() : juce::String ("Card C is silent: load a recording (or choose OSC 3, NOISE or an instrument patch) to morph");
@@ -875,7 +878,8 @@ juce::String AnalogEngine::engineSourceName (int layer) const
             case HybridType::oscillator: return "OSC";
             case HybridType::noise: return "NOISE";
             case HybridType::sample:
-            case HybridType::instrumentPatch: break;
+            case HybridType::instrumentPatch:
+            case HybridType::external: break;   // (the second layer is never EXTERNAL)
         }
         const std::lock_guard<std::mutex> lock (source2Mutex);
         if (source2Definition == nullptr)
@@ -889,6 +893,7 @@ juce::String AnalogEngine::engineSourceName (int layer) const
         case HybridType::oscillator: return "OSC 3";
         case HybridType::noise: return "NOISE";
         case HybridType::sample: return recordingPublished.load() ? juce::String() : juce::String ("HYBRID");   // (empty: its stand-in)
+        case HybridType::external: return external.state() == ExternalInstrument::State::ready ? external.displayName().toUpperCase() : juce::String ("EXTERNAL");
         case HybridType::instrumentPatch: break;
     }
     const std::lock_guard<std::mutex> lock (sourceMutex);
@@ -1023,6 +1028,11 @@ bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTree
         p.osc2Octave = h.octave;
         p.osc2Coarse = h.coarse;
         cycle = oscillatorPictureOf (p, 2);
+        return true;
+    }
+    if (layer == 1 && hybridType() == HybridType::external)
+    {
+        cycle.assign (2, 0.0f);   // (EXPERIMENT: the hosted instrument has no picture here; the well says what it is)
         return true;
     }
     if (layer == 1 && engineSourcePlaceholder (1).isNotEmpty())

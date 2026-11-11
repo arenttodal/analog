@@ -439,7 +439,11 @@ const ProductInfo& productInfo()
                 const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (ap::hybridType)), 0, 4));
                 const K level { "layerB.level", "LEVEL" };
                 if (type == HybridType::external)
-                    k = { K {}, K {}, K {}, level, K {} };   // (EXPERIMENT: the hosted instrument's own controls are in its editor)
+                {
+                    K none;
+                    none.hidden = true;
+                    k = { none, none, none, level, none };   // (EXPERIMENT: the hosted instrument's own controls are in its editor)
+                }
                 else if (type == HybridType::oscillator)
                     k = { K { ap::osc3Fine, "DETUNE" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, level, K { ap::hybridVelo, "VELO" } };
                 else if (type == HybridType::noise)

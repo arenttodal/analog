@@ -163,7 +163,13 @@ bool ExternalInstrument::load (const juce::PluginDescription& d, const juce::Mem
     publish (std::move (instance));
     if (nativeState != nullptr && nativeState->getSize() > 0)
         if (const auto& live = exchange.latestModel(); live != nullptr && live->instance != nullptr)
+        {
             live->instance->setStateInformation (nativeState->getData(), static_cast<int> (nativeState->getSize()));
+            // (its state may change its latency: the host reads it when it is prepared - again,
+            // here on the message thread, before the audio thread has it)
+            live->instance->releaseResources();
+            prepareLive (*live);
+        }
     savedXml.reset();
     currentState = State::ready;
     statusMessage = d.name + (d.version.isNotEmpty() ? " " + d.version : juce::String());
@@ -239,6 +245,9 @@ void ExternalInstrument::prepare (double sampleRate, int block)
 void ExternalInstrument::collectGarbage()
 {
     exchange.collectGarbage();
+    // (a plugin may change its latency at any time: re-read here, on the message thread)
+    if (const auto& live = exchange.latestModel(); live != nullptr && live->instance != nullptr)
+        latency.store (live->instance->getLatencySamples());
 }
 
 juce::Component* ExternalInstrument::editorComponent() const noexcept

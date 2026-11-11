@@ -13,5 +13,5 @@ strings_morph_100.wav: 9.0 s, peak -10.2 dBFS
     MORPH  75 %: to A+B 11.07, to C  2.45, to the dry 50/50 crossfade  6.15; level -4.4 dB against A+B
     MORPH 100 %: to A+B  9.67, to C  0.00, to the dry 50/50 crossfade  4.55; level -4.3 dB against A+B
     (the crossfade itself: to A+B  5.95, to C  4.55)
-example2_chord_evolving_pad_morph50.wav: 8.0 s, peak -0.6 dBFS
+example2_chord_evolving_pad_morph50.wav: 8.0 s, peak -3.2 dBFS
 example3_C_arp_AB_hold.wav: 8.0 s, peak -5.8 dBFS

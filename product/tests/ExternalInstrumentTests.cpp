@@ -8,8 +8,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <map>
+#include <cstdio>
 #include <cstdlib>
 #include <vector>
 
@@ -488,26 +490,44 @@ TEST_CASE ("EXTERNAL G3: C2 is neutral; switching card C away mid-note fades C o
 
 namespace
 {
-    std::shared_ptr<juce::MemoryBlock> surrogateState (int program, int latency = 0)
+    /** Sets one of the hosted stand-in's parameters by name, as a host would (its plain value). */
+    void setHosted (ExternalInstrument& host, const juce::String& name, float plain)
     {
-        juce::XmlElement xml ("AndorTestInstrument");
-        xml.setAttribute ("program", program);
-        xml.setAttribute ("latency", latency);
-        auto block = std::make_shared<juce::MemoryBlock>();
-        juce::AudioProcessor::copyXmlToBinary (xml, *block);
-        return block;
+        auto* instance = host.hostedInstance();
+        REQUIRE (instance != nullptr);
+        for (auto* param : instance->getParameters())
+            if (param->getName (64) == name)
+            {
+                auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param);
+                const float normalised = ranged != nullptr ? ranged->convertTo0to1 (plain)
+                                                           : (name == "Latency" ? plain / 4096.0f : plain);
+                param->setValueNotifyingHost (normalised);
+                return;
+            }
+        FAIL ("the hosted instrument has no parameter " << name);
+    }
+
+    float hostedValue (ExternalInstrument& host, const juce::String& name)
+    {
+        for (auto* param : host.hostedInstance()->getParameters())
+            if (param->getName (64) == name)
+                return param->getValue();
+        return -1.0f;
     }
 
     /** Card C EXTERNAL with the stand-in's instrument `program` (0 LEGATO STRINGS, 1 EVOLVING PAD). */
-    void withSurrogateProgram (ShellProcessor& p, int program)
+    void withSurrogateProgram (ShellProcessor& p, int program, int latency = 0)
     {
         p.prepareToPlay (testRate, testBlock);
         set (p, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
         auto& host = engineOf (p).externalInstrument();
-        juce::PluginDescription d;
-        juce::String why;
-        REQUIRE (host.locate (d, why));
-        REQUIRE (host.load (d, surrogateState (program).get()));
+        REQUIRE (host.loadKontakt());
+        setHosted (host, "Instrument", program == 0 ? 0.0f : 1.0f);
+        if (latency > 0)
+        {
+            setHosted (host, "Latency", static_cast<float> (latency));
+            p.prepareToPlay (testRate, testBlock);   // (a plugin's new latency: read when the host prepares it)
+        }
     }
 
     /** Legato chord changes (each next chord 60 ms before the last ends), the top voice last. */
@@ -694,4 +714,370 @@ TEST_CASE ("EXTERNAL G4: the demo renders (ANALOG_DEMO_DIR)", "[.][external-rend
         save ("example3_C_arp_AB_hold.wav", play (p, 8.0, { { 0.0, 48, 100 }, { 0.0, 55, 100 }, { 0.0, 64, 100 }, { 7.0, 48, 0 }, { 7.0, 55, 0 }, { 7.0, 64, 0 } }));
     }
     out.getChildFile ("renders.txt").replaceWithText (notes);
+}
+
+//==============================================================================
+// Gate 5: the session - the instrument's identity and native state saved and restored; a
+// missing one keeps everything and lets A + B play. And card C's well.
+
+#include "ShellEditor.h"
+#include "CeramicSkin.h"
+
+namespace
+{
+    std::unique_ptr<juce::XmlElement> sessionXml (ShellProcessor& p)
+    {
+        juce::MemoryBlock block;
+        p.getStateInformation (block);
+        return juce::AudioProcessor::getXmlFromBinary (block.getData(), static_cast<int> (block.getSize()));
+    }
+
+    void restoreXml (ShellProcessor& p, const juce::XmlElement& xml)
+    {
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (xml, block);
+        p.setStateInformation (block.getData(), static_cast<int> (block.getSize()));
+    }
+
+    juce::XmlElement* findChild (juce::XmlElement& root, const juce::String& tag)
+    {
+        if (root.hasTagName (tag))
+            return &root;
+        for (auto* c : root.getChildIterator())
+            if (auto* found = findChild (*c, tag))
+                return found;
+        return nullptr;
+    }
+
+    juce::Component* findTitled (juce::Component& root, const juce::String& title)
+    {
+        if (root.getTitle() == title)
+            return &root;
+        for (auto* c : root.getChildren())
+            if (auto* found = findTitled (*c, title))
+                return found;
+        return nullptr;
+    }
+
+    template <typename T>
+    T* findOfType (juce::Component& root)
+    {
+        if (auto* t = dynamic_cast<T*> (&root))
+            return t;
+        for (auto* c : root.getChildren())
+            if (auto* found = findOfType<T> (*c))
+                return found;
+        return nullptr;
+    }
+
+    juce::Button* findButton (juce::Component& root, const juce::String& text)
+    {
+        if (auto* b = dynamic_cast<juce::Button*> (&root); b != nullptr && b->getButtonText() == text)
+            return b;
+        for (auto* c : root.getChildren())
+            if (auto* found = findButton (*c, text))
+                return found;
+        return nullptr;
+    }
+}
+
+TEST_CASE ("EXTERNAL G5: the session keeps the instrument - identity and its own state, restored (twice) into a new instance", "[external][g5]")
+{
+    SurrogateOverride env;
+    ShellProcessor p;
+    withSurrogateProgram (p, 1);   // (EVOLVING PAD: not the default, so its state must travel)
+    const auto saved = sessionXml (p);
+    REQUIRE (saved != nullptr);
+    auto* ext = findChild (*saved, "ExternalInstrument");
+    REQUIRE (ext != nullptr);
+    CHECK (ext->getIntAttribute ("version") == 1);
+    CHECK (ext->getStringAttribute ("name") == "ANDOR Test Instrument");
+    REQUIRE (ext->getChildByName ("PLUGIN") != nullptr);
+    const auto nativeState = ext->getStringAttribute ("state");
+    CHECK (nativeState.isNotEmpty());
+    // Opened, saved, opened again: the same instrument with the same instrument chosen in it.
+    ShellProcessor q;
+    restoreXml (q, *saved);
+    q.prepareToPlay (testRate, testBlock);
+    auto& qHost = engineOf (q).externalInstrument();
+    CHECK (qHost.state() == ExternalInstrument::State::ready);
+    CHECK (qHost.displayName() == "ANDOR Test Instrument");
+    const auto again = sessionXml (q);
+    ShellProcessor r;
+    restoreXml (r, *again);
+    r.prepareToPlay (testRate, testBlock);
+    const auto third = sessionXml (r);
+    CHECK (findChild (*third, "ExternalInstrument")->getStringAttribute ("state") == nativeState);
+    // The instrument chosen in it came back (EVOLVING PAD), not the stand-in's default.
+    CHECK (hostedValue (engineOf (r).externalInstrument(), "Instrument") == Catch::Approx (1.0f));
+    // And it plays its restored instrument (the pad: all three notes at once, not a mono line).
+    set (r, params::osc1Level, 0.0f);
+    set (r, params::osc2Level, 0.0f);
+    dry (r);
+    const auto chord = play (r, 1.0, { { 0.0, 48, 100 }, { 0.0, 55, 100 }, { 0.0, 64, 100 } });
+    CHECK (rmsOf (chord, 0.5, 1.0) > 0.005);
+}
+
+TEST_CASE ("EXTERNAL G5: Kontakt missing on reopening - A + B play, nothing is lost or rewritten, no crash", "[external][g5]")
+{
+    std::unique_ptr<juce::XmlElement> saved;
+    {
+        SurrogateOverride env;
+        ShellProcessor p;
+        withSurrogateProgram (p, 1);
+        saved = sessionXml (p);
+    }
+    // As saved on a computer with Kontakt, opened on one without (no override, the file gone).
+    auto* ext = findChild (*saved, "ExternalInstrument");
+    REQUIRE (ext != nullptr);
+    ext->setAttribute ("name", "Kontakt 8");
+    auto* plugin = ext->getChildByName ("PLUGIN");
+    plugin->setAttribute ("name", "Kontakt 8");
+    plugin->setAttribute ("file", "/Library/Audio/Plug-Ins/VST3/Kontakt 8.vst3 (not here)");
+    const juce::XmlElement asSaved (*ext);
+    ShellProcessor q;
+    restoreXml (q, *saved);
+    q.prepareToPlay (testRate, testBlock);
+    auto& host = engineOf (q).externalInstrument();
+    CHECK (host.state() == ExternalInstrument::State::missing);
+    CHECK (host.message().contains ("Kontakt 8"));
+    CHECK (juce::roundToInt (q.parameterValue (params::hybridType)) == static_cast<int> (andor::analog::HybridType::external));
+    // A + B still play (card C silent).
+    dry (q);
+    const auto out = play (q, 1.0, { { 0.0, 48, 100 }, { 0.0, 55, 100 } });
+    CHECK (rmsOf (out, 0.3, 1.0) > 0.005);
+    // Saved again: the external instrument exactly as it was read.
+    const auto resaved = sessionXml (q);
+    auto* back = findChild (*resaved, "ExternalInstrument");
+    REQUIRE (back != nullptr);
+    CHECK (back->isEquivalentTo (&asSaved, false));
+}
+
+TEST_CASE ("EXTERNAL G5: a session from before (no external instrument) opens with none; card C's other types unchanged", "[external][g5]")
+{
+    SurrogateOverride env;
+    ShellProcessor p;
+    withSurrogateProgram (p, 0);
+    set (p, params::hybridType, 1.0f);
+    auto saved = sessionXml (p);
+    // Strip it (as a session saved before the experiment).
+    std::function<void (juce::XmlElement&)> strip = [&] (juce::XmlElement& e) {
+        for (int i = e.getNumChildElements(); --i >= 0;)
+        {
+            auto* c = e.getChildElement (i);
+            if (c->hasTagName ("ExternalInstrument"))
+                e.removeChildElement (c, true);
+            else
+                strip (*c);
+        }
+    };
+    strip (*saved);
+    saved->setAttribute ("productVersion", 21);
+    ShellProcessor q;
+    restoreXml (q, *saved);
+    CHECK (engineOf (q).externalInstrument().state() == ExternalInstrument::State::empty);
+    CHECK (juce::roundToInt (q.parameterValue (params::hybridType)) == 1);
+}
+
+TEST_CASE ("EXTERNAL UI: card C's well - LOAD KONTAKT, then OPEN KONTAKT and UNLOAD; the GLOBAL MORPH note; Kontakt not installed in words", "[external][ui]")
+{
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    p.prepareToPlay (testRate, testBlock);
+    set (p, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (1448.0f * ui.instrumentHeight() / 1448.0f));
+    ui.refreshNow();
+    auto well = [&ui]() -> juce::Component* { return ui.engineCard (1).wellOverlayComponent(); };
+    REQUIRE (well() != nullptr);
+    REQUIRE (findTitled (*well(), "Card C external instrument") != nullptr);
+    auto* load = findButton (*well(), "LOAD KONTAKT");
+    REQUIRE (load != nullptr);
+    CHECK (findButton (*well(), "OPEN KONTAKT") == nullptr);
+    // Not installed here: pressing it says so (and nothing breaks).
+    {
+        load->onClick();
+        ui.refreshNow();
+        const auto state = engineOf (p).externalInstrument().state();
+        CHECK ((state == ExternalInstrument::State::notInstalled || state == ExternalInstrument::State::ready));
+    }
+    // With the stand-in found: loaded, the keys become OPEN KONTAKT and UNLOAD.
+    {
+        SurrogateOverride env;
+        auto* again = findButton (*well(), "LOAD KONTAKT");
+        REQUIRE (again != nullptr);
+        again->onClick();
+        ui.refreshNow();
+        CHECK (engineOf (p).externalInstrument().state() == ExternalInstrument::State::ready);
+        REQUIRE (findButton (*well(), "OPEN KONTAKT") != nullptr);
+        auto* unload = findButton (*well(), "UNLOAD");
+        REQUIRE (unload != nullptr);
+        unload->onClick();
+        ui.refreshNow();
+        CHECK (engineOf (p).externalInstrument().state() == ExternalInstrument::State::empty);
+        CHECK (findButton (*well(), "LOAD KONTAKT") != nullptr);
+    }
+}
+
+TEST_CASE ("EXTERNAL UI screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-external]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    for (const int width : { 1448, 869, 1810 })
+    {
+        ShellProcessor p;
+        p.prepareToPlay (testRate, testBlock);
+        set (p, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        auto save = [&] (const juce::String& name) {
+            ui.refreshNow();
+            auto& card = ui.engineCard (1);
+            const auto area = editor->getLocalArea (&card, card.getLocalBounds()).expanded (6);
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (editor->createComponentSnapshot (area, true, 2.0f), stream);
+        };
+        save ("external-00-empty");
+        engineOf (p).externalInstrument().loadKontakt();   // (not installed here)
+        save ("external-01-kontakt-not-found");
+        {
+            SurrogateOverride env;
+            engineOf (p).externalInstrument().loadKontakt();
+            set (p, params::morphEnabled, 1.0f);
+            play (p, 0.5, { { 0.0, 57, 100 } });
+            save ("external-02-loaded-surrogate");
+            const auto whole = out.getChildFile ("external-03-instrument-" + juce::String (width) + ".png");
+            whole.deleteFile();
+            juce::FileOutputStream stream (whole);
+            juce::PNGImageFormat().writeImageToStream (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), stream);
+        }
+    }
+}
+
+//==============================================================================
+// Gate 6 (what this machine can run): latency, rates and block sizes, cost.
+
+TEST_CASE ("EXTERNAL G6: an instrument that reports latency - A + B wait for it, and the host is told", "[external][g6]")
+{
+    SurrogateOverride env;
+    auto onsetOf = [] (const juce::AudioBuffer<float>& a) {
+        for (int i = 0; i < a.getNumSamples(); ++i)
+            if (std::abs (a.getSample (0, i)) > 1.0e-3f)
+                return i;
+        return -1;
+    };
+    auto abOnset = [&] (int latency) {
+        ShellProcessor p;
+        withSurrogateProgram (p, 0, latency);
+        dry (p);
+        auto& host = engineOf (p).externalInstrument();
+        set (p, "layerB.mute", 1.0f);   // (A + B alone heard)
+        CHECK (host.latencySamples() == latency);
+        CHECK (engineOf (p).latencySamples() >= latency);
+        return onsetOf (play (p, 0.3, { { 0.1, 60, 120 } }));
+    };
+    const int plain = abOnset (0), late = abOnset (256);
+    INFO ("A + B begin at sample " << plain << " (no latency), " << late << " (256 reported)");
+    REQUIRE (plain > 0);
+    CHECK (late - plain == 256);
+}
+
+TEST_CASE ("EXTERNAL G6: 44.1 / 48 / 96 kHz at 64 / 128 / 512-sample blocks - C sounds, its lane intact, nothing broken", "[external][g6]")
+{
+    SurrogateOverride env;
+    for (const double rate : { 44100.0, 48000.0, 96000.0 })
+        for (const int blockSize : { 64, 128, 512 })
+        {
+            INFO (rate << " Hz, " << blockSize << "-sample blocks");
+            ShellProcessor p;
+            p.prepareToPlay (rate, blockSize);
+            dry (p);
+            set (p, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
+            auto& host = engineOf (p).externalInstrument();
+            REQUIRE (host.loadKontakt());
+            set (p, params::morphEnabled, 1.0f);
+            set (p, params::morphPosition, 50.0f);
+            const int count = host.forwardedCount();
+            const auto start = host.samplesProcessed();
+            const int total = static_cast<int> (0.8 * rate), onAt = static_cast<int> (0.1 * rate), offAt = static_cast<int> (0.5 * rate);
+            juce::AudioBuffer<float> buffer (2, blockSize);
+            double energy = 0.0;
+            bool finite = true;
+            for (int pos = 0; pos < total; pos += blockSize)
+            {
+                juce::MidiBuffer midi;
+                if (onAt >= pos && onAt < pos + blockSize)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), onAt - pos);
+                if (offAt >= pos && offAt < pos + blockSize)
+                    midi.addEvent (juce::MidiMessage::noteOff (1, 60), offAt - pos);
+                p.processBlock (buffer, midi);
+                for (int i = 0; i < blockSize; ++i)
+                {
+                    const float x = buffer.getSample (0, i);
+                    finite = finite && std::isfinite (x);
+                    energy += static_cast<double> (x) * x;
+                }
+            }
+            CHECK (finite);
+            CHECK (energy > 0.0);
+            REQUIRE (host.forwardedCount() - count == 2);
+            CHECK (host.forwarded (count).sample - start == onAt);
+            CHECK (host.forwarded (count + 1).sample - start == offAt);
+        }
+}
+
+TEST_CASE ("EXTERNAL G6: cost - 4 / 8 / 16 notes, native against the hosted stand-in with and without GLOBAL MORPH", "[.][external-cpu]")
+{
+    SurrogateOverride env;
+    auto rssKb = [] {
+        juce::StringArray lines;
+        lines.addLines (juce::File ("/proc/self/status").loadFileAsString());
+        for (const auto& l : lines)
+            if (l.startsWith ("VmRSS:"))
+                return l.fromFirstOccurrenceOf (":", false, false).trim().getIntValue();
+        return 0;
+    };
+    auto measure = [] (ShellProcessor& p, int notes) {
+        juce::AudioBuffer<float> buffer (2, 512);
+        juce::MidiBuffer midi;
+        for (int n = 0; n < notes; ++n)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 40 + 3 * n, static_cast<juce::uint8> (100)), 0);
+        p.processBlock (buffer, midi);
+        midi.clear();
+        for (int b = 0; b < 20; ++b)
+            p.processBlock (buffer, midi);
+        const int blocks = 300;
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int b = 0; b < blocks; ++b)
+            p.processBlock (buffer, midi);
+        const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+        return 100.0 * seconds / (blocks * 512.0 / 48000.0);
+    };
+    for (const int notes : { 4, 8, 16 })
+        for (int run = 0; run < 2; ++run)
+        {
+            ShellProcessor native;
+            native.prepareToPlay (48000.0, 512);
+            set (native, params::hybridType, 1.0f);
+            const double a = measure (native, notes);
+            ShellProcessor hosted;
+            hosted.prepareToPlay (48000.0, 512);
+            set (hosted, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
+            const int before = rssKb();
+            REQUIRE (engineOf (hosted).externalInstrument().loadKontakt());
+            const int after = rssKb();
+            const double b = measure (hosted, notes);
+            set (hosted, params::morphEnabled, 1.0f);
+            set (hosted, params::morphPosition, 50.0f);
+            const double c = measure (hosted, notes);
+            WARN (notes << " notes: native (OSC 3) " << a << " %, hosted stand-in " << b << " %, + GLOBAL MORPH 50 % " << c << " % of one core; loading it: +"
+                        << (after - before) << " kB resident");
+        }
 }

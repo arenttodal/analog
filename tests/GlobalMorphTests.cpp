@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <numbers>
 #include <vector>
@@ -217,4 +218,16 @@ TEST_CASE ("GLOBAL MORPH: the sweep's loudness is controlled; the carrier's ster
         ref += std::pow (ab.l[i], 2.0);
     }
     CHECK (diff < 1.0e-6 * ref);
+}
+
+TEST_CASE ("GLOBAL MORPH: cost (one stereo pair, 48 kHz)", "[.][globalmorph-cpu]")
+{
+    const auto ab = carrier (10.0), c = source (10.0);
+    for (const double x : { 0.0, 0.25, 0.5, 0.75 })
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        morphed (ab, c, x);
+        const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+        WARN ("position " << x << ": " << 100.0 * seconds / 10.0 << " % of one core");
+    }
 }

@@ -683,3 +683,34 @@ TEST_CASE ("realtime: the rhythm loop player (sync, free, swaps, seeks) never al
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: card C's external bus and GLOBAL MORPH (on / off, MORPH switched, the position moving, a latency) never allocate", "[realtime][external]")
+{
+    // EXPERIMENT (docs/experiments/KONTAKT_EXTERNAL_MORPH.md): the bus is the host's block (here
+    // a stand-in signal); the synth mixes or morphs it with A + B.
+    Patch p = measurementPatch();
+    p.blend = 0.5;
+    p.hybridType = HybridType::external;
+    auto s = makeSynth (p, 48000.0, 4, 512);
+    std::vector<float> l (512), r (512), cl (512), cr (512);
+    for (std::size_t i = 0; i < cl.size(); ++i)
+    {
+        cl[i] = 0.2f * std::sin (0.031f * static_cast<float> (i));
+        cr[i] = 0.2f * std::sin (0.029f * static_cast<float> (i));
+    }
+    counting = true;
+    for (int block = 0; block < 400; ++block)
+    {
+        if (block % 40 == 0)
+        {
+            const std::uint8_t on[3] { 0x90, static_cast<std::uint8_t> (48 + block / 40), 100 };
+            s->handleMidi (on, 3);
+        }
+        const bool active = (block / 100) % 2 == 0 || block > 300;
+        const bool morph = (block / 25) % 2 == 1;
+        s->setExternal (active, cl.data(), cr.data(), 512, 0.9f, morph, 0.5 + 0.5 * std::sin (block * 0.05), block > 200 ? 256 : 0);
+        s->render (l.data(), r.data(), 512);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
