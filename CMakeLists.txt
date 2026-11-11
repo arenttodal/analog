@@ -53,6 +53,7 @@ add_library(analog_dsp STATIC
     dsp/Synth.cpp
     dsp/SubOsc.cpp
     dsp/ShaperDna.cpp
+    dsp/rhythm/RhythmAnalysis.cpp
     dsp/fx/FxGraph.cpp
     dsp/fx/FxEngine.cpp
     dsp/fx/FxProcessors.cpp
@@ -100,6 +101,7 @@ if(OSP_BUILD_TESTS)
         tests/ShaperDnaAudioTests.cpp
         tests/UserMacroCoreTests.cpp
         tests/SatelliteTests.cpp
+        tests/RhythmAnalysisTests.cpp
         tests/CardEqTests.cpp
         tests/SampleSourceTests.cpp
         tools/Wav.cpp)
