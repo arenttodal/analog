@@ -8,6 +8,7 @@
 
 #include "model/ModelExchange.h"
 #include "rhythm/RhythmLoop.h"
+#include "ExternalInstrument.h"
 
 #include <atomic>
 #include <memory>
@@ -38,7 +39,14 @@ public:
     void prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters) override;
     /** The voices' oversampling and the CUSTOM route's effects (FxEngine's plan; 0 in CLASSIC):
         the shell tells the host whenever it changes. */
-    int latencySamples() const override { return synth.latencySamples() + synth.fxEngine().latencySamples(); }
+    int latencySamples() const override
+    {
+        // (EXPERIMENT: an external instrument that reports latency - the voices wait for it)
+        return synth.latencySamples() + synth.fxEngine().latencySamples() + (hybridType() == HybridType::external ? external.latencySamples() : 0);
+    }
+    /** EXPERIMENT: card C's hosted instrument (message thread: load, editor, state). */
+    ExternalInstrument& externalInstrument() noexcept { return external; }
+    const ExternalInstrument& externalInstrument() const noexcept { return external; }
     /** Layer B is the hybrid (the shell's hybrid layer): its recording reaches every voice
         while the hybrid is a SAMPLE (process() hands it over; another type keeps it dormant). */
     void setSource (int layer, const osp::plugin::LoadedInstrument* source) noexcept override
@@ -214,7 +222,11 @@ private:
     struct ImpulseTimer final : juce::Timer
     {
         AnalogEngine* engine = nullptr;
-        void timerCallback() override { engine->updateConvolutionImpulses(); }
+        void timerCallback() override
+        {
+            engine->updateConvolutionImpulses();
+            engine->external.collectGarbage();   // (EXPERIMENT: retired hosted instances)
+        }
     } impulseTimer;
     struct ImpulseKey
     {
@@ -234,6 +246,11 @@ private:
     osp::ShaperPattern shaperPattern = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);   ///< audio thread
     osp::ShaperPattern shaperPatternB = osp::RhythmicShaper::patternSteps (osp::ShaperParams().pattern);  ///< MOVEMENT lane B's (audio thread)
     std::vector<float> scratch;
+    // EXPERIMENT (docs/experiments/KONTAKT_EXTERNAL_MORPH.md): card C's hosted instrument.
+    ExternalInstrument external;
+    juce::MidiBuffer externalMidi;              ///< card C's lane, this block (preallocated)
+    std::vector<float> externalL, externalR;    ///< its stereo bus, this block
+    std::int64_t externalClock = 0;
     /** Cinematic V6 SUB: the musician's own MIDI for this block (before the arpeggiator), from
         setPlayedKeys(); null: the notes process() is given are the musician's. */
     const juce::MidiBuffer* playedMidi = nullptr;

@@ -88,6 +88,15 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     mixR.assign (internalBlock, 0.0f);
     halfL.assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
     halfR.assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
+    // EXPERIMENT: card C's external instrument's bus and the GLOBAL MORPH (idle unless used).
+    for (auto* b : { &externalL, &externalR, &morphOutL, &morphOutR })
+        b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    voicesDelayL.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
+    voicesDelayR.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
+    voicesDelayAt = 0;
+    globalMorph.prepare (hostRate, maxBlock);
+    externalRunning = false;
+    externalGainNow = externalMorphNow = 0.0f;
     for (auto* b : { &sendMixL, &sendMixR })
         b->assign (internalBlock, 0.0f);
     for (auto* b : { &sendHalfL, &sendHalfR })
@@ -2866,6 +2875,86 @@ void Synth::renderRhythm (int numSamples) noexcept
     rhythmShown.store (rhythmValues[n - 1], std::memory_order_relaxed);
 }
 
+void Synth::setExternal (bool active, const float* left, const float* right, int length, float gain, bool morphOn, double position, int latency) noexcept
+{
+    external.active = active && left != nullptr && right != nullptr && length > 0;
+    external.left = left;
+    external.right = right;
+    external.length = length;
+    external.read = 0;
+    external.gain = std::max (0.0f, gain);
+    external.morphOn = morphOn;
+    external.position = std::clamp (position, 0.0, 1.0);
+    external.latency = std::clamp (latency, 0, maxExternalLatency - 1);
+}
+
+void Synth::mixExternal (float* left, float* right, int numSamples) noexcept
+{
+    // EXPERIMENT (docs/experiments/KONTAKT_EXTERNAL_MORPH.md). Never used: nothing here runs and
+    // the instrument is the one before, bit for bit.
+    if (! external.active && ! externalRunning)
+        return;
+    if (! externalRunning)
+    {
+        globalMorph.reset();
+        voicesDelayAt = 0;
+        std::fill (voicesDelayL.begin(), voicesDelayL.end(), 0.0f);
+        std::fill (voicesDelayR.begin(), voicesDelayR.end(), 0.0f);
+    }
+    externalRunning = true;
+    const int n = std::min (numSamples, maxBlock);
+    // C's samples for this piece of the block (the bus is read in order; past its end: silence).
+    const int from = external.read;
+    external.read += n;
+    const int available = external.active ? std::clamp (external.length - from, 0, n) : 0;
+    // The voices wait for an instrument that reports latency, so both buses meet.
+    if (const int lag = external.active ? external.latency : 0; lag > 0)
+        for (int i = 0; i < n; ++i)
+        {
+            const int at = (voicesDelayAt - lag + maxExternalLatency) % maxExternalLatency;
+            const float l = left[i], r = right[i];
+            left[i] = voicesDelayL[static_cast<std::size_t> (at)];
+            right[i] = voicesDelayR[static_cast<std::size_t> (at)];
+            voicesDelayL[static_cast<std::size_t> (voicesDelayAt)] = l;
+            voicesDelayR[static_cast<std::size_t> (voicesDelayAt)] = r;
+            voicesDelayAt = (voicesDelayAt + 1) % maxExternalLatency;
+        }
+    // C at its level (10 ms ramps: switching it, its level, MORPH on / off - never a click).
+    const float step = static_cast<float> (1.0 / (0.010 * hostRate));
+    const float gainTarget = external.active ? external.gain : 0.0f;
+    const float morphTarget = external.active && external.morphOn ? 1.0f : 0.0f;
+    float g = externalGainNow;
+    for (int i = 0; i < n; ++i)
+    {
+        g = g < gainTarget ? std::min (gainTarget, g + step * std::max (1.0f, gainTarget)) : std::max (gainTarget, g - step * std::max (1.0f, g));
+        const float cl = i < available ? external.left[from + i] : 0.0f, cr = i < available ? external.right[from + i] : 0.0f;
+        externalL[static_cast<std::size_t> (i)] = g * cl;
+        externalR[static_cast<std::size_t> (i)] = g * cr;
+    }
+    externalGainNow = g;
+    const bool morphing = morphTarget > 0.0f || externalMorphNow > 0.0f;
+    if (morphing)
+    {
+        std::copy (left, left + n, morphOutL.begin());
+        std::copy (right, right + n, morphOutR.begin());
+        globalMorph.process (morphOutL.data(), morphOutR.data(), externalL.data(), externalR.data(), n, external.position);
+    }
+    float m = externalMorphNow;
+    for (int i = 0; i < n; ++i)
+    {
+        m = m < morphTarget ? std::min (morphTarget, m + step) : std::max (morphTarget, m - step);
+        const auto k = static_cast<std::size_t> (i);
+        // MORPH off: A + B and C side by side (each once); on: the morph's result (never both
+        // plus a dry copy - only the crossfade between the two while MORPH is switched).
+        const float plainL = left[i] + externalL[k], plainR = right[i] + externalR[k];
+        left[i] = m <= 0.0f ? plainL : (m >= 1.0f ? morphOutL[k] : (1.0f - m) * plainL + m * morphOutL[k]);
+        right[i] = m <= 0.0f ? plainR : (m >= 1.0f ? morphOutR[k] : (1.0f - m) * plainR + m * morphOutR[k]);
+    }
+    externalMorphNow = m;
+    if (! external.active && externalGainNow <= 0.0f && externalMorphNow <= 0.0f)
+        externalRunning = false;   // (faded out: back to the instrument as before)
+}
+
 void Synth::mixRhythm (float* left, float* right, int numSamples) noexcept
 {
     const auto& rs = current.rhythm;
@@ -3268,6 +3357,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     }
 
     mixRhythm (left, right, numSamples);   // card C's loop joins the voices (AUDIO, BOTH)
+    mixExternal (left, right, numSamples);   // EXPERIMENT: card C's external instrument (and GLOBAL MORPH)
 
     // The chorus (state version 4; off: the buffers untouched), on the voices' sum.
     chorus.setMode (current.chorusMode);

@@ -110,7 +110,7 @@ analog.morph.detail v4 float "Morph Detail" label="%" range=0.0000..100.0000/0.1
 analog.morph.levelMatch v4 bool "Morph Level Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.morph.output v4 choice "Morph Output" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Morph Only|Morph Only|Layered [Morph Only|Layered]
 analog.osc1.fine v8 float "Osc 1 Fine" label="ct" range=-100.0000..100.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-100 ct|0 ct|+100 ct
-analog.hybrid.type v8 choice "Hybrid Type" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=Sample|Noise|Instrument Patch [Sample|Oscillator|Noise|Instrument Patch]
+analog.hybrid.type v8 choice "Hybrid Type" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=Sample|Noise|External [Sample|Oscillator|Noise|Instrument Patch|External]
 analog.osc3.model v8 choice "Osc 3 Model" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Classic|DCO|Wide [Classic|DCO|Wide]
 analog.osc3.wave v8 choice "Osc 3 Wave" label="" range=0.0000..6.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=Saw|Saw+Tri|All [Saw|Triangle|Pulse|Saw+Tri|Saw+Pulse|Tri+Pulse|All]
 analog.osc3.octave v8 int "Osc 3 Octave" label="oct" range=-2.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=-2 oct|0 oct|+2 oct

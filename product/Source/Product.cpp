@@ -436,9 +436,11 @@ const ProductInfo& productInfo()
             {
                 // Card C by its type.
                 using andor::analog::HybridType;
-                const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (ap::hybridType)), 0, 3));
+                const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (host.parameterValue (ap::hybridType)), 0, 4));
                 const K level { "layerB.level", "LEVEL" };
-                if (type == HybridType::oscillator)
+                if (type == HybridType::external)
+                    k = { K {}, K {}, K {}, level, K {} };   // (EXPERIMENT: the hosted instrument's own controls are in its editor)
+                else if (type == HybridType::oscillator)
                     k = { K { ap::osc3Fine, "DETUNE" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, level, K { ap::hybridVelo, "VELO" } };
                 else if (type == HybridType::noise)
                     k = { K { ap::hybridNoiseTone, "TONE" }, K { ap::hybridNoiseMovement, "MOVEMENT" }, K { ap::hybridNoiseKeys, "KEYS" }, level, K { ap::hybridVelo, "VELO" } };
@@ -511,7 +513,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 21;   // (21: RHYTHMIC MORPH appended, off; C RHYTHM a 13th route source - nothing to migrate; 20: SATELLITE appended, every card off - nothing to migrate; 19: the USER macros appended, no assignment - nothing to migrate; 18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
+        p.stateVersion = 22;   // (22: EXPERIMENT - card C's EXTERNAL type appended (indices kept) and its ExternalInstrument engine child: absent = none - nothing to migrate; 21: RHYTHMIC MORPH appended, off; C RHYTHM a 13th route source - nothing to migrate; 20: SATELLITE appended, every card off - nothing to migrate; 19: the USER macros appended, no assignment - nothing to migrate; 18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);

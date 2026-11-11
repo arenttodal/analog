@@ -42,7 +42,9 @@ enum class MorphMethod { imprint, fuse, weave };
 enum class MorphCarrier { osc1, osc2, both };
 enum class MorphOutput { morphOnly, layered };
 /** State version 8: what card C (the hybrid slot) plays; only the selected one sounds. */
-enum class HybridType { sample, oscillator, noise, instrumentPatch };
+/** Card C's types. EXTERNAL (appended; EXPERIMENT: docs/experiments/KONTAKT_EXTERNAL_MORPH.md) is
+    a hosted instrument (Kontakt) on a global bus: the voices sound nothing of card C. */
+enum class HybridType { sample, oscillator, noise, instrumentPatch, external };
 
 /** A DCO slot's settings (its pulse width is the slot's WIDTH, its tuning and level the slot's). */
 struct DcoSettings

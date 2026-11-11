@@ -555,7 +555,8 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                              })));
     };
     bipolar8 (osc1Fine, "Osc 1 Fine", 100.0f, d.osc1FineCents, "ct", 0);
-    choice8 (hybridType, "Hybrid Type", { "Sample", "Oscillator", "Noise", "Instrument Patch" }, static_cast<int> (d.hybridType));
+    // (EXTERNAL appended - EXPERIMENT, state version 22: the earlier four keep their indices)
+    choice8 (hybridType, "Hybrid Type", { "Sample", "Oscillator", "Noise", "Instrument Patch", "External" }, static_cast<int> (d.hybridType));
     choice8 (osc3Model, "Osc 3 Model", models, static_cast<int> (d.osc3Model));
     choice8 (osc3Wave, "Osc 3 Wave", { "Saw", "Triangle", "Pulse", "Saw+Tri", "Saw+Pulse", "Tri+Pulse", "All" }, static_cast<int> (d.osc3Wave));
     integer8 (osc3Octave, "Osc 3 Octave", -2, 2, d.osc3Octave, "oct");
@@ -1098,7 +1099,7 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.eqC = cardEq (iEqC);
     cardDampen (iDampenC, p.dampenC);
     p.osc1FineCents = v (iOsc1Fine);
-    p.hybridType = static_cast<HybridType> (index (iHybridType, 4));
+    p.hybridType = static_cast<HybridType> (index (iHybridType, 5));
     p.osc3Model = static_cast<OscModel> (index (iOsc3Model, 3));
     p.osc3Wave = static_cast<Osc2Wave> (index (iOsc3Wave, 7));
     p.osc3Octave = juce::roundToInt (v (iOsc3Octave));

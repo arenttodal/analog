@@ -49,6 +49,7 @@ add_library(analog_dsp STATIC
     dsp/HalfBand.cpp
     dsp/JunoChorus.cpp
     dsp/morph/LiveMorph.cpp
+    dsp/morph/GlobalMorph.cpp
     dsp/LiveGranulator.cpp
     dsp/Synth.cpp
     dsp/SubOsc.cpp
@@ -97,6 +98,7 @@ if(OSP_BUILD_TESTS)
         tests/OrganicTests.cpp
         tests/MorphTests.cpp
         tests/LiveMorphTests.cpp
+        tests/GlobalMorphTests.cpp
         tests/MovementLaneTests.cpp
         tests/ShaperDnaTests.cpp
         tests/ShaperDnaAudioTests.cpp

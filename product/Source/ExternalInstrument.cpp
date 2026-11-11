@@ -394,9 +394,11 @@ void ExternalInstrument::runInstance (const Live& live, const juce::MidiBuffer& 
         live.midi.clear();
         if (endNotes && offset == from)
         {
-            const std::uint8_t sustainOff[3] { 0xb0, 64, 0 }, allNotesOff[3] { 0xb0, 123, 0 };
+            // (sustain off, all notes off, all sound off: no stuck note, no frozen tail to resume)
+            const std::uint8_t sustainOff[3] { 0xb0, 64, 0 }, allNotesOff[3] { 0xb0, 123, 0 }, allSoundOff[3] { 0xb0, 120, 0 };
             live.midi.addEvent (sustainOff, 3, 0);
             live.midi.addEvent (allNotesOff, 3, 0);
+            live.midi.addEvent (allSoundOff, 3, 0);
         }
         for (const auto m : midi)
             if (m.samplePosition >= offset && m.samplePosition < offset + chunk)

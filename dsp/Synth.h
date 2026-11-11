@@ -12,6 +12,7 @@
 #include "VoiceEq.h"
 #include "OtaFilter.h"
 #include "morph/LiveMorph.h"
+#include "morph/GlobalMorph.h"
 #include "LiveGranulator.h"
 #include "Patch.h"
 #include "PolyBlep.h"
@@ -245,6 +246,20 @@ public:
         double driftCents = 0.0;  ///< MOVEMENT DRIFT's wander of its pitch now (both lanes)
     };
     VoiceView voiceView (int slot) const noexcept;
+
+    /**
+        EXPERIMENT (docs/experiments/KONTAKT_EXTERNAL_MORPH.md): card C's external instrument as a
+        global stereo bus. Given once per host block before the render calls that make it (they
+        read it in order): `length` samples, `gain` card C's level (its LEVEL, MIX share, MUTE /
+        SOLO), MORPH on or off and its position, and the instrument's reported latency (the
+        voices are delayed by it so both buses meet). `active` false: the instrument path is
+        off and the render is the instrument as before, bit for bit.
+        It joins where RHYTHMIC MORPH's loop does - after the voices' sum and the decimators,
+        before the chorus, KALEIDOSCOPE and the effects: card C's instrument is not filtered per
+        voice and does not join the SEND bus.
+    */
+    void setExternal (bool active, const float* left, const float* right, int length, float gain, bool morphOn, double position, int latency) noexcept;
+    const GlobalMorph& globalMorphState() const noexcept { return globalMorph; }
 
     /** RHYTHMIC MORPH: card C's prepared loop (owned by the caller, alive while set; null: none). */
     void setRhythmLoop (const andor::analog::rhythm::PreparedLoop* loop) noexcept { loopPlayer.setLoop (loop); }
@@ -689,6 +704,23 @@ private:
     bool rhythmRun = false;   ///< this block: the loop plays
     void renderRhythm (int numSamples) noexcept;
     void mixRhythm (float* left, float* right, int numSamples) noexcept;
+    void mixExternal (float* left, float* right, int numSamples) noexcept;
+    // EXPERIMENT: the external instrument's bus (setExternal) and the GLOBAL MORPH.
+    GlobalMorph globalMorph;
+    struct External
+    {
+        bool active = false, morphOn = false;
+        const float* left = nullptr;
+        const float* right = nullptr;
+        int length = 0, read = 0, latency = 0;
+        float gain = 0.0f;
+        double position = 0.0;
+    } external;
+    float externalGainNow = 0.0f, externalMorphNow = 0.0f;
+    bool externalRunning = false;
+    static constexpr int maxExternalLatency = 8192;   ///< samples (an instrument reporting more: not aligned past it)
+    std::vector<float> externalL, externalR, morphOutL, morphOutR, voicesDelayL, voicesDelayR;
+    int voicesDelayAt = 0;
     std::array<SatelliteCard, 3> sat {};
     std::array<std::atomic<float>, 3> satShownX {}, satShownRear {};
     std::atomic<int> satShownLive { 0 };

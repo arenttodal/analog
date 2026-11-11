@@ -28,7 +28,7 @@ void AnalogEngine::attachParameters (juce::AudioProcessorValueTreeState& paramet
 
 HybridType AnalogEngine::hybridType() const noexcept
 {
-    return static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+    return static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 4));
 }
 
 void AnalogEngine::setHybridType (HybridType type)
@@ -58,6 +58,12 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     synth.setKeyDnaAmount (reader.keyDnaCardAmount());
     synth.reset();
     scratch.assign (static_cast<std::size_t> (std::max (1, maximumBlockSize)), 0.0f);
+    // EXPERIMENT: card C's external instrument (prepared here, never on the audio thread).
+    external.prepare (sampleRate, std::max (1, maximumBlockSize));
+    externalL.assign (static_cast<std::size_t> (std::max (8192, maximumBlockSize)), 0.0f);
+    externalR.assign (externalL.size(), 0.0f);
+    externalMidi.ensureSize (16384);
+    externalClock = 0;
     prepared = true;
     updateConvolutionImpulses();
     impulseTimer.engine = this;
@@ -121,6 +127,10 @@ void AnalogEngine::saveState (juce::XmlElement& state) const
         if (source2Definition != nullptr)
             state.createNewChildElement ("Hybrid2Source")->addChildElement (new juce::XmlElement (*source2Definition));
     }
+    // EXPERIMENT (state version 22): card C's external instrument - its identity and native
+    // state; one that is missing here is written back exactly as it was read.
+    if (auto xml = external.toXml())
+        state.addChildElement (xml.release());
     // State version 19: the USER macros' names and assignments, only once there are any (absent:
     // none, as every session and preset from before).
     if (! userMacroState.isDefault())
@@ -194,6 +204,11 @@ void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File
     }
     if (! setFxRoute (saved))
         setFxRoute (andor::analog::fx::classicGraph());
+    // EXPERIMENT (state version 22): card C's external instrument (absent: none).
+    if (const auto* ext = state.getChildByName ("ExternalInstrument"))
+        external.restore (*ext);
+    else
+        external.clear();
     // State version 19: the USER macros (absent: none - exactly the state from before).
     setUserMacros (UserMacroState::fromXml (state.getChildByName ("UserMacros")));
     // State version 8: before it, an imported source played whenever it was there; now card C
@@ -562,7 +577,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // message side once nothing reads it).
     if (const auto* next = loopExchange.takePending())
         loopPlaying = next;
-    const auto cardType = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+    const auto cardType = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 4));
     const auto* loop = loopPlaying != nullptr && cardType == HybridType::sample ? loopPlaying->loop.get() : nullptr;   // (C's recording: only while C plays it)
     synth.setRhythmLoop (loop);
     if (loopPlaying != nullptr)
@@ -575,7 +590,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // INSTRUMENT PATCH (OSC 3 and NOISE are the voices' own). The others stay loaded, silent.
     // With the loop heard, the recording is the loop (not played by the keys).
     {
-        const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+        const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 4));
         const auto* recording = type == HybridType::sample && ! rhythmPlays ? shellRecording : nullptr;
         const SampleSource* zones = type == HybridType::instrumentPatch && sourcePlaying != nullptr ? sourcePlaying->source.get() : nullptr;
         if (recording != recordingApplied)
@@ -619,6 +634,10 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
                 reader.moveById (raw, id, offset);
     }
     auto patch = reader.read (raw);
+    // EXPERIMENT: card C EXTERNAL - its second layer neutral (off) in this MVP.
+    const bool externalMode = patch.hybridType == HybridType::external;
+    if (externalMode)
+        patch.hybrid2.enabled = false;
     fxReader.read (patch.fx);   // (the FX library's slots)
     if (performance.bpm > 1.0)
         patch.fx.bpm = performance.bpm;
@@ -658,6 +677,51 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // SUB plays the musician's own keys (before the arpeggiator): those events are merged in
     // at their own samples, a played event first where both land on one sample.
     const auto& played = playedThisBlock != nullptr ? *playedThisBlock : midi;
+    // EXPERIMENT: card C EXTERNAL - its MIDI lane (every event whose cards include C: its
+    // arpeggiator's lane when it arpeggiates, the held keys when it is passed through) goes to
+    // the hosted instrument at its own samples, on channel 1, overlaps and order intact; the
+    // notes that sound card C alone no longer start voices (they would be silent).
+    const bool hostedC = externalMode || external.state() == ExternalInstrument::State::ready;
+    auto cardCOnly = [this] (const juce::MidiMessageMetadata& m) {
+        const int status = m.numBytes > 0 ? (m.data[0] & 0xf0) : 0;
+        return (status == 0x90 || status == 0x80) && synth.cardsFor ((m.data[0] & 0x0f) + 1) == 4;
+    };
+    if (hostedC)
+    {
+        externalMidi.clear();
+        if (externalMode)
+            for (const auto m : midi)
+            {
+                if (m.numBytes < 1 || m.numBytes > 3)
+                    continue;
+                const int status = m.data[0];
+                const bool channelMessage = status >= 0x80 && status < 0xf0;
+                if (channelMessage && (synth.cardsFor ((status & 0x0f) + 1) & 4) == 0)
+                    continue;   // (cards A / B's lanes)
+                std::uint8_t bytes[3] { static_cast<std::uint8_t> (channelMessage ? (status & 0xf0) : status), m.numBytes > 1 ? m.data[1] : std::uint8_t (0),
+                                        m.numBytes > 2 ? m.data[2] : std::uint8_t (0) };
+                externalMidi.addEvent (bytes, m.numBytes, m.samplePosition);
+            }
+        ExternalInstrument::Transport transport;
+        transport.valid = performance.hasPosition;
+        transport.playing = performance.playing;
+        transport.bpm = performance.bpm > 1.0 ? performance.bpm : 120.0;
+        transport.ppq = performance.ppq;
+        transport.numerator = performance.numerator;
+        transport.denominator = performance.denominator;
+        transport.timeInSamples = externalClock;
+        const int length = std::min (total, static_cast<int> (externalL.size()));
+        external.process (externalMidi, externalL.data(), externalR.data(), length, transport, externalMode);
+        // Card C's level: its LEVEL, MUTE / SOLO and the MIX share, as a native card C's.
+        const double theta = std::clamp (patch.organic.blend, 0.0, 1.0) * juce::MathConstants<double>::halfPi;
+        const double share = patch.organic.blend <= 0.0 ? 0.0 : std::min (1.0, std::sqrt (2.0) * std::sin (theta));
+        const double level = patch.organic.heard && patch.organic.levelDb > -47.99 ? juce::Decibels::decibelsToGain (patch.organic.levelDb) : 0.0;
+        synth.setExternal (externalMode && external.state() == ExternalInstrument::State::ready, externalL.data(), externalR.data(), length,
+                           static_cast<float> (level * share), patch.morph.enabled, patch.morph.position, external.latencySamples());
+    }
+    else
+        synth.setExternal (false, nullptr, nullptr, 0, 0.0f, false, 0.0, 0);
+    externalClock += total;
     int done = 0;
     auto renderTo = [&] (int samplePosition)
     {
@@ -677,7 +741,8 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             synth.handleSubMidi ((*p).data, (*p).numBytes);
         }
         renderTo (m.samplePosition);
-        synth.handleMidi (m.data, m.numBytes);
+        if (! (externalMode && cardCOnly (m)))
+            synth.handleMidi (m.data, m.numBytes);
     }
     for (; p != played.cend(); ++p)
     {

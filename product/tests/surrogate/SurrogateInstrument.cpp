@@ -156,6 +156,7 @@ private:
             v.hz = v.targetHz = noteHz (note);
             v.gate = true;
             v.age = 0.0;
+            v.env = 0.0;   // (a new bow: the attack from silence - what legato avoids)
             return;
         }
         // The pad: a free voice (else the quietest).

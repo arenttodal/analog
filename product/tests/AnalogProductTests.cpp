@@ -6047,7 +6047,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 21);   // (21: RHYTHMIC MORPH; 20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
+        CHECK (xml->getIntAttribute ("productVersion") == 22);   // (22: EXTERNAL (experiment); 21: RHYTHMIC MORPH; 20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8091,6 +8091,12 @@ TEST_CASE ("analog: projects saved by 1.0 open with the same settings and the sa
                 // 1.0, 13 choices then, 14 now - its normalised value moved, its meaning not).
                 CHECK (juce::roundToInt (now * osp::mod::sourceCount) == juce::roundToInt (was * osp::mod::baseSourceCount));
             }
+            else if (id == params::hybridType)
+            {
+                // Card C's type: the same one (EXTERNAL appended after 1.0 - EXPERIMENT: 4
+                // choices then, 5 now; its index kept).
+                CHECK (juce::roundToInt (now * 4.0) == juce::roundToInt (was * 3.0));
+            }
             else
                 CHECK (now == Approx (was).margin (2.0e-6));
         }
@@ -8273,7 +8279,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 21);
+    CHECK (xml->getIntAttribute ("productVersion") == 22);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -9087,7 +9093,7 @@ TEST_CASE ("SHAPER DNA: every setting is a host parameter - saved, recalled, rea
     {
         auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 21);
+        CHECK (xml->getIntAttribute ("productVersion") == 22);
     }
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
@@ -9463,7 +9469,7 @@ TEST_CASE ("USER MACROS G1: six parameters at 0, no assignment, nothing saved, t
     p.getStateInformation (session);
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 21);
+    CHECK (xml->getIntAttribute ("productVersion") == 22);
     std::function<bool (const juce::XmlElement&)> hasChild = [&] (const juce::XmlElement& e) {
         for (auto* c : e.getChildIterator())
             if (c->hasTagName ("UserMacros") || hasChild (*c))

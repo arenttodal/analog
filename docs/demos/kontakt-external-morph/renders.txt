@@ -1,0 +1,17 @@
+strings_dry_AB.wav: 9.0 s, peak -4.3 dBFS
+strings_dry_C.wav: 9.0 s, peak -12.1 dBFS
+strings_morph_OFF.wav: 9.0 s, peak -2.7 dBFS
+strings_morph_0.wav: 9.0 s, peak -4.3 dBFS
+strings_morph_25.wav: 9.0 s, peak -5.6 dBFS
+strings_morph_50.wav: 9.0 s, peak -1.0 dBFS
+strings_morph_75.wav: 9.0 s, peak -3.2 dBFS
+strings_morph_100.wav: 9.0 s, peak -10.2 dBFS
+  spectral shape distance (dB, third octaves 100 Hz-8 kHz, levels removed):
+    MORPH   0 %: to A+B  0.00, to C  9.67, to the dry 50/50 crossfade  5.95; level +0.0 dB against A+B
+    MORPH  25 %: to A+B  5.34, to C  4.82, to the dry 50/50 crossfade  3.08; level -2.3 dB against A+B
+    MORPH  50 %: to A+B 11.33, to C  3.16, to the dry 50/50 crossfade  6.42; level -4.1 dB against A+B
+    MORPH  75 %: to A+B 11.07, to C  2.45, to the dry 50/50 crossfade  6.15; level -4.4 dB against A+B
+    MORPH 100 %: to A+B  9.67, to C  0.00, to the dry 50/50 crossfade  4.55; level -4.3 dB against A+B
+    (the crossfade itself: to A+B  5.95, to C  4.55)
+example2_chord_evolving_pad_morph50.wav: 8.0 s, peak -0.6 dBFS
+example3_C_arp_AB_hold.wav: 8.0 s, peak -5.8 dBFS
