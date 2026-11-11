@@ -425,10 +425,12 @@ Analysis analyse (const float* mono, std::size_t length, double sampleRate)
             return 1.0e3;   // (at the very start: from nothing)
         return static_cast<double> (after) / std::max (static_cast<double> (before), 1.0e-6 * a.envelopePeak + 1.0e-12);
     };
+    for (auto& o : a.onsets)
+        o.rise = static_cast<float> (std::min (riseAt (o.seconds), 1.0e3));
     int strong = 0, onGrid = 0;
     for (const auto& o : a.onsets)
     {
-        if (o.strength < 0.2f || riseAt (o.seconds) < 2.0)   // (+6 dB: vibrato measured at most 1.75x, a drum hit 4x or more)
+        if (o.strength < 0.2f || o.rise < 2.0f)   // (+6 dB: vibrato measured at most 1.75x, a drum hit 4x or more)
             continue;
         ++strong;
         const double b = (o.seconds - a.downbeatSeconds) / beat;

@@ -1,0 +1,5 @@
+render: factory/Init @ 48 kHz, the legacy phrase, 0.75 s, blocks of 173 (tests/LegacyTests.cpp)
+settings: SATELLITE A/B/C ORBIT depth 100 % FREE 2 Hz (off); RHYTHM BOTH DOUBLE TRANSIENT, a loop loaded (off)
+FNV-1a over the float samples' bits (L, R interleaved): 9913012343000941499
+stored in tests/golden/legacy-renders.txt before SATELLITE / RHYTHMIC MORPH (linux-x86_64-gcc): 9913012343000941499
+IDENTICAL

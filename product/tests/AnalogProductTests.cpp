@@ -37,6 +37,7 @@
 
 #include "audio/utility/TestSignals.h"
 #include "core/PitchMath.h"
+#include "core/Prng.h"
 #include "engine/RhythmicShaper.h"
 #include "io/AudioFileIO.h"
 
@@ -10290,6 +10291,11 @@ TEST_CASE ("RHYTHMIC MORPH: card C's recording is analysed off the audio thread;
     setValue (p, params::rhythmEnabled, 1.0f);
     const auto on = renderShell (p, 1.2, { { 0, 60, 100 } }, false);
     CHECK (differenceRms (off, on) > 1.0e-4);
+    // MOD with no route: card C plays its recording on the keys as ever, the loop silent -
+    // exactly as off.
+    setValue (p, params::rhythmAudio, 1.0f);
+    CHECK (identical (off, renderShell (p, 1.2, { { 0, 60, 100 } }, false)));
+    setValue (p, params::rhythmAudio, 0.0f);
     // (OSC 3 on card C: the loop - C's recording - stays dormant)
     setValue (p, params::hybridType, 1.0f);
     const auto osc = renderShell (p, 1.2, { { 0, 60, 100 } }, false);
@@ -10452,6 +10458,27 @@ TEST_CASE ("RHYTHMIC MORPH G7: the panel - what the analysis heard, only the con
     CHECK (andor::analog::rhythmview::routeTo (rig.p, T::filter) >= 0);
 }
 
+TEST_CASE ("RHYTHMIC MORPH G7: every quick route acts - the sound changes with C RHYTHM taken to it", "[analog][rhythm][ui]")
+{
+    using T = andor::analog::rhythmview::Target;
+    for (const auto t : andor::analog::rhythmview::targets)
+    {
+        INFO (andor::analog::rhythmview::targetName (t));
+        ShellProcessor p;
+        Scratch scratch;
+        loadOrganic (p, writeTicks (scratch.dir, "ticks.wav"));
+        waitForRhythm (p);
+        setValue (p, params::rhythmEnabled, 1.0f);
+        setValue (p, params::rhythmAudio, 1.0f);   // (MOD: only what the route does is heard)
+        if (t == T::morph)
+            setValue (p, params::morphEnabled, 1.0f);
+        const auto plain = renderShell (p, 1.5, { { 0, 48, 100 }, { 0, 55, 100 } }, false);
+        REQUIRE (andor::analog::rhythmview::toggleRoute (p, t));
+        const auto routed = renderShell (p, 1.5, { { 0, 48, 100 }, { 0, 55, 100 } }, false);
+        CHECK (differenceRms (plain, routed) > 1.0e-4);
+    }
+}
+
 TEST_CASE ("RHYTHMIC MORPH G7: the display's playhead and C RHYTHM meter are the audio thread's", "[analog][rhythm][ui]")
 {
     RhythmRig rig;
@@ -10512,4 +10539,411 @@ TEST_CASE ("RHYTHMIC MORPH screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshot
             save ("rhythm-04-panel-both-routed-crop", box, 2.0f);
         }
     }
+}
+
+//==============================================================================
+// SATELLITE + RHYTHMIC MORPH, gate 8: the spec's demo renders, through the whole instrument
+// (ANALOG_DEMO_DIR; docs/demos/satellite-rhythm). The sources are synthesised here, seeded:
+// a 120 BPM clock, a syncopated 4-bar break at 100 BPM, and rain (no pulse).
+
+namespace
+{
+    struct DemoHead final : juce::AudioPlayHead
+    {
+        double bpm = 120.0, rate = 48000.0;
+        juce::int64 sample = 0;
+        bool playing = true;
+        juce::Optional<PositionInfo> getPosition() const override
+        {
+            PositionInfo info;
+            info.setBpm (bpm);
+            info.setIsPlaying (playing);
+            info.setTimeInSamples (sample);
+            info.setPpqPosition (static_cast<double> (sample) / rate * bpm / 60.0);
+            info.setTimeSignature (juce::AudioPlayHead::TimeSignature { 4, 4 });
+            return info;
+        }
+    };
+
+    osp::AudioData stereoOf (const std::vector<float>& l, const std::vector<float>& r)
+    {
+        osp::AudioData a;
+        a.sampleRate = 48000.0;
+        a.channels = { l, r };
+        return a;
+    }
+
+    void addHit (std::vector<float>& x, double at, float gain, double toneHz, double decay, double noise, osp::Prng& rng)
+    {
+        const auto first = static_cast<std::size_t> (at * 48000.0);
+        for (std::size_t i = 0; first + i < x.size() && i < static_cast<std::size_t> (6.0 * decay * 48000.0); ++i)
+        {
+            const double t = static_cast<double> (i) / 48000.0;
+            const double env = std::exp (-t / decay);
+            const double body = toneHz > 0.0 ? std::sin (2.0 * juce::MathConstants<double>::pi * toneHz * t * (1.0 + 0.5 * std::exp (-t / 0.01))) : 0.0;
+            x[first + i] += static_cast<float> (gain * env * ((1.0 - noise) * body + noise * rng.bipolar()));
+        }
+    }
+
+    /** 2 bars at 120 BPM: sixteenth ticks, a soft thump on 1 and 3. */
+    osp::AudioData clockRecording()
+    {
+        osp::Prng rng (120);
+        std::vector<float> x (static_cast<std::size_t> (4.0 * 48000.0), 0.0f);
+        for (int s = 0; s < 32; ++s)
+        {
+            addHit (x, s * 0.125, s % 4 == 0 ? 0.45f : 0.22f, 0.0, 0.004, 1.0, rng);
+            if (s % 8 == 0)
+                addHit (x, s * 0.125, 0.7f, 70.0, 0.08, 0.05, rng);
+        }
+        return stereoOf (x, x);
+    }
+
+    /** 4 bars at 100 BPM, syncopated: kick, snare on 2 and 4, eighth hats, ghost notes. */
+    osp::AudioData breakRecording()
+    {
+        osp::Prng rng (92);
+        const double beat = 0.6;
+        std::vector<float> l (static_cast<std::size_t> (16 * beat * 48000.0), 0.0f), r = l;
+        for (int bar = 0; bar < 4; ++bar)
+        {
+            const double t0 = bar * 4 * beat;
+            for (const double k : { 0.0, 1.5, 2.75 })
+            {
+                addHit (l, t0 + k * beat, 0.8f, 55.0, 0.12, 0.08, rng);
+                addHit (r, t0 + k * beat, 0.8f, 55.0, 0.12, 0.08, rng);
+            }
+            for (const double s : { 1.0, 3.0 })
+            {
+                addHit (l, t0 + s * beat, 0.55f, 190.0, 0.07, 0.7, rng);
+                addHit (r, t0 + s * beat, 0.55f, 190.0, 0.07, 0.7, rng);
+            }
+            for (int h = 0; h < 8; ++h)
+            {
+                addHit (l, t0 + h * 0.5 * beat, h % 2 == 0 ? 0.18f : 0.1f, 0.0, 0.012, 1.0, rng);
+                addHit (r, t0 + h * 0.5 * beat + 0.002, h % 2 == 0 ? 0.16f : 0.11f, 0.0, 0.012, 1.0, rng);
+            }
+            if (bar % 2 == 1)
+                addHit (l, t0 + 3.5 * beat, 0.2f, 190.0, 0.03, 0.8, rng);   // (a ghost)
+        }
+        return stereoOf (l, r);
+    }
+
+    /** 8 s of rain: drops at random (about 40 a second, random strength), a soft hiss under them. */
+    osp::AudioData rainRecording()
+    {
+        osp::Prng rng (7);
+        std::vector<float> l (static_cast<std::size_t> (8.0 * 48000.0), 0.0f), r = l;
+        double t = 0.0;
+        while (t < 7.9)
+        {
+            t += -std::log (std::max (1.0e-9, rng.nextDouble())) / 40.0;
+            const auto g = static_cast<float> (0.05 + 0.25 * rng.nextDouble() * rng.nextDouble());
+            const double pan = rng.nextDouble();
+            addHit (l, t, g * static_cast<float> (1.0 - 0.6 * pan), 2000.0 + 3000.0 * rng.nextDouble(), 0.004, 0.6, rng);
+            addHit (r, t, g * static_cast<float> (0.4 + 0.6 * pan), 2000.0 + 3000.0 * rng.nextDouble(), 0.004, 0.6, rng);
+        }
+        float lpL = 0.0f, lpR = 0.0f;
+        for (std::size_t i = 0; i < l.size(); ++i)
+        {
+            lpL += 0.05f * (static_cast<float> (rng.bipolar()) - lpL);
+            lpR += 0.05f * (static_cast<float> (rng.bipolar()) - lpR);
+            l[i] += 0.12f * lpL;
+            r[i] += 0.12f * lpR;
+        }
+        return stereoOf (l, r);
+    }
+
+    juce::File writeSourceFile (const juce::File& dir, const juce::String& name, const osp::AudioData& audio)
+    {
+        const auto file = dir.getChildFile (name);
+        std::string error;
+        REQUIRE (osp::io::writeAudioFile (std::filesystem::path (file.getFullPathName().toStdString()), audio, osp::io::SampleFormat::pcm24, error));
+        return file;
+    }
+
+    /** Renders through the plugin with the host's transport running at the head's tempo (or stopped). */
+    juce::AudioBuffer<float> renderDemo (ShellProcessor& p, DemoHead& head, double seconds, const std::vector<Note>& notes)
+    {
+        p.setPlayHead (&head);
+        const int total = static_cast<int> (seconds * rate);
+        juce::AudioBuffer<float> out (2, total), buffer (2, block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            juce::MidiBuffer midi;
+            for (const auto& n : notes)
+                if (n.sample >= pos && n.sample < pos + block)
+                    midi.addEvent (n.velocity > 0 ? juce::MidiMessage::noteOn (1, n.note, static_cast<juce::uint8> (n.velocity)) : juce::MidiMessage::noteOff (1, n.note),
+                                   n.sample - pos);
+            p.processBlock (buffer, midi);
+            head.sample += block;
+            const int n = std::min (block, total - pos);
+            for (int ch = 0; ch < 2; ++ch)
+                out.copyFrom (ch, pos, buffer, ch, 0, n);
+        }
+        p.setPlayHead (nullptr);
+        return out;
+    }
+
+    std::vector<Note> heldChord (std::initializer_list<int> keys, double from, double to, int velocity = 96)
+    {
+        std::vector<Note> n;
+        for (const int k : keys)
+            n.push_back ({ static_cast<int> (from * rate), k, velocity });
+        for (const int k : keys)
+            n.push_back ({ static_cast<int> (to * rate), k, 0 });
+        return n;
+    }
+
+    void writeDemo (const juce::File& file, const juce::AudioBuffer<float>& audio)
+    {
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions().withSampleRate (rate).withNumChannels (2).withBitsPerSample (24));
+        REQUIRE (writer != nullptr);
+        REQUIRE (writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples()));
+    }
+
+    juce::AudioBuffer<float> joined (std::initializer_list<const juce::AudioBuffer<float>*> parts)
+    {
+        int total = 0;
+        for (const auto* b : parts)
+            total += b->getNumSamples();
+        juce::AudioBuffer<float> out (2, total);
+        int at = 0;
+        for (const auto* b : parts)
+        {
+            for (int ch = 0; ch < 2; ++ch)
+                out.copyFrom (ch, at, *b, ch, 0, b->getNumSamples());
+            at += b->getNumSamples();
+        }
+        return out;
+    }
+
+    juce::AudioBuffer<float> monoFold (const juce::AudioBuffer<float>& s)
+    {
+        juce::AudioBuffer<float> m (2, s.getNumSamples());
+        for (int i = 0; i < s.getNumSamples(); ++i)
+        {
+            const float v = 0.5f * (s.getSample (0, i) + s.getSample (1, i));
+            m.setSample (0, i, v);
+            m.setSample (1, i, v);
+        }
+        return m;
+    }
+
+    /** Level (dB) of channel 0 in 250 ms windows from `from` seconds on. */
+    std::vector<double> windowsDb (const juce::AudioBuffer<float>& s, double from)
+    {
+        std::vector<double> w;
+        const int size = static_cast<int> (0.25 * rate);
+        for (int a = static_cast<int> (from * rate); a + size <= s.getNumSamples(); a += size)
+        {
+            double sum = 0.0;
+            for (int i = a; i < a + size; ++i)
+                sum += static_cast<double> (s.getSample (0, i)) * s.getSample (0, i);
+            w.push_back (10.0 * std::log10 (std::max (sum / size, 1.0e-20)));
+        }
+        return w;
+    }
+
+    double peakOf (const juce::AudioBuffer<float>& s)
+    {
+        return std::max (s.getMagnitude (0, 0, s.getNumSamples()), s.getMagnitude (1, 0, s.getNumSamples()));
+    }
+
+    void setNormalised (ShellProcessor& p, const juce::String& id, float v)
+    {
+        auto* param = p.parameters.getParameter (id);
+        REQUIRE (param != nullptr);
+        param->setValueNotifyingHost (v);
+    }
+
+    void satellite (ShellProcessor& p, int card, int mode, int division, float depth, float offset = 0.0f, float phase = 0.0f, int retrigger = 0)
+    {
+        setValue (p, params::satelliteId (card, "enabled"), 1.0f);
+        setValue (p, params::satelliteId (card, "mode"), static_cast<float> (mode));
+        setValue (p, params::satelliteId (card, "division"), static_cast<float> (division));
+        setValue (p, params::satelliteId (card, "depth"), depth);
+        setValue (p, params::satelliteId (card, "offset"), offset);
+        setValue (p, params::satelliteId (card, "phase"), phase);
+        setValue (p, params::satelliteId (card, "retrigger"), static_cast<float> (retrigger));
+    }
+
+    /** The per-card arpeggiators, unlinked: each card its own pattern and rate. */
+    void unlinkedArps (ShellProcessor& p, int patternA, int rateA, int patternB, int rateB, int patternC, int rateC, int octavesC = 1)
+    {
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "arp.pattern", static_cast<float> (patternA));
+        setValue (p, "arp.rate", static_cast<float> (rateA));
+        setValue (p, "analog.arp.cardB.pattern", static_cast<float> (patternB));
+        setValue (p, "analog.arp.cardB.rate", static_cast<float> (rateB));
+        setValue (p, "analog.arp.cardC.pattern", static_cast<float> (patternC));
+        setValue (p, "analog.arp.cardC.rate", static_cast<float> (rateC));
+        setValue (p, "analog.arp.cardC.octaves", static_cast<float> (octavesC));
+    }
+}
+
+TEST_CASE ("SATELLITE + RHYTHMIC MORPH demo renders (ANALOG_DEMO_DIR)", "[.][demo-renders]")
+{
+    const char* dir = std::getenv ("ANALOG_DEMO_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    Scratch scratch;
+    juce::String notes;
+    auto note = [&notes] (const juce::String& line) { notes << line << "\n"; };
+    auto check = [&] (const juce::String& name, const juce::AudioBuffer<float>& audio) {
+        const double peak = peakOf (audio);
+        INFO (name);
+        CHECK (std::isfinite (peak));
+        CHECK (peak > 1.0e-3);
+        CHECK (peak < 4.0);
+        writeDemo (out.getChildFile (name), audio);
+        note (name + juce::String::formatted (": %.1f s, peak %.1f dBFS", audio.getNumSamples() / rate, 20.0 * std::log10 (std::max (peak, 1.0e-9))));
+    };
+    const auto clock = writeSourceFile (scratch.dir, "clock120.wav", clockRecording());
+    const auto brk = writeSourceFile (scratch.dir, "break100.wav", breakRecording());
+    const auto rain = writeSourceFile (scratch.dir, "rain.wav", rainRecording());
+
+    // 1. A's held chord (CHORD, quarters) placed left, B's eighths in the centre, C's sixteenths
+    //    (OSC 3, two octaves) orbiting once a bar; 120 BPM.
+    {
+        ShellProcessor p;
+        setValue (p, params::hybridType, 1.0f);
+        unlinkedArps (p, 5, 0, 0, 1, 2, 2, 2);
+        satellite (p, 0, 0, 2, 0.0f, -45.0f);
+        satellite (p, 2, 1, 2, 90.0f);
+        DemoHead head;
+        head.bpm = 120.0;
+        p.prepareToPlay (rate, block);
+        check ("satellite_a_chord_b_center_c_orbit_120bpm.wav", renderDemo (p, head, 10.0, heldChord ({ 48, 55, 60, 64 }, 0.0, 8.0)));
+    }
+    // 2. Three unlinked arpeggiators at 140 BPM, each card BOUNCING: A every half note, B every
+    //    quarter (a quarter cycle later), C to the other side on each of its notes.
+    {
+        ShellProcessor p;
+        setValue (p, params::hybridType, 1.0f);
+        unlinkedArps (p, 0, 1, 1, 2, 2, 8, 2);
+        satellite (p, 0, 2, 4, 80.0f);
+        satellite (p, 1, 2, 7, 70.0f, 0.0f, 90.0f);
+        satellite (p, 2, 2, 7, 90.0f, 0.0f, 0.0f, 1);
+        DemoHead head;
+        head.bpm = 140.0;
+        p.prepareToPlay (rate, block);
+        check ("satellite_bounce_three_unlinked_arps_140bpm.wav", renderDemo (p, head, 9.0, heldChord ({ 50, 57, 62, 65 }, 0.0, 7.5)));
+    }
+    // 3. Mono compatibility: A's chord ORBITING (a half note, the full depth) - in stereo, then
+    //    folded to mono, then SATELLITE off folded to mono.
+    {
+        auto renderA = [] (bool orbit) {
+            ShellProcessor p;
+            if (orbit)
+                satellite (p, 0, 1, 4, 100.0f);
+            DemoHead head;
+            p.prepareToPlay (rate, block);
+            return renderDemo (p, head, 6.0, heldChord ({ 48, 55, 60, 64 }, 0.0, 5.5));
+        };
+        const auto orbit = renderA (true), off = renderA (false);
+        const auto orbitMono = monoFold (orbit), offMono = monoFold (off);
+        check ("satellite_orbit_mono_compat_comparison.wav", joined ({ &orbit, &orbitMono, &offMono }));
+        const auto a = windowsDb (orbitMono, 1.0), b = windowsDb (offMono, 1.0);
+        double lo = 1.0e9, hi = -1.0e9, mean = 0.0;
+        for (std::size_t i = 0; i < std::min (a.size(), b.size()) - 2; ++i)
+        {
+            const double d = a[i] - b[i];
+            lo = std::min (lo, d);
+            hi = std::max (hi, d);
+            mean += d;
+        }
+        mean /= static_cast<double> (std::min (a.size(), b.size()) - 2);
+        note (juce::String::formatted ("  mono fold, ORBIT against off (250 ms windows, 1-5 s): mean %+.2f dB, range %+.2f .. %+.2f dB", mean, lo, hi));
+        CHECK (std::abs (mean) < 3.0);
+    }
+    // 4. A 120 BPM clock on card C (muted: not heard, felt) pumps A and B: C RHYTHM -> LEVEL A
+    //    and LEVEL B (the quick routes), MOD.
+    {
+        ShellProcessor p;
+        loadOrganic (p, clock);
+        waitForRhythm (p);
+        const auto loop = dynamic_cast<AnalogEngine&> (p.productEngine()).rhythmLoop();
+        REQUIRE (loop != nullptr);
+        note (juce::String::formatted ("  clock analysed: %.2f BPM, %d beats, rhythmic %d", loop->analysis.bpm, loop->analysis.beats, loop->rhythmic() ? 1 : 0));
+        setValue (p, "layerB.mute", 1.0f);
+        REQUIRE (andor::analog::rhythmview::toggleRoute (p, andor::analog::rhythmview::Target::levelA));
+        REQUIRE (andor::analog::rhythmview::toggleRoute (p, andor::analog::rhythmview::Target::levelB));
+        setValue (p, params::rhythmAudio, 1.0f);   // MOD
+        setValue (p, params::rhythmRelease, 90.0f);
+        DemoHead head;
+        p.prepareToPlay (rate, block);
+        check ("rhythm_clock_C_modulates_AB_amp_120bpm.wav", renderDemo (p, head, 9.0, heldChord ({ 45, 52, 57, 60, 64 }, 0.0, 8.0)));
+    }
+    // 5. The 100 BPM break on card C, heard on the host's grid at 90, 120 and 140 BPM (BOTH), and
+    //    opening A and B's FILTER on its hits (C RHYTHM -> FILTER, the filter set low).
+    {
+        ShellProcessor p;
+        loadOrganic (p, brk);
+        waitForRhythm (p);
+        const auto loop = dynamic_cast<AnalogEngine&> (p.productEngine()).rhythmLoop();
+        REQUIRE (loop != nullptr);
+        note (juce::String::formatted ("  break analysed: %.2f BPM, %d beats, %g bars, %d/4, rhythmic %d", loop->analysis.bpm, loop->analysis.beats, loop->analysis.bars,
+                                       loop->analysis.beatsPerBar, loop->rhythmic() ? 1 : 0));
+        REQUIRE (andor::analog::rhythmview::toggleRoute (p, andor::analog::rhythmview::Target::filter));
+        setValue (p, params::rhythmShape, 1.0f);   // TRANSIENT
+        setNormalised (p, params::tone, 0.3f);
+        setValue (p, "layerB.level", -6.0f);   // (the break under the chord)
+        p.prepareToPlay (rate, block);
+        std::vector<juce::AudioBuffer<float>> sections;
+        for (const double bpm : { 90.0, 120.0, 140.0 })
+        {
+            DemoHead head;
+            head.bpm = bpm;
+            const double bars = 4.0 * 4.0 * 60.0 / bpm;   // (four bars of each)
+            sections.push_back (renderDemo (p, head, bars + 0.8, heldChord ({ 43, 50, 55, 58 }, 0.0, bars)));
+        }
+        check ("rhythm_break_C_audio_and_AB_filter_90_120_140.wav", joined ({ &sections[0], &sections[1], &sections[2] }));
+    }
+    // 6. Rain (no pulse: FREE, the transport stopped) on card C's keys; its level moves MORPH
+    //    between A + B and the rain (C RHYTHM -> MORPH: MOD, MORPH on).
+    {
+        ShellProcessor p;
+        loadOrganic (p, rain);
+        waitForRhythm (p);
+        const auto loop = dynamic_cast<AnalogEngine&> (p.productEngine()).rhythmLoop();
+        REQUIRE (loop != nullptr);
+        CHECK_FALSE (loop->rhythmic());
+        note (juce::String::formatted ("  rain analysed: rhythmic %d (FREE)", loop->rhythmic() ? 1 : 0));
+        REQUIRE (andor::analog::rhythmview::toggleRoute (p, andor::analog::rhythmview::Target::morph));
+        setValue (p, params::rhythmRelease, 400.0f);
+        setValue (p, params::rhythmSensitivity, 80.0f);
+        DemoHead head;
+        head.playing = false;
+        p.prepareToPlay (rate, block);
+        check ("rhythm_rain_unsynced_modulates_morph.wav", renderDemo (p, head, 10.0, heldChord ({ 48, 55, 62, 67 }, 0.0, 8.5)));
+    }
+    // 7. Cinematic: the break felt (MOD) through MORPH and A's LEVEL, SATELLITE on all three
+    //    cards (A ORBIT over 2 bars, B PAN a bar, half a cycle apart, C BOUNCE on quarters),
+    //    SPACE wide; 100 BPM, two chords.
+    {
+        ShellProcessor p;
+        loadOrganic (p, brk);
+        waitForRhythm (p);
+        REQUIRE (andor::analog::rhythmview::toggleRoute (p, andor::analog::rhythmview::Target::morph));
+        REQUIRE (andor::analog::rhythmview::toggleRoute (p, andor::analog::rhythmview::Target::levelA));
+        setValue (p, params::rhythmRelease, 250.0f);
+        satellite (p, 0, 1, 1, 80.0f);
+        satellite (p, 1, 0, 2, 60.0f, 0.0f, 180.0f);
+        satellite (p, 2, 2, 7, 70.0f);
+        setValue (p, "space", 60.0f);
+        DemoHead head;
+        head.bpm = 100.0;
+        p.prepareToPlay (rate, block);
+        auto chords = heldChord ({ 45, 52, 57, 60, 64 }, 0.0, 7.0);
+        for (const auto& n : heldChord ({ 41, 48, 53, 57, 60 }, 7.2, 14.0))
+            chords.push_back (n);
+        check ("combined_cinematic_satellite_plus_rhythmic_morph.wav", renderDemo (p, head, 17.0, chords));
+    }
+    out.getChildFile ("renders.txt").replaceWithText (notes);
 }

@@ -35,7 +35,8 @@ namespace rhythmview
     /**
         Takes C RHYTHM to the target, or (routed) takes the route away: one undo step. A new route
         goes in the first free slot (none free: nothing happens, false) with a musical depth, and
-        RHYTHM is switched on and set to feed it (AUDIO becomes BOTH).
+        RHYTHM is switched on and set to feed it (AUDIO becomes BOTH; MORPH: MOD and MORPH on -
+        MORPH blends with card C as its keys play it, which a heard loop would take away).
     */
     bool toggleRoute (osp::plugin::InstrumentHost& host, Target t);
     /** What the analysis says, in a line (the display's readout; tests). */

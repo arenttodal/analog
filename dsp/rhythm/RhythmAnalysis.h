@@ -42,6 +42,8 @@ struct Onset
     double seconds = 0.0;
     float strength = 0.0f;   ///< 0..1: how clear (the onset curve's peak)
     float level = 0.0f;      ///< 0..1: how loud its attack, against the loudest (square-root compressed)
+    float rise = 0.0f;       ///< its level's jump: the loudest 40 ms after it over the quietest 60 ms before
+                             ///< (a drum hit 4 or more; a sustained sound's spectral change about 1)
 };
 
 struct Analysis

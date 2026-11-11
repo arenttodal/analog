@@ -89,8 +89,8 @@ namespace rhythmview
         };
         switch (t)
         {
-            case Target::levelA: return mod::choiceOf (mod::Dest::levelA);
-            case Target::levelB: return mod::choiceOf (mod::Dest::levelC);   // (card B is the shell's layer C)
+            case Target::levelA: return product (params::osc1Level);   // (card A's LEVEL knob)
+            case Target::levelB: return product (params::osc2Level);   // (card B's)
             case Target::filter: return product (params::tone);
             case Target::morph: return product (params::morphPosition);
         }
@@ -135,7 +135,14 @@ namespace rhythmview
         setPlain (host, InstrumentHost::modRouteId (free, "depth"), depth);
         setPlain (host, InstrumentHost::modRouteId (free, "enabled"), 1.0f);
         setPlain (host, params::rhythmEnabled, 1.0f);
-        if (juce::roundToInt (host.parameterValue (params::rhythmAudio)) == 0)
+        if (t == Target::morph)
+        {
+            // MORPH blends A + B with card C as its keys play it: MORPH on, and the loop felt
+            // (MOD), not heard - heard, it would take the recording from the keys.
+            setPlain (host, params::morphEnabled, 1.0f);
+            setPlain (host, params::rhythmAudio, 1.0f);
+        }
+        else if (juce::roundToInt (host.parameterValue (params::rhythmAudio)) == 0)
             setPlain (host, params::rhythmAudio, 2.0f);   // (AUDIO feeds no route: BOTH)
         return true;
     }
@@ -450,7 +457,7 @@ RhythmPanel::RhythmPanel (InstrumentHost& h) : MiniPanel ("RHYTHM"), host (h)
     };
     timing = segments (params::rhythmSync, { "SYNC", "FREE" }, "SYNC: each slice of the loop starts on the host's grid, its pitch kept. FREE: it plays at its own speed");
     tempo = segments (params::rhythmTempo, { "HALF", "DETECTED", "DOUBLE" }, "The loop's tempo as detected, or read at half or double (a wrong octave corrected)");
-    audio = segments (params::rhythmAudio, { "AUDIO", "MOD", "BOTH" }, "AUDIO: the loop heard. MOD: only felt, through C RHYTHM. BOTH: heard and felt");
+    audio = segments (params::rhythmAudio, { "AUDIO", "MOD", "BOTH" }, "AUDIO: the loop heard (the keys hand it the recording). MOD: card C plays as ever, the loop felt through C RHYTHM. BOTH: heard and felt");
     shape = segments (params::rhythmShape, { "ENVELOPE", "TRANSIENT" }, "What C RHYTHM follows: the loop's level, or its attacks");
     auto knob = [&] (const juce::String& pid, const char* caption, const char* tooltip) {
         auto* p = state.getParameter (pid);

@@ -23,6 +23,7 @@ void AnalogEngine::attachParameters (juce::AudioProcessorValueTreeState& paramet
     state = &parameters;
     hybridTypeValue = parameters.getRawParameterValue (params::hybridType);
     rhythmEnabledValue = parameters.getRawParameterValue (params::rhythmEnabled);
+    rhythmAudioValue = parameters.getRawParameterValue (params::rhythmAudio);
 }
 
 HybridType AnalogEngine::hybridType() const noexcept
@@ -566,10 +567,13 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     synth.setRhythmLoop (loop);
     if (loopPlaying != nullptr)
         loopExchange.publishOldestInUse (loopPlaying->generation);
-    const bool rhythmPlays = loop != nullptr && rhythmEnabledValue != nullptr && rhythmEnabledValue->load() >= 0.5f;
+    // The loop takes the recording from the keys only while it is heard (AUDIO, BOTH). In MOD
+    // card C plays as ever (MORPH has its C) and the loop runs silent on the grid, felt.
+    const bool rhythmPlays = loop != nullptr && rhythmEnabledValue != nullptr && rhythmEnabledValue->load() >= 0.5f
+                             && (rhythmAudioValue == nullptr || juce::roundToInt (rhythmAudioValue->load()) != static_cast<int> (Patch::Rhythm::Audio::mod));
     // Card C plays only its selected type: the recording as a SAMPLE, the imported zones as an
     // INSTRUMENT PATCH (OSC 3 and NOISE are the voices' own). The others stay loaded, silent.
-    // With RHYTHM on, the recording is the loop (not played by the keys).
+    // With the loop heard, the recording is the loop (not played by the keys).
     {
         const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
         const auto* recording = type == HybridType::sample && ! rhythmPlays ? shellRecording : nullptr;

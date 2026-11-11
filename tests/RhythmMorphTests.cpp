@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <numbers>
 
@@ -243,3 +244,39 @@ TEST_CASE ("RHYTHMIC MORPH: SATELLITE C moves the loop; card C muted silences it
     }
 }
 
+
+TEST_CASE ("RHYTHMIC MORPH: CPU (16 held voices; off, AUDIO, BOTH with a route)", "[.][rhythm-cpu]")
+{
+    auto measure = [] (const Patch& p, bool route, int oversampling) {
+        auto s = makeSynth (p, 48000.0, oversampling, 512);
+        s->setRhythmLoop (tickLoop().get());
+        if (route)
+        {
+            mod::Settings routes;
+            routes.routes[0] = { mod::Source::cRhythm, mod::Dest::levelA, -0.6, true, -1 };
+            s->setModulation (routes, { 2, 11, 16, 17 });
+        }
+        for (int i = 0; i < 16; ++i)
+        {
+            const std::uint8_t noteOn[3] { 0x90, static_cast<std::uint8_t> (36 + 3 * i), 100 };
+            s->handleMidi (noteOn, 3);
+        }
+        std::vector<float> l (512), r (512);
+        for (int b = 0; b < 20; ++b)
+            s->render (l.data(), r.data(), 512);
+        const int blocks = 400;
+        const auto start = std::chrono::steady_clock::now();
+        for (int b = 0; b < blocks; ++b)
+            s->render (l.data(), r.data(), 512);
+        const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+        return 100.0 * seconds / (blocks * 512.0 / 48000.0);
+    };
+    Patch off = measurementPatch();
+    off.blend = 0.5;
+    Patch audio = off, both = off;
+    audio.rhythm.enabled = both.rhythm.enabled = true;
+    both.rhythm.audio = Patch::Rhythm::Audio::both;
+    for (const int os : { 1, 4 })
+        for (int run = 0; run < 3; ++run)
+            WARN ("oversampling " << os << ": off " << measure (off, false, os) << " %, AUDIO " << measure (audio, false, os) << " %, BOTH + route " << measure (both, true, os) << " %");
+}

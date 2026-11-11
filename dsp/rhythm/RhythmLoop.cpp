@@ -31,7 +31,9 @@ std::shared_ptr<const PreparedLoop> prepareLoop (const float* left, const float*
         loop->loopStart = a.downbeatSeconds * rate;
         loop->loopFrames = a.loopSeconds() * rate;
         // Slices: anchored on every onset's attack (each read from 2 ms before it), measured
-        // from the downbeat round the loop; the downbeat itself always anchors one.
+        // from the downbeat round the loop; the downbeat itself always anchors one. (Every
+        // onset, a soft one too: a hat under a kick's tail barely raises the level, yet it must
+        // land on the grid.)
         loop->slices.push_back (0.0);
         for (const auto& o : a.onsets)
         {

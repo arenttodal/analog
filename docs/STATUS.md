@@ -5,8 +5,19 @@
 > - USER MACROS V1.1 gates 1–4 with the CORE / USER folder tabs (`feature/user-macros-v1`,
 >   stacked on DNA; docs/USER_MACROS_V1_1.md).
 >
+> - SATELLITE + RHYTHMIC MORPH, gates 0–8 (`feature/satellite-rhythm` in both repositories,
+>   stacked on USER MACROS; docs/features/SATELLITE_RHYTHM_ARCHITECTURE.md):
+>   - SATELLITE: each card's own stereo motion (PAN / ORBIT / BOUNCE, SYNC / FREE), its key and
+>     panel in the per-card arpeggiator's editor;
+>   - RHYTHMIC MORPH: card C's recording analysed for its rhythm and looped on the host's grid,
+>     its pitch kept (AUDIO / MOD / BOTH);
+>   - C RHYTHM: a 13th modulation source, with its panel in card C's well.
+>
+>   State version 21; off is bit-identical (the legacy Init hash). Demo renders are in
+>   docs/demos/satellite-rhythm. Open decisions are listed in that document.
+>
 > Next: USER MACROS gate 5 (FX-library slot targets, orphan / reconnect), its CPU figures and a
-> draft PR. Not run here: hosts, real input, listening.
+> draft PR. Not run here: hosts, real input, listening (SATELLITE and RHYTHM included).
 
 > **9 Nov 2026: 1.0.0 release candidate** (branch `claude/release-candidate`;
 > docs/release/READINESS_SCORECARD.md). On the baseline (`main` a25c270, OSP 3d949cd), the full

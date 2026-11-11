@@ -309,6 +309,7 @@ private:
     const LoadedLoop* loopPlaying = nullptr;                   ///< audio thread
     std::atomic<bool> loopAnalysing { false };
     std::atomic<float>* rhythmEnabledValue = nullptr;
+    std::atomic<float>* rhythmAudioValue = nullptr;
     void analyseRhythm (std::shared_ptr<const osp::plugin::LoadedInstrument> source);
     void publishLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation);
     void loadHybrid2 (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation);

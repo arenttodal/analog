@@ -15,6 +15,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -193,4 +195,67 @@ TEST_CASE ("legacy: every factory sound and edge patch renders as it did at stat
     }
     else if (hashesCompared == 0)
         WARN ("no exact hashes stored for " << platform << ": loudness contours compared only");
+}
+
+TEST_CASE ("SATELLITE + RHYTHMIC MORPH off: the Init render is the hash stored before they existed (ANALOG_DEMO_DIR: the WAV)", "[satellite][rhythm][regression]")
+{
+    // Every new setting away from its default but switched off, and a loop loaded for card C:
+    // the render must be the one stored before SATELLITE and RHYTHMIC MORPH (bit for bit, on the
+    // platform that stored it). With ANALOG_DEMO_DIR set, the render and its hash are written
+    // (baseline_identical_off_render.wav / .hash.txt).
+    const auto all = cases();
+    const auto c = std::find_if (all.begin(), all.end(), [] (const Case& k) { return k.name == "factory/Init"; });
+    REQUIRE (c != all.end());
+    Patch patch = c->patch;
+    for (auto& s : patch.satellite)
+    {
+        s.mode = osp::satellite::Mode::orbit;
+        s.depth = 1.0;
+        s.offset = 0.6;
+        s.width = 0.3;
+        s.timing = osp::satellite::Timing::free;
+        s.rateHz = 2.0;
+    }   // (enabled stays false)
+    patch.rhythm.audio = Patch::Rhythm::Audio::both;
+    patch.rhythm.tempo = 2;
+    patch.rhythm.shape = Patch::Rhythm::Shape::transient;
+    patch.rhythm.sensitivity = 0.9;   // (enabled stays false)
+    std::vector<float> ticks (static_cast<std::size_t> (2.0 * 48000.0), 0.0f);
+    for (int k = 0; k < 4; ++k)
+        for (int i = 0; i < 300; ++i)
+            ticks[static_cast<std::size_t> (k * 24000 + i)] = 0.5f * std::exp (-i / 60.0f);
+    const auto loop = andor::analog::rhythm::prepareLoop (ticks.data(), ticks.data(), ticks.size(), 48000.0);
+    auto s = makeSynth (patch, 48000.0);
+    s->setRhythmLoop (loop.get());
+    const auto out = render (*s, 0.75, c->events, 173);
+    std::uint64_t h = 1469598103934665603ull;   // (the legacy fingerprint's FNV-1a)
+    for (std::size_t i = 0; i < out.left.size(); ++i)
+        for (const float x : { out.left[i], out.right[i] })
+        {
+            std::uint32_t bits;
+            std::memcpy (&bits, &x, sizeof bits);
+            h = (h ^ bits) * 1099511628211ull;
+        }
+    std::uint64_t stored = 0;
+    {
+        std::ifstream in (goldenPath());
+        const std::string want = "hash:" + osp::platformTag() + " factory/Init@48000";
+        for (std::string line; std::getline (in, line);)
+            if (line.rfind (want + " ", 0) == 0)
+                std::istringstream (line.substr (want.size())) >> stored;
+    }
+    if (stored != 0)
+        CHECK (h == stored);
+    else
+        WARN ("no exact hash stored for " << osp::platformTag());
+    if (const char* dir = std::getenv ("ANALOG_DEMO_DIR"))
+    {
+        REQUIRE (writeWav (std::string (dir) + "/baseline_identical_off_render.wav", out));
+        std::ofstream (std::string (dir) + "/baseline_identical_off_render.hash.txt")
+            << "render: factory/Init @ 48 kHz, the legacy phrase, 0.75 s, blocks of 173 (tests/LegacyTests.cpp)\n"
+            << "settings: SATELLITE A/B/C ORBIT depth 100 % FREE 2 Hz (off); RHYTHM BOTH DOUBLE TRANSIENT, a loop loaded (off)\n"
+            << "FNV-1a over the float samples' bits (L, R interleaved): " << h << "\n"
+            << "stored in tests/golden/legacy-renders.txt before SATELLITE / RHYTHMIC MORPH (" << osp::platformTag() << "): " << stored << "\n"
+            << (h == stored ? "IDENTICAL\n" : "DIFFERENT\n");
+    }
 }

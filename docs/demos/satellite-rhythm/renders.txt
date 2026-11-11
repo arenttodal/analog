@@ -1,0 +1,11 @@
+satellite_a_chord_b_center_c_orbit_120bpm.wav: 10.0 s, peak -4.5 dBFS
+satellite_bounce_three_unlinked_arps_140bpm.wav: 9.0 s, peak -7.3 dBFS
+satellite_orbit_mono_compat_comparison.wav: 18.0 s, peak -6.7 dBFS
+  mono fold, ORBIT against off (250 ms windows, 1-5 s): mean -1.38 dB, range -2.12 .. -0.74 dB
+  clock analysed: 120.00 BPM, 8 beats, rhythmic 1
+rhythm_clock_C_modulates_AB_amp_120bpm.wav: 9.0 s, peak -5.6 dBFS
+  break analysed: 100.00 BPM, 16 beats, 4 bars, 4/4, rhythmic 1
+rhythm_break_C_audio_and_AB_filter_90_120_140.wav: 27.9 s, peak -3.0 dBFS
+  rain analysed: rhythmic 0 (FREE)
+rhythm_rain_unsynced_modulates_morph.wav: 10.0 s, peak -7.1 dBFS
+combined_cinematic_satellite_plus_rhythmic_morph.wav: 17.0 s, peak -6.7 dBFS
