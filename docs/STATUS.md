@@ -1,5 +1,14 @@
 # ANDOR ANALOG — status
 
+> **11 Nov 2026: ANDOR Learn V1** (branch `feature/andor-learn-v1`, from 1.0.0 `main`; OSP
+> `feature/andor-learn-v1`). Guided lessons are opt-in:
+> - Quick Start, Make a moving pattern (ARP, 8 steps), Blend with MORPH, See the effect chain.
+>
+> There is also a contextual Learn mode with 18 help regions, a topic browser, a one-time
+> invitation and per-user progress. Interface only: no parameter, state or DSP change.
+> Learn OFF renders pixel-identical (724 / 724 baseline screenshots).
+> Details: docs/LEARN_V1.md, docs/LEARN_V1_REPORT.md. DAW checks still to do.
+
 > **9 Nov 2026: 1.0.0 release candidate** (branch `claude/release-candidate`;
 > docs/release/READINESS_SCORECARD.md). On the baseline (`main` a25c270, OSP 3d949cd), the full
 > suite passed 13/13 on Linux. Release fixes:

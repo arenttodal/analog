@@ -2,6 +2,7 @@
 // factory sounds) and its engine. Started by tools/create_andor_instrument.py from
 // shared/andor-shell/template.
 
+#include "AnalogLearn.h"
 #include "AnalogEngine.h"
 #include "AnalogMaterialsData.h"
 #include "AnalogParameters.h"
@@ -447,6 +448,9 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
+        // ANDOR Learn (docs/LEARN_V1.md): guided lessons and Learn mode, two items in the header
+        // menu. Interface only: no parameter, no state, nothing drawn until asked for.
+        p.learn = andor::analog::learnDescriptor();
         p.stateVersion = 13;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)

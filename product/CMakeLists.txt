@@ -13,6 +13,7 @@ andor_add_instrument(ANDOR_Analog
     VERSION ${ANALOG_VERSION}
     SOURCES
         Source/Product.cpp
+        Source/AnalogLearn.cpp
         Source/AnalogEngine.cpp
         Source/AnalogParameters.cpp
         Source/AnalogPopovers.cpp
@@ -40,5 +41,5 @@ juce_add_binary_data(analog_materials
 target_link_libraries(ANDOR_Analog PRIVATE analog_materials)
 
 andor_add_instrument_tests(ANDOR_Analog andor_analog_tests
-    SOURCES tests/AnalogProductTests.cpp
+    SOURCES tests/AnalogProductTests.cpp tests/AnalogLearnTests.cpp
     GOLDEN golden/parameter-schema.txt)
