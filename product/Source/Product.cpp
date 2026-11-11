@@ -16,6 +16,7 @@
 #include "KeyDnaState.h"
 #include "SamplePatches.h"
 #include "SampleSourceUI.h"
+#include "ShaperDnaPanel.h"
 #include "ShellProcessor.h"
 #include "ShellProduct.h"
 
@@ -470,6 +471,19 @@ const ProductInfo& productInfo()
         p.generatorGranularToggle = true;
         // Cinematic V6 gate 2: SUB in the arpeggiator's housing ("arp" above, "sub" below).
         p.arpCompanion = { "sub", andor::analog::params::subEnabled, [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSubPopover (host); } };
+        // SHAPER DNA V1: the key on the MOVEMENT rack's SHAPER and its panel.
+        p.shaperDna = andor::shell::ProductInfo::ShaperDna {
+            andor::analog::params::dnaEnabled,
+            [] (osp::plugin::InstrumentHost& host) -> std::unique_ptr<osp::plugin::MiniPanel> { return std::make_unique<andor::analog::ShaperDnaPanel> (host); },
+            [] (osp::plugin::InstrumentHost& host) -> juce::String {
+                // Why it cannot play just now (the key's tooltip): MOVEMENT not heard on MAIN, or lane A off.
+                if (host.parameterValue ("analog.movement.a.on") < 0.5f)
+                    return "Switch MOVEMENT lane A on for Shaper DNA";
+                auto& engine = dynamic_cast<andor::analog::AnalogEngine&> (dynamic_cast<andor::shell::ShellProcessor&> (host).productEngine());
+                if (! andor::analog::fx::movementOnMain (engine.fxRoute()))
+                    return "Place MOVEMENT on MAIN for Shaper DNA";
+                return {};
+            } };
         // The walnut sibling of ANDOR OSP's teak (docs/WALNUT_VISUAL_DESIGN.md): its own
         // finish, interface only.
         p.materials = walnutMaterials();

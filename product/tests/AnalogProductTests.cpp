@@ -27,6 +27,7 @@
 #include "KontaktImport.h"
 #include "SampleSourceUI.h"
 #include "ShellEditor.h"
+#include "ShaperDnaPanel.h"
 #include "SubPanel.h"
 #include "ShellProcessor.h"
 
@@ -9031,4 +9032,195 @@ TEST_CASE ("SHAPER DNA: switched on through the plugin, it hands lane A's SHAPER
     setValue (p, params::dnaEnabled, 0.0f);
     renderShell (p, 0.2, {}, false);
     CHECK (engine.synthForTest().shaperHandoff() < 1.0e-3);
+}
+
+//==============================================================================
+// SHAPER DNA V1, gate 4: the rack's key and the panel
+
+namespace
+{
+    struct DnaRig
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+        andor::shell::ShellEditor* ui = nullptr;
+        osp::plugin::rack::Module* movement = nullptr;
+        explicit DnaRig (int width = 1448)
+        {
+            using osp::plugin::rack::Kind;
+            osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+            editor.reset (p.createEditorIfNeeded());
+            ui = &dynamic_cast<andor::shell::ShellEditor&> (*editor);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui->instrumentHeight() / 1448.0f));
+            ui->refreshNow();
+            ui->toggleRackFromLabel (Kind::movement);
+            ui->refreshNow();
+            movement = ui->effectsRack().module (Kind::movement);
+        }
+        juce::Component* key() const { return movement != nullptr ? osp::plugin::rackShaperDnaKey (*movement) : nullptr; }
+        andor::analog::ShaperDnaPanel* panel() { return dynamic_cast<andor::analog::ShaperDnaPanel*> (ui->openPopupPanel()); }
+    };
+}
+
+TEST_CASE ("SHAPER DNA: the rack's key - lane A's SHAPER only, beside the magnifier; its light switches DNA (undoable), its name opens the panel", "[analog][shaperdna][ui]")
+{
+    DnaRig rig;
+    REQUIRE (rig.movement != nullptr);
+    auto* key = rig.key();
+    REQUIRE (key != nullptr);
+    // Not in DRIFT (the default), nor TAPE / CHORUS / PULSE: hidden, its setting kept.
+    CHECK_FALSE (key->isVisible());
+    for (const float mode : { 1.0f, 2.0f, 3.0f })
+    {
+        setValue (rig.p, "movement.mode", mode);
+        rig.ui->refreshNow();
+        CHECK_FALSE (key->isVisible());
+    }
+    setValue (rig.p, "movement.mode", 4.0f);   // SHAPER
+    rig.ui->refreshNow();
+    CHECK (key->isVisible());
+    // Small: no taller than the magnifier, inside the SHAPER display's top edge.
+    CHECK (key->getHeight() <= 20);
+    CHECK (key->getWidth() <= 48);
+    CHECK (dynamic_cast<juce::SettableTooltipClient&> (*key).getTooltip() == "Different Shaper rhythms for individual notes");
+    // The light: DNA on, one gesture, undoable.
+    rig.p.parameters.copyState();
+    rig.p.undoManager.beginNewTransaction();
+    osp::plugin::clickRackShaperDnaKey (*rig.movement, true);
+    rig.p.parameters.copyState();
+    CHECK (rig.p.parameterValue (params::dnaEnabled) >= 0.5f);
+    rig.p.undoManager.beginNewTransaction();
+    rig.p.undoManager.undo();
+    CHECK (rig.p.parameterValue (params::dnaEnabled) < 0.5f);
+    // The name: the panel, anchored to the key, inside the instrument.
+    const auto before = allParameterValues (rig.p);
+    osp::plugin::clickRackShaperDnaKey (*rig.movement, false);
+    REQUIRE (rig.panel() != nullptr);
+    CHECK (rig.ui->openPopupIndex() == andor::shell::ShellEditor::anchoredPopup);
+    CHECK (rig.ui->anchoredPopoverOpenFrom (*key));
+    const auto card = rig.ui->getLocalArea (rig.panel(), rig.panel()->card());
+    CHECK (rig.editor->getLocalBounds().contains (card));
+    CHECK (allParameterValues (rig.p) == before);   // (opening changes nothing)
+    // The key again closes it; Escape closes it.
+    osp::plugin::clickRackShaperDnaKey (*rig.movement, false);
+    CHECK (rig.ui->openPopupPanel() == nullptr);
+    osp::plugin::clickRackShaperDnaKey (*rig.movement, false);
+    REQUIRE (rig.panel() != nullptr);
+    CHECK (rig.ui->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+    CHECK (rig.ui->openPopupPanel() == nullptr);
+}
+
+TEST_CASE ("SHAPER DNA: the panel - every control is a DNA parameter; KEY ZONES' handles drag the splits; CYCLE shows its sequence (GUI-01)", "[analog][shaperdna][ui]")
+{
+    for (const int width : { 1448, 869 })
+    {
+        INFO ("width " << width);
+        DnaRig rig (width);
+        setValue (rig.p, "movement.mode", 4.0f);
+        rig.ui->refreshNow();
+        osp::plugin::clickRackShaperDnaKey (*rig.movement, false);
+        auto* panel = rig.panel();
+        REQUIRE (panel != nullptr);
+        panel->settleNow();
+        // Inside the instrument at every size (placePopover keeps it there).
+        CHECK (rig.editor->getLocalBounds().contains (rig.ui->getLocalArea (panel, panel->card())));
+        // CYCLE (the default): its sequence, NOTES shown.
+        CHECK (panel->display().cycleText() == "ABCABCABCABC");
+        CHECK (panel->notesControl().isVisible());
+        setValue (rig.p, params::dnaNotesPerProfile, 1.0f);
+        panel->refreshContent();
+        CHECK (panel->display().cycleText() == "AABBCCAABBCC");
+        setValue (rig.p, params::dnaProfiles, 0.0f);   // A / B
+        panel->refreshContent();
+        CHECK (panel->display().cycleText() == "AABBAABBAABB");
+        CHECK (panel->rateSelector (2).getAlpha() < 1.0f);   // (C kept, quiet)
+        setValue (rig.p, params::dnaProfiles, 1.0f);
+        // KEY ZONES: NOTES hidden, the handles drag the splits, one gesture each, never crossing.
+        setValue (rig.p, params::dnaAssignment, 1.0f);
+        panel->refreshContent();
+        CHECK_FALSE (panel->notesControl().isVisible());
+        CHECK (panel->display().cycleText().isEmpty());
+        auto& display = panel->display();
+        using Split = andor::analog::ShaperDnaDisplay::Split;
+        const auto ab = display.splitHandle (Split::ab);
+        CHECK (display.splitAt (ab) == Split::ab);
+        CHECK (display.splitAt (display.splitHandle (Split::bc)) == Split::bc);
+        rig.p.parameters.copyState();
+        rig.p.undoManager.beginNewTransaction();
+        juce::ModifierKeys none;
+        auto event = [&] (juce::Point<float> at) {
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, none, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &display, &display,
+                                     juce::Time::getCurrentTime(), ab, juce::Time::getCurrentTime(), 1, false);
+        };
+        display.mouseDown (event (ab));
+        display.mouseDrag (event ({ display.keyX (48), ab.y }));
+        display.mouseUp (event ({ display.keyX (48), ab.y }));
+        rig.p.parameters.copyState();
+        CHECK (juce::roundToInt (rig.p.parameterValue (params::dnaSplitAB)) == 47);
+        // Dragged past the other split: stops a key short of it.
+        display.mouseDown (event (display.splitHandle (Split::ab)));
+        display.mouseDrag (event ({ display.keyX (100), ab.y }));
+        display.mouseUp (event ({ display.keyX (100), ab.y }));
+        CHECK (juce::roundToInt (rig.p.parameterValue (params::dnaSplitAB)) == juce::roundToInt (rig.p.parameterValue (params::dnaSplitBC)) - 1);
+        rig.p.undoManager.beginNewTransaction();
+        rig.p.undoManager.undo();
+        rig.p.undoManager.undo();
+        CHECK (juce::roundToInt (rig.p.parameterValue (params::dnaSplitAB)) == 59);
+        // The rows: PATTERN and RATE bound to the profile's own parameters.
+        CHECK (osp::plugin::binding::tagsOf (panel->patternSelector (1)).contains (params::dnaProfileId (1, "pattern")));
+        CHECK (osp::plugin::binding::tagsOf (panel->rateSelector (2)).contains (params::dnaProfileId (2, "rate")));
+        CHECK (osp::plugin::binding::tagsOf (panel->assignmentControl()).contains (params::dnaAssignment));
+        // The light in the header: DNA on.
+        panel->lamp().toggle();
+        CHECK (rig.p.parameterValue (params::dnaEnabled) >= 0.5f);
+    }
+}
+
+TEST_CASE ("SHAPER DNA screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-shaper-dna]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    for (const int width : { 1448, 869 })
+    {
+        DnaRig rig (width);
+        auto save = [&] (const juce::Image& image, const juce::String& name) {
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (image, stream);
+        };
+        auto rackShot = [&] (const juce::String& name) {
+            rig.ui->refreshNow();
+            const auto area = rig.ui->getLocalArea (&rig.ui->effectsRack(), rig.ui->effectsRack().getLocalBounds());
+            save (rig.editor->createComponentSnapshot (area, true, 2.0f), name);
+        };
+        auto panelShot = [&] (const juce::String& name, bool full = false) {
+            rig.ui->refreshNow();
+            if (auto* panel = rig.panel())
+            {
+                panel->settleNow();
+                save (rig.editor->createComponentSnapshot (rig.ui->getLocalArea (panel, panel->card().expanded (8)), true, 2.0f), name);
+            }
+            if (full)
+                save (rig.editor->createComponentSnapshot (rig.editor->getLocalBounds(), true, 1.0f), name + "-full");
+        };
+        rackShot ("dna-00-rack-drift");                 // (the rack as it was: no key outside SHAPER)
+        setValue (rig.p, "movement.mode", 4.0f);
+        rackShot ("dna-01-rack-shaper-off");            // the key, DNA off
+        setValue (rig.p, params::dnaEnabled, 1.0f);
+        rackShot ("dna-02-rack-shaper-on");             // the key lit
+        osp::plugin::clickRackShaperDnaKey (*rig.movement, false);
+        panelShot ("dna-03-panel-cycle", true);         // CYCLE, defaults
+        setValue (rig.p, params::dnaNotesPerProfile, 1.0f);
+        setValue (rig.p, params::dnaProfileId (2, "pattern"), 7.0f);
+        panelShot ("dna-04-panel-cycle-2-notes");       // two notes per profile, C's own pattern
+        setValue (rig.p, params::dnaAssignment, 1.0f);
+        panelShot ("dna-05-panel-key-zones", true);     // KEY ZONES
+        setValue (rig.p, params::dnaProfiles, 0.0f);
+        panelShot ("dna-06-panel-two-zones");           // A / B
+        setValue (rig.p, params::dnaEnabled, 0.0f);
+        panelShot ("dna-07-panel-off");                 // OFF: the same picture, quieter
+    }
 }
