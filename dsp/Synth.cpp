@@ -144,6 +144,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.toybox2.prepare (internalRate);
         v.mirage2.prepare (internalRate);
         v.highPass.prepare (internalRate);
+        v.sendHighPass.prepare (internalRate);
         v.organic.prepare (internalRate);
         for (auto& z : v.zones)
             z.prepare (internalRate);
@@ -218,6 +219,7 @@ void Synth::reset() noexcept
         v.amp.kill();
         v.env.kill();
         v.filter.reset();
+        v.sendFilter.reset();
         v.line1.reset();
         v.line2.reset();
         v.osc2Out = 0.0f;
@@ -596,6 +598,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     if (! wasActive)
     {
         v.filter.reset();
+        v.sendFilter.reset();
         v.line1.reset();
         v.line2.reset();
         // State version 4: the models' extras from the note's seed (SUPER SAW's side phases
@@ -629,8 +632,10 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.noiseColour = 0.0f;
         v.ringNow = static_cast<float> (current.ringMix);
         v.ota.reset();
+        v.sendOta.reset();
         v.otaMix = v.otaTarget = current.filterModel == FilterModel::ota ? 1.0f : 0.0f;
         v.highPass.reset();
+        v.sendHighPass.reset();
         v.eqA.reset();
         v.eqB.reset();
         v.eqC.reset();
@@ -1100,6 +1105,7 @@ void Synth::allSoundOff() noexcept
         v.amp.kill();
         v.env.kill();
         v.filter.reset();
+        v.sendFilter.reset();
         v.line1.reset();
         v.line2.reset();
         v.outGain = 0.0f;
@@ -1421,7 +1427,10 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     }
     v.otaTarget = p.filterModel == FilterModel::ota ? 1.0f : 0.0f;
     if (v.otaTarget > 0.0f && v.otaMix <= 0.0f)
+    {
         v.ota.reset();   // (fading in from rest, never from a stale state)
+        v.sendOta.reset();
+    }
     // The high-pass before the low-pass: its curve the OTA voicing's (JUPITER) or the Juno
     // variant's; switched off, it glides to FLAT and then sleeps (no click either way).
     {
@@ -1431,10 +1440,14 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         if (p.highPass >= 0)
         {
             v.highPass.setMode (variant, std::clamp (p.highPass, 0, 3));
+            v.sendHighPass.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.highPassTail = std::max (1, static_cast<int> (VoiceHighPass::rampSeconds * internalRate) + controlPeriod * oversampling);
         }
         else if (v.highPassTail > 0)
+        {
             v.highPass.setMode (variant, flat);
+            v.sendHighPass.setMode (variant, flat);
+        }
     }
     equalPower (v.pan + static_cast<float> (v.driftOut[3]) + v.panMod, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
     const float driveMoved = moved (p.filterDrive, current.filterDrive);
@@ -2341,29 +2354,54 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             if (p.polyModToCutoff)
                 cutoff += scratchPolyMod[ks] * polyModCutoffSemitones;
             float in = scratchSource[ks] * v.driveGain;
+            const int at = done + k;
+            // The cards' sends (MAIN + SEND): each card's own part as it reaches the filter.
+            float sendIn = 0.0f;
+            if (sendTaps)
+            {
+                const float t = static_cast<float> (tapBase + at) / static_cast<float> (tapTotal);
+                const float sA = sendFrom[0] + t * (sendTo[0] - sendFrom[0]), sB = sendFrom[1] + t * (sendTo[1] - sendFrom[1]),
+                            sC = sendFrom[2] + t * (sendTo[2] - sendFrom[2]);
+                sendIn = (sA * scratchA[ks] + sB * scratchB[ks] + sC * scratchC[ks]) * v.driveGain;
+            }
             if (v.highPassTail > 0)
             {
                 in = v.highPass.process (in);
+                if (sendTaps)
+                    sendIn = v.sendHighPass.process (sendIn);
                 if (current.highPass < 0)
                     --v.highPassTail;
             }
-            float y;
+            // The filter, once for the voice and (while a send is open) once more, its twin, for
+            // the sends: FILTER shapes what the room hears exactly as it shapes the dry.
+            const float g = cutoffG (cutoff);
+            float y, sendY = 0.0f;
             if (v.otaMix <= 0.0f && v.otaTarget <= 0.0f)   // LADDER: the original path
-                y = v.filter.process (in, cutoffG (cutoff), v.k, driveBias, driveBiasOffset) * v.makeUp;
+            {
+                y = v.filter.process (in, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                if (sendTaps)
+                    sendY = v.sendFilter.process (sendIn, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+            }
             else
             {
                 // OTA (or the crossfade between the models, about 30 ms: both run meanwhile).
-                const float g = cutoffG (cutoff);
-                const float ota = v.ota.process (in, v.otaCutoffOffset != 0.0f ? cutoffG (cutoff + v.otaCutoffOffset) : g, v.resonance01, current.otaVoicing == OtaVoicing::jupiter ? OtaCharacter::jupiter : OtaCharacter::juno,
-                                                 current.otaTwoPole) * v.otaMakeUp;
+                const float gOta = v.otaCutoffOffset != 0.0f ? cutoffG (cutoff + v.otaCutoffOffset) : g;
+                const auto character = current.otaVoicing == OtaVoicing::jupiter ? OtaCharacter::jupiter : OtaCharacter::juno;
+                const float ota = v.ota.process (in, gOta, v.resonance01, character, current.otaTwoPole) * v.otaMakeUp;
+                const float sendOta = sendTaps ? v.sendOta.process (sendIn, gOta, v.resonance01, character, current.otaTwoPole) * v.otaMakeUp : 0.0f;
                 if (v.otaMix >= 1.0f && v.otaTarget >= 1.0f)
+                {
                     y = ota;
+                    sendY = sendOta;
+                }
                 else
                 {
                     const float ladder = v.filter.process (in, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                    const float sendLadder = sendTaps ? v.sendFilter.process (sendIn, g, v.k, driveBias, driveBiasOffset) * v.makeUp : 0.0f;
                     const float step = 1.0f / (0.03f * static_cast<float> (internalRate));
                     v.otaMix = std::clamp (v.otaMix + (v.otaTarget > v.otaMix ? step : -step), 0.0f, 1.0f);
                     y = ladder + v.otaMix * (ota - ladder);
+                    sendY = sendLadder + v.otaMix * (sendOta - sendLadder);
                 }
             }
             v.outGain += 0.004f * (v.outGainTarget - v.outGain);
@@ -2371,18 +2409,13 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             const float fadeGain = v.fade > 0 ? static_cast<float> (v.fade) / static_cast<float> (fadeLength) : 1.0f;
             if (v.fade > 0)
                 out *= fadeGain;
-            const int at = done + k;
             left[at] += out * v.panL;
             right[at] += out * v.panR;
             if (sendTaps)
             {
-                // The cards' sends (MAIN + SEND): each card's own part as it reaches the filter,
-                // shaped by the note's AMP, level and place - never filtered (the FILTER macro is
-                // MAIN's). Card C's part is both its layers'.
-                const float t = static_cast<float> (tapBase + at) / static_cast<float> (tapTotal);
-                const float sA = sendFrom[0] + t * (sendTo[0] - sendFrom[0]), sB = sendFrom[1] + t * (sendTo[1] - sendFrom[1]),
-                            sC = sendFrom[2] + t * (sendTo[2] - sendFrom[2]);
-                const float tap = (sA * scratchA[ks] + sB * scratchB[ks] + sC * scratchC[ks]) * scratchAmp[ks] * v.outGain * fadeGain;
+                // The sends, filtered as the voice is and shaped by the note's AMP, level and
+                // place. Card C's part is both its layers'.
+                const float tap = sendY * scratchAmp[ks] * v.outGain * fadeGain;
                 tapL[at] += tap * v.panL;
                 tapR[at] += tap * v.panR;
             }
@@ -2522,8 +2555,16 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         sendFrom = sendTo = {};
     sendTaps = mainSend && (sendTo[0] > 0.0f || sendTo[1] > 0.0f || sendTo[2] > 0.0f || sendFrom[0] > 0.0f || sendFrom[1] > 0.0f || sendFrom[2] > 0.0f);
     if (sendTaps && ! sendWas)
+    {
         for (auto* d : { &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R })
             d->reset();   // (nothing left over from the last time they ran)
+        for (auto& v : voices)
+        {
+            v.sendFilter.reset();   // (the voices' send filters start from rest, as the sends do)
+            v.sendOta.reset();
+            v.sendHighPass.reset();
+        }
+    }
     sendWas = sendTaps;
     tapTotal = std::max (1, total);
     if (sendTaps)
@@ -2626,13 +2667,15 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     // MOVEMENT's level gain, sample by sample, for SUB (it never enters MOVEMENT): PULSE and
     // SHAPER move it with the rest. 1 where no MOVEMENT plays (a route without it).
     const bool subFollowsMovement = ! subOnMain && (subOsc.sounding() || subTail > 0);
-    if (subFollowsMovement)
+    // (The cards' sends follow it too: MOVEMENT on MAIN moves what SEND's room hears.)
+    if (subFollowsMovement || sendTaps)
     {
         std::fill (subGain.begin(), subGain.begin() + numSamples, 1.0f);
         effects.beginMovementTrace (subGain.data(), numSamples);
     }
     if (mainSend)
-        router.process (effects, left, right, numSamples, sendTaps ? sendOutL.data() : nullptr, sendTaps ? sendOutR.data() : nullptr);
+        router.process (effects, left, right, numSamples, sendTaps ? sendOutL.data() : nullptr, sendTaps ? sendOutR.data() : nullptr,
+                        sendTaps ? subGain.data() : nullptr);
     else
         router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
     effects.endMovementTrace();

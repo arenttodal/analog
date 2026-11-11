@@ -242,7 +242,8 @@ std::shared_ptr<const Impulse> FxEngine::impulse (int slot) const
     return {};
 }
 
-void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, int numSamples, const float* sendLeft, const float* sendRight) noexcept
+void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, int numSamples, const float* sendLeft, const float* sendRight,
+                        const float* sendGain) noexcept
 {
     if (const auto* next = exchange.takePending(); next != nullptr && next != current)
     {
@@ -274,7 +275,8 @@ void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, i
         else if (ducking)
             run = std::min (remaining, 32);
         if (custom && current->graph.mainSend)
-            runMainSend (legacy, *current, l, r, run, sendLeft != nullptr ? sendLeft + done : nullptr, sendRight != nullptr ? sendRight + done : nullptr);
+            runMainSend (legacy, *current, l, r, run, sendLeft != nullptr ? sendLeft + done : nullptr, sendRight != nullptr ? sendRight + done : nullptr,
+                         sendGain != nullptr ? sendGain + done : nullptr);
         else if (custom)
             runCustom (legacy, *current, l, r, run);
         else
@@ -342,7 +344,7 @@ void FxEngine::runCustom (osp::PostProcessor& legacy, const CompiledGraph& g, fl
 }
 
 void FxEngine::runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n, const float* sendLeft,
-                            const float* sendRight) noexcept
+                            const float* sendRight, const float* sendGain) noexcept
 {
     // MAIN: the voices' sum (KALEIDOSCOPE's stage first, as CUSTOM), its inserts.
     legacy.customReimagined (left, right, n);
@@ -354,6 +356,14 @@ void FxEngine::runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, 
     {
         std::memcpy (sendL.data(), sendLeft, bytes);
         std::memcpy (sendR.data(), sendRight, bytes);
+        if (sendGain != nullptr)
+            for (int i = 0; i < n; ++i)
+            {
+                // MOVEMENT (on MAIN, already run): its PULSE / SHAPER level, so what the room
+                // hears pulses and gates with the dry (1 where no MOVEMENT plays).
+                sendL[static_cast<std::size_t> (i)] *= sendGain[i];
+                sendR[static_cast<std::size_t> (i)] *= sendGain[i];
+            }
     }
     else
     {

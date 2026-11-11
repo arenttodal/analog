@@ -334,6 +334,12 @@ private:
         float resonance01 = 0.0f;
         float otaCutoffOffset = 0.0f; ///< semitones (the Juno-6's calibration)
         VoiceHighPass highPass;
+        // MAIN + SEND: the cards' sends through the same filter as the voice (its twin: the same
+        // cutoff, resonance, model and high-pass, its own state), so FILTER shapes what the
+        // room hears too. Run only while a send is open.
+        LadderFilter sendFilter;
+        OtaFilter sendOta;
+        VoiceHighPass sendHighPass;
         // Each card's EQ and DAMPEN on its own part, before the filter (Patch::eqA ...).
         VoiceEq eqA, eqB;
         VoiceEq eqC;                  ///< state version 8: card B's (OSC 2), the shell's layer C

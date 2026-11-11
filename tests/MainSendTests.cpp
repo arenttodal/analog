@@ -1,7 +1,7 @@
 // Cinematic V6 gate 4: MAIN + SEND (docs/CINEMATIC_V6_GATE4.md). An opt-in route of its own:
 // MAIN is the dry insert chain (no spatial processor), SEND is fed only by the cards' sends
-// (taken before the voice filter) and returns strictly wet. CLASSIC and CUSTOM never compute a
-// send; SUB never reaches SEND.
+// (filtered as the voices are, gated by MOVEMENT on MAIN) and returns strictly wet. CLASSIC
+// and CUSTOM never compute a send; SUB never reaches SEND.
 
 #include "TestUtil.h"
 
@@ -274,4 +274,49 @@ TEST_CASE ("SUB (review fix): with one path, SUB meets the voices at a latent ro
         return;
     }
     WARN ("no latent effect at this rate: nothing to align");
+}
+
+TEST_CASE ("SEND-02: the cards' sends follow FILTER - a closed filter darkens and quiets what the room hears", "[mainsend][v6]")
+{
+    // Only card C sounds (A silent), sent at 100 % to SPACE alone; MAIN is empty.
+    const auto g = mainSend ({}, { effect (fx::Type::space) });
+    Patch p = twoCards();
+    p.osc1Level = 0.0;
+    p.echo = 0.0;
+    p.sendC = 1.0;
+    const auto open = play (p, &g);
+    Patch closed = p;
+    closed.tone = 0.08;   // (the FILTER macro nearly closed)
+    const auto shut = play (closed, &g);
+    REQUIRE (open.rms (1.0, 2.0) > 1.0e-3);
+    // The dry is filtered (as always) and so is what SEND hears: the room after the release
+    // falls with the dry, where it used to stay as loud as the open filter's.
+    CHECK (shut.rms (0.1, 0.5) < 0.5 * open.rms (0.1, 0.5));
+    CHECK (shut.rms (1.0, 2.0) < 0.5 * open.rms (1.0, 2.0));
+}
+
+TEST_CASE ("SEND-03: the cards' sends follow MOVEMENT on MAIN - PULSE gates what the room hears too", "[mainsend][v6]")
+{
+    // Card C at 100 % into ECHO alone (a short repeat: the pulse survives into the wet);
+    // MOVEMENT (PULSE, nearly square, at full) on MAIN.
+    const auto g = mainSend ({ effect (fx::Type::movement) }, { effect (fx::Type::echo) });
+    Patch p = twoCards();
+    p.osc1Level = 0.0;
+    p.space = 0.0;
+    p.echo = 0.6;
+    p.sendC = 1.0;
+    p.effects.movementMode = osp::MovementMode::pulse;
+    p.effects.pulseRate = 0.83;
+    p.effects.pulseShape = 1.0;
+    p.effects.pulseStereo = 0.0;
+    const std::vector<Event> held { on (0, 57, 100), off (60000, 57) };
+    Patch still = p;
+    still.motion = 0.0;
+    Patch moving = p;
+    moving.motion = 1.0;
+    const auto a = play (still, &g, 2.0, held), b = play (moving, &g, 2.0, held);
+    // The room alone, after the release (MAIN's dry is over by then): with MOVEMENT gating the
+    // sends it carries clearly less of the note than without.
+    REQUIRE (a.rms (1.3, 2.0) > 1.0e-4);
+    CHECK (b.rms (1.3, 2.0) < 0.85 * a.rms (1.3, 2.0));
 }

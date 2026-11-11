@@ -75,11 +75,14 @@ public:
     void setSettings (const Settings& settings) noexcept;
 
     /** Audio thread: one block, in place, after the voices (the PostProcessor's slot). With a
-        MAIN + SEND route, `sendLeft` / `sendRight` are the cards' sends (taken before the voice
-        filter; null: none this block): MAIN runs on left / right, SEND on a copy of the sends,
-        and SEND's wet return joins MAIN, the two aligned to the slower. */
+        MAIN + SEND route, `sendLeft` / `sendRight` are the cards' sends (filtered as the voices
+        are; null: none this block): MAIN runs on left / right, SEND on a copy of the sends,
+        and SEND's wet return joins MAIN, the two aligned to the slower. `sendGain` (optional)
+        is MOVEMENT's level trace for this block: read once MAIN has run (MOVEMENT on MAIN has
+        written it), it scales the sends before SEND hears them, so the room pulses and gates
+        with the dry. */
     void process (osp::PostProcessor& legacy, float* left, float* right, int numSamples, const float* sendLeft = nullptr,
-                  const float* sendRight = nullptr) noexcept;
+                  const float* sendRight = nullptr, const float* sendGain = nullptr) noexcept;
     /** Audio thread: the route playing (or about to) is MAIN + SEND: the voices' sends are wanted. */
     bool wantsSend() const noexcept { return (current != nullptr && current->graph.mainSend) || (waiting != nullptr && waiting->graph.mainSend); }
     /** Audio thread: the route playing this block is MAIN + SEND (not one still ducking out). */
@@ -116,7 +119,8 @@ private:
                    bool ahead = false) noexcept;
     void runEffect (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth) noexcept;
     bool runGroup (osp::PostProcessor& legacy, const Node& node, float* left, float* right, int n, int depth, int& group, bool wet, bool ahead) noexcept;
-    void runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n, const float* sendLeft, const float* sendRight) noexcept;
+    void runMainSend (osp::PostProcessor& legacy, const CompiledGraph& g, float* left, float* right, int n, const float* sendLeft, const float* sendRight,
+                      const float* sendGain) noexcept;
     void applySettings() noexcept;
     int chainLatency (const std::vector<Node>& chain) const noexcept;
     int effectLatency (InstanceId id) const noexcept;

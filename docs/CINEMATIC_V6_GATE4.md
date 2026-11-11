@@ -7,16 +7,18 @@ CLASSIC and CUSTOM session and preset plays exactly as before; none is ever conv
 ## Signal flow
 
 ```
-A  B  C (C1 + C2)      each card's part, after its own stages, before the voice filter
+A  B  C (C1 + C2)      each card's part, after its own stages
  |  |  |
  |  |  +-- SEND C --+
- |  +----- SEND B --+-> sends (shaped by each note's AMP, level and pan;
- +-------- SEND A --+   never filtered)
+ |  +----- SEND B --+-> sends -> the voice filter's twin (FILTER, as the dry)
+ +-------- SEND A --+   -> each note's AMP, level and pan
  |                                   |
 voice filter -> AMP -> stereo sum    |
  -> chorus / KALEIDOSCOPE            |
  + SUB (MAIN only)                   |
- -> MAIN chain (inserts only) ------(+)-- SEND chain (wet only) <--+
+ -> MAIN chain (inserts only)        |
+      MOVEMENT's level trace ------> x (PULSE / SHAPER VOL)
+ ---------------------------------(+)-- SEND chain (wet only) <--+
  -> output gain, DC blocker, guard
 ```
 
@@ -37,9 +39,19 @@ voice filter -> AMP -> stereo sum    |
   reaches SEND: it has no send, and SEND's input is the cards' sends alone. With one path, SUB
   stays after every effect, as in Gate 2.
 - **Sends are taps, never moves.** Each card's SEND (`analog.send.a/b/c`, 0–100 %) taps that
-  card's part as it reaches the filter. The FILTER macro is MAIN's; the sends are never
-  filtered. The dry is untouched: a send adds, it never subtracts. Card C's send carries both
-  its layers.
+  card's part as it reaches the filter. The dry is untouched: a send adds, it never subtracts.
+  Card C's send carries both its layers.
+- **The sends follow FILTER and MOVEMENT** (V7 follow-up, like SUB): everything runs through
+  the macro panel's FILTER and MOVEMENT, so a closed filter or a gating SHAPER is heard in the
+  room too, not only in the dry.
+  - FILTER: each voice runs its send through a twin of its own filter (the same cutoff,
+    envelope, resonance, model and high-pass; its own state), only while a send is open.
+  - MOVEMENT: on MAIN, MOVEMENT writes its level trace (PULSE, SHAPER VOL; both lanes), and
+    SEND's input is multiplied by it before SEND hears it. SHAPER's FILTER target and DRIFT,
+    TAPE and CHORUS are not carried (as for SUB). MOVEMENT placed on SEND processes the sends
+    itself, as before.
+  - There is no switch: always on, as asked. CLASSIC and CUSTOM never compute a send, so they
+    are untouched.
 - **Gains are kept apart.** The macros never change with the tabs. On SEND, ECHO and SPACE
   set the wet return; the cards' sends set what feeds it.
 
@@ -78,6 +90,7 @@ voice filter -> AMP -> stereo sum    |
 | Spec | Test | Checks |
 |---|---|---|
 | LEGACY-01 | `[v6-baseline]`, `[legacy]`, `[fx]`, `[mainsend][v6]` | Every golden is unchanged. In CLASSIC and CUSTOM the cards' sends change nothing (bit-identical). |
+| SEND-02 / SEND-03 | `[mainsend][v6]` | A nearly closed FILTER quiets the room after the release (< 0.5×); PULSE on MAIN gates what SEND hears (room < 0.85× without). Both fail on the previous code. |
 | BUS-01 | `[mainsend][v6]` | Card C at 100 % and card A at 0 %: the room after the release is C's alone. A silent C sent at 100 % adds nothing. The dry under the send is untouched. |
 | Strictly wet | `[mainsend][v6]` | A SEND with only an EQ returns nothing. A lane without a spatial processor adds nothing. The SPACE and ECHO macros at 0 return nothing. |
 | SUB | `[mainsend][v6][sub]` | Every card at 100 %, full SPACE and ECHO, feedback 0.95: SUB's release has no room or echo after it. |
