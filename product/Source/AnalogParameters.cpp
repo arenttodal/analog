@@ -99,6 +99,8 @@ namespace
         // State version 18: SHAPER DNA.
         iDnaEnabled, iDnaAssignment, iDnaProfiles, iDnaNotesPerProfile, iDnaSplitAB, iDnaSplitBC,
         iDnaPatternA, iDnaRateA, iDnaPatternB, iDnaRateB, iDnaPatternC, iDnaRateC,
+        // State version 19: the USER macros (their own values; the patch does not read them).
+        iUserMacro1, iUserMacro2, iUserMacro3, iUserMacro4, iUserMacro5, iUserMacro6,
         count
     };
 
@@ -216,6 +218,9 @@ namespace
             for (int profile = 0; profile < 3; ++profile)
                 for (const char* name : { "pattern", "rate" })
                     l.add (dnaProfileId (profile, name));
+            // State version 19: the USER macros.
+            for (int macro = 0; macro < 6; ++macro)
+                l.add (userMacroId (macro));
             return l;
         }();
         jassert (withCards.size() == count);
@@ -869,6 +874,26 @@ void addShaperDnaTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout
         layout.add (osp::plugin::parameters::make<Choice> (v33 (dnaProfileId (profile, "pattern")), name + " Pattern", patterns, d.pattern[i] + 1));
         layout.add (osp::plugin::parameters::make<Choice> (v33 (dnaProfileId (profile, "rate")), name + " Rate", rates, d.rate[i] + 1));
     }
+}
+
+void addUserMacrosTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 19 (USER MACROS V1.1): append-only, frozen once shipped. At 0 with no
+    // assignment they do nothing at all.
+    for (int macro = 0; macro < 6; ++macro)
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (juce::ParameterID { userMacroId (macro), 34 }, "User Macro " + juce::String (macro + 1),
+                                                                              juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f,
+                                                                              juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
+}
+
+int readerIndexOf (const juce::String& id)
+{
+    return ids().indexOf (id);
+}
+
+int userMacroReaderIndex (int macro) noexcept
+{
+    return iUserMacro1 + std::clamp (macro, 0, 5);
 }
 
 const std::vector<osp::mod::ProductDest>& modulationDestinations()

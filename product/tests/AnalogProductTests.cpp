@@ -29,6 +29,8 @@
 #include "ShellEditor.h"
 #include "ShaperDnaPanel.h"
 #include "SubPanel.h"
+#include "UserMacroBank.h"
+#include "UserMacroUI.h"
 #include "ShellProcessor.h"
 
 #include "audio/utility/TestSignals.h"
@@ -37,6 +39,7 @@
 #include "io/AudioFileIO.h"
 
 #include <set>
+#include <iostream>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -802,6 +805,19 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             };
         }
     }
+    // A USER macro acts through its assignments: each tried with one, FILTER resonance, up to the top.
+    for (int m = 0; m < andor::analog::usermacro::macroCount; ++m)
+        setups[params::userMacroId (m)] = [m] (ShellProcessor& q) {
+            auto& engine = dynamic_cast<AnalogEngine&> (q.productEngine());
+            auto state = engine.userMacros();
+            andor::analog::UserMacroAssignment a;
+            a.target = params::resonance;
+            a.map.anchorMacro = 0.0f;
+            a.map.anchorTarget = a.map.low = q.parameters.getParameter (params::resonance)->getValue();
+            a.map.high = 1.0f;
+            state.maps[static_cast<std::size_t> (m)] = { a };
+            engine.setUserMacros (state);
+        };
     for (const char* name : { "shape", "rate", "sync", "division", "phase", "polarity", "mode", "scope" })
         setups[osp::plugin::InstrumentHost::modLfoId (1, name)] = [route, name] (ShellProcessor& q) {
             route (0, 2) (q);   // LFO 2 -> TONE
@@ -5971,7 +5987,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 18);   // (18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
+        CHECK (xml->getIntAttribute ("productVersion") == 19);   // (19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8188,7 +8204,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 18);
+    CHECK (xml->getIntAttribute ("productVersion") == 19);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -9002,7 +9018,7 @@ TEST_CASE ("SHAPER DNA: every setting is a host parameter - saved, recalled, rea
     {
         auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 18);
+        CHECK (xml->getIntAttribute ("productVersion") == 19);
     }
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
@@ -9351,4 +9367,413 @@ TEST_CASE ("SHAPER DNA: write the demo (preset, MIDI, render) - ANALOG_DEMO_DIR"
     CHECK (q.parameterValue (params::dnaEnabled) >= 0.5f);
     setValue (q, params::dnaEnabled, 0.0f);
     writeWav (renderShell (q, 9.0, notes, false), "SHAPER DNA - Held Above (DNA off).wav");
+}
+
+//==============================================================================
+// USER MACROS V1.1 (docs/USER_MACROS_V1_1.md)
+
+namespace
+{
+    andor::analog::AnalogEngine& engineOfShell (ShellProcessor& p) { return dynamic_cast<andor::analog::AnalogEngine&> (p.productEngine()); }
+    void resetBankPreference (ShellProcessor& p) { p.setMacroBank (0); }   // (tests share Interface.xml: back to CORE)
+}
+
+TEST_CASE ("USER MACROS G1: six parameters at 0, no assignment, nothing saved, the sound untouched (M01, M25)", "[analog][usermacro][state]")
+{
+    using andor::analog::UserMacroState;
+    ShellProcessor p;
+    for (int m = 0; m < 6; ++m)
+    {
+        REQUIRE (p.parameters.getParameter (params::userMacroId (m)) != nullptr);
+        CHECK (p.parameterValue (params::userMacroId (m)) == 0.0f);
+        CHECK (p.parameters.getParameter (params::userMacroId (m))->getName (32) == "User Macro " + juce::String (m + 1));
+    }
+    CHECK (engineOfShell (p).userMacros().isDefault());
+    CHECK (engineOfShell (p).userMacroTable().empty());
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (xml != nullptr);
+    CHECK (xml->getIntAttribute ("productVersion") == 19);
+    std::function<bool (const juce::XmlElement&)> hasChild = [&] (const juce::XmlElement& e) {
+        for (auto* c : e.getChildIterator())
+            if (c->hasTagName ("UserMacros") || hasChild (*c))
+                return true;
+        return false;
+    };
+    CHECK_FALSE (hasChild (*xml));   // (absent: exactly the state from before)
+    // Moving the USER macros with nothing assigned changes nothing, bit for bit.
+    setValue (p, "space", 0.0f);
+    const auto before = renderShell (p, 0.6);
+    ShellProcessor q;
+    setValue (q, "space", 0.0f);
+    for (int m = 0; m < 6; ++m)
+        setValue (q, params::userMacroId (m), 37.0f + 9.0f * static_cast<float> (m));
+    CHECK (differenceRms (renderShell (q, 0.6), before) == 0.0);
+}
+
+TEST_CASE ("USER MACROS G1: names and assignments round-trip; bad data is made safe (M12, M17)", "[analog][usermacro][state]")
+{
+    using andor::analog::UserMacroState;
+    UserMacroState s;
+    s.names[0] = "BLOOM";
+    s.names[3] = juce::String::fromUTF8 ("D\xc3\x9cNE \xe2\x80\x94 WEIT");
+    andor::analog::UserMacroAssignment a;
+    a.target = params::resonance;
+    a.map = { 0.67f, 0.15f, 0.15f, 0.65f, andor::analog::usermacro::Curve::linear, true };
+    s.maps[0].push_back (a);
+    a.target = "analog.fx.eq.1.gain";
+    a.orphaned = true;
+    a.reason = "EFFECT REMOVED";
+    s.maps[0].push_back (a);
+    const auto back = UserMacroState::fromXml (s.toXml().get());
+    CHECK (back == s);
+    CHECK (back.displayName (3) == s.names[3].toUpperCase());
+    CHECK (back.displayName (1) == "MACRO 2");
+    // Hostile input: too many, duplicates, NaN, out of range, not an ID, control characters.
+    auto xml = std::make_unique<juce::XmlElement> ("UserMacros");
+    auto* m = xml->createNewChildElement ("Macro");
+    m->setAttribute ("index", 0);
+    m->setAttribute ("name", juce::String ("BAD\n\tNAME") + juce::String::repeatedString ("X", 100));
+    for (int i = 0; i < 20; ++i)
+    {
+        auto* e = m->createNewChildElement ("Map");
+        e->setAttribute ("target", i < 3 ? params::resonance : "analog.osc" + juce::String (i) + ".level");
+        e->setAttribute ("anchorMacro", "nan");
+        e->setAttribute ("low", 9.0);
+        e->setAttribute ("high", -4.0);
+    }
+    xml->createNewChildElement ("Map")->setAttribute ("target", "rm -rf /");
+    xml->createNewChildElement ("Macro")->setAttribute ("index", 99);
+    const auto safe = UserMacroState::fromXml (xml.get());
+    CHECK (safe.assignmentCount (0) == 8);                      // (eight at most)
+    CHECK (safe.find (0, params::resonance) == 0);              // (one per target)
+    CHECK (safe.names[0].length() <= UserMacroState::maxNameLength);
+    CHECK_FALSE (safe.names[0].containsAnyOf ("\n\t"));
+    for (const auto& x : safe.maps[0])
+    {
+        CHECK (x.map.low <= 1.0f);
+        CHECK (x.map.high >= 0.0f);
+        CHECK (std::isfinite (x.map.anchorMacro));
+    }
+    // Saved with the session and recalled exactly; the engine compiles the active ones only.
+    ShellProcessor p;
+    engineOfShell (p).setUserMacros (s);
+    CHECK (engineOfShell (p).userMacroTable().count == 1);   // (the orphan is kept, silent)
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    CHECK (engineOfShell (q).userMacros() == s);
+    // A state from before USER MACROS (no child): none, even over existing ones.
+    for (const auto& [name, make] : fixtureSessions())
+    {
+        juce::MemoryBlock old;
+        REQUIRE (fixtureDir().getChildFile (name + ".state").loadFileAsData (old));
+        q.setStateInformation (old.getData(), static_cast<int> (old.getSize()));
+        CHECK (engineOfShell (q).userMacros().isDefault());
+        for (int i = 0; i < 6; ++i)
+            CHECK (q.parameterValue (params::userMacroId (i)) == 0.0f);
+    }
+}
+
+TEST_CASE ("USER MACROS G3: BLOOM moves FILTER resonance, OSC 2 level and SPACE decay - no jump at 0 / 50 / 73 / 100 %, sums and clamps, undo (M06-M09)", "[analog][usermacro]")
+{
+    namespace um = andor::analog::usermacros;
+    for (const float at : { 0.0f, 50.0f, 73.0f, 100.0f })
+    {
+        INFO ("macro at " << at << " %");
+        ShellProcessor p;
+        setValue (p, "space", 30.0f);
+        setValue (p, params::userMacroId (0), at);
+        renderShell (p, 0.1, {}, false);
+        const auto before = renderShell (p, 0.5);
+        // Made at the macro's position: neutral (bit for bit: the offset is exactly 0 there).
+        for (const auto& id : { params::resonance, params::osc2Level, juce::String ("space.decay") })
+            REQUIRE (um::assign (p, 0, id));
+        CHECK (engineOfShell (p).userMacroTable().count == 3);
+        renderShell (p, 0.1, {}, false);
+        ShellProcessor ref;
+        setValue (ref, "space", 30.0f);
+        setValue (ref, params::userMacroId (0), at);
+        renderShell (ref, 0.1, {}, false);
+        CHECK (differenceRms (renderShell (p, 0.5), renderShell (ref, 0.5)) == 0.0);
+        (void) before;
+    }
+    // Ranges: resonance 15 % -> 65 % (made at 0); the macro moves it, the knob stays.
+    ShellProcessor p;
+    auto* reso = p.parameters.getParameter (params::resonance);
+    reso->setValueNotifyingHost (0.15f);
+    REQUIRE (um::assign (p, 0, params::resonance));
+    um::edit (p, [] (andor::analog::UserMacroState& s) { s.maps[0][0].map.high = 0.65f; }, "range");
+    for (const float at : { 0.0f, 50.0f, 100.0f })
+    {
+        setValue (p, params::userMacroId (0), at);
+        renderShell (p, 0.3, {}, false);   // (the glides settle)
+        CHECK (engineOfShell (p).userMacroOffsetOf (params::resonance) == Approx (0.5 * at / 100.0).margin (1.0e-3));
+        CHECK (reso->getValue() == Approx (0.15f));   // never written
+    }
+    // A second macro on the same target: offsets add (the clamp is the reader's).
+    REQUIRE (um::assign (p, 1, params::resonance));
+    um::edit (p, [] (andor::analog::UserMacroState& s) { s.maps[1][0].map.high = 0.4f; }, "range");
+    setValue (p, params::userMacroId (1), 100.0f);
+    renderShell (p, 0.3, {}, false);
+    CHECK (engineOfShell (p).userMacroOffsetOf (params::resonance) == Approx (0.5 + 0.25).margin (1.0e-3));
+    // The knob moved: the overlay rides on it (M09).
+    reso->setValueNotifyingHost (0.3f);
+    renderShell (p, 0.1, {}, false);
+    CHECK (engineOfShell (p).userMacroOffsetOf (params::resonance) == Approx (0.75).margin (1.0e-3));
+    // An assignment is one undo step: undo takes it away, redo brings it back.
+    p.parameters.copyState();   // (the knob moves above: their own step, flushed first)
+    const int before = engineOfShell (p).userMacroTable().count;
+    REQUIRE (um::assign (p, 2, params::osc2Level));
+    CHECK (engineOfShell (p).userMacroTable().count == before + 1);
+    p.undoManager.undo();
+    CHECK (engineOfShell (p).userMacroTable().count == before);
+    p.undoManager.redo();
+    CHECK (engineOfShell (p).userMacroTable().count == before + 1);
+    // Removed: the offset glides out to nothing.
+    um::edit (p, [] (andor::analog::UserMacroState& s) { s.maps[0].clear(); s.maps[1].clear(); s.maps[2].clear(); }, "clear");
+    renderShell (p, 0.5, {}, false);
+    CHECK (engineOfShell (p).userMacroOffsetOf (params::resonance) == 0.0);
+}
+
+TEST_CASE ("USER MACROS G2: CORE and USER folder tabs - small, rising from the panel's top-left edge, nothing moves; switching only changes what the knobs show (M03, M20)", "[analog][usermacro][ui]")
+{
+    for (const int width : { 869, 1448, 1810 })
+    {
+        INFO ("width " << width);
+        ShellProcessor p;
+        resetBankPreference (p);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        auto* tab = ui.macroBankTab();
+        REQUIRE (tab != nullptr);
+        CHECK (ui.macroBankShown() == 0);   // (a new musician: CORE)
+        // Two small folder tabs (35-42 units each) rising 12-15 units from the macro panel's
+        // top-left edge; their targets larger than drawn; clear of the first name.
+        using Tab = osp::plugin::MacroBankTab;
+        for (const int b : { 0, 1 })
+        {
+            const auto t = tab->tabArea (b);
+            CHECK (t.getWidth() >= 35.0f);
+            CHECK (t.getWidth() <= 42.0f);
+            CHECK (t.getHeight() >= 12.0f);
+            CHECK (t.getHeight() <= 15.0f);
+            CHECK (tab->half (b).getWidth() >= 40);
+            CHECK (tab->half (b).getHeight() >= 24);
+        }
+        const auto panel = osp::plugin::design::layout::macroPanel.translated (0.0f, -ui.sourceTrim());
+        const auto tabBox = tab->getBounds();
+        CHECK (tabBox.getY() + tab->drawnArea().getBottom() == Approx (panel.getY()).margin (1.0));   // (they stand on the edge)
+        CHECK (tabBox.getBottom() <= juce::roundToInt (panel.getY() + Tab::intoPanel) + 1);
+        CHECK (tabBox.getX() >= juce::roundToInt (panel.getX()));
+        CHECK (tabBox.getBottom() <= ui.macroLabel (0)->getY());
+        // Switching: the same six places, the sound and every parameter untouched.
+        std::vector<juce::Rectangle<int>> knobs, labels;
+        for (int i = 0; i < 6; ++i)
+        {
+            knobs.push_back (ui.macroSlider (i)->getBounds());
+            labels.push_back (ui.macroLabel (i)->getBounds());
+        }
+        const int height = editor->getHeight();
+        const auto values = allParameterValues (p);
+        for (int round = 0; round < 50; ++round)
+        {
+            ui.showMacroBank (round % 2 == 0 ? 1 : 0);
+            ui.refreshNow();
+        }
+        ui.showMacroBank (1);
+        ui.refreshNow();
+        CHECK (allParameterValues (p) == values);
+        CHECK (editor->getHeight() == height);
+        // USER 1..6 left to right, each in a CORE knob's own place (its name in that knob's).
+        for (int i = 0; i < 6; ++i)
+        {
+            CHECK (ui.userMacroKnob (i)->slider.isVisible());
+            CHECK_FALSE (ui.macroLabel (i)->isVisible());
+            const auto bounds = ui.userMacroKnob (i)->slider.getBounds();
+            const auto at = std::find (knobs.begin(), knobs.end(), bounds);
+            REQUIRE (at != knobs.end());
+            CHECK (ui.userMacroKnob (i)->label->getBounds() == labels[static_cast<std::size_t> (at - knobs.begin())]);
+            if (i > 0)
+                CHECK (bounds.getX() > ui.userMacroKnob (i - 1)->slider.getX());
+            CHECK (ui.userMacroKnob (i)->label->getTitle() == "MACRO " + juce::String (i + 1));
+            CHECK (ui.userMacroLens (i)->isVisible());
+        }
+        CHECK (p.macroBank() == 1);   // (remembered: the interface's, never the sound's)
+        // The USER knob is the USER parameter (host automation reaches it, and back).
+        ui.userMacroKnob (2)->slider.setValue (42.0, juce::sendNotificationSync);
+        CHECK (p.parameterValue (params::userMacroId (2)) == Approx (42.0f).margin (0.1f));
+        ui.showMacroBank (0);
+        resetBankPreference (p);
+    }
+}
+
+TEST_CASE ("USER MACROS G2/G4: lens drag, right-click Assign, pick mode, rename, the panel (M13, M19)", "[analog][usermacro][ui]")
+{
+    namespace um = andor::analog::usermacros;
+    ShellProcessor p;
+    resetBankPreference (p);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    editor->setVisible (true);
+    ui.refreshNow();
+    ui.showMacroBank (1);
+    ui.refreshNow();
+    // Drag cancelled: nothing made, no undo step. (In USER the CORE knobs are hidden: the target
+    // is a card's knob - card B's LEVEL.)
+    const auto lens = ui.userMacroLens (0)->getScreenBounds().getCentre();
+    juce::Slider* target = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (! child->isVisible())
+                continue;   // (headless: nothing is "showing"; a hidden branch is skipped as the editor does)
+            if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && target == nullptr
+                && (s->getProperties()["paramId"].toString() == params::osc2Level || osp::plugin::binding::tagsOf (*s)[0] == params::osc2Level))
+                target = s;
+            find (*child);
+        }
+    };
+    find (*editor);
+    REQUIRE (target != nullptr);
+    const auto onTarget = target->getScreenBounds().getCentre();
+    ui.dragUserMacroLens (0, lens, onTarget, true);
+    CHECK (engineOfShell (p).userMacros().isDefault());
+    CHECK_FALSE ((p.undoManager.canUndo() && p.undoManager.getUndoDescription().startsWith ("Assign")));
+    // Dropped on the knob: a neutral assignment, the panel open on it.
+    ui.dragUserMacroLens (0, lens, onTarget);
+    CHECK (engineOfShell (p).userMacros().find (0, params::osc2Level) == 0);
+    auto* panel = dynamic_cast<andor::analog::UserMacroPanel*> (ui.openPopupPanel());
+    REQUIRE (panel != nullptr);
+    CHECK (panel->macro() == 0);
+    CHECK (panel->rowText (0).startsWith (um::targetName (p, params::osc2Level)));
+    // Dropped nowhere eligible: nothing.
+    ui.dragUserMacroLens (1, ui.userMacroLens (1)->getScreenBounds().getCentre(), ui.userMacroLens (1)->getScreenBounds().getCentre() + juce::Point<int> (0, -300));
+    CHECK (engineOfShell (p).userMacros().assignmentCount (1) == 0);
+    // The panel (the drag above folded it, as any drag does): LOW / HIGH edit the range, SWAP.
+    ui.openUserMacroPanel (0, params::osc2Level);
+    panel = dynamic_cast<andor::analog::UserMacroPanel*> (ui.openPopupPanel());
+    REQUIRE (panel != nullptr);
+    panel->highSlider().setValue (0.9, juce::sendNotificationSync);
+    CHECK (engineOfShell (p).userMacros().maps[0][0].map.high == Approx (0.9f));
+    panel->swapButton().onClick();   // (what a click does; triggerClick posts it)
+    CHECK (engineOfShell (p).userMacros().maps[0][0].map.low == Approx (0.9f));
+    p.undoManager.undo();
+    CHECK (engineOfShell (p).userMacros().maps[0][0].map.high == Approx (0.9f));
+    // Right-click on a control: Assign to USER with the six names; on a switch: nothing.
+    const auto menu = ui.controlContextMenu (params::resonance);
+    bool hasAssign = false;
+    for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+        hasAssign = hasAssign || it.getItem().text == "Assign to USER";
+    CHECK (hasAssign);
+    CHECK_FALSE (um::eligible (p, params::dnaEnabled));
+    CHECK_FALSE (um::eligible (p, params::userMacroId (1)));
+    CHECK (um::eligible (p, params::resonance));
+    // Pick mode: + Add folds the panel into the banner; a click on a target assigns it; Escape cancels.
+    ui.beginUserMacroPick (2);
+    CHECK (ui.openPopupPanel() == nullptr);
+    CHECK (ui.macroAssignOverlay().mode() == osp::plugin::MacroAssignOverlay::Mode::pick);
+    CHECK (ui.macroAssignOverlay().bannerText().startsWith ("Assign to MACRO 3"));
+    CHECK (ui.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+    CHECK (ui.macroAssignOverlay().mode() != osp::plugin::MacroAssignOverlay::Mode::pick);
+    CHECK (engineOfShell (p).userMacros().assignmentCount (2) == 0);
+    ui.beginUserMacroPick (2);
+    ui.macroAssignOverlay().onPicked (params::osc2Level);
+    CHECK (engineOfShell (p).userMacros().find (2, params::osc2Level) == 0);
+    REQUIRE (dynamic_cast<andor::analog::UserMacroPanel*> (ui.openPopupPanel()) != nullptr);
+    // Rename in place: Return commits (undoable), the name shows; the host still sees "User Macro 1".
+    ui.closePopup();
+    ui.startUserMacroRename (0);
+    auto* field = ui.userMacroRenameField();
+    REQUIRE (field != nullptr);
+    field->setText ("bloom");
+    field->onReturnKey();
+    ui.refreshNow();
+    CHECK (engineOfShell (p).userMacros().displayName (0) == "BLOOM");
+    CHECK (ui.userMacroKnob (0)->label->getTitle() == "BLOOM");
+    CHECK (p.parameters.getParameter (params::userMacroId (0))->getName (32) == "User Macro 1");
+    p.undoManager.undo();
+    ui.refreshNow();
+    CHECK (engineOfShell (p).userMacros().displayName (0) == "MACRO 1");
+    ui.showMacroBank (0);
+    resetBankPreference (p);
+}
+
+TEST_CASE ("USER MACROS screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-user-macros]")
+{
+    namespace um = andor::analog::usermacros;
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    for (const int width : { 1448, 869 })
+    {
+        ShellProcessor p;
+        resetBankPreference (p);
+        osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        editor->setVisible (true);
+        ui.refreshNow();
+        const float scale = static_cast<float> (width) / 1448.0f;
+        auto save = [&] (const juce::String& name, bool full = false) {
+            ui.refreshNow();
+            if (auto* panel = ui.openPopupPanel())
+                panel->settleNow();
+            // The macro panel and the band above it (the tab, the banner, an open panel).
+            const auto area = full ? editor->getLocalBounds()
+                                   : juce::Rectangle<int> (0, juce::roundToInt (440.0f * scale), width, editor->getHeight() - juce::roundToInt (440.0f * scale));
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (editor->createComponentSnapshot (area, true, full ? 1.0f : 2.0f), stream);
+        };
+        save ("um-00-core", true);                       // CORE: the instrument as ever, the tiny tab top-left
+        save ("um-01-core-panel");
+        ui.showMacroBank (1);
+        save ("um-02-user-empty");                       // USER: six MACRO n at 0, no arcs
+        // BLOOM: three assignments with ranges; MACRO 2 one.
+        REQUIRE (um::assign (p, 0, params::resonance));
+        REQUIRE (um::assign (p, 0, params::osc2Level));
+        REQUIRE (um::assign (p, 0, "space.decay"));
+        um::edit (p, [] (andor::analog::UserMacroState& s) {
+            s.names[0] = "BLOOM";
+            s.maps[0][0].map.high = 0.8f;
+            s.maps[0][1].map.high = 0.9f;
+            s.maps[0][2].map.high = std::min (1.0f, s.maps[0][2].map.anchorTarget + 0.3f);
+        }, "shots");
+        REQUIRE (um::assign (p, 1, params::filterDrive));
+        setValue (p, params::userMacroId (0), 62.0f);
+        save ("um-03-user-assigned", true);              // the names, the knob at 62 %
+        ui.openUserMacroPanel (0, params::resonance);
+        save ("um-04-inspector");                        // the inspector on resonance, arcs on the three
+        ui.closePopup();
+        // A drag in progress: the lens's ring on every eligible knob, the pending one named.
+        auto* lens = ui.userMacroLens (2);
+        REQUIRE (lens != nullptr);
+        lens->onDragMove (lens->getScreenBounds().getCentre());
+        const auto& controls = ui.macroAssignOverlay().eligibleControls();
+        REQUIRE (! controls.empty());
+        juce::Point<int> over;
+        for (const auto& c : controls)
+            if (c.parameterId == params::osc2Level)
+                over = ui.macroAssignOverlay().localPointToGlobal (c.area.getCentre().roundToInt());
+        if (over == juce::Point<int>())
+            over = ui.macroAssignOverlay().localPointToGlobal (controls.front().area.getCentre().roundToInt());
+        lens->onDragMove (over);
+        save ("um-05-drag", true);
+        lens->onDragEnd (over, true);
+        // Pick mode: the banner above the macro panel.
+        ui.beginUserMacroPick (2);
+        save ("um-06-pick", true);
+        save ("um-07-pick-banner");
+        ui.cancelUserMacroAssign();
+        resetBankPreference (p);
+    }
 }

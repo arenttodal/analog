@@ -4,6 +4,7 @@
 #include "FxParameters.h"
 #include "ShellEngine.h"
 #include "Synth.h"
+#include "UserMacroState.h"
 
 #include "model/ModelExchange.h"
 
@@ -108,6 +109,26 @@ public:
         hands it to the audio thread; an invalid graph (or one holding an effect this build cannot
         play) is refused - false, nothing changes. CLASSIC (custom false): the original chain. */
     bool setFxRoute (const andor::analog::fx::Graph& route);
+
+    /** USER MACROS V1.1 (docs/USER_MACROS_V1_1.md). Message thread. The names and assignments
+        (the sound's state, saved with it); setUserMacros compiles the active assignments into
+        the bounded table the audio thread reads (no lock, no allocation there) and tells the
+        interface. Undo: the caller's (UserMacroEdit). */
+    const UserMacroState& userMacros() const noexcept { return userMacroState; }
+    void setUserMacros (const UserMacroState& state);
+    /** Called (message thread) after the USER macros changed: an edit, undo, a preset, a session. */
+    std::function<void()> onUserMacrosChanged;
+    /** Moves on every change of the USER macros (message thread). */
+    std::uint64_t userMacroRevision() const noexcept { return userMacroRevisionCount; }
+    /** Tests: the offset (normalised) USER macros add to a parameter now (audio thread's smoothed
+        value; read after rendering). */
+    double userMacroOffsetOf (const juce::String& parameterId) const noexcept
+    {
+        const int i = params::readerIndexOf (parameterId);
+        return i >= 0 && i < params::Reader::maxValues ? userMacroOffset[static_cast<std::size_t> (i)] : 0.0;
+    }
+    /** Tests: the table the audio thread reads now (message thread; the latest published). */
+    const usermacro::Snapshot& userMacroTable() const noexcept { return userMacroCompiled; }
     andor::analog::fx::Graph fxRoute() const;
     /** Called (message thread) whenever the route changes: an edit, a session or preset. */
     std::function<void()> onFxRouteChanged;
@@ -215,6 +236,20 @@ private:
     void publishModulationView() noexcept;
     params::Reader::Values raw {};
     bool modulated = false;
+
+    // USER MACROS: the state (message thread), its compiled table and its hand-over, and the
+    // audio thread's smoothing (each macro's value; each target's summed offset, so adding or
+    // removing an assignment glides instead of stepping).
+    void applyUserMacros (params::Reader::Values& values, int samples) noexcept;
+    UserMacroState userMacroState;
+    usermacro::Snapshot userMacroCompiled;
+    usermacro::TripleBuffer<usermacro::Snapshot> userMacroTables;
+    std::array<double, usermacro::macroCount> userMacroValue {};
+    std::array<double, params::Reader::maxValues> userMacroWant {}, userMacroOffset {};
+    std::array<bool, params::Reader::maxValues> userMacroTouched {};
+    bool userMacroLive = false, userMacroPrimed = false;
+    std::uint64_t userMacroRevisionCount = 1;
+    double userMacroRate = 48000.0;
     std::array<std::atomic<float>, osp::mod::sourceCount> viewValue {};
     std::array<std::atomic<float>, 2> viewPhase {}, viewEnvTime {}, viewGlobalEnv {};
     std::array<std::atomic<int>, 2> viewEnvStage {};

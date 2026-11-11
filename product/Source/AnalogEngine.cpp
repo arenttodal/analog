@@ -45,6 +45,8 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     fxReader.attach (parameters);
     synth.prepare (sampleRate, std::max (1, maximumBlockSize), oversamplingFactor);
     synth.setControlModulator (this);
+    userMacroRate = sampleRate;
+    userMacroPrimed = false;   // (the macros land where they are: nothing glides in from 0)
     reader.snapshot (raw);
     auto patch = reader.read (raw);
     fxReader.read (patch.fx);
@@ -117,6 +119,10 @@ void AnalogEngine::saveState (juce::XmlElement& state) const
         if (source2Definition != nullptr)
             state.createNewChildElement ("Hybrid2Source")->addChildElement (new juce::XmlElement (*source2Definition));
     }
+    // State version 19: the USER macros' names and assignments, only once there are any (absent:
+    // none, as every session and preset from before).
+    if (! userMacroState.isDefault())
+        state.addChildElement (userMacroState.toXml().release());
     // State version 12: the FX route, only once it is CUSTOM (absent: CLASSIC, as every session
     // and preset from before is).
     const std::lock_guard<std::mutex> lock (routeMutex);
@@ -186,10 +192,88 @@ void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File
     }
     if (! setFxRoute (saved))
         setFxRoute (andor::analog::fx::classicGraph());
+    // State version 19: the USER macros (absent: none - exactly the state from before).
+    setUserMacros (UserMacroState::fromXml (state.getChildByName ("UserMacros")));
     // State version 8: before it, an imported source played whenever it was there; now card C
     // plays it as its INSTRUMENT PATCH (a session or preset from before keeps its sound).
     if (definition != nullptr && state.getIntAttribute ("productVersion", 1) < 8)
         setHybridType (HybridType::instrumentPatch);
+}
+
+void AnalogEngine::setUserMacros (const UserMacroState& next)
+{
+    userMacroState = next;
+    // Compiled: active assignments only (enabled, not orphaned, a target this build plays).
+    usermacro::Snapshot table;
+    for (int macro = 0; macro < usermacro::macroCount; ++macro)
+        for (const auto& a : userMacroState.maps[static_cast<std::size_t> (macro)])
+        {
+            if (! a.map.enabled || a.orphaned || table.count >= usermacro::maxMaps)
+                continue;
+            const int index = params::readerIndexOf (a.target);
+            if (index < 0 || index >= params::Reader::maxValues)
+                continue;   // (G5: the FX library's slots)
+            auto& c = table.maps[static_cast<std::size_t> (table.count++)];
+            c.macro = static_cast<std::uint8_t> (macro);
+            c.kind = usermacro::TargetKind::synth;
+            c.index = static_cast<std::int16_t> (index);
+            c.map = a.map;
+        }
+    userMacroCompiled = table;
+    userMacroTables.publish (table);
+    ++userMacroRevisionCount;
+    if (onUserMacrosChanged != nullptr)
+        onUserMacrosChanged();
+}
+
+void AnalogEngine::applyUserMacros (params::Reader::Values& values, int samples) noexcept
+{
+    // USER MACROS: each assignment adds its offset (normalised, around the target's own live
+    // value) - the knobs and their automation are never written. Nothing assigned and nothing
+    // still gliding out: not a value touched (exactly the sound from before).
+    const auto& table = userMacroTables.read();
+    if (table.empty() && ! userMacroLive)
+        return;
+    // ~20 ms glides, whatever the block size: the macros' values, and each target's sum (an
+    // assignment added, removed or undone glides in or out instead of stepping).
+    const double coef = 1.0 - std::exp (-static_cast<double> (std::max (1, samples)) / (0.02 * userMacroRate));
+    for (int m = 0; m < usermacro::macroCount; ++m)
+    {
+        const double target = std::clamp (0.01 * static_cast<double> (values[static_cast<std::size_t> (params::userMacroReaderIndex (m))]), 0.0, 1.0);
+        auto& v = userMacroValue[static_cast<std::size_t> (m)];
+        v = userMacroPrimed ? v + (target - v) * coef : target;
+    }
+    userMacroPrimed = true;
+    for (int i = 0; i < table.count; ++i)
+    {
+        const auto& c = table.maps[static_cast<std::size_t> (i)];
+        if (c.kind != usermacro::TargetKind::synth)
+            continue;
+        const auto at = static_cast<std::size_t> (c.index);
+        userMacroWant[at] += usermacro::offsetOf (c.map, userMacroValue[c.macro]);
+        userMacroTouched[at] = true;
+    }
+    userMacroLive = false;
+    for (std::size_t at = 0; at < userMacroTouched.size(); ++at)
+    {
+        if (! userMacroTouched[at])
+            continue;
+        auto& offset = userMacroOffset[at];
+        offset += (userMacroWant[at] - offset) * coef;
+        const bool stillAssigned = userMacroWant[at] != 0.0 || std::any_of (table.maps.begin(), table.maps.begin() + table.count, [at] (const usermacro::CompiledMap& c) {
+            return c.kind == usermacro::TargetKind::synth && static_cast<std::size_t> (c.index) == at;
+        });
+        userMacroWant[at] = 0.0;
+        if (! stillAssigned && std::abs (offset) < 1.0e-7)
+        {
+            offset = 0.0;   // (glided out: untouched from now on)
+            userMacroTouched[at] = false;
+            continue;
+        }
+        if (offset != 0.0)
+            reader.moveIndex (values, static_cast<int> (at), offset);   // (exactly 0 at the anchor: the value untouched)
+        userMacroLive = true;
+    }
 }
 
 void AnalogEngine::setSampleSourceDefinition (std::unique_ptr<juce::XmlElement> definition, const juce::File& assetFolder)
@@ -450,6 +534,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // The knobs as they are, the instrument's own controls moved by their routes (global
     // sources: one value for the whole instrument), and ANDOR OSP's macros likewise.
     reader.snapshot (raw);
+    applyUserMacros (raw, total);   // USER MACROS: before the routes (they move the knob's base)
     if (modulated)
     {
         double offset = 0.0;

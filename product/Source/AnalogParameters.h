@@ -227,6 +227,17 @@ namespace andor::analog::params
     inline juce::String dnaProfileId (int profile, const char* name) { return juce::String ("analog.movement.shaperDna.") + static_cast<char> ('a' + profile) + "." + name; }
     /** Appends SHAPER DNA's parameters (after the sends). */
     void addShaperDnaTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
+    /** State version 19 (USER MACROS V1.1, docs/USER_MACROS_V1_1.md): the six USER macros,
+        0..100 %, at 0 in a new instrument and every session from before. Their IDs never change
+        when a macro is renamed (the name is the patch's, the host sees "User Macro n"). */
+    inline juce::String userMacroId (int macro) { return "analog.userMacro." + juce::String (macro + 1); }
+    /** Appends the USER macros' parameters (after SHAPER DNA's). */
+    void addUserMacrosTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
+    /** The reader's index of a parameter ID (message thread), or -1: what a USER macro's
+        assignment compiles to. */
+    int readerIndexOf (const juce::String& id);
+    /** The reader's index of USER macro `macro`'s own value. */
+    int userMacroReaderIndex (int macro) noexcept;
     /** Appends card C's second layer's parameters (after SUB's). */
     void addHybrid2To (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends SUB's parameters (after the FX library's: Product's addParameters). */
@@ -282,11 +293,13 @@ namespace andor::analog::params
         /** Sets in `patch` what product destination k (a voice's control) sets, from `base` (raw
             values) moved by `offset`. */
         void moveControl (Patch& patch, const Values& base, int k, double offset) const noexcept;
+        /** Moves the reader's value `index` by `offset` (normalised, clamped at its ends): what a
+            USER macro's assignments add (real-time safe). */
+        void moveIndex (Values& raw, int index, double offset) const noexcept;
 
     private:
         float value (int index) const noexcept;
         Patch readWith (const float* raw) const noexcept;
-        void moveIndex (Values& raw, int index, double offset) const noexcept;
         std::vector<std::atomic<float>*> values;
         std::vector<juce::NormalisableRange<float>> ranges;
         std::vector<int> destinationIndex;   ///< product destination k -> the reader's index
