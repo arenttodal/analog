@@ -28,7 +28,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-8";   // (8: MORPH on, the wheel unlinked)
+    constexpr const char* factoryVersion = "analog-factory-9";   // (8: MORPH on, the wheel unlinked; 9: INIT with MORPH off)
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -362,6 +362,8 @@ const ProductInfo& productInfo()
         // preset bar takes its room, SAVE and ROUTING after it as keys of one size.
         p.headerMix = false;
         p.crossCloseKeys = true;   // (the ARPEGGIATOR closes with the racks' X)
+        // MORPH's own on / off beside its name (off on a new instance; a preset or a session keeps its own).
+        p.macroSwitches = { { 0, andor::analog::params::morphEnabled, "Enable / bypass Morph." } };
         // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
         // a SAMPLE or INSTRUMENT PATCH only.
         p.cardModifiersShown = [] (int layer, osp::plugin::InstrumentHost& host) {

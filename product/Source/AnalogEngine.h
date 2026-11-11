@@ -165,19 +165,6 @@ public:
     static std::vector<float> oscillatorPictureOf (Patch patch, int slot, int points = 256);
 
 private:
-    /** MORPH switches itself on when its knob (the MORPH macro) is taken in hand while it is
-        off (a preset or a session that had it off): turning MORPH always morphs. */
-    struct MorphTouch final : juce::AudioProcessorParameter::Listener
-    {
-        juce::RangedAudioParameter* enabled = nullptr;
-        void parameterValueChanged (int, float) override {}
-        void parameterGestureChanged (int, bool starting) override
-        {
-            if (starting && enabled != nullptr && enabled->getValue() < 0.5f)
-                enabled->setValueNotifyingHost (1.0f);   // (on the thread of the gesture: the editor's)
-        }
-    } morphTouch;
-    juce::RangedAudioParameter* morphPositionParam = nullptr;
     std::atomic<bool> recordingPublished { false };   ///< the shell has a recording on card C (message thread)
 
     // State version 8: card C's sources as handed to the synth (audio thread): the shell's

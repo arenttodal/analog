@@ -44,8 +44,8 @@ namespace
     }
 
     /** Every factory sound starts from INIT with the first version's LFO (TRIANGLE at 4 Hz:
-        what WHEEL brings in), so each sounds as it did. MORPH is on (half way, FUSE), as in a
-        new instrument: it acts as soon as card C sounds. */
+        what WHEEL brings in), so each sounds as it did. MORPH is on (half way, FUSE): it acts
+        as soon as card C sounds. INIT alone has it off, as a new instrument does. */
     Patch base()
     {
         Patch p;
@@ -71,7 +71,8 @@ namespace
         };
 
         {
-            Patch p = base();   // INIT: two saws a few cents apart, the filter half open.
+            Patch p = base();   // INIT: two saws a few cents apart, the filter half open; MORPH off.
+            p.morph.enabled = false;
             add ("Init", "Basic", p, chord);
         }
         {

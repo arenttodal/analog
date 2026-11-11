@@ -495,7 +495,7 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     const auto& m = d.morph;
     // State version 9: MORPH is on in a new instrument (it acts whenever card C sounds); the
     // synth's own neutral patch (the tests' reference) keeps it off.
-    onOff4 (morphEnabled, "Morph On", true);
+    onOff4 (morphEnabled, "Morph On", false);
     percent4 (morphPosition, "Morph", m.position);
     choice4 (morphMethod, "Morph Method", { "Imprint", "Fuse", "Weave" }, static_cast<int> (m.method));
     choice4 (morphCarrier, "Morph Carrier", { "Osc 1", "Osc 2", "Both" }, static_cast<int> (m.carrier));

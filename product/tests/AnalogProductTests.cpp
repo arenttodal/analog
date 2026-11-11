@@ -1319,24 +1319,23 @@ TEST_CASE ("analog: a version-4 session rests at the A/B mix's centre, where ORG
     CHECK (q.parameterValue ("ab.blend") == Approx (0.0f));
 }
 
-TEST_CASE ("analog: taking the MORPH knob in hand switches MORPH on; the factory presets have it on", "[analog][morph]")
+TEST_CASE ("analog: MORPH's switch is its own - the knob never turns it on; the factory presets have it on, INIT off", "[analog][morph]")
 {
     ShellProcessor p;
-    setValue (p, params::morphEnabled, 0.0f);   // (a preset or session with MORPH off)
+    CHECK (p.parameterValue (params::morphEnabled) < 0.5f);   // (off in a new instrument)
     auto* position = p.parameters.getParameter (params::morphPosition);
     REQUIRE (position != nullptr);
+    // Taking the knob in hand, or automating it, leaves the switch as it is.
     position->beginChangeGesture();
     position->setValueNotifyingHost (0.7f);
     position->endChangeGesture();
-    CHECK (p.parameterValue (params::morphEnabled) >= 0.5f);
-    // Automation (no gesture) leaves the switch as it is.
-    setValue (p, params::morphEnabled, 0.0f);
+    CHECK (p.parameterValue (params::morphEnabled) < 0.5f);
     position->setValueNotifyingHost (0.3f);
     CHECK (p.parameterValue (params::morphEnabled) < 0.5f);
     for (const auto& f : andor::analog::factoryPatches())
     {
         INFO (f.name);
-        CHECK (f.patch.morph.enabled);
+        CHECK (f.patch.morph.enabled == (f.name != "Init"));
         CHECK_FALSE (f.patch.wheelToLfo);
     }
 }
@@ -1768,12 +1767,12 @@ TEST_CASE ("analog: ORGANIC takes a recording onto its own card beside the oscil
     CHECK (differenceRms (renderShell (p, 0.6), synth) < 1.0e-6);
 }
 
-TEST_CASE ("analog: MORPH is the first macro, on and half way in a new instrument; it fuses the oscillators with card C", "[analog][organic][morph]")
+TEST_CASE ("analog: MORPH is the first macro, off and half way in a new instrument; it fuses the oscillators with card C", "[analog][organic][morph]")
 {
     Scratch scratch;
     ShellProcessor p;
     setValue (p, "space", 0.0f);
-    CHECK (p.parameterValue (params::morphEnabled) >= 0.5f);
+    CHECK (p.parameterValue (params::morphEnabled) < 0.5f);
     CHECK (p.parameterValue (params::morphPosition) == Approx (50.0f));
     // Card C silent: said so; MORPH on changes nothing (the oscillators play as they are).
     CHECK (p.engineStatus ("morph").isNotEmpty());
@@ -3233,6 +3232,7 @@ TEST_CASE ("analog: MIX sets the analog pair against whatever card C plays; MORP
     ShellProcessor p;
     setValue (p, "space", 0.0f);
     setValue (p, "echo", 0.0f);
+    p.setParameterValue (params::morphEnabled, 1.0f);   // (MORPH on, half way: as the factory sounds have it)
     auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
     const auto pairOnly = renderShell (p, 0.5, note, false);   // (C empty: the INIT pair, untouched)
     for (const auto type : { HybridType::oscillator, HybridType::noise })
@@ -3249,7 +3249,7 @@ TEST_CASE ("analog: MIX sets the analog pair against whatever card C plays; MORP
         const auto both = renderShell (p, 0.5, note, false);
         CHECK (differenceRms (both, pairOnly) > 1.0e-3);
         CHECK (differenceRms (both, cOnly) > 1.0e-3);
-        // MORPH (on, half way, as a new instrument has it) hears card C live: it is ready, and
+        // MORPH (on, half way, as the factory sounds have it) hears card C live: it is ready, and
         // at the mix's centre the two are fused, not layered.
         CHECK (p.engineStatus ("morph").isEmpty());
         p.setParameterValue (params::morphEnabled, 0.0f);
@@ -8829,4 +8829,97 @@ TEST_CASE ("analog: MAIN + SEND (review fixes) - a chain that does not fit its t
     engine.setHybrid2Definition (std::make_unique<juce::XmlElement> (*made.xml), scratch.dir.getChildFile ("Imported"));
     CHECK (! engine.hybrid2State().loading);
     CHECK (engine.hybrid2State().loaded);
+}
+
+TEST_CASE ("analog: MORPH's lamp - left of its name, toggles MORPH (undoable), dims only the knob's arc, keeps its value", "[analog][morph][ui]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    for (const int width : { 1448, 869 })
+    {
+        INFO ("width " << width);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        auto* lamp = ui.macroSwitch (0);
+        REQUIRE (lamp != nullptr);
+        CHECK (ui.macroSwitch (1) == nullptr);   // (MORPH's alone)
+        CHECK (lamp->getTooltip() == "Enable / bypass Morph.");
+        auto* label = ui.macroLabel (0);
+        REQUIRE (label != nullptr);
+        // Immediately left of the name, on its centre line; the name keeps its place and the
+        // lamp never covers its text. A larger target than it shows.
+        const auto lampBox = lamp->getBounds().toFloat();
+        const auto labelBox = label->getBounds().toFloat();
+        const float textLeft = labelBox.getCentreX() - 0.5f * label->textWidth();
+        CHECK (std::abs (lampBox.getCentreY() - labelBox.getCentreY()) <= 1.0f);
+        const auto ring = lamp->ringArea().translated (lampBox.getX(), lampBox.getY());
+        CHECK (ring.getRight() <= textLeft);
+        CHECK (ring.getRight() > textLeft - 10.0f);
+        CHECK (ring.getWidth() <= 16.0f);
+        CHECK (lampBox.getWidth() >= 24.0f);
+    }
+    auto* lamp = ui.macroSwitch (0);
+    auto* knob = ui.macroSlider (0);
+    REQUIRE (knob != nullptr);
+    auto arc = [&] { return static_cast<juce::int64> (knob->getProperties()["arc"]); };
+    const auto lit = static_cast<juce::int64> (osp::plugin::design::colour::macro (0).getARGB());
+    // Off in a new instrument: the arc dimmed, the knob's value as it is.
+    CHECK_FALSE (lamp->isOn());
+    CHECK (arc() != lit);
+    const double position = knob->getValue();
+    // A click turns MORPH on (one gesture, undoable): the arc lit.
+    p.parameters.copyState();   // (the state as it is, so undo has the change to undo)
+    p.undoManager.beginNewTransaction();
+    lamp->toggle();
+    p.parameters.copyState();
+    CHECK (p.parameterValue (params::morphEnabled) >= 0.5f);
+    CHECK (lamp->isOn());
+    CHECK (arc() == lit);
+    CHECK (knob->getValue() == Approx (position));
+    p.undoManager.beginNewTransaction();
+    p.undoManager.undo();
+    CHECK (p.parameterValue (params::morphEnabled) < 0.5f);
+    CHECK_FALSE (lamp->isOn());
+    CHECK (arc() != lit);
+    // Any source (automation, a preset, the rack's own switch) moves the lamp and the arc.
+    setValue (p, params::morphEnabled, 1.0f);
+    ui.refreshNow();
+    CHECK (lamp->isOn());
+    CHECK (arc() == lit);
+    // The keyboard: Return or Space toggles.
+    CHECK (lamp->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK (p.parameterValue (params::morphEnabled) < 0.5f);
+    // The name still opens MORPH's editor (the lamp is beside it, not on it).
+    ui.openPopup (0);
+    CHECK (ui.openPopupPanel() != nullptr);
+    ui.closePopup();
+}
+
+TEST_CASE ("analog: MORPH lamp screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-morph-lamp]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    for (const int width : { 1448, 869 })
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+        auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        auto shoot = [&] (const juce::String& name) {
+            ui.refreshNow();
+            auto* label = ui.macroLabel (1);
+            REQUIRE (label != nullptr);
+            // MORPH and DRIVE, name to knob (the lamp beside MORPH's name; DRIVE for comparison).
+            const auto area = ui.getLocalArea (label->getParentComponent(), ui.macroLabel (0)->getBounds().getUnion (label->getBounds()).getUnion (ui.macroSlider (1)->getBounds())).expanded (24);
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (editor->createComponentSnapshot (area, true, 2.0f), stream);
+        };
+        shoot ("morph-lamp-01-off");
+        setValue (p, params::morphEnabled, 1.0f);
+        shoot ("morph-lamp-02-on");
+    }
 }

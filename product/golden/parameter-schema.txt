@@ -99,7 +99,7 @@ analog.juno.chorusNoise v4 bool "Chorus Noise" label="" range=0.0000..1.0000/1.0
 analog.osc1.enabled v4 bool "Osc 1 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.osc2.enabled v4 bool "Osc 2 On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.organic.root v4 int "Organic Root" label="" range=-1.0000..127.0000/1.0000 skew=1.00000 default=-1.0000 steps=129 texts=Auto|D#4|G9
-analog.morph.enabled v4 bool "Morph On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.morph.enabled v4 bool "Morph On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.morph.position v4 float "Morph" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.morph.method v4 choice "Morph Method" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=1.0000 steps=3 texts=Imprint|Fuse|Weave [Imprint|Fuse|Weave]
 analog.morph.carrier v4 choice "Morph Carrier" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Osc 1|Osc 2|Both [Osc 1|Osc 2|Both]
