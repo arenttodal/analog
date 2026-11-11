@@ -1,5 +1,13 @@
 # ANDOR ANALOG — status
 
+> **11 Nov 2026, feature branches (not in the 1.0.0 release candidate):**
+> - SHAPER DNA V1 (`feature/shaper-dna-v1`; docs/SHAPER_DNA_V1.md);
+> - USER MACROS V1.1 gates 1–4 with the CORE / USER folder tabs (`feature/user-macros-v1`,
+>   stacked on DNA; docs/USER_MACROS_V1_1.md).
+>
+> Next: USER MACROS gate 5 (FX-library slot targets, orphan / reconnect), its CPU figures and a
+> draft PR. Not run here: hosts, real input, listening.
+
 > **9 Nov 2026: 1.0.0 release candidate** (branch `claude/release-candidate`;
 > docs/release/READINESS_SCORECARD.md). On the baseline (`main` a25c270, OSP 3d949cd), the full
 > suite passed 13/13 on Linux. Release fixes:
