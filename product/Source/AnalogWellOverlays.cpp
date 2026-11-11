@@ -88,7 +88,8 @@ namespace
     /** Card C's layers (Cinematic V6 gate 3): `+` adds the second (revealed on hover, so a card
         C with one layer looks as it always did); with two, `1` and `2` choose which one the well
         and the knob row show, and `x` (on 2) removes the second. Small graphite keys at the
-        well's top left, under the card's own modifier keys. */
+        well's top right, under the TYPE dropdown and right-aligned to it (the instrument, then
+        its layer); the sample's modifier keys keep the top left. */
     class LayerKeys final : public juce::Component, public juce::TooltipClient
     {
     public:
@@ -404,7 +405,7 @@ namespace
             else
                 modelSelector->setBounds (w - 12 - 92, 6, 92, 22);
             if (layerKeys != nullptr)
-                layerKeys->setBounds (12, 34, layerKeys->preferredWidth(), LayerKeys::keySize);
+                layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
             const auto b = band().reduced (8, 4);
             const int cellWidth = b.getWidth() / cellCount;
             for (std::size_t i = 0; i < static_cast<std::size_t> (cellCount); ++i)
@@ -658,7 +659,7 @@ namespace
             WellOverlay::resized();
             typeSelector->setBounds (getWidth() - 12 - 118, 6, 118, 22);
             if (layerKeys != nullptr)
-                layerKeys->setBounds (12, 34, layerKeys->preferredWidth(), LayerKeys::keySize);
+                layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
             if (browse != nullptr)
                 browse->setBounds (getLocalBounds().withTrimmedTop (32));
             if (browse2 != nullptr)

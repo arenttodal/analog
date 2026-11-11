@@ -9224,3 +9224,36 @@ TEST_CASE ("SHAPER DNA screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][s
         panelShot ("dna-07-panel-off");                 // OFF: the same picture, quieter
     }
 }
+
+TEST_CASE ("GUI-04: card C's layer keys sit under its TYPE dropdown, right-aligned to it; the left keeps the sample's tools (every size)", "[analog][hybrid2][ui]")
+{
+    using andor::analog::HybridType;
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    for (const int width : { 869, 1448, 1810 })
+        for (const auto type : { HybridType::sample, HybridType::oscillator, HybridType::noise, HybridType::instrumentPatch })
+            for (const bool two : { false, true })
+            {
+                INFO ("width " << width << ", type " << static_cast<int> (type) << ", two layers " << two);
+                ShellProcessor p;
+                dynamic_cast<AnalogEngine&> (p.productEngine()).setHybridType (type);
+                setValue (p, params::hybrid2Enabled, two ? 1.0f : 0.0f);
+                std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+                auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+                editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+                ui.refreshNow();
+                auto* overlay = ui.engineCard (1).wellOverlayComponent();
+                REQUIRE (overlay != nullptr);
+                auto* keys = findTitled (*overlay, "Hybrid layers");
+                auto* typeKey = findTitled (*overlay, "Card C type");
+                REQUIRE (keys != nullptr);
+                REQUIRE (typeKey != nullptr);
+                const auto k = overlay->getLocalArea (keys->getParentComponent(), keys->getBounds());
+                const auto t = overlay->getLocalArea (typeKey->getParentComponent(), typeKey->getBounds());
+                CHECK (k.getRight() == t.getRight());          // right-aligned to the dropdown
+                CHECK (k.getY() >= t.getBottom());             // under it, not over it
+                CHECK (k.getY() - t.getBottom() <= 8);         // directly under it
+                CHECK (k.getX() > overlay->getWidth() / 2);    // the left half is the sample's tools'
+                CHECK (overlay->getLocalBounds().contains (k));
+                CHECK (keys->getHeight() <= 28);
+            }
+}
