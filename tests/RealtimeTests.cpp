@@ -2,6 +2,7 @@
 // controllers, voice stealing included).
 
 #include "TestUtil.h"
+#include "rhythm/RhythmLoop.h"
 
 #include "FactoryPatches.h"
 #include "fx/Effects.h"
@@ -646,6 +647,38 @@ TEST_CASE ("realtime: SATELLITE (three cards moving, twins starting and stopping
         synth.render (left.data(), right.data(), 256);
         synth.handleMidi (noteOff, 3);
         synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: the rhythm loop player (sync, free, swaps, seeks) never allocates", "[realtime][rhythm]")
+{
+    // Two loops prepared beforehand (a loader thread's work), then only playing.
+    std::vector<float> a (96000, 0.0f), b (72000, 0.0f);
+    for (std::size_t k = 0; k < a.size(); k += 24000)
+        for (std::size_t i = 0; i < 300; ++i)
+            a[k + i] = 0.5f * std::sin (0.26f * static_cast<float> (i));
+    for (std::size_t i = 0; i < b.size(); ++i)
+        b[i] = 0.1f * std::sin (0.01f * static_cast<float> (i));
+    const auto loopA = andor::analog::rhythm::prepareLoop (a.data(), a.data(), a.size(), 48000.0);
+    const auto loopB = andor::analog::rhythm::prepareLoop (b.data(), b.data(), b.size(), 48000.0);
+    andor::analog::rhythm::LoopPlayer player;
+    player.prepare (48000.0);
+    std::vector<float> l (512), r (512), lev (512), tr (512);
+    counting = true;
+    double q = 0.0;
+    for (int block = 0; block < 400; ++block)
+    {
+        if (block % 50 == 0)
+            player.setLoop (block % 100 == 0 ? loopA.get() : loopB.get());
+        if (block == 200)
+            q = 3.5;   // (a seek)
+        andor::analog::rhythm::LoopPlayer::Settings s;
+        s.sync = (block / 30) % 2 == 0;
+        s.tempoFactor = block % 3 == 0 ? 2.0 : 1.0;
+        player.render (l.data(), r.data(), 0.8f, lev.data(), tr.data(), 512, q, (100.0 + block * 0.1) / 60.0 / 48000.0, block % 70 != 0, s);
+        q += 512 * (100.0 + block * 0.1) / 60.0 / 48000.0;
     }
     counting = false;
     CHECK (allocations.load() == 0);
