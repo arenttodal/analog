@@ -31,6 +31,7 @@
 
 #include <array>
 #include <atomic>
+#include "rhythm/RhythmLoop.h"
 #include <cstdint>
 #include <vector>
 
@@ -244,6 +245,13 @@ public:
         double driftCents = 0.0;  ///< MOVEMENT DRIFT's wander of its pitch now (both lanes)
     };
     VoiceView voiceView (int slot) const noexcept;
+
+    /** RHYTHMIC MORPH: card C's prepared loop (owned by the caller, alive while set; null: none). */
+    void setRhythmLoop (const andor::analog::rhythm::PreparedLoop* loop) noexcept { loopPlayer.setLoop (loop); }
+    /** C RHYTHM's value now (0..1) and the loop's playhead (source seconds, -1 idle): the card's
+        display. Read only, any thread. */
+    float rhythmValue() const noexcept { return rhythmShown.load (std::memory_order_relaxed); }
+    double rhythmPlayhead() const noexcept { return loopPlayer.playheadSeconds(); }
 
     /** SATELLITE's telemetry (read only: the panel's live path): where each card is now (its
         place -1..1 and ORBIT's rear amount), as the audio heard it this control period. */
@@ -673,6 +681,14 @@ private:
         float x0 = 0.0f, x1 = 0.0f, rear0 = 0.0f, rear1 = 0.0f, width = 1.0f;   ///< this chunk's ends (amount applied)
         int notes = 0;            ///< BOUNCE NOTE: the card's notes so far
     };
+    // RHYTHMIC MORPH: the loop (one for the instrument, on the musical clock) and C RHYTHM.
+    andor::analog::rhythm::LoopPlayer loopPlayer;
+    std::vector<float> loopL, loopR, loopLevel, loopTransient, rhythmValues;   ///< a block (host rate)
+    float rhythmEnv = 0.0f, rhythmGate = 0.0f, loopGainL = 1.0f, loopGainR = 1.0f;
+    std::atomic<float> rhythmShown { 0.0f };
+    bool rhythmRun = false;   ///< this block: the loop plays
+    void renderRhythm (int numSamples) noexcept;
+    void mixRhythm (float* left, float* right, int numSamples) noexcept;
     std::array<SatelliteCard, 3> sat {};
     std::array<std::atomic<float>, 3> satShownX {}, satShownRear {};
     std::atomic<int> satShownLive { 0 };

@@ -274,9 +274,22 @@ void LoopPlayer::render (float* outL, float* outR, float gain, float* level, flo
                     double p = std::fmod (h.pos, frames);
                     if (p < 0.0)
                         p += frames;
-                    const auto idx = std::min (a.envelope.size() - 1, static_cast<std::size_t> (p / h.source->rate / a.hopSeconds));
-                    envLevel = h.gain * (a.envelopePeak > 0.0f ? a.envelope[idx] / a.envelopePeak : 0.0f);
-                    envTransient = h.gain * a.transient[idx];
+                    const double seconds = p / h.source->rate;
+                    // The level: the envelope between its frames.
+                    const double f = seconds / a.hopSeconds;
+                    const auto i0 = std::min (a.envelope.size() - 1, static_cast<std::size_t> (f));
+                    const auto i1 = std::min (a.envelope.size() - 1, i0 + 1);
+                    const auto t = static_cast<float> (f - static_cast<double> (i0));
+                    const float e = a.envelope[i0] + t * (a.envelope[i1] - a.envelope[i0]);
+                    envLevel = h.gain * (a.envelopePeak > 0.0f ? e / a.envelopePeak : 0.0f);
+                    // The transient: a pulse from the last attack at or before the head, to the
+                    // sample (its level, falling over ~30 ms).
+                    const auto it = std::upper_bound (a.onsets.begin(), a.onsets.end(), seconds, [] (double x, const Onset& o) { return x < o.seconds; });
+                    if (it != a.onsets.begin())
+                    {
+                        const auto& o = *std::prev (it);
+                        envTransient = h.gain * o.level * static_cast<float> (std::exp (-(seconds - o.seconds) / 0.03));
+                    }
                 }
             }
             h.pos += step;

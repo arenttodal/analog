@@ -40,7 +40,8 @@ struct Candidate
 struct Onset
 {
     double seconds = 0.0;
-    float strength = 0.0f;   ///< 0..1
+    float strength = 0.0f;   ///< 0..1: how clear (the onset curve's peak)
+    float level = 0.0f;      ///< 0..1: how loud its attack, against the loudest (square-root compressed)
 };
 
 struct Analysis

@@ -195,6 +195,9 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     chorus.prepare (hostRate, maxBlock);
     dcCoef = static_cast<float> (1.0 - 2.0 * math::pi * 5.0 / hostRate);
     satRearCoef = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * 2200.0 / internalRate));   // (ORBIT's rear: a darkening near 2 kHz)
+    for (auto* b : { &loopL, &loopR, &loopLevel, &loopTransient, &rhythmValues })
+        b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    loopPlayer.prepare (hostRate);
     reset();
 }
 
@@ -229,6 +232,9 @@ void Synth::reset() noexcept
         c.amount = current.satellite[k].enabled ? 1.0 : 0.0;
     }
     satLive = 0;
+    loopPlayer.reset();
+    rhythmEnv = rhythmGate = 0.0f;
+    rhythmRun = false;
     satLocalRunning = satPendingStart = false;
     satLocalPpq = 0.0;
     satIdle = 0;
@@ -2819,6 +2825,79 @@ namespace
     }
 }
 
+void Synth::renderRhythm (int numSamples) noexcept
+{
+    // RHYTHMIC MORPH: the loop on the musical clock - SATELLITE's (the host's quarter notes while
+    // the transport runs; stopped, the local clock the first note starts) - and C RHYTHM from
+    // what it plays: one value for the instrument (every voice, every chord, together).
+    const auto& rs = current.rhythm;
+    rhythmRun = rs.enabled && loopPlayer.loop() != nullptr && numSamples <= static_cast<int> (loopL.size());
+    if (! rhythmRun)
+    {
+        rhythmEnv = 0.0f;
+        rhythmShown.store (0.0f, std::memory_order_relaxed);
+        return;
+    }
+    const double bpm = timing.valid && timing.bpm > 1.0 ? timing.bpm : 120.0;
+    const bool playing = timing.valid && timing.playing;
+    const bool starting = ! playing && satPendingStart && ! satLocalRunning;
+    const double q0 = playing ? ppqAtBlock + static_cast<double> (blockOffset) / hostRate * bpm / 60.0 : (satLocalRunning ? satLocalPpq : 0.0);
+    const bool running = playing || satLocalRunning || starting;
+    const auto n = static_cast<std::size_t> (numSamples);
+    std::fill (loopL.begin(), loopL.begin() + static_cast<std::ptrdiff_t> (n), 0.0f);
+    std::fill (loopR.begin(), loopR.begin() + static_cast<std::ptrdiff_t> (n), 0.0f);
+    andor::analog::rhythm::LoopPlayer::Settings settings;
+    settings.sync = rs.sync;
+    settings.tempoFactor = rs.tempo == 0 ? 0.5 : (rs.tempo == 2 ? 2.0 : 1.0);
+    loopPlayer.render (loopL.data(), loopR.data(), 1.0f, loopLevel.data(), loopTransient.data(), numSamples, q0, bpm / 60.0 / hostRate, running, settings);
+    // C RHYTHM: above the threshold (SENSITIVITY), through its ATTACK and RELEASE, times DEPTH.
+    const float threshold = static_cast<float> (0.6 * (1.0 - std::clamp (rs.sensitivity, 0.0, 1.0)));
+    const float attack = static_cast<float> (1.0 - std::exp (-1.0 / (std::max (0.5, rs.attackMs) * 0.001 * hostRate)));
+    const float release = static_cast<float> (1.0 - std::exp (-1.0 / (std::max (5.0, rs.releaseMs) * 0.001 * hostRate)));
+    const float depth = static_cast<float> (std::clamp (rs.depth, 0.0, 1.0));
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        const float raw = rs.shape == Patch::Rhythm::Shape::transient ? loopTransient[i] : loopLevel[i];
+        const float x = std::max (0.0f, raw - threshold) / std::max (0.05f, 1.0f - threshold);
+        rhythmEnv += (x > rhythmEnv ? attack : release) * (std::min (1.0f, x) - rhythmEnv);
+        rhythmValues[i] = depth * rhythmEnv;
+    }
+    rhythmShown.store (rhythmValues[n - 1], std::memory_order_relaxed);
+}
+
+void Synth::mixRhythm (float* left, float* right, int numSamples) noexcept
+{
+    const auto& rs = current.rhythm;
+    if (! rhythmRun || rs.audio == Patch::Rhythm::Audio::mod)
+    {
+        rhythmGate = 0.0f;
+        return;
+    }
+    // Heard while card C's notes sound (their AMP: attack, hold, release), at card C's LEVEL
+    // (its mute and solo too), at SATELLITE C's place.
+    float gate = 0.0f;
+    for (const auto& v : voices)
+        if (v.active && (v.cards & 4) != 0)
+            gate = std::max (gate, v.amp.value());
+    const float level = current.organic.heard && current.organic.levelDb > -47.99 ? math::dbToGain (static_cast<float> (current.organic.levelDb)) : 0.0f;
+    float gL = 1.0f, gR = 1.0f;
+    if ((satLive & 4) != 0)
+        osp::satellite::gains (sat[2].x1, gL, gR);
+    const float gateStep = static_cast<float> (1.0 - std::exp (-1.0 / (0.002 * hostRate)));
+    const float span = 1.0f / static_cast<float> (std::max (1, numSamples));
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto ui = static_cast<std::size_t> (i);
+        rhythmGate += gateStep * (gate - rhythmGate);
+        const float t = static_cast<float> (i) * span;
+        const float l = loopGainL + t * (gL - loopGainL), r = loopGainR + t * (gR - loopGainR);
+        left[i] += level * rhythmGate * l * loopL[ui];
+        right[i] += level * rhythmGate * r * loopR[ui];
+    }
+    loopGainL = gL;
+    loopGainR = gR;
+}
+
 void Synth::updateSatellite (int count) noexcept
 {
     // SATELLITE's clock, as SHAPER DNA's: the host's quarter notes while the transport runs
@@ -3135,11 +3214,13 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     dnaWanted = current.shaperDna.enabled && current.effects.movementMode == osp::MovementMode::shaper && current.movementA.on && router.movementOnMain();
     effects.setShaperHandoff (dnaWanted);
 
+    renderRhythm (numSamples);   // (first: C RHYTHM is this block's, ready for its control periods)
     int pos = 0;
     while (pos < numSamples)
     {
         if (controlCountdown <= 0)
         {
+            modRuntime.setRhythm (rhythmRun ? rhythmValues[static_cast<std::size_t> (pos)] : 0.0f);
             controlUpdate();
             controlCountdown = controlPeriod;
         }
@@ -3184,6 +3265,8 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
             right[i] = stage2R.process (srcR[2 * i], srcR[2 * i + 1]);
         }
     }
+
+    mixRhythm (left, right, numSamples);   // card C's loop joins the voices (AUDIO, BOTH)
 
     // The chorus (state version 4; off: the buffers untouched), on the voices' sum.
     chorus.setMode (current.chorusMode);

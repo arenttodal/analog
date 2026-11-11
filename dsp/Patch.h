@@ -245,6 +245,23 @@ struct Patch
     /** SATELLITE (docs/features/SATELLITE_RHYTHM_ARCHITECTURE.md): each card's own stereo motion,
         A, B, C. All off: as before, bit for bit. SUB is never moved. */
     std::array<osp::satellite::Settings, 3> satellite {};
+    /** RHYTHMIC MORPH: card C's recording as a loop on the host's grid (its own pitch), heard
+        and / or felt as C RHYTHM - a modulation source the routes take to A / B, FILTER, MORPH.
+        Off: as before, bit for bit. */
+    struct Rhythm
+    {
+        enum class Audio { audio, mod, both };
+        enum class Shape { envelope, transient };
+        bool enabled = false;
+        Audio audio = Audio::audio;   ///< AUDIO: heard; MOD: only felt (silent, still playing); BOTH
+        bool sync = true;             ///< on the host's grid (a rhythmic loop); off: FREE
+        int tempo = 1;                ///< 0 HALF, 1 DETECTED, 2 DOUBLE
+        Shape shape = Shape::envelope;
+        double attackMs = 5.0, releaseMs = 120.0;
+        double sensitivity = 0.5;     ///< 0..1: the threshold under which the rhythm is nothing
+        double depth = 1.0;           ///< 0..1: C RHYTHM's height
+    };
+    Rhythm rhythm;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45

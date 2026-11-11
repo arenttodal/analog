@@ -104,6 +104,7 @@ if(OSP_BUILD_TESTS)
         tests/SatelliteTests.cpp
         tests/RhythmAnalysisTests.cpp
         tests/RhythmLoopTests.cpp
+        tests/RhythmMorphTests.cpp
         tests/CardEqTests.cpp
         tests/SampleSourceTests.cpp
         tools/Wav.cpp)

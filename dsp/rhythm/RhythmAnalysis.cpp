@@ -206,6 +206,31 @@ Analysis analyse (const float* mono, std::size_t length, double sampleRate)
         }
     }
 
+    // The transient track C RHYTHM reads: a pulse at every onset's attack (its strength,
+    // falling over ~30 ms) - aligned with the sound, where the flux curve itself peaks a few
+    // milliseconds early.
+    // Each pulse is the attack's own level against the loudest (square-root compressed: a soft
+    // tick stays a tick, a loud one stays louder - the dynamics kept, never flattened).
+    std::fill (a.transient.begin(), a.transient.end(), 0.0f);
+    float loudest = 1.0e-9f;
+    for (const float l : levels)
+        loudest = std::max (loudest, l);
+    for (std::size_t i = 0; i < a.onsets.size(); ++i)
+    {
+        auto& o = a.onsets[i];
+        const double height = std::sqrt (std::clamp (static_cast<double> (levels[i] / loudest), 0.0, 1.0));
+        o.level = static_cast<float> (height);
+        const auto first = static_cast<std::size_t> (std::max (0.0, std::ceil (o.seconds / a.hopSeconds)));
+        for (std::size_t f = first; f < frames; ++f)
+        {
+            const double t = static_cast<double> (f) * a.hopSeconds - o.seconds;
+            const auto v = static_cast<float> (height * std::exp (-t / 0.03));
+            if (v < 0.01f)
+                break;
+            a.transient[f] = std::max (a.transient[f], v);
+        }
+    }
+
     // Tempo: the onset curve's autocorrelation, each lag scored with its octaves (twice, four
     // times), under a gentle prior around 120 BPM.
     double mean = 0.0;
