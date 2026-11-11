@@ -561,3 +561,45 @@ TEST_CASE ("realtime: MAIN + SEND (the cards' sends, SEND's wet chain, SUB on MA
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("RT-01: SHAPER DNA (16 voices, three profiles, FILTER / BOTH, hand-overs, profile changes) never allocates", "[realtime][shaperdna][v8]")
+{
+    auto synthOwned = std::make_unique<Synth>();
+    Synth& synth = *synthOwned;
+    synth.prepare (48000.0, 512, 4);
+    auto p = factoryPatches()[0].patch;
+    p.motion = 1.0;
+    p.effects.movementMode = osp::MovementMode::shaper;
+    p.effects.shaper.target = osp::ShaperTarget::both;
+    p.shaperDna.enabled = true;
+    p.shaperDna.rate = { -1, static_cast<int> (osp::ShaperRate::eighthTriplet), static_cast<int> (osp::ShaperRate::thirtySecond) };
+    p.sub.enabled = true;
+    synth.setPatch (p);
+    synth.reset();
+    std::vector<float> left (512), right (512);
+    synth.render (left.data(), right.data(), 512);
+    counting = true;
+    for (int block = 0; block < 200; ++block)
+    {
+        p.shaperDna.enabled = block % 37 < 30;   // hand-overs both ways
+        p.shaperDna.pattern[1] = block % 12;      // profile changes (crossfades)
+        p.shaperDna.assignment = block % 50 < 25 ? andor::analog::ShaperDnaSettings::Assignment::cycle : andor::analog::ShaperDnaSettings::Assignment::keyZones;
+        p.effects.shaper.target = block % 3 == 0 ? osp::ShaperTarget::filter : osp::ShaperTarget::both;
+        synth.setPatch (p);
+        osp::HostTiming t;
+        t.valid = true;
+        t.playing = block % 40 < 20;
+        t.ppq = block * 0.1;
+        synth.setTransport (t);
+        const std::uint8_t keyOn[3] { 0x90, static_cast<std::uint8_t> (36 + block % 48), 100 };
+        const std::uint8_t keyOff[3] { 0x80, static_cast<std::uint8_t> (36 + (block + 40) % 48), 0 };
+        synth.handleMidi (keyOn, 3);
+        synth.handleSubMidi (keyOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (keyOff, 3);
+        synth.handleSubMidi (keyOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

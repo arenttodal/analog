@@ -106,6 +106,10 @@ struct Graph
     bool operator!= (const Graph& o) const { return ! (*this == o); }
 };
 
+/** MOVEMENT (lane A's bus) is heard on MAIN: CLASSIC, or a route with it on its MAIN chain (the
+    one path, or MAIN + SEND's MAIN), not bypassed. SHAPER DNA plays only then. No allocation. */
+bool movementOnMain (const Graph& g) noexcept;
+
 /** CLASSIC as drawn: DRIVE -> MOVEMENT -> (ECHO || SPACE), the pair a SEND group. */
 Graph classicGraph();
 /** MAIN + SEND as it starts (the user's explicit conversion of `from`): MAIN keeps `from`'s

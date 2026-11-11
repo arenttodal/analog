@@ -210,6 +210,17 @@ public:
     /** Output delay of the decimation filters, in host samples. */
     int latencySamples() const noexcept { return latency; }
     int oversamplingFactor() const noexcept { return oversampling; }
+    /** SHAPER DNA (tests, telemetry): the profile (0 A, 1 B, 2 C) the sounding note `note` was
+        given, -1 when no voice plays it; and the hand-over (0 lane A's SHAPER .. 1 the notes'). */
+    int shaperDnaProfileOf (int note) const noexcept
+    {
+        for (const auto& v : voices)
+            if (v.active && ! v.pending && v.note == note)
+                return v.dnaProfile;
+        return -1;
+    }
+    double shaperDnaMix() const noexcept { return dnaMix; }
+    double shaperHandoff() const noexcept { return effects.shaperHandoff(); }
     double sampleRate() const noexcept { return hostRate; }
     /** Tests: the amount KALEIDOSCOPE's stage on the mix is set to (the cards', level-weighted). */
     double kaleidoscopeAmount() const noexcept { return kaleidoscopeStage.amount(); }
@@ -466,6 +477,12 @@ private:
         // A voice taken for a new note fades out first (3 ms), then starts the new one.
         int fade = 0;
         bool pending = false;
+        // SHAPER DNA: the profile this note was given (latched until it ends), its level and
+        // rhythmic low-pass state (mono, before pan), and its send's own filter state.
+        int dnaProfile = 0, pendingDnaProfile = 0;
+        double dnaGain = 1.0, dnaClose = 0.0, dnaG = 1.0;
+        double dnaS1 = 0.0, dnaS2 = 0.0, dnaSendS1 = 0.0, dnaSendS2 = 0.0;
+        int dnaCoefCountdown = 0;
         int pendingChannel = 0, pendingNote = 0;
         float pendingVelocity = 0.0f;
         bool pendingRetrigger = true;
@@ -606,6 +623,31 @@ private:
     std::vector<float> subGain;
     float subCutoffMoved = 0.0f;  ///< the cards' cutoff movement beyond TONE and tracking (SUB follows it)   ///< MOVEMENT's level gain this block (SUB follows PULSE / SHAPER)
     int subTail = 0;
+
+    // SHAPER DNA (docs/SHAPER_DNA_V1.md): lane A's SHAPER per note. Nothing here runs while it
+    // is off and has faded out, so OFF renders exactly as before.
+    void updateShaperDna (int count) noexcept;
+    void applyShaperDna (Voice& v, float& out, float* send, int at) noexcept;
+    static constexpr int dnaMaxChunk = controlPeriod * 8;   ///< internal samples per control chunk (oversampling up to 8)
+    ShaperDnaAssigner dnaAssigner;
+    int dnaAssigning = 0;                     ///< the profile the next started voice takes
+    bool dnaWasEnabled = false;
+    std::array<shaperDna::Profile, 3> dnaProfiles {}, dnaPrevious {};
+    std::array<int, 3> dnaFade {};            ///< a profile's pattern / rate change: 30 ms crossfade (internal samples)
+    ShaperDnaSettings dnaResolvedSettings;
+    osp::ShaperParams dnaResolvedShaper;
+    bool dnaResolvedOnce = false;
+    bool dnaRun = false;                      ///< this chunk: the voices are shaped
+    bool dnaWanted = false;                   ///< this block: DNA on and eligible (SHAPER on lane A, MOVEMENT on MAIN)
+    double dnaAmountCoef = 0.001, dnaDepthCoef = 0.001, dnaRampCoef = 0.01, dnaMixStep = 0.001, dnaOpenHz = 18000.0, dnaOpenOctaves = 5.6;
+    int dnaFadeLength = 1, dnaTailLength = 1, dnaIdleLimit = 1;
+    int dnaTail = 0;                          ///< after the hand-back: the voices' ramps settle before it stops
+    double dnaMix = 0.0, dnaAmount = 0.0, dnaVolDepth = 0.55, dnaFltDepth = 1.0;
+    double dnaLocalPpq = 0.0;
+    bool dnaLocalRunning = false, dnaPendingStart = false;
+    int dnaIdle = 0;
+    std::array<std::array<float, dnaMaxChunk>, 3> dnaShape {};
+    std::array<float, dnaMaxChunk> dnaVol {}, dnaFlt {}, dnaShare {};   ///< depths, and the notes' share of the gate (the hand-over)
     float* tapL = nullptr;            ///< (renderVoice's: where this chunk's sends go)
     float* tapR = nullptr;
     HalfBandDecimator stage1L, stage1R, stage2L, stage2R;

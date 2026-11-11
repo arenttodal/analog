@@ -276,6 +276,31 @@ bool Graph::operator== (const Graph& o) const
     return custom == o.custom && sameNodes (chain, o.chain) && mainSend == o.mainSend && sameNodes (send, o.send);
 }
 
+namespace
+{
+    bool holdsLiveMovement (const std::vector<Node>& chain) noexcept
+    {
+        for (const auto& n : chain)
+        {
+            if (n.kind == Node::Kind::effect)
+            {
+                if (n.fx.type == Type::movement && ! n.bypassed)
+                    return true;
+                continue;
+            }
+            for (const auto& lane : n.lanes)
+                if (holdsLiveMovement (lane))
+                    return true;
+        }
+        return false;
+    }
+}
+
+bool movementOnMain (const Graph& g) noexcept
+{
+    return ! g.custom || holdsLiveMovement (g.chain);
+}
+
 Graph classicGraph()
 {
     Graph g;

@@ -8,6 +8,7 @@
 #include "engine/KaleidoscopeEngine.h"
 
 #include <algorithm>
+#include <numbers>
 #include <cmath>
 
 namespace andor::analog
@@ -97,6 +98,17 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     subGain.assign (static_cast<std::size_t> (maxBlock), 1.0f);
     subR.assign (static_cast<std::size_t> (maxBlock), 0.0f);
     subDelay.allocate (fx::CompiledGraph::alignCapacity);
+    // SHAPER DNA's constants at the internal rate (the SHAPER's own times: 2 ms ramps, 30 ms
+    // pattern / rate crossfades, 40 ms target and hand-over glides, 1.5 s idle clock).
+    dnaAmountCoef = 1.0 - std::exp (-1.0 / (0.05 * internalRate));
+    dnaDepthCoef = 1.0 - std::exp (-1.0 / (0.04 * internalRate));
+    dnaRampCoef = 1.0 - std::exp (-1.0 / (0.002 * internalRate));
+    dnaMixStep = 1.0 / (0.04 * internalRate);
+    dnaFadeLength = std::max (1, static_cast<int> (0.03 * internalRate));
+    dnaTailLength = std::max (1, static_cast<int> (0.05 * internalRate));
+    dnaIdleLimit = std::max (1, static_cast<int> (1.5 * internalRate));
+    dnaOpenHz = std::min (18000.0, 0.45 * hostRate);
+    dnaOpenOctaves = std::log2 (dnaOpenHz / 380.0);
 
     // 2x -> 1x: flat to 0.42 fs, -96 dB from 0.58 fs (what folds back lands above 0.42 fs).
     stage2L.design (0.08, 96.0);
@@ -196,6 +208,15 @@ void Synth::reset() noexcept
     pedal = false;
     blockOffset = 0;
     controlCountdown = 0;
+    dnaAssigner.reset();
+    dnaAssigning = 0;
+    dnaLocalRunning = dnaPendingStart = false;
+    dnaLocalPpq = 0.0;
+    dnaIdle = 0;
+    dnaFade = {};
+    dnaRun = false;
+    dnaTail = 0;
+    dnaMix = dnaWanted ? 1.0 : 0.0;
     smoothingPrimed = false;
     driftSeed = current.seed;
     rebuildDrift();
@@ -573,7 +594,11 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         kaleidoscopeStage.setModel (&model);
     }
     if (retrigger)
+    {
         effects.noteStarted();
+        dnaPendingStart = true;   // (SHAPER DNA's own stopped-transport clock starts with it too)
+    }
+    v.dnaProfile = dnaAssigning;   // SHAPER DNA: latched for the note's life
     v.channel = channel;
     v.note = note;
     v.cards = cardsFor (channel);
@@ -599,6 +624,10 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     {
         v.filter.reset();
         v.sendFilter.reset();
+        v.dnaGain = 1.0;
+        v.dnaClose = 0.0;
+        v.dnaS1 = v.dnaS2 = v.dnaSendS1 = v.dnaSendS2 = 0.0;
+        v.dnaCoefCountdown = 0;
         v.line1.reset();
         v.line2.reset();
         // State version 4: the models' extras from the note's seed (SUPER SAW's side phases
@@ -870,6 +899,14 @@ void Synth::noteOn (int channel, int note, float velocity) noexcept
         noteOff (channel, note);
         return;
     }
+    // SHAPER DNA: this logical note's profile (CYCLE counts it, from A each time DNA is switched
+    // on; KEY ZONES reads the key). Every voice it starts (unison, a stolen voice's wait) shares it.
+    if (current.shaperDna.enabled != dnaWasEnabled)
+    {
+        dnaWasEnabled = current.shaperDna.enabled;
+        dnaAssigner.reset();
+    }
+    dnaAssigning = current.shaperDna.enabled ? dnaAssigner.assign (current.shaperDna, note) : 0;
     // The modulation follows the keys: a global LFO 1 / 2 in RETRIGGER restarts with the first,
     // the global envelopes start, VEL and NOTE on the shared stages take this key.
     modRuntime.noteStarted (note, channel);
@@ -901,6 +938,7 @@ void Synth::noteOn (int channel, int note, float velocity) noexcept
         v->pendingNote = note;
         v->pendingVelocity = velocity;
         v->pendingRetrigger = true;
+        v->pendingDnaProfile = dnaAssigning;
         v->held = false;
         v->sustained = false;
         v->fade = std::max (1, static_cast<int> (stealFadeSeconds * internalRate));
@@ -2409,13 +2447,15 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             const float fadeGain = v.fade > 0 ? static_cast<float> (v.fade) / static_cast<float> (fadeLength) : 1.0f;
             if (v.fade > 0)
                 out *= fadeGain;
+            // The sends, filtered as the voice is and shaped by the note's AMP, level and place.
+            // Card C's part is both its layers'.
+            float tap = sendTaps ? sendY * scratchAmp[ks] * v.outGain * fadeGain : 0.0f;
+            if (dnaRun)
+                applyShaperDna (v, out, sendTaps ? &tap : nullptr, at);   // SHAPER DNA: this note's rhythm (its send too)
             left[at] += out * v.panL;
             right[at] += out * v.panR;
             if (sendTaps)
             {
-                // The sends, filtered as the voice is and shaped by the note's AMP, level and
-                // place. Card C's part is both its layers'.
-                const float tap = sendY * scratchAmp[ks] * v.outGain * fadeGain;
                 tapL[at] += tap * v.panL;
                 tapR[at] += tap * v.panR;
             }
@@ -2427,6 +2467,7 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                 v.env.kill();
                 v.active = false;
                 v.stoppedAt = stillRunning;
+                dnaAssigning = v.pendingDnaProfile;   // (the profile its note-on was given)
                 startVoice (v, v.pendingChannel, v.pendingNote, v.pendingVelocity, v.pendingRetrigger);
                 used = k + 1;
                 break;
@@ -2537,11 +2578,206 @@ void Synth::render (float* left, float* right, int numSamples) noexcept
     }
 }
 
+//==============================================================================
+// SHAPER DNA (docs/SHAPER_DNA_V1.md)
+
+namespace
+{
+    bool sameShaper (const osp::ShaperParams& a, const osp::ShaperParams& b) noexcept
+    {
+        return a.pattern == b.pattern && a.rate == b.rate && a.smooth == b.smooth && a.custom == b.custom && a.customSteps == b.customSteps;
+    }
+}
+
+void Synth::updateShaperDna (int count) noexcept
+{
+    count = std::min (count, dnaMaxChunk);
+    // The clock, always (it only counts): the host's quarter notes while the transport runs,
+    // sample-accurate from the block's start; stopped, one local clock started by the first
+    // note and kept running while anything sounds (1.5 s of silence and it waits again), as
+    // the SHAPER's own. New notes never reset it.
+    const double bpm = timing.valid && timing.bpm > 1.0 ? timing.bpm : 120.0;
+    const double dq = bpm / (60.0 * internalRate);
+    double q0 = 0.0;
+    bool running = false;
+    if (timing.valid && timing.playing)
+    {
+        q0 = ppqAtBlock + static_cast<double> (blockOffset) / hostRate * bpm / 60.0;
+        running = true;
+        dnaLocalRunning = false;
+    }
+    else
+    {
+        if (dnaPendingStart && ! dnaLocalRunning)
+        {
+            dnaLocalRunning = true;
+            dnaLocalPpq = 0.0;
+            dnaIdle = 0;
+        }
+        dnaPendingStart = false;
+        q0 = dnaLocalPpq;
+        running = dnaLocalRunning;
+        if (dnaLocalRunning)
+        {
+            dnaLocalPpq += dq * count;
+            bool sounding = false;
+            for (const auto& v : voices)
+                sounding = sounding || v.active;
+            dnaIdle = sounding ? 0 : dnaIdle + count;
+            if (dnaIdle > dnaIdleLimit)
+                dnaLocalRunning = false;
+        }
+    }
+
+    // Running: while wanted, while the hand-back glides, and a short tail for the notes' ramps.
+    if (dnaWanted)
+        dnaTail = dnaTailLength;
+    else if (dnaMix <= 0.0 && dnaTail > 0)
+        dnaTail -= count;
+    const bool wasRunning = dnaRun;
+    dnaRun = dnaWanted || dnaMix > 0.0 || dnaTail > 0;
+    if (! dnaRun)
+    {
+        if (wasRunning)
+            for (auto& v : voices)
+            {
+                // (stopped: the next hand-over starts every note from open)
+                v.dnaGain = 1.0;
+                v.dnaClose = 0.0;
+                v.dnaS1 = v.dnaS2 = v.dnaSendS1 = v.dnaSendS2 = 0.0;
+                v.dnaCoefCountdown = 0;
+            }
+        return;
+    }
+
+    const auto& shaper = current.effects.shaper;
+    const auto dna = current.shaperDna.sanitised();
+    const double amountTarget = std::clamp (current.motion, 0.0, 1.0) * std::clamp (current.movementA.level, 0.0, 1.0);
+    const double volumeTarget = shaper.target == osp::ShaperTarget::volume ? 1.0 : (shaper.target == osp::ShaperTarget::both ? 0.55 : 0.0);
+    const double filterTarget = shaper.target == osp::ShaperTarget::volume ? 0.0 : 1.0;
+    if (! wasRunning)
+    {
+        // Starting: the depth is where the SHAPER's is (only the hand-over glides).
+        dnaAmount = amountTarget;
+        dnaVolDepth = volumeTarget;
+        dnaFltDepth = filterTarget;
+    }
+    // The profiles, resolved only when something changed (a change crossfades 30 ms).
+    if (! dnaResolvedOnce || ! (dna == dnaResolvedSettings) || ! sameShaper (shaper, dnaResolvedShaper))
+    {
+        for (int i = 0; i < ShaperDnaSettings::maxProfiles; ++i)
+        {
+            const auto ui = static_cast<std::size_t> (i);
+            const auto p = shaperDna::resolve (dna, i, shaper);
+            if (dnaResolvedOnce && wasRunning && ! (p == dnaProfiles[ui]))
+            {
+                dnaPrevious[ui] = dnaProfiles[ui];
+                dnaFade[ui] = dnaFadeLength;
+            }
+            dnaProfiles[ui] = p;
+        }
+        dnaResolvedSettings = dna;
+        dnaResolvedShaper = shaper;
+        dnaResolvedOnce = true;
+    }
+
+    // Each profile's curve across the chunk (once, whatever the number of notes), and the
+    // depths every note reads.
+    const double phase = std::clamp (current.effects.movementPhase, 0.0, 1.0);
+    const double smooth = shaper.smooth;
+    const double mixTarget = dnaWanted ? 1.0 : 0.0;
+    for (int k = 0; k < count; ++k)
+    {
+        const auto uk = static_cast<std::size_t> (k);
+        const double q = q0 + dq * k;
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            float s = running ? shaperDna::shapeAt (dnaProfiles[i], q, smooth, phase) : 1.0f;
+            if (dnaFade[i] > 0)
+            {
+                const float old = running ? shaperDna::shapeAt (dnaPrevious[i], q, smooth, phase) : 1.0f;
+                const float w = static_cast<float> (dnaFade[i]) / static_cast<float> (dnaFadeLength);
+                s += w * (old - s);
+                --dnaFade[i];
+            }
+            dnaShape[i][uk] = s;
+        }
+        dnaAmount += (amountTarget - dnaAmount) * dnaAmountCoef;
+        dnaVolDepth += (volumeTarget - dnaVolDepth) * dnaDepthCoef;
+        dnaFltDepth += (filterTarget - dnaFltDepth) * dnaDepthCoef;
+        if (dnaMix != mixTarget)
+            dnaMix = mixTarget > dnaMix ? std::min (mixTarget, dnaMix + dnaMixStep) : std::max (mixTarget, dnaMix - dnaMixStep);
+        // The hand-over shares one gate between lane A's SHAPER and the notes (RhythmicShaper's
+        // `share`): the notes' gain is gain^mix and their filter closes by mix of the octaves.
+        const double amount = dnaAmount;
+        dnaVol[uk] = static_cast<float> (amount * dnaVolDepth);
+        dnaFlt[uk] = amount > 0.0 ? static_cast<float> (dnaFltDepth * std::pow (amount, 0.8) * dnaOpenOctaves) : 0.0f;
+        dnaShare[uk] = static_cast<float> (dnaMix);
+    }
+}
+
+void Synth::applyShaperDna (Voice& v, float& out, float* send, int at) noexcept
+{
+    // The SHAPER's own law, on one note: VOL dips its level, FILTER closes a gentle LP12 (its
+    // own state: never shared between notes), BOTH does both, the filter fully and the level
+    // less. 2 ms ramps: never a jump, even at SMOOTH 0.
+    const auto ua = static_cast<std::size_t> (std::clamp (at, 0, dnaMaxChunk - 1));
+    const double closed = 1.0 - static_cast<double> (dnaShape[static_cast<std::size_t> (std::clamp (v.dnaProfile, 0, 2))][ua]);
+    const double share = dnaShare[ua];
+    double gainTarget = 1.0 - static_cast<double> (dnaVol[ua]) * closed;
+    double closeTarget = static_cast<double> (dnaFlt[ua]) * closed;
+    if (share < 1.0)
+    {
+        gainTarget = std::pow (std::max (0.0, gainTarget), share);   // (the hand-over: the notes' part)
+        closeTarget *= share;
+    }
+    v.dnaGain += (gainTarget - v.dnaGain) * dnaRampCoef;
+    v.dnaClose += (closeTarget - v.dnaClose) * dnaRampCoef;
+    if (v.dnaClose > 1.0e-3)
+    {
+        if (--v.dnaCoefCountdown <= 0)
+        {
+            v.dnaCoefCountdown = 8 * oversampling;
+            const double fc = dnaOpenHz * std::exp2 (-v.dnaClose);
+            v.dnaG = std::tan (std::numbers::pi * std::min (fc, 0.49 * internalRate) / internalRate);
+        }
+        constexpr double k = 1.3;   // (Q ~0.77: transparent, unresonant)
+        const double g = v.dnaG;
+        const double a1 = 1.0 / (1.0 + g * (g + k));
+        auto lp = [g, a1] (float& x, double& s1, double& s2) {
+            const double v1 = a1 * (s1 + g * (static_cast<double> (x) - s2));
+            const double v2 = s2 + g * v1;
+            s1 = 2.0 * v1 - s1;
+            s2 = 2.0 * v2 - s2;
+            x = static_cast<float> (v2);
+        };
+        lp (out, v.dnaS1, v.dnaS2);
+        if (send != nullptr)
+            lp (*send, v.dnaSendS1, v.dnaSendS2);
+    }
+    else
+    {
+        // Open: the filter rests, its state following the input so closing again is seamless.
+        v.dnaS1 = 0.0;
+        v.dnaS2 = out;
+        if (send != nullptr)
+        {
+            v.dnaSendS1 = 0.0;
+            v.dnaSendS2 = *send;
+        }
+        v.dnaCoefCountdown = 0;
+    }
+    out *= static_cast<float> (v.dnaGain);
+    if (send != nullptr)
+        *send *= static_cast<float> (v.dnaGain);
+}
+
 void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
 {
     if (numSamples <= 0)
         return;
     const int total = numSamples * oversampling;
+    router.takePendingRoute();   // (the route this block plays, before the voices ask about it)
     std::fill (mixL.begin(), mixL.begin() + total, 0.0f);
     std::fill (mixR.begin(), mixR.begin() + total, 0.0f);
     // Cinematic V6 gate 4: a MAIN + SEND route hears the cards' sends (taken before the voice
@@ -2573,6 +2809,11 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         std::fill (sendMixR.begin(), sendMixR.begin() + total, 0.0f);
     }
 
+    // SHAPER DNA: on, lane A in SHAPER and on, and MOVEMENT heard on MAIN. Lane A's own SHAPER is
+    // handed over (its depth glides out as the notes' glides in); off, it is handed back.
+    dnaWanted = current.shaperDna.enabled && current.effects.movementMode == osp::MovementMode::shaper && current.movementA.on && router.movementOnMain();
+    effects.setShaperHandoff (dnaWanted);
+
     int pos = 0;
     while (pos < numSamples)
     {
@@ -2586,6 +2827,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         tapL = sendMixL.data() + from;
         tapR = sendMixR.data() + from;
         tapBase = from;
+        updateShaperDna (count);
         for (auto& v : voices)
             if (v.active)
                 renderVoice (v, mixL.data() + from, mixR.data() + from, count);

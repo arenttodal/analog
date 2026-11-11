@@ -242,9 +242,10 @@ std::shared_ptr<const Impulse> FxEngine::impulse (int slot) const
     return {};
 }
 
-void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, int numSamples, const float* sendLeft, const float* sendRight,
-                        const float* sendGain) noexcept
+void FxEngine::takePendingRoute() noexcept
 {
+    // (Idempotent: the Synth asks before its voices render - SHAPER DNA needs to know where
+    // MOVEMENT is this block - and process() asks again.)
     if (const auto* next = exchange.takePending(); next != nullptr && next != current)
     {
         const bool sameSound = current == nullptr ? ! next->graph.custom : (! current->graph.custom && ! next->graph.custom) || current->graph == next->graph;
@@ -261,6 +262,12 @@ void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, i
             ducking = true;
         }
     }
+}
+
+void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, int numSamples, const float* sendLeft, const float* sendRight,
+                        const float* sendGain) noexcept
+{
+    takePendingRoute();
     played = true;
     int done = 0;
     while (done < numSamples)
@@ -309,6 +316,13 @@ void FxEngine::process (osp::PostProcessor& legacy, float* left, float* right, i
         latency = current->graph.mainSend && hasSpatial (current->graph.send) ? std::max (chainLatency (current->graph.chain), chainLatency (current->graph.send))
                                                                               : chainLatency (current->graph.chain);   // (a SEND without a spatial processor returns nothing: not waited for)
     latencyNow.store (latency, std::memory_order_relaxed);
+}
+
+bool FxEngine::movementOnMain() const noexcept
+{
+    // CLASSIC (or nothing compiled yet): MOVEMENT always plays. A route: MOVEMENT somewhere on
+    // its MAIN chain (the one path, or MAIN + SEND's MAIN), not bypassed.
+    return current == nullptr || fx::movementOnMain (current->graph);
 }
 
 int FxEngine::effectLatency (InstanceId id) const noexcept

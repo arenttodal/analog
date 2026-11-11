@@ -7,6 +7,7 @@
 #include "engine/ReimaginedModes.h"
 #include "engine/Shaping.h"
 #include "fx/FxSettings.h"
+#include "ShaperDna.h"
 #include "SubOsc.h"
 
 #include <algorithm>
@@ -237,6 +238,8 @@ struct Patch
     MovementLane movementA;
     MovementLane movementBLane { false, 1.0 };
     osp::Shaping movementB;   ///< lane B's settings (its movement fields; its SHAPER CUSTOM steps from the shell)
+    /** SHAPER DNA V1 (docs/SHAPER_DNA_V1.md): lane A's SHAPER per note. OFF: as before, bit for bit. */
+    ShaperDnaSettings shaperDna;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45

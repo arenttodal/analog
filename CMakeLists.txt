@@ -97,6 +97,7 @@ if(OSP_BUILD_TESTS)
         tests/LiveMorphTests.cpp
         tests/MovementLaneTests.cpp
         tests/ShaperDnaTests.cpp
+        tests/ShaperDnaAudioTests.cpp
         tests/CardEqTests.cpp
         tests/SampleSourceTests.cpp
         tools/Wav.cpp)

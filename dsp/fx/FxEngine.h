@@ -83,10 +83,17 @@ public:
         with the dry. */
     void process (osp::PostProcessor& legacy, float* left, float* right, int numSamples, const float* sendLeft = nullptr,
                   const float* sendRight = nullptr, const float* sendGain = nullptr) noexcept;
+    /** Audio thread: takes a newly published route now (process() does it too). Called before the
+        voices render, so what they read about the route (MOVEMENT on MAIN, the sends) is this
+        block's. Nothing else changes: a switch still waits for silence where it always did. */
+    void takePendingRoute() noexcept;
     /** Audio thread: the route playing (or about to) is MAIN + SEND: the voices' sends are wanted. */
     bool wantsSend() const noexcept { return (current != nullptr && current->graph.mainSend) || (waiting != nullptr && waiting->graph.mainSend); }
     /** Audio thread: the route playing this block is MAIN + SEND (not one still ducking out). */
     bool mainSendPlaying() const noexcept { return current != nullptr && current->graph.mainSend && waiting == nullptr; }
+    /** Audio thread: MOVEMENT (lane A's bus) is heard on MAIN - CLASSIC, or a route with it on
+        its MAIN chain and not bypassed. SHAPER DNA plays only then (never from SEND). */
+    bool movementOnMain() const noexcept;
     /** The route now playing is MAIN + SEND (any thread). */
     bool playingMainSend() const noexcept { return mainSendNow.load (std::memory_order_relaxed); }
 
