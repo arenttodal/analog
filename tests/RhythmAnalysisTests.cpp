@@ -3,6 +3,8 @@
 
 #include "rhythm/RhythmAnalysis.h"
 
+#include "audio/utility/TestSignals.h"
+#include "core/PitchMath.h"
 #include "core/Prng.h"
 
 #include <catch2/catch_approx.hpp>
@@ -255,4 +257,21 @@ TEST_CASE ("RHYTHM: a long recording (60 s) - correct, and quick enough for a lo
     CHECK (a.bpm == Approx (120.0).epsilon (1.0e-6));
     CHECK (a.beats == 120);
     CHECK (seconds < 10.0);
+}
+
+TEST_CASE ("RHYTHM: a sung vowel with vibrato is not a beat - its flux moves with no attack: UNSURE", "[rhythm][unit]")
+{
+    // (5.2 Hz vibrato sweeps the harmonics through the formants; the two channels' 3 cents beat
+    // in the mono sum - a periodic flux curve, but its level never jumps)
+    for (const int note : { 45, 57, 64 })
+    {
+        const auto v = osp::testsignals::vowel (osp::midiToHz (note), 2.0, 48000.0, 3);
+        std::vector<float> m (v.channels[0].size());
+        for (std::size_t i = 0; i < m.size(); ++i)
+            m[i] = 0.5f * (v.channels[0][i] + v.channels[1][i]);
+        const auto a = rhythm::analyse (m.data(), m.size(), 48000.0);
+        INFO ("note " << note << ": " << a.bpm << " BPM, confidence " << a.confidence);
+        CHECK (a.kind == rhythm::Kind::unsure);
+        CHECK (a.envelope.size() > 0);   // (still modulates, FREE)
+    }
 }

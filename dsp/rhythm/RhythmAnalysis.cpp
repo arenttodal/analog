@@ -409,10 +409,26 @@ Analysis analyse (const float* mono, std::size_t length, double sampleRate)
         a.downbeatSeconds = 0.0;
 
     // Rhythmic: a clear pulse, enough onsets, and most of them on a sixteenth or triplet grid.
+    // Only attacks count: an onset whose level rises (the loudest 40 ms after it against the
+    // quietest 60 ms before it). A sustained sound's spectral changes - a singer's vibrato
+    // sweeping its harmonics through the formants - move the flux curve periodically with no
+    // attack at all, and must not read as a beat.
+    const auto riseAt = [&] (double seconds) {
+        const auto hop = [&] (double t) { return static_cast<std::ptrdiff_t> (std::floor (t / a.hopSeconds)); };
+        const auto n = static_cast<std::ptrdiff_t> (a.envelope.size());
+        float before = 1.0e30f, after = 0.0f;
+        for (auto f = std::max<std::ptrdiff_t> (0, hop (seconds - 0.06)); f < std::min (n, hop (seconds)); ++f)
+            before = std::min (before, a.envelope[static_cast<std::size_t> (f)]);
+        for (auto f = std::max<std::ptrdiff_t> (0, hop (seconds)); f < std::min (n, hop (seconds + 0.04) + 1); ++f)
+            after = std::max (after, a.envelope[static_cast<std::size_t> (f)]);
+        if (before > 1.0e29f)
+            return 1.0e3;   // (at the very start: from nothing)
+        return static_cast<double> (after) / std::max (static_cast<double> (before), 1.0e-6 * a.envelopePeak + 1.0e-12);
+    };
     int strong = 0, onGrid = 0;
     for (const auto& o : a.onsets)
     {
-        if (o.strength < 0.2f)
+        if (o.strength < 0.2f || riseAt (o.seconds) < 2.0)   // (+6 dB: vibrato measured at most 1.75x, a drum hit 4x or more)
             continue;
         ++strong;
         const double b = (o.seconds - a.downbeatSeconds) / beat;

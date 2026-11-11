@@ -244,6 +244,18 @@ namespace andor::analog::params
     inline juce::String satelliteId (int card, const char* name) { return juce::String ("analog.satellite.") + static_cast<char> ('a' + card) + "." + name; }
     inline constexpr const char* satelliteNames[] = { "enabled", "mode", "sync", "division", "rate", "depth", "width", "phase", "offset", "retrigger" };
     inline constexpr int satelliteFields = 10;
+    /** State version 21 (RHYTHMIC MORPH): card C's recording as a host-synced loop and C RHYTHM. */
+    inline const juce::String rhythmEnabled = "analog.rhythm.enabled";
+    inline const juce::String rhythmAudio = "analog.rhythm.audio";
+    inline const juce::String rhythmSync = "analog.rhythm.sync";
+    inline const juce::String rhythmTempo = "analog.rhythm.tempo";
+    inline const juce::String rhythmShape = "analog.rhythm.shape";
+    inline const juce::String rhythmAttack = "analog.rhythm.attack";
+    inline const juce::String rhythmRelease = "analog.rhythm.release";
+    inline const juce::String rhythmSensitivity = "analog.rhythm.sensitivity";
+    inline const juce::String rhythmDepth = "analog.rhythm.depth";
+    /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */
+    void addRhythmTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends SATELLITE's parameters (after the USER macros'). */
     void addSatelliteTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends card C's second layer's parameters (after SUB's). */

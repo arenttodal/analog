@@ -7,6 +7,7 @@
 #include "Binding.h"
 #include "Design.h"
 #include "OspLookAndFeel.h"
+#include "RhythmPanel.h"
 #include "ShapingPopups.h"
 
 #include <array>
@@ -637,6 +638,12 @@ namespace
                 soundKey->onClick = [this] { showLayer2SampleMenu(); };
                 revealed().addAndMakeVisible (*soundKey);
             }
+            if (type == HybridType::sample && layer == 1 && ! empty)
+            {
+                // RHYTHMIC MORPH: the recording as a loop and C RHYTHM (its key opens its panel).
+                rhythmKey = std::make_unique<RhythmKey> (host);
+                addAndMakeVisible (*rhythmKey);
+            }
             layerKeys = std::make_unique<LayerKeys> (host, accent);
             (layerKeys->twoLayers() ? static_cast<juce::Component&> (*this) : revealed()).addAndMakeVisible (*layerKeys);
             typeSelector->toFront (false);
@@ -660,6 +667,12 @@ namespace
             typeSelector->setBounds (getWidth() - 12 - 118, 6, 118, 22);
             if (layerKeys != nullptr)
                 layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
+            if (rhythmKey != nullptr)
+            {
+                // Under the TYPE dropdown, left of the layer keys (their room kept while hidden).
+                const int keysWidth = layerKeys != nullptr ? layerKeys->preferredWidth() : 0;
+                rhythmKey->setBounds (getWidth() - 12 - keysWidth - 6 - RhythmKey::preferredWidth, 6 + 22 + 6, RhythmKey::preferredWidth, RhythmKey::preferredHeight);
+            }
             if (browse != nullptr)
                 browse->setBounds (getLocalBounds().withTrimmedTop (32));
             if (browse2 != nullptr)
@@ -745,6 +758,7 @@ namespace
         std::unique_ptr<BrowseArea> browse;
         std::unique_ptr<Layer2Browse> browse2;
         std::unique_ptr<LayerKeys> layerKeys;
+        std::unique_ptr<RhythmKey> rhythmKey;
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::array<juce::Component*, 3> cells {};
     };

@@ -22,6 +22,7 @@ void AnalogEngine::attachParameters (juce::AudioProcessorValueTreeState& paramet
 {
     state = &parameters;
     hybridTypeValue = parameters.getRawParameterValue (params::hybridType);
+    rhythmEnabledValue = parameters.getRawParameterValue (params::rhythmEnabled);
 }
 
 HybridType AnalogEngine::hybridType() const noexcept
@@ -464,9 +465,62 @@ void AnalogEngine::sourcePublished (int layer, std::shared_ptr<const osp::plugin
 {
     if (layer != 1)
         return;
+    analyseRhythm (source);   // (RHYTHMIC MORPH: its rhythm, on the loader thread)
     recordingPublished.store (source != nullptr);
     if (source != nullptr)
         setHybridType (HybridType::sample);   // (a recording dropped on card C plays: an imported source stays, dormant)
+}
+
+void AnalogEngine::analyseRhythm (std::shared_ptr<const osp::plugin::LoadedInstrument> source)
+{
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock (loopMutex);
+        generation = ++loopGeneration;
+    }
+    const osp::PlaybackSource* audio = source != nullptr && source->model != nullptr && source->model->original.source != nullptr ? source->model->original.source.get() : nullptr;
+    if (audio == nullptr || ! audio->isValid())
+    {
+        publishLoop (nullptr, generation);
+        return;
+    }
+    loopAnalysing.store (true);
+    // (the job keeps the recording alive; a newer recording makes this one's answer stale)
+    sourceLoader.addJob ([this, source, generation] {
+        const auto& pb = *source->model->original.source;
+        auto loop = rhythm::prepareLoop (pb.channelData (0), pb.numChannels() > 1 ? pb.channelData (1) : nullptr, static_cast<std::size_t> (pb.numFrames()), pb.sampleRate());
+        publishLoop (std::move (loop), generation);
+    });
+}
+
+void AnalogEngine::publishLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation)
+{
+    auto loaded = std::make_shared<LoadedLoop>();
+    loaded->generation = generation;
+    loaded->loop = loop;
+    const std::lock_guard<std::mutex> lock (loopMutex);
+    if (generation != loopGeneration)
+        return;   // (a newer recording since)
+    loopLatest = std::move (loop);
+    loopExchange.publish (std::move (loaded));
+    loopExchange.collectGarbage();
+    loopAnalysing.store (false);
+}
+
+std::shared_ptr<const rhythm::PreparedLoop> AnalogEngine::rhythmLoop() const
+{
+    const std::lock_guard<std::mutex> lock (loopMutex);
+    return loopLatest;
+}
+
+void AnalogEngine::setRhythmLoopForTest (std::shared_ptr<const rhythm::PreparedLoop> loop)
+{
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock (loopMutex);
+        generation = ++loopGeneration;
+    }
+    publishLoop (std::move (loop), generation);
 }
 
 juce::String AnalogEngine::status (const juce::String& topic) const
@@ -503,11 +557,22 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     if (const auto* next = sourceExchange.takePending())
         sourcePlaying = next;
     const auto* playedThisBlock = std::exchange (playedMidi, nullptr);   // (this callback's only)
+    // RHYTHMIC MORPH: card C's prepared loop (a newer one replaces it; the old is freed on the
+    // message side once nothing reads it).
+    if (const auto* next = loopExchange.takePending())
+        loopPlaying = next;
+    const auto cardType = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
+    const auto* loop = loopPlaying != nullptr && cardType == HybridType::sample ? loopPlaying->loop.get() : nullptr;   // (C's recording: only while C plays it)
+    synth.setRhythmLoop (loop);
+    if (loopPlaying != nullptr)
+        loopExchange.publishOldestInUse (loopPlaying->generation);
+    const bool rhythmPlays = loop != nullptr && rhythmEnabledValue != nullptr && rhythmEnabledValue->load() >= 0.5f;
     // Card C plays only its selected type: the recording as a SAMPLE, the imported zones as an
     // INSTRUMENT PATCH (OSC 3 and NOISE are the voices' own). The others stay loaded, silent.
+    // With RHYTHM on, the recording is the loop (not played by the keys).
     {
         const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (hybridTypeValue != nullptr ? hybridTypeValue->load() : 0.0f), 0, 3));
-        const auto* recording = type == HybridType::sample ? shellRecording : nullptr;
+        const auto* recording = type == HybridType::sample && ! rhythmPlays ? shellRecording : nullptr;
         const SampleSource* zones = type == HybridType::instrumentPatch && sourcePlaying != nullptr ? sourcePlaying->source.get() : nullptr;
         if (recording != recordingApplied)
         {

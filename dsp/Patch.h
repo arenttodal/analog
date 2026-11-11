@@ -253,7 +253,7 @@ struct Patch
         enum class Audio { audio, mod, both };
         enum class Shape { envelope, transient };
         bool enabled = false;
-        Audio audio = Audio::audio;   ///< AUDIO: heard; MOD: only felt (silent, still playing); BOTH
+        Audio audio = Audio::audio;   ///< AUDIO: heard (C RHYTHM rests at 0); MOD: only felt (silent, still playing); BOTH
         bool sync = true;             ///< on the host's grid (a rhythmic loop); off: FREE
         int tempo = 1;                ///< 0 HALF, 1 DETECTED, 2 DOUBLE
         Shape shape = Shape::envelope;

@@ -21,6 +21,7 @@ andor_add_instrument(ANDOR_Analog
         Source/UserMacroState.cpp
         Source/UserMacroUI.cpp
         Source/SatellitePanel.cpp
+        Source/RhythmPanel.cpp
         Source/AnalogRacks.cpp
         Source/FxRouting.cpp
         Source/FxIdentity.cpp

@@ -103,6 +103,8 @@ namespace
         iUserMacro1, iUserMacro2, iUserMacro3, iUserMacro4, iUserMacro5, iUserMacro6,
         // State version 20: SATELLITE, ten fields a card (satelliteNames), A, B, C.
         iSatellite, iSatelliteLast = iSatellite + 3 * satelliteFields - 1,
+        // State version 21: RHYTHMIC MORPH.
+        iRhythmEnabled, iRhythmAudio, iRhythmSync, iRhythmTempo, iRhythmShape, iRhythmAttack, iRhythmRelease, iRhythmSensitivity, iRhythmDepth,
         count
     };
 
@@ -227,6 +229,9 @@ namespace
             for (int card = 0; card < 3; ++card)
                 for (const char* name : satelliteNames)
                     l.add (satelliteId (card, name));
+            // State version 21: RHYTHMIC MORPH.
+            for (const auto* id : { &rhythmEnabled, &rhythmAudio, &rhythmSync, &rhythmTempo, &rhythmShape, &rhythmAttack, &rhythmRelease, &rhythmSensitivity, &rhythmDepth })
+                l.add (*id);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -933,6 +938,33 @@ void addSatelliteTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout
     }
 }
 
+void addRhythmTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 21 (RHYTHMIC MORPH): off in a new instrument and every session from before.
+    // Append-only: IDs, ranges and choice orders frozen once shipped.
+    const Patch::Rhythm d;
+    auto v36 = [] (const juce::String& name) { return juce::ParameterID { name, 36 }; };
+    using Choice = juce::AudioParameterChoice;
+    using Float = juce::AudioParameterFloat;
+    auto msText = [] (float ms, int) { return ms < 10.0f ? juce::String (ms, 1) + " ms" : juce::String (juce::roundToInt (ms)) + " ms"; };
+    juce::NormalisableRange<float> attack (0.5f, 200.0f, 0.1f), release (10.0f, 1000.0f, 1.0f);
+    attack.setSkewForCentre (10.0f);
+    release.setSkewForCentre (150.0f);
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v36 (rhythmEnabled), "Rhythm", d.enabled));
+    layout.add (osp::plugin::parameters::make<Choice> (v36 (rhythmAudio), "Rhythm Audio", juce::StringArray { "AUDIO", "MOD", "BOTH" }, static_cast<int> (d.audio)));
+    layout.add (osp::plugin::parameters::make<Choice> (v36 (rhythmSync), "Rhythm Timing", juce::StringArray { "SYNC", "FREE" }, d.sync ? 0 : 1));
+    layout.add (osp::plugin::parameters::make<Choice> (v36 (rhythmTempo), "Rhythm Tempo", juce::StringArray { "HALF", "DETECTED", "DOUBLE" }, d.tempo));
+    layout.add (osp::plugin::parameters::make<Choice> (v36 (rhythmShape), "Rhythm Shape", juce::StringArray { "ENVELOPE", "TRANSIENT" }, static_cast<int> (d.shape)));
+    layout.add (osp::plugin::parameters::make<Float> (v36 (rhythmAttack), "Rhythm Attack", attack, static_cast<float> (d.attackMs),
+                                                      juce::AudioParameterFloatAttributes().withLabel ("ms").withStringFromValueFunction (msText)));
+    layout.add (osp::plugin::parameters::make<Float> (v36 (rhythmRelease), "Rhythm Release", release, static_cast<float> (d.releaseMs),
+                                                      juce::AudioParameterFloatAttributes().withLabel ("ms").withStringFromValueFunction (msText)));
+    layout.add (osp::plugin::parameters::make<Float> (v36 (rhythmSensitivity), "Rhythm Sensitivity", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                      static_cast<float> (100.0 * d.sensitivity), juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    layout.add (osp::plugin::parameters::make<Float> (v36 (rhythmDepth), "Rhythm Depth", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                      static_cast<float> (100.0 * d.depth), juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
+}
+
 int readerIndexOf (const juce::String& id)
 {
     return ids().indexOf (id);
@@ -1308,6 +1340,19 @@ Patch Reader::readWith (const float* raw) const noexcept
             d.pattern[static_cast<std::size_t> (profile)] = index (iDnaPatternA + 2 * profile, osp::RhythmicShaper::patternCount + 1) - 1;
             d.rate[static_cast<std::size_t> (profile)] = index (iDnaRateA + 2 * profile, 7) - 1;
         }
+    }
+    // RHYTHMIC MORPH (state version 21).
+    {
+        auto& r = p.rhythm;
+        r.enabled = on (iRhythmEnabled);
+        r.audio = static_cast<Patch::Rhythm::Audio> (index (iRhythmAudio, 3));
+        r.sync = ! on (iRhythmSync);   // (SYNC 0, FREE 1)
+        r.tempo = index (iRhythmTempo, 3);
+        r.shape = static_cast<Patch::Rhythm::Shape> (index (iRhythmShape, 2));
+        r.attackMs = v (iRhythmAttack);
+        r.releaseMs = v (iRhythmRelease);
+        r.sensitivity = v (iRhythmSensitivity) / 100.0;
+        r.depth = v (iRhythmDepth) / 100.0;
     }
     // SATELLITE (state version 20).
     for (int card = 0; card < 3; ++card)
@@ -1690,6 +1735,18 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (base + 7, 360.0 * st.phase);
         put (base + 8, 100.0 * st.offset);
         put (base + 9, static_cast<int> (st.retrigger));
+    }
+    {
+        const auto& r = p.rhythm;
+        put (iRhythmEnabled, r.enabled ? 1.0 : 0.0);
+        put (iRhythmAudio, static_cast<int> (r.audio));
+        put (iRhythmSync, r.sync ? 0.0 : 1.0);
+        put (iRhythmTempo, r.tempo);
+        put (iRhythmShape, static_cast<int> (r.shape));
+        put (iRhythmAttack, r.attackMs);
+        put (iRhythmRelease, r.releaseMs);
+        put (iRhythmSensitivity, 100.0 * r.sensitivity);
+        put (iRhythmDepth, 100.0 * r.depth);
     }
     put (iSourceMode, p.granular ? 1.0 : 0.0);
     put (iGrainPosition, 100.0 * p.grains.position);

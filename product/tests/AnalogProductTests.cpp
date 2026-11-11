@@ -32,6 +32,7 @@
 #include "UserMacroBank.h"
 #include "UserMacroUI.h"
 #include "SatellitePanel.h"
+#include "RhythmPanel.h"
 #include "ShellProcessor.h"
 
 #include "audio/utility/TestSignals.h"
@@ -57,6 +58,27 @@ using Catch::Approx;
 
 namespace
 {
+    /** RHYTHMIC MORPH: a prepared loop of 2 kHz ticks on every beat of 4 bars at 100 BPM (as if
+        card C's recording had been analysed). */
+    std::shared_ptr<const andor::analog::rhythm::PreparedLoop> testTickLoop()
+    {
+        static const auto loop = [] {
+            constexpr double rate = 48000.0, beat = 60.0 / 100.0;
+            const auto length = static_cast<std::size_t> (std::lround (16 * beat * rate));
+            std::vector<float> x (length, 0.0f);
+            for (int k = 0; k < 16; ++k)
+            {
+                const auto first = static_cast<std::size_t> (std::lround (k * beat * rate));
+                for (std::size_t i = 0; i < static_cast<std::size_t> (0.03 * rate) && first + i < length; ++i)
+                {
+                    const double t = static_cast<double> (i) / rate;
+                    x[first + i] += static_cast<float> ((k % 4 == 0 ? 0.8 : 0.5) * std::exp (-t / 0.006) * std::sin (2.0 * juce::MathConstants<double>::pi * 2000.0 * t));
+                }
+            }
+            return andor::analog::rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+        }();
+        return loop;
+    }
     /** Points the shell's sample store at `folder` (empty: back to the default). POSIX setenv /
         unsetenv do not exist on Windows; the CRT's _putenv_s does what the shell's getenv reads. */
     void setSampleStore (const juce::File& folder)
@@ -826,6 +848,22 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
                     setValue (q, params::satelliteId (card, "depth"), 40.0f);
             };
         }
+    // RHYTHMIC MORPH acts on card C's loop (a 100 BPM tick loop stands in for an analysed
+    // recording, so SYNC and HALF / DOUBLE move it against the 120 BPM clock) and through a
+    // C RHYTHM -> TONE route (AUDIO alone feeds no route: BOTH does).
+    for (const auto* id : { &params::rhythmEnabled, &params::rhythmAudio, &params::rhythmSync, &params::rhythmTempo, &params::rhythmShape,
+                            &params::rhythmAttack, &params::rhythmRelease, &params::rhythmSensitivity, &params::rhythmDepth })
+    {
+        const juce::String which (*id);
+        setups[*id] = [route, which] (ShellProcessor& q) {
+            dynamic_cast<AnalogEngine&> (q.productEngine()).setRhythmLoopForTest (testTickLoop());
+            setValue (q, params::hybridType, 0.0f);   // (SAMPLE: the loop is C's recording)
+            setValue (q, params::rhythmEnabled, 1.0f);
+            if (which != params::rhythmAudio && which != params::rhythmSync && which != params::rhythmTempo)
+                setValue (q, params::rhythmAudio, 2.0f);   // BOTH
+            route (0, osp::mod::sourceIndex (osp::mod::Source::cRhythm) + 1) (q);
+        };
+    }
     // A USER macro acts through its assignments: each tried with one, FILTER resonance, up to the top.
     for (int m = 0; m < andor::analog::usermacro::macroCount; ++m)
         setups[params::userMacroId (m)] = [m] (ShellProcessor& q) {
@@ -6008,7 +6046,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 20);   // (20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
+        CHECK (xml->getIntAttribute ("productVersion") == 21);   // (21: RHYTHMIC MORPH; 20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8042,9 +8080,18 @@ TEST_CASE ("analog: projects saved by 1.0 open with the same settings and the sa
         for (int i = 0; i < expected.size(); ++i)
         {
             INFO (expected[i]);
-            CHECK (actual[i].upToFirstOccurrenceOf (" ", false, false) == expected[i].upToFirstOccurrenceOf (" ", false, false));
-            CHECK (actual[i].fromFirstOccurrenceOf (" ", false, false).getDoubleValue()
-                   == Approx (expected[i].fromFirstOccurrenceOf (" ", false, false).getDoubleValue()).margin (2.0e-6));
+            const auto id = expected[i].upToFirstOccurrenceOf (" ", false, false);
+            CHECK (actual[i].upToFirstOccurrenceOf (" ", false, false) == id);
+            const double was = expected[i].fromFirstOccurrenceOf (" ", false, false).getDoubleValue();
+            const double now = actual[i].fromFirstOccurrenceOf (" ", false, false).getDoubleValue();
+            if (id.startsWith ("mod.route") && id.endsWith (".source"))
+            {
+                // A route's source: the same one (its index; the list grew by C RHYTHM after
+                // 1.0, 13 choices then, 14 now - its normalised value moved, its meaning not).
+                CHECK (juce::roundToInt (now * osp::mod::sourceCount) == juce::roundToInt (was * osp::mod::baseSourceCount));
+            }
+            else
+                CHECK (now == Approx (was).margin (2.0e-6));
         }
         if (name == "fx-custom")
             CHECK (dynamic_cast<AnalogEngine&> (q.productEngine()).fxRoute().custom);
@@ -8225,7 +8272,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 20);
+    CHECK (xml->getIntAttribute ("productVersion") == 21);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -9039,7 +9086,7 @@ TEST_CASE ("SHAPER DNA: every setting is a host parameter - saved, recalled, rea
     {
         auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 20);
+        CHECK (xml->getIntAttribute ("productVersion") == 21);
     }
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
@@ -9415,7 +9462,7 @@ TEST_CASE ("USER MACROS G1: six parameters at 0, no assignment, nothing saved, t
     p.getStateInformation (session);
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 20);
+    CHECK (xml->getIntAttribute ("productVersion") == 21);
     std::function<bool (const juce::XmlElement&)> hasChild = [&] (const juce::XmlElement& e) {
         for (auto* c : e.getChildIterator())
             if (c->hasTagName ("UserMacros") || hasChild (*c))
@@ -10116,6 +10163,353 @@ TEST_CASE ("SATELLITE screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][sc
             setValue (rig.p, params::satelliteId (0, "offset"), -40.0f);
             panel->refreshContent();
             save ("sat-05-panel-card-a-off", box, 2.0f);
+        }
+    }
+}
+
+//==============================================================================
+// RHYTHMIC MORPH (docs/features/SATELLITE_RHYTHM_ARCHITECTURE.md), gates 5-6: through the plugin
+
+namespace
+{
+    /** 2 kHz ticks on every beat of 4 bars at 100 BPM, written as a recording. */
+    juce::File writeTicks (const juce::File& dir, const juce::String& name)
+    {
+        const auto& loop = *testTickLoop();
+        osp::AudioData audio;
+        audio.sampleRate = loop.rate;
+        audio.channels = { loop.left, loop.right };
+        const auto file = dir.getChildFile (name);
+        std::string error;
+        REQUIRE (osp::io::writeAudioFile (std::filesystem::path (file.getFullPathName().toStdString()), audio, osp::io::SampleFormat::pcm24, error));
+        return file;
+    }
+
+    /** Waits for card C's rhythm analysis (the loader thread), feeding the audio thread meanwhile. */
+    void waitForRhythm (ShellProcessor& p)
+    {
+        auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+        juce::AudioBuffer<float> buffer (2, 256);
+        juce::MidiBuffer none;
+        for (int i = 0; i < 600 && engine.rhythmAnalysing(); ++i)
+        {
+            juce::Thread::sleep (20);
+            p.processBlock (buffer, none);
+        }
+        REQUIRE_FALSE (engine.rhythmAnalysing());
+        p.processBlock (buffer, none);   // (the loop taken by the audio thread)
+    }
+}
+
+TEST_CASE ("RHYTHMIC MORPH: off in a new instrument and every older session; saved and recalled", "[analog][rhythm][state]")
+{
+    ShellProcessor p;
+    CHECK (p.parameterValue (params::rhythmEnabled) == 0.0f);
+    {
+        params::Reader reader;
+        reader.attach (p.parameters);
+        const auto read = reader.read();
+        CHECK_FALSE (read.rhythm.enabled);
+        CHECK (read.rhythm.sync);
+        CHECK (read.rhythm.tempo == Approx (1.0));
+    }
+    setValue (p, params::rhythmEnabled, 1.0f);
+    setValue (p, params::rhythmAudio, 2.0f);       // BOTH
+    setValue (p, params::rhythmTempo, 2.0f);       // DOUBLE
+    setValue (p, params::rhythmShape, 1.0f);       // TRANSIENT
+    setValue (p, params::rhythmSensitivity, 80.0f);
+    setValue (p, params::rhythmRelease, 300.0f);
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    ShellProcessor q;
+    q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    params::Reader reader;
+    reader.attach (q.parameters);
+    const auto r = reader.read().rhythm;
+    CHECK (r.enabled);
+    CHECK (r.audio == Patch::Rhythm::Audio::both);
+    CHECK (r.tempo == Approx (2.0));
+    CHECK (r.shape == Patch::Rhythm::Shape::transient);
+    CHECK (r.sensitivity == Approx (0.8).margin (1.0e-3));
+    CHECK (r.releaseMs == Approx (300.0).margin (0.5));
+    // An older session (no RHYTHM in it) opens with it off.
+    auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), static_cast<int> (state.getSize()));
+    REQUIRE (xml != nullptr);
+    std::function<void (juce::XmlElement&)> strip = [&] (juce::XmlElement& e) {
+        for (int i = e.getNumChildElements(); --i >= 0;)
+        {
+            auto* child = e.getChildElement (i);
+            if (child->getStringAttribute ("id").startsWith ("analog.rhythm."))
+                e.removeChildElement (child, true);
+            else
+                strip (*child);
+        }
+    };
+    strip (*xml);
+    CHECK (xml->toString().contains ("analog.rhythm.") == false);
+    xml->setAttribute ("productVersion", 20);
+    juce::MemoryBlock older;
+    juce::AudioProcessor::copyXmlToBinary (*xml, older);
+    ShellProcessor o;
+    o.setStateInformation (older.getData(), static_cast<int> (older.getSize()));
+    CHECK (o.parameterValue (params::rhythmEnabled) == 0.0f);
+}
+
+TEST_CASE ("RHYTHMIC MORPH: C RHYTHM is a 13th modulation source in ANDOR ANALOG's route lists (ANDOR OSP keeps 12)", "[analog][rhythm][modulation]")
+{
+    ShellProcessor p;
+    CHECK (osp::mod::offeredSourceCount() == osp::mod::sourceCount);
+    CHECK (osp::mod::sourceCount == osp::mod::baseSourceCount + 1);
+    auto* source = dynamic_cast<juce::AudioParameterChoice*> (p.parameters.getParameter (osp::plugin::InstrumentHost::modRouteId (0, "source")));
+    REQUIRE (source != nullptr);
+    CHECK (source->choices.size() == osp::mod::sourceCount + 1);   // (+ None)
+    CHECK (source->choices[source->choices.size() - 1] == "C RHYTHM");
+    // The sources before it keep their indices: an older session's routes mean what they meant.
+    for (int i = 1; i <= osp::mod::baseSourceCount; ++i)
+        CHECK (source->choices[i] == osp::mod::sourceName (static_cast<osp::mod::Source> (i)));
+}
+
+TEST_CASE ("RHYTHMIC MORPH: card C's recording is analysed off the audio thread; RHYTHM plays it as the loop", "[analog][rhythm][engine]")
+{
+    ShellProcessor p;
+    Scratch scratch;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    loadOrganic (p, writeTicks (scratch.dir, "ticks.wav"));
+    waitForRhythm (p);
+    const auto loop = engine.rhythmLoop();
+    REQUIRE (loop != nullptr);
+    CHECK (loop->rhythmic());
+    CHECK (loop->analysis.bpm == Approx (100.0).margin (0.5));
+    CHECK (loop->analysis.beats == 16);
+    CHECK (loop->analysis.beatsPerBar == 4);
+
+    // Off: the keys play the recording, nothing of the loop's clock runs.
+    const auto off = renderShell (p, 1.2, { { 0, 60, 100 } }, false);
+    CHECK (engine.rhythmPlayhead() < 0.0);
+    // On: the loop plays while card C's note sounds (its playhead moves), and it sounds different.
+    setValue (p, params::rhythmEnabled, 1.0f);
+    const auto on = renderShell (p, 1.2, { { 0, 60, 100 } }, false);
+    CHECK (differenceRms (off, on) > 1.0e-4);
+    // (OSC 3 on card C: the loop - C's recording - stays dormant)
+    setValue (p, params::hybridType, 1.0f);
+    const auto osc = renderShell (p, 1.2, { { 0, 60, 100 } }, false);
+    setValue (p, params::rhythmEnabled, 0.0f);
+    const auto oscOff = renderShell (p, 1.2, { { 0, 60, 100 } }, false);
+    CHECK (identical (osc, oscOff));
+
+    // A recording with no pulse (a sung vowel): UNSURE, no tempo claimed - it would play FREE.
+    loadOrganic (p, writeRecording (scratch.dir, "vowel.wav", 57, 2.0));
+    waitForRhythm (p);
+    const auto vowel = engine.rhythmLoop();
+    REQUIRE (vowel != nullptr);
+    INFO ("duration " << vowel->analysis.durationSeconds << " s, " << vowel->analysis.bpm << " BPM, confidence " << vowel->analysis.confidence << ", onsets " << vowel->analysis.onsets.size());
+    CHECK (vowel->analysis.durationSeconds == Approx (2.0).margin (0.01));
+    CHECK_FALSE (vowel->rhythmic());
+}
+
+//==============================================================================
+// RHYTHMIC MORPH, gate 7: card C's own controls, in card C
+
+namespace
+{
+    void pressAt (juce::Component& c, juce::Point<float> at)
+    {
+        juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), at, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c,
+                            juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false);
+        c.mouseDown (e);
+    }
+
+    struct RhythmRig
+    {
+        ShellProcessor p;
+        Scratch scratch;
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+        andor::shell::ShellEditor* ui = nullptr;
+        explicit RhythmRig (int width = 1448, bool load = true)
+        {
+            osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+            if (load)
+            {
+                loadOrganic (p, writeTicks (scratch.dir, "ticks.wav"));
+                waitForRhythm (p);
+            }
+            editor.reset (p.createEditorIfNeeded());
+            ui = &dynamic_cast<andor::shell::ShellEditor&> (*editor);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui->instrumentHeight() / 1448.0f));
+            ui->refreshNow();
+        }
+        juce::Component* overlay() { return ui->engineCard (1).wellOverlayComponent(); }
+        andor::analog::RhythmKey* key()
+        {
+            ui->refreshNow();
+            auto* o = overlay();
+            return o != nullptr ? dynamic_cast<andor::analog::RhythmKey*> (findTitled (*o, "Rhythm")) : nullptr;
+        }
+        andor::analog::RhythmPanel* panel() { return dynamic_cast<andor::analog::RhythmPanel*> (ui->openPopupPanel()); }
+        void clickLight() { pressAt (*key(), key()->lightArea().getCentre().toFloat()); }
+        void clickName() { pressAt (*key(), { static_cast<float> (key()->getWidth()) - 30.0f, 0.5f * static_cast<float> (key()->getHeight()) }); }
+    };
+}
+
+TEST_CASE ("RHYTHMIC MORPH G7: the RHYTHM key is in card C's well while it plays its recording - never otherwise", "[analog][rhythm][ui]")
+{
+    {
+        RhythmRig empty (1448, false);
+        CHECK (empty.key() == nullptr);   // (no recording: the well is the invitation, as before)
+    }
+    RhythmRig rig;
+    auto* key = rig.key();
+    REQUIRE (key != nullptr);
+    CHECK (key->isShowing() == rig.overlay()->isShowing());
+    // Under the TYPE dropdown, inside the well, overlapping neither it nor the layer keys.
+    const auto box = key->getBounds();
+    CHECK (rig.overlay()->getLocalBounds().contains (box));
+    auto* typeSelector = findTitled (*rig.overlay(), "Card C type");
+    REQUIRE (typeSelector != nullptr);
+    CHECK_FALSE (box.intersects (typeSelector->getBounds()));
+    CHECK (box.getY() >= typeSelector->getBottom());
+    if (auto* layers = findTitled (*rig.overlay(), "Hybrid layers"))
+        CHECK_FALSE (rig.overlay()->getLocalArea (layers->getParentComponent(), layers->getBounds()).intersects (box));
+    // Another type (OSC 3): the recording dormant, no key.
+    setValue (rig.p, params::hybridType, 1.0f);
+    CHECK (rig.key() == nullptr);
+    setValue (rig.p, params::hybridType, 0.0f);
+    CHECK (rig.key() != nullptr);
+}
+
+TEST_CASE ("RHYTHMIC MORPH G7: the light switches (one undo step), the name opens the panel inside the window at every size", "[analog][rhythm][ui]")
+{
+    for (const int width : { 869, 1448, 1810 })
+    {
+        INFO ("width " << width);
+        RhythmRig rig (width);
+        REQUIRE (rig.key() != nullptr);
+        rig.p.undo().clearUndoHistory();
+        rig.clickLight();
+        CHECK (rig.p.parameterValue (params::rhythmEnabled) == 1.0f);
+        CHECK (rig.panel() == nullptr);   // (the light never opens)
+        rig.p.parameters.copyState();   // (the tree catches up: what the undo step records)
+        rig.p.undo().undo();
+        CHECK (rig.p.parameterValue (params::rhythmEnabled) == 0.0f);
+        rig.clickName();
+        CHECK (rig.p.parameterValue (params::rhythmEnabled) == 0.0f);   // (the name never switches)
+        auto* panel = rig.panel();
+        REQUIRE (panel != nullptr);
+        CHECK (rig.editor->getLocalBounds().contains (rig.editor->getLocalArea (panel, panel->card())));
+        CHECK (rig.key()->isOpen());
+        rig.clickName();   // (again: closed)
+        CHECK (rig.panel() == nullptr);
+    }
+}
+
+TEST_CASE ("RHYTHMIC MORPH G7: the panel - what the analysis heard, only the controls that act, quick routes in one step", "[analog][rhythm][ui]")
+{
+    RhythmRig rig;
+    rig.clickName();
+    auto* panel = rig.panel();
+    REQUIRE (panel != nullptr);
+    CHECK (andor::analog::rhythmview::readout (rig.p) == juce::String::fromUTF8 ("100.0 BPM \xc2\xb7 4 BARS \xc2\xb7 4/4"));
+    setValue (rig.p, params::rhythmTempo, 0.0f);   // HALF
+    CHECK (andor::analog::rhythmview::readout (rig.p) == juce::String::fromUTF8 ("50.0 BPM \xc2\xb7 2 BARS \xc2\xb7 4/4"));
+    setValue (rig.p, params::rhythmTempo, 1.0f);
+    // AUDIO feeds no route: C RHYTHM's shaping disabled; HALF / DOUBLE only in SYNC.
+    panel->refreshContent();
+    CHECK_FALSE (panel->sensitivityKnob().isEnabled());
+    CHECK_FALSE (panel->shapeControl().isEnabled());
+    CHECK (panel->tempoControl().isEnabled());
+    setValue (rig.p, params::rhythmSync, 1.0f);   // FREE
+    panel->refreshContent();
+    CHECK_FALSE (panel->tempoControl().isEnabled());
+    setValue (rig.p, params::rhythmSync, 0.0f);
+
+    // LEVEL A: a route from C RHYTHM, RHYTHM on and felt (BOTH) - one undo step takes it all back.
+    using T = andor::analog::rhythmview::Target;
+    rig.p.parameters.copyState();
+    rig.p.undo().clearUndoHistory();
+    pressAt (*panel, panel->routeKeyArea (T::levelA).getCentre().toFloat());
+    const int r = andor::analog::rhythmview::routeTo (rig.p, T::levelA);
+    REQUIRE (r >= 0);
+    CHECK (rig.p.parameterValue (osp::plugin::InstrumentHost::modRouteId (r, "depth")) == Approx (-60.0f));
+    CHECK (rig.p.parameterValue (params::rhythmEnabled) == 1.0f);
+    CHECK (juce::roundToInt (rig.p.parameterValue (params::rhythmAudio)) == 2);
+    panel->refreshContent();
+    CHECK (panel->sensitivityKnob().isEnabled());
+    // FILTER and MORPH too, each its own route.
+    rig.p.parameters.copyState();
+    pressAt (*panel, panel->routeKeyArea (T::filter).getCentre().toFloat());
+    rig.p.parameters.copyState();
+    pressAt (*panel, panel->routeKeyArea (T::morph).getCentre().toFloat());
+    rig.p.parameters.copyState();
+    CHECK (andor::analog::rhythmview::routeTo (rig.p, T::filter) >= 0);
+    CHECK (andor::analog::rhythmview::routeTo (rig.p, T::morph) >= 0);
+    CHECK (andor::analog::rhythmview::routeTo (rig.p, T::levelB) < 0);
+    // Pressed again: the route goes (the others stay) - one undo step brings it back.
+    pressAt (*panel, panel->routeKeyArea (T::filter).getCentre().toFloat());
+    CHECK (andor::analog::rhythmview::routeTo (rig.p, T::filter) < 0);
+    CHECK (andor::analog::rhythmview::routeTo (rig.p, T::morph) >= 0);
+    rig.p.parameters.copyState();
+    rig.p.undo().undo();
+    CHECK (andor::analog::rhythmview::routeTo (rig.p, T::filter) >= 0);
+}
+
+TEST_CASE ("RHYTHMIC MORPH G7: the display's playhead and C RHYTHM meter are the audio thread's", "[analog][rhythm][ui]")
+{
+    RhythmRig rig;
+    rig.clickName();
+    auto* panel = rig.panel();
+    REQUIRE (panel != nullptr);
+    auto paintDisplay = [&] {
+        juce::Image image (juce::Image::ARGB, 600, 300, true);
+        juce::Graphics g (image);
+        panel->display().paint (g);
+    };
+    paintDisplay();
+    CHECK (panel->display().playheadX() < 0.0f);   // (off: nothing plays)
+    setValue (rig.p, params::rhythmEnabled, 1.0f);
+    setValue (rig.p, params::rhythmAudio, 2.0f);
+    renderShell (rig.p, 0.5, { { 0, 60, 100 } }, false);
+    paintDisplay();
+    CHECK (panel->display().playheadX() >= 0.0f);
+    const float first = panel->display().playheadX();
+    renderShell (rig.p, 0.3, { { 0, 60, 100 } }, false);
+    paintDisplay();
+    CHECK (panel->display().playheadX() != first);   // (it moves with the audio)
+}
+
+TEST_CASE ("RHYTHMIC MORPH screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-rhythm]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    for (const int width : { 1448, 869, 1810 })
+    {
+        RhythmRig rig (width);
+        auto save = [&] (const juce::String& name, juce::Rectangle<int> area, float scale) {
+            rig.ui->refreshNow();
+            if (auto* panel = rig.ui->openPopupPanel())
+                panel->settleNow();
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (rig.editor->createComponentSnapshot (area, true, scale), stream);
+        };
+        auto& card = rig.ui->engineCard (1);
+        const auto cardArea = rig.editor->getLocalArea (&card, card.getLocalBounds()).expanded (6);
+        save ("rhythm-00-card-c-off", cardArea, 2.0f);
+        setValue (rig.p, params::rhythmEnabled, 1.0f);
+        save ("rhythm-01-card-c-on", cardArea, 2.0f);
+        rig.clickName();
+        save ("rhythm-02-panel", rig.editor->getLocalBounds(), 1.0f);
+        if (auto* panel = rig.panel())
+        {
+            const auto box = rig.editor->getLocalArea (panel, panel->getLocalBounds()).expanded (8);
+            save ("rhythm-03-panel-audio-crop", box, 2.0f);
+            andor::analog::rhythmview::toggleRoute (rig.p, andor::analog::rhythmview::Target::levelA);
+            andor::analog::rhythmview::toggleRoute (rig.p, andor::analog::rhythmview::Target::morph);
+            renderShell (rig.p, 0.9, { { 0, 60, 100 } }, false);   // (the playhead and the meter live)
+            panel->refreshContent();
+            save ("rhythm-04-panel-both-routed-crop", box, 2.0f);
         }
     }
 }

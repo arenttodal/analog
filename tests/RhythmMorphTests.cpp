@@ -113,6 +113,18 @@ TEST_CASE ("RHYTHMIC MORPH: AUDIO - the loop on the grid while card C's notes so
         CHECK (t[k] == Approx (0.5 * static_cast<double> (k)).margin (0.001));   // (the local clock: 120 BPM from the note)
     CHECK (t.back() < 2.25);
     CHECK (rmsOf (out.left, 2.4, 3.0) < 1.0e-4);   // (released: silent)
+    // AUDIO is the sound alone: C RHYTHM rests (a route from it does nothing).
+    auto again = loopSynth (rhythmPatch());
+    const unsigned char noteOn[3] { 0x90, 60, 100 };
+    again->handleMidi (noteOn, 3);
+    std::vector<float> l (480), r (480);
+    float peak = 0.0f;
+    for (int b = 0; b < 200; ++b)
+    {
+        again->render (l.data(), r.data(), 480);
+        peak = std::max (peak, again->rhythmValue());
+    }
+    CHECK (peak == 0.0f);
 }
 
 TEST_CASE ("RHYTHMIC MORPH: the host's tempo - ticks on its beats at 90 BPM", "[rhythm][synth]")

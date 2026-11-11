@@ -7,6 +7,7 @@
 #include "UserMacroState.h"
 
 #include "model/ModelExchange.h"
+#include "rhythm/RhythmLoop.h"
 
 #include <atomic>
 #include <memory>
@@ -80,6 +81,15 @@ public:
     void setCardRouting (bool on) noexcept override { synth.setCardRouting (on); }
     /** Tests: the synth as it plays (its voices' views). */
     const Synth& synthForTest() const noexcept { return synth; }
+    /** RHYTHMIC MORPH: card C's recording as analysed for its rhythm (message thread; null: no
+        recording, or still analysing), whether it is being analysed now, C RHYTHM's value and the
+        loop's playhead (any thread). */
+    std::shared_ptr<const rhythm::PreparedLoop> rhythmLoop() const;
+    bool rhythmAnalysing() const noexcept { return loopAnalysing.load (std::memory_order_relaxed); }
+    float rhythmValue() const noexcept { return synth.rhythmValue(); }
+    double rhythmPlayhead() const noexcept { return synth.rhythmPlayhead(); }
+    /** Tests: a prepared loop as if card C's recording had just been analysed (message thread). */
+    void setRhythmLoopForTest (std::shared_ptr<const rhythm::PreparedLoop> loop);
     /** SATELLITE's live place of card 0..2 (the panel's path display; read only, any thread). */
     Synth::SatelliteView satelliteView (int card) const noexcept { return synth.satelliteView (card); }
     osp::InstrumentEngine::ModView modulationView() const noexcept override;
@@ -285,6 +295,22 @@ private:
     static void outlineOf (const SampleSource* source, std::vector<float>& cycle);
     bool source2FileLoading = false;   ///< (a recording being made into its source: under source2Mutex)
     std::shared_ptr<int> lifetime = std::make_shared<int> (0);   ///< (the loader's answers on the message thread check it)
+    // RHYTHMIC MORPH: card C's recording analysed for its rhythm on the loader thread, handed to
+    // the audio thread as a prepared loop (never analysed there).
+    struct LoadedLoop
+    {
+        std::uint64_t generation = 0;
+        std::shared_ptr<const rhythm::PreparedLoop> loop;   ///< null: none
+    };
+    mutable std::mutex loopMutex;
+    std::uint64_t loopGeneration = 0;
+    std::shared_ptr<const rhythm::PreparedLoop> loopLatest;   ///< (the card's display)
+    osp::ModelExchange<LoadedLoop> loopExchange;               ///< (published under loopMutex)
+    const LoadedLoop* loopPlaying = nullptr;                   ///< audio thread
+    std::atomic<bool> loopAnalysing { false };
+    std::atomic<float>* rhythmEnabledValue = nullptr;
+    void analyseRhythm (std::shared_ptr<const osp::plugin::LoadedInstrument> source);
+    void publishLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation);
     void loadHybrid2 (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation);
 };
 

@@ -2854,7 +2854,8 @@ void Synth::renderRhythm (int numSamples) noexcept
     const float threshold = static_cast<float> (0.6 * (1.0 - std::clamp (rs.sensitivity, 0.0, 1.0)));
     const float attack = static_cast<float> (1.0 - std::exp (-1.0 / (std::max (0.5, rs.attackMs) * 0.001 * hostRate)));
     const float release = static_cast<float> (1.0 - std::exp (-1.0 / (std::max (5.0, rs.releaseMs) * 0.001 * hostRate)));
-    const float depth = static_cast<float> (std::clamp (rs.depth, 0.0, 1.0));
+    // (AUDIO: the loop heard, no modulation - C RHYTHM rests at 0; MOD and BOTH feed it)
+    const float depth = rs.audio == Patch::Rhythm::Audio::audio ? 0.0f : static_cast<float> (std::clamp (rs.depth, 0.0, 1.0));
     for (std::size_t i = 0; i < n; ++i)
     {
         const float raw = rs.shape == Patch::Rhythm::Shape::transient ? loopTransient[i] : loopLevel[i];
