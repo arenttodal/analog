@@ -27,6 +27,9 @@ namespace
     }
 
     inline float dbToGain (double db) noexcept { return static_cast<float> (std::pow (10.0, db / 20.0)); }
+
+    // A fourth-order Butterworth low-pass as two second-order sections: k = 1 / Q.
+    constexpr float sectionK1 = 1.847759f, sectionK2 = 0.765367f;
 }
 
 void SubOsc::prepare (double sampleRate) noexcept
@@ -46,6 +49,7 @@ void SubOsc::reset() noexcept
 {
     for (auto& v : voices)
         v = Voice {};
+    applyFilterTimes();
     held.fill (0);
     sustained.fill (false);
     pedal = false;
@@ -110,21 +114,86 @@ void SubOsc::startKey (int key, float velocity) noexcept
         chosen->gain = chosen->gainTarget;
         chosen->env = 0.0f;
         chosen->phase = 0.0;
+        chosen->s1 = chosen->s2 = chosen->s3 = chosen->s4 = 0.0f;
     }
+    // Its filter envelope starts again with each key, as a card's does.
+    chosen->filterEnv.noteOn();
+    chosen->filterCountdown = 0;
+}
+
+void SubOsc::setFilterFollow (const SubFilterFollow& f) noexcept
+{
+    const bool timesChanged = f.attack != follow.attack || f.decay != follow.decay || f.sustain != follow.sustain || f.release != follow.release;
+    follow = f;
+    if (timesChanged)
+        applyFilterTimes();
+}
+
+void SubOsc::applyFilterTimes() noexcept
+{
+    for (auto& v : voices)
+    {
+        v.filterEnv.setSampleRate (rate);
+        v.filterEnv.setTimes (follow.attack, follow.decay, follow.sustain, follow.release);
+    }
+}
+
+float SubOsc::voiceCutoffHz (int index) const noexcept
+{
+    const auto& v = voices[static_cast<std::size_t> (std::clamp (index, 0, maxVoices - 1))];
+    return follow.on && v.key >= 0 ? v.cutoffHz : 0.0f;
+}
+
+void SubOsc::updateCutoff (Voice& v) noexcept
+{
+    // The cards' cutoff for this key: base (TONE and its modulation), tracking around C4, the
+    // envelope scaled by velocity.
+    const float velocityScale = 1.0f - follow.velocityToEnv + follow.velocityToEnv * v.velocity;
+    const float note = follow.baseNote + follow.keyTrack * static_cast<float> (v.key - 60)
+                       + v.filterEnvNow * follow.envDepth * velocityScale;
+    const double hz = std::clamp (440.0 * std::exp2 ((static_cast<double> (note) - 69.0) / 12.0), 8.0, 0.45 * rate);
+    v.cutoffHz = static_cast<float> (hz);
+    v.g = static_cast<float> (std::tan (twoPi * 0.5 * hz / rate));
+}
+
+float SubOsc::filterSample (Voice& v, float x) noexcept
+{
+    // Two TPT state-variable low-passes (Zavalishin), the cutoff shared.
+    auto section = [g = v.g] (float in, float k, float& ic1, float& ic2) {
+        const float a1 = 1.0f / (1.0f + g * (g + k));
+        const float a2 = g * a1, a3 = g * a2;
+        const float v3 = in - ic2;
+        const float v1 = a1 * ic1 + a2 * v3;
+        const float v2 = ic2 + a2 * ic1 + a3 * v3;
+        ic1 = 2.0f * v1 - ic1;
+        ic2 = 2.0f * v2 - ic2;
+        return v2;
+    };
+    const float y = section (section (x, sectionK1, v.s1, v.s2), sectionK2, v.s3, v.s4);
+    for (float* s : { &v.s1, &v.s2, &v.s3, &v.s4 })
+        if (std::abs (*s) < 1.0e-20f)
+            *s = 0.0f;   // (no denormals)
+    return y;
 }
 
 void SubOsc::releaseKey (int key) noexcept
 {
     for (auto& v : voices)
         if (v.key == key)
+        {
             v.releasing = true;
+            v.filterEnv.noteOff();
+        }
 }
 
 void SubOsc::releaseAll() noexcept
 {
     for (auto& v : voices)
         if (v.key >= 0)
+        {
             v.releasing = true;
+            v.filterEnv.noteOff();
+        }
 }
 
 void SubOsc::reconcile() noexcept
@@ -135,7 +204,10 @@ void SubOsc::reconcile() noexcept
         if (v.key >= 0)
         {
             if (! settings.enabled || ! inRange (v.key))
+            {
                 v.releasing = true;
+                v.filterEnv.noteOff();
+            }
             else
                 v.gainTarget = keyGain (v.key) * velocityGain (v.velocity);
         }
@@ -306,9 +378,25 @@ void SubOsc::render (float* left, float* right, int n) noexcept
             else
                 v.env = std::min (1.0f, v.env + attackStep);
             v.gain += rangeCoef * (v.gainTarget - v.gain);
-            sum += sample (v, increments[i]) * v.env * v.gain;
+            float x = sample (v, increments[i]);
+            if (follow.on)
+            {
+                // The instrument's filter: its envelope runs per sample, the cutoff at control rate.
+                v.filterEnvNow = v.filterEnv.next();
+                if (--v.filterCountdown <= 0)
+                {
+                    v.filterCountdown = filterInterval;
+                    updateCutoff (v);
+                }
+                x = filterSample (v, x);
+            }
+            sum += x * v.env * v.gain;
             if (v.releasing && v.env < 1.0e-5f)
+            {
                 v = Voice {};
+                v.filterEnv.setSampleRate (rate);
+                v.filterEnv.setTimes (follow.attack, follow.decay, follow.sustain, follow.release);
+            }
         }
         if (grit > 0.0)
         {

@@ -17,7 +17,9 @@ that use REIMAGINED (see the first item). Every new feature starts switched off.
     the cards arpeggiate.
   - Its settings: WAVE, an octave or two down, GRIT, LEVEL, a key RANGE you drag on a small
     keyboard, and FLAT or TAPER (quieter high notes).
-  - It is always dry: no ECHO or SPACE ever reaches it.
+  - It sits under the same FILTER as everything else (cutoff and filter envelope, no
+    resonance) and follows MOVEMENT's PULSE and SHAPER, so it closes and gates with the cards.
+  - No ECHO or SPACE ever reaches it.
 - **A second layer in card C.** Hover card C's screen and press **+** to add a layer (an
   oscillator, noise, a recording or an instrument patch) and stack two instruments in one
   card. **1** and **2** choose which one you're editing; **×** removes the second.

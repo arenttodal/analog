@@ -34,12 +34,34 @@ arpeggiate. It joins the output after every effect.
   - CC 121 resets the bend and lifts the pedal.
 - **Real-time safety.** Fixed arrays only: no allocation, locks or I/O. Denormals are flushed.
 
-## The dry guarantee
+## The dry guarantee, and what SUB follows
 
 In the synth, SUB is added after `router.process` (CLASSIC's effects, or the CUSTOM route) and
 before the output gain, DC blocker and soft guard. It is never any effect's input: no edge
 exists by which ECHO, SPACE or any other effect could hear it. When SUB is silent, not a
 sample is touched.
+
+**FILTER and MOVEMENT reach it anyway (owner's request, 11 Nov 2026).** Otherwise SUB stays full
+and loud while everything else is filtered down or gated. ECHO and SPACE still never reach it.
+
+- **FILTER.** Each SUB voice has a flat 24 dB/octave low-pass with no resonance (a fourth-order
+  Butterworth: two TPT state-variable sections). Its cutoff is the cards' own:
+  - TONE, as smoothed for the cards;
+  - the cards' movement of their cutoff beyond TONE and tracking (modulation routes, LFO,
+    drift), averaged over the sounding cards;
+  - keyboard tracking around C4 for the played key;
+  - the filter envelope (the AMP envelope with ENV LINK), retriggered by each SUB key and
+    scaled by velocity as the cards scale it.
+
+  RESONANCE stays the cards' alone, so the sub never booms or whistles.
+- **MOVEMENT.** PULSE's tremolo and SHAPER's VOL multiply SUB, sample by sample, in step with
+  the cards. OSP's `PostProcessor::beginMovementTrace` records MOVEMENT's level gain (both
+  lanes) in the same pass that processes the cards. The gain is applied before the delay that
+  aligns SUB with a latent route.
+  - DRIFT, TAPE and CHORUS move pitch and time, not level, so they never reach SUB.
+  - SHAPER's FILTER target closes no lower than about 380 Hz, so it is not applied.
+- **MAIN + SEND.** SUB goes through MAIN's inserts as before, so MOVEMENT there already reaches
+  it. FILTER follows in every route.
 
 ## MIDI path
 
@@ -86,7 +108,9 @@ are the same buffer. ANDOR OSP's engine API is unchanged.
 | SUB-01 | `[sub][v6]` (DSP), `[v6][sub]` (plugin) | The held chord is sustained while the arpeggiator plays other notes, through the real plugin path. Pitch is two octaves down. Pedal, repeated notes, CC 120 and 123 behave. |
 | SUB-02 | `[sub][v6]` | Widening, narrowing and restoring the range while keys are held: no clicks (largest sample step < 0.02), nothing stuck. SUB on and off while held. |
 | SUB-03 | `[sub][v6]` | TAPER is exactly 6 and 12 dB down at C5 and C6, falls monotonically above C4, and is flat below. Every wave × GRIT × octave, at 0 dB with 13 keys and a full bend: finite and ≤ 1.0. The waves differ, and GRIT adds harmonics. |
-| SUB-04 | `[sub][v6]` | Oscillators muted, SUB played with SPACE and ECHO at full, feedback 0.95, DRIVE and MOVEMENT at full: identical to fully dry (< 1e-5). The tail after the release is silent. |
+| SUB-04 | `[sub][v6]` | Oscillators muted, SUB played with SPACE and ECHO at full, feedback 0.95 and DRIVE at full: identical to fully dry (< 1e-5). The tail after the release is silent. (MOVEMENT is left out: SUB follows it, SUB-09.) |
+| SUB-08 | `[sub][v6]` | SUB follows FILTER. TONE at 0.1 halves its level and more. The filter envelope opens it at the attack and closes it as it decays. Resonance changes nothing on SUB (< 2 %). |
+| SUB-09 | `[sub][v6]` | SUB follows MOVEMENT. PULSE at full drops its 10 ms level below 30 % of the peak (steady above 80 % without MOVEMENT). SHAPER gates it. CHORUS leaves its level steady. |
 | SUB-05 | `[sub][v6]` | CLASSIC with SPACE and ECHO on: with SUB off, the musician's keys reaching SUB change nothing (bit-identical). With SUB on, the output minus the old signal equals SUB alone (< 2e-6). |
 | RT-01 | `[realtime][sub][v6]` | 300 blocks of keys, range, wave, GRIT, pedal, bend and CC 120/123 changes: zero allocations, finite output, no denormals. |
 | UI | `[v6][sub]` | The lower light switches only SUB, and the upper light still switches the arpeggiator. The row opens the popover above the housing and closes it again. Dragging the RANGE handles moves `lowKey` and never crosses the high key. The reference render has no second row. |

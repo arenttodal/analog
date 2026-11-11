@@ -597,6 +597,8 @@ private:
     // SUB with one path: held back by the route's latency, so it meets the voices the host aligns.
     fx::AlignLine subDelay;
     std::vector<float> subL, subR;
+    std::vector<float> subGain;
+    float subCutoffMoved = 0.0f;  ///< the cards' cutoff movement beyond TONE and tracking (SUB follows it)   ///< MOVEMENT's level gain this block (SUB follows PULSE / SHAPER)
     int subTail = 0;
     float* tapL = nullptr;            ///< (renderVoice's: where this chunk's sends go)
     float* tapR = nullptr;

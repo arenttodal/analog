@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Envelope.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -11,7 +13,9 @@ namespace andor::analog
     Cinematic V6 gate 2: SUB - an independent polyphonic sub-bass instrument. It plays the keys
     the musician holds (the MIDI before the arpeggiator), so it can sustain a chord while the
     cards arpeggiate, and it joins the output after the effects: never ECHO's, SPACE's or any
-    other effect's input (docs/CINEMATIC_V6_GATE2.md).
+    other effect's input. It still follows the instrument's FILTER (setFilterFollow) and, in the
+    engine, MOVEMENT's level (PULSE, SHAPER), so it closes and gates with the cards
+    (docs/CINEMATIC_V6_GATE2.md).
 
     Its own voices (maxVoices), envelope, key range, high-note response, GRIT and level; a
     band-limited wave (SINE, TRIANGLE, SQUARE, SAW) one or two octaves below the key, centred.
@@ -34,10 +38,30 @@ struct SubSettings
     bool operator== (const SubSettings&) const = default;
 };
 
+/**
+    The FILTER SUB follows (V6: the instrument's filter reaches the sub too, so a closed or
+    sweeping filter darkens it with the cards rather than leaving one full sub under them). Its
+    cutoff is the cards' own: TONE (the FILTER macro), the cards' modulation of it, keyboard
+    tracking around C4 (the played key), and the filter envelope (or the AMP one with ENV LINK)
+    scaled by velocity as the cards scale it. No resonance: a flat 24 dB/octave low-pass, so the
+    sub never booms or whistles.
+*/
+struct SubFilterFollow
+{
+    bool on = false;              ///< off: SUB unfiltered (the engine sets it on)
+    float baseNote = 135.0f;      ///< the cutoff (MIDI note) before tracking and the envelope
+    float keyTrack = 0.0f;        ///< 1: an octave per octave
+    float envDepth = 0.0f;        ///< semitones at full envelope
+    float velocityToEnv = 0.0f;   ///< 0..1: how much velocity scales envDepth
+    double attack = 0.008, decay = 0.5, sustain = 0.2, release = 0.35;   ///< seconds; sustain 0..1
+};
+
 class SubOsc
 {
 public:
     static constexpr int maxVoices = 8;
+    /** Every voice's filter cutoff recomputed this often (samples). */
+    static constexpr int filterInterval = 16;
 
     void prepare (double sampleRate) noexcept;
     void reset() noexcept;
@@ -46,6 +70,10 @@ public:
     /** The pitch wheel without MIDI (the instrument's on-screen wheel), -1..1 of the bend range. */
     void setBend (float wheel) noexcept { bendSemitones = bendRange * static_cast<double> (std::clamp (wheel, -1.0f, 1.0f)); }
     const SubSettings& settingsNow() const noexcept { return settings; }
+    /** The instrument's filter as SUB follows it (control rate, audio thread). */
+    void setFilterFollow (const SubFilterFollow& f) noexcept;
+    /** Tests: a voice's cutoff now (Hz), 0 when unfiltered or free. */
+    float voiceCutoffHz (int index) const noexcept;
 
     /** One MIDI message of the musician's own input (note on / off, sustain, bend, 120, 121, 123). */
     void handleMidi (const std::uint8_t* data, int size) noexcept;
@@ -71,7 +99,17 @@ private:
         float gain = 0.0f, gainTarget = 0.0f;   ///< range x response x velocity, glided
         float velocity = 1.0f;
         std::uint64_t age = 0;
+        // The filter it follows: its envelope (retriggered by its key) and two TPT state-variable
+        // low-passes in cascade (Butterworth: no resonance).
+        Envelope filterEnv;
+        float filterEnvNow = 0.0f;
+        float g = 0.0f, cutoffHz = 0.0f, s1 = 0.0f, s2 = 0.0f, s3 = 0.0f, s4 = 0.0f;
+        int filterCountdown = 0;
     };
+    void updateCutoff (Voice& v) noexcept;
+    void applyFilterTimes() noexcept;   ///< every voice's filter envelope: the rate and times
+    float filterSample (Voice& v, float x) noexcept;
+    SubFilterFollow follow;
 
     void startKey (int key, float velocity) noexcept;
     void releaseKey (int key) noexcept;

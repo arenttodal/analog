@@ -330,7 +330,8 @@ TEST_CASE ("SUB-04: the oscillators silent, SUB played: no ECHO or SPACE, even a
             p.echo = 1.0;
             p.effects.echoFeedback = 0.95;
             p.drive = 1.0;
-            p.motion = 1.0;
+            // (MOVEMENT is not here on purpose: SUB follows its PULSE and SHAPER, and its DRIFT
+            // moves the cards' cutoff, which SUB's filter follows: SUB-09 and SUB-08.)
         }
         s.setPatch (p);
         s.reset();
@@ -420,4 +421,81 @@ TEST_CASE ("SUB: a note right after ALL SOUND OFF plays (only the voices soundin
     for (std::size_t i = 2400; i < l.size(); ++i)
         peak = std::max (peak, std::abs (l[i]));
     CHECK (peak > 0.01f);
+}
+
+TEST_CASE ("SUB-08: SUB follows the instrument's FILTER: TONE and the filter envelope, no resonance", "[sub][v6]")
+{
+    auto play = [] (double tone, double envDepth, double resonance) {
+        auto sOwned = std::make_unique<Synth>();
+        Synth& s = *sOwned;
+        s.prepare (48000.0, 256, 4);
+        auto p = withSub (measurementPatch());
+        p.osc1Level = p.osc2Level = 0.0;
+        p.sub.wave = SubSettings::Wave::saw;
+        p.sub.octave = -1;   // (C3 played: SUB at C2, 65 Hz)
+        p.tone = tone;
+        p.resonance = resonance;
+        p.envDepthSemitones = envDepth;
+        p.filterAttack = 0.002;
+        p.filterDecay = 0.25;
+        p.filterSustain = 0.0;
+        s.setPatch (p);
+        s.reset();
+        return renderBoth (s, 1.2, { on (0, 48, 100) }, { on (0, 48, 100) });
+    };
+    // A closed filter (TONE at 0.1: about 40 Hz) darkens SUB with the cards.
+    const auto open = play (1.0, 0.0, 0.0), closed = play (0.1, 0.0, 0.0);
+    CHECK (open.rms (0.2, 1.0) > 0.01);
+    CHECK (closed.rms (0.2, 1.0) < 0.5 * open.rms (0.2, 1.0));
+    // The filter envelope opens it at the attack and closes it as it decays to SUSTAIN 0.
+    const auto swept = play (0.1, 48.0, 0.0);
+    CHECK (swept.rms (0.01, 0.08) > 1.5 * swept.rms (0.8, 1.1));
+    CHECK (swept.rms (0.01, 0.08) > 1.5 * closed.rms (0.01, 0.08));
+    // RESONANCE is the cards' alone: SUB's filter has none (the same sub at any resonance).
+    const auto resonant = play (0.25, 0.0, 1.0), plain = play (0.25, 0.0, 0.0);
+    CHECK (std::abs (resonant.rms (0.2, 1.0) - plain.rms (0.2, 1.0)) < 0.02 * plain.rms (0.2, 1.0));
+    CHECK (closed.finite());
+    CHECK (swept.finite());
+}
+
+TEST_CASE ("SUB-09: SUB follows MOVEMENT's PULSE (and SHAPER), never its ECHO or SPACE", "[sub][v6]")
+{
+    auto play = [] (double motion, osp::MovementMode mode) {
+        auto sOwned = std::make_unique<Synth>();
+        Synth& s = *sOwned;
+        s.prepare (48000.0, 256, 4);
+        auto p = withSub (measurementPatch());
+        p.osc1Level = p.osc2Level = 0.0;
+        p.motion = motion;
+        p.effects.movementMode = mode;
+        p.effects.pulseRate = 0.83;   // about 4 Hz
+        p.effects.pulseShape = 1.0;   // nearly square
+        p.effects.pulseStereo = 0.0;
+        s.setPatch (p);
+        s.reset();
+        return renderBoth (s, 1.5, { on (0, 60, 100) }, { on (0, 60, 100) });
+    };
+    // The level in 10 ms windows: steady without MOVEMENT, pulsing with PULSE at full.
+    auto spread = [] (const Stereo& out) {
+        double lo = 1.0e9, hi = 0.0;
+        for (double t = 0.3; t < 1.3; t += 0.01)
+        {
+            const double r = out.rms (t, t + 0.01);
+            lo = std::min (lo, r);
+            hi = std::max (hi, r);
+        }
+        return std::pair { lo, hi };
+    };
+    const auto [steadyLo, steadyHi] = spread (play (0.0, osp::MovementMode::pulse));
+    const auto [pulseLo, pulseHi] = spread (play (1.0, osp::MovementMode::pulse));
+    CHECK (steadyHi > 0.01);
+    CHECK (steadyLo > 0.8 * steadyHi);
+    CHECK (pulseLo < 0.3 * pulseHi);
+    // SHAPER's rhythm (its default pattern, VOL and FILTER) gates SUB with the cards.
+    const auto [shaperLo, shaperHi] = spread (play (1.0, osp::MovementMode::shaper));
+    INFO ("SHAPER level " << shaperLo << " .. " << shaperHi);
+    CHECK (shaperLo < 0.7 * shaperHi);
+    // DRIFT, TAPE and CHORUS move pitch and time: they never reach SUB's level.
+    const auto [chorusLo, chorusHi] = spread (play (1.0, osp::MovementMode::chorus));
+    CHECK (chorusLo > 0.8 * chorusHi);
 }

@@ -94,6 +94,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     for (auto* b : { &sendOutL, &sendOutR })
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
     subL.assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    subGain.assign (static_cast<std::size_t> (maxBlock), 1.0f);
     subR.assign (static_cast<std::size_t> (maxBlock), 0.0f);
     subDelay.allocate (fx::CompiledGraph::alignCapacity);
 
@@ -261,6 +262,7 @@ void Synth::reset() noexcept
     kaleidoscopeStage.reset();
     subOsc.reset();
     subDelay.clear();
+    subCutoffMoved = 0.0f;
     subTail = 0;
     sendWas = false;
     sendFrom = sendTo = {};
@@ -1770,6 +1772,43 @@ void Synth::controlUpdate() noexcept
         applyVoiceModulation (v);
         updateVoiceControl (v, lfoNow, depth);
     }
+
+    // SUB follows the cards' filter (V6): TONE as smoothed here, plus what moves the cards'
+    // cutoff beyond TONE and tracking (their modulation, LFO, drift), as the sounding cards
+    // average it; tracking and the envelope are SUB's own per key, with the cards' amounts.
+    {
+        float moved = 0.0f;
+        int counted = 0;
+        for (const auto& v : voices)
+            if (v.active)
+            {
+                moved += v.cutoffNote - toneNote - static_cast<float> (p.keyTrack * (v.pitch - 60.0));
+                ++counted;
+            }
+        if (counted > 0)
+            subCutoffMoved += 0.5f * (moved / static_cast<float> (counted) - subCutoffMoved);
+        SubFilterFollow follow;
+        follow.on = true;
+        follow.baseNote = toneNote + subCutoffMoved;
+        follow.keyTrack = static_cast<float> (p.keyTrack);
+        follow.envDepth = static_cast<float> (p.envDepthSemitones);
+        follow.velocityToEnv = static_cast<float> (std::clamp (p.velocityToFilter, 0.0, 1.0));
+        if (p.envLink)   // (ENV LINK: the AMP envelope shapes the filter, as on the cards)
+        {
+            follow.attack = p.ampAttack;
+            follow.decay = p.ampDecay;
+            follow.sustain = p.ampSustain;
+            follow.release = p.ampRelease;
+        }
+        else
+        {
+            follow.attack = p.filterAttack;
+            follow.decay = p.filterDecay;
+            follow.sustain = p.filterSustain;
+            follow.release = p.filterRelease;
+        }
+        subOsc.setFilterFollow (follow);
+    }
 }
 
 //==============================================================================
@@ -2584,29 +2623,60 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     const bool subOnMain = mainSend && router.mainSendPlaying();
     if (subOnMain && subOsc.sounding())
         subOsc.render (left, right, numSamples);
+    // MOVEMENT's level gain, sample by sample, for SUB (it never enters MOVEMENT): PULSE and
+    // SHAPER move it with the rest. 1 where no MOVEMENT plays (a route without it).
+    const bool subFollowsMovement = ! subOnMain && (subOsc.sounding() || subTail > 0);
+    if (subFollowsMovement)
+    {
+        std::fill (subGain.begin(), subGain.begin() + numSamples, 1.0f);
+        effects.beginMovementTrace (subGain.data(), numSamples);
+    }
     if (mainSend)
         router.process (effects, left, right, numSamples, sendTaps ? sendOutL.data() : nullptr, sendTaps ? sendOutR.data() : nullptr);
     else
         router.process (effects, left, right, numSamples);   // (CLASSIC: effects.process, untouched)
+    effects.endMovementTrace();
     if (! subOnMain)
     {
         // SUB: after every effect, before the output gain and guard - dry by construction (it is
         // never any effect's input). Held back by the route's latency (a CUSTOM route's latent
         // effects), so it meets the voices the host aligns. Nothing sounding: not a sample touched.
         const int lag = std::min (router.latencySamples(), fx::CompiledGraph::alignCapacity - 1);
+        // (MOVEMENT's gain is the voices' at the moment they passed it: applied before the
+        // delay that aligns SUB with them.)
+        auto renderSub = [this, numSamples] {
+            std::fill (subL.begin(), subL.begin() + numSamples, 0.0f);
+            std::fill (subR.begin(), subR.begin() + numSamples, 0.0f);
+            subOsc.render (subL.data(), subR.data(), numSamples);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                subL[static_cast<std::size_t> (i)] *= subGain[static_cast<std::size_t> (i)];
+                subR[static_cast<std::size_t> (i)] *= subGain[static_cast<std::size_t> (i)];
+            }
+        };
         if (lag <= 0)
         {
             if (subOsc.sounding())
-                subOsc.render (left, right, numSamples);
+            {
+                renderSub();
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    left[i] += subL[static_cast<std::size_t> (i)];
+                    right[i] += subR[static_cast<std::size_t> (i)];
+                }
+            }
             subTail = 0;
         }
         else if (subOsc.sounding() || subTail > 0)
         {
             const bool sounding = subOsc.sounding();
-            std::fill (subL.begin(), subL.begin() + numSamples, 0.0f);
-            std::fill (subR.begin(), subR.begin() + numSamples, 0.0f);
             if (sounding)
-                subOsc.render (subL.data(), subR.data(), numSamples);
+                renderSub();
+            else
+            {
+                std::fill (subL.begin(), subL.begin() + numSamples, 0.0f);
+                std::fill (subR.begin(), subR.begin() + numSamples, 0.0f);
+            }
             subDelay.run (subL.data(), subR.data(), numSamples, lag);
             for (int i = 0; i < numSamples; ++i)
             {
