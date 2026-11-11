@@ -507,7 +507,7 @@ TEST_CASE ("analog learn: the browser lists real lessons and resumes; the invita
         CHECK (row.status == andor::learn::Browser::Row::Status::notStarted);
     // Start the ARP lesson from the browser, leave at step 3, come back to it.
     REQUIRE (browser->onChoose != nullptr);
-    browser->onChoose ("analog.arp.basics");
+    rig.learn->chooseLesson ("analog.arp.basics");
     rig.settle();
     REQUIRE (rig.runner().inTour());
     rig.learn->noteAction ("skip");
@@ -520,7 +520,16 @@ TEST_CASE ("analog learn: the browser lists real lessons and resumes; the invita
     for (const auto& row : browser->rows())
         if (row.lessonId == "analog.arp.basics")
             CHECK (row.status == andor::learn::Browser::Row::Status::inProgress);
-    browser->onChoose ("analog.arp.basics");
+    // Chosen with the keyboard (the browser deletes itself as it starts the lesson).
+    CHECK (browser->keyPressed (juce::KeyPress (juce::KeyPress::downKey)));
+    CHECK (browser->keyPressed (juce::KeyPress (juce::KeyPress::downKey)));   // the second row: the ARP lesson
+    CHECK (browser->keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+    CHECK (rig.learn->browser() == browser);   // still alive: the choice is delivered after the key returns
+    REQUIRE (browser->onChoose != nullptr);
+    browser->onChoose (juce::String ("analog.arp.basics"));   // ...as the deferred call does (it deletes the browser)
+    CHECK (rig.learn->browser() == nullptr);
+    REQUIRE (rig.runner().lesson() != nullptr);
+    CHECK (rig.runner().lesson()->id == "analog.arp.basics");
     CHECK (rig.runner().stepIndex() == 2);   // resumed where it was left
     rig.learn->noteAction ("close");
     // Reset learning progress forgets it (and nothing of the sound).

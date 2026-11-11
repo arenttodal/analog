@@ -64,7 +64,7 @@ See "Test results" below for the exact runs and counts.
 
 | Program | Cases | Assertions |
 |---|---|---|
-| `andor_analog_tests "[learn]"` | 14 (7 shared + 7 Analog) | 382 |
+| `andor_analog_tests "[learn]"` | 14 (7 shared + 7 Analog) | 390 |
 | `andor_example_tests "[learn]"` | 7 | 97 |
 
 What they cover:
@@ -132,7 +132,7 @@ The thirteenth, `andor_analog_tests`, failed two preset-count checks in that par
 
 | Program | Cases | Assertions | Result |
 |---|---|---|---|
-| `andor_analog_tests "[learn]"` | 14 | 382 | all passed |
+| `andor_analog_tests "[learn]"` | 14 | 390 | all passed |
 | `andor_example_tests "[learn]"` | 7 | 97 | all passed |
 
 ## Screenshots
