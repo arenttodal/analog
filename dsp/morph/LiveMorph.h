@@ -27,7 +27,9 @@ namespace andor::analog::morph
     harmonics (the breath, the bow, a noise source) is kept as eight octave bands of residual.
 
     Synthesis, at the host rate, interpolated up:
-      - partials on one fundamental, f = fx^(1 - p) fy^p (the pitch morphs too), each
+      - partials on one fundamental, f = fx^(1 - p) fy'^p, fy' being card C's pitch moved by
+        whole octaves to the nearest of the carrier's (the pitch morphs too, octave-aware:
+        card C's OCT never puts the fusion between notes, only DETUNE-like offsets glide), each
         partial's level interpolated in dB between the two sources (FUSE), taken from one side
         or the other in a seeded order the position sweeps through (WEAVE), or the carrier's
         own partials with their smooth envelope (2/3 octave) traded for card C's (IMPRINT: a

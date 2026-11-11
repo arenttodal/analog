@@ -239,12 +239,19 @@ void LiveMorph::updateTargets() noexcept
     const bool xHeard = xLevelDb > silentDb, yHeard = yLevelDb > silentDb;
     const double fx = std::max (20.0, settings.carrierHz), fy = std::max (20.0, settings.sourceHz);
     // The pitch morphs with the sound (IMPRINT keeps the carrier's); a silent side gives none.
+    // Octave-aware: whole octaves between the sides (card C's OCT) are not glided through, so
+    // the fusion stays on the played note's pitch class (OCT +1 at 50 % is the key, never a
+    // tritone); what is left (DETUNE, a non-octave transposition) glides the shortest way.
     if (settings.method == MorphMethod::imprint || ! yHeard)
         f0Morph = fx;
     else if (! xHeard)
         f0Morph = fy;
     else
-        f0Morph = std::exp ((1.0 - p) * std::log (fx) + p * std::log (fy));
+    {
+        const double octaves = std::round (std::log2 (fy / fx));
+        const double fyNear = octaves == 0.0 ? fy : fy * std::exp2 (-octaves);   // (no octave apart: exactly as before)
+        f0Morph = std::exp ((1.0 - p) * std::log (fx) + p * std::log (fyNear));
+    }
 
     const double shift = std::exp2 (-settings.formants / 12.0);
     const int count = std::min (partialCount, std::max (1, static_cast<int> (0.45 * hostRate / f0Morph)));

@@ -193,13 +193,29 @@ TEST_CASE ("live morph: the middle fuses the partials (a saw into a square: the 
     CHECK ((h3 - h1) == Approx (0.5 * (sawH3 + squareH3) - 0.5 * (sawH1 + squareH1)).margin (2.0));
 }
 
-TEST_CASE ("live morph: the pitch morphs too (an octave apart: the fifth-and-a-bit between at 50 %)", "[morph][live][pitch]")
+TEST_CASE ("live morph: the pitch morphs octave-aware (card C's OCT never puts it between notes)", "[morph][live][pitch]")
 {
+    // An octave apart (card C at OCT +1): the fusion stays on the key at every position - never
+    // the tritone between (what MORPH at 50 % did before 11 Nov 2026).
+    for (const double position : { 0.25, 0.5, 0.75 })
+        for (const double source : { 440.0, 880.0, 110.0 })
+        {
+            morph::LiveMorph m;
+            run (m, saw (220.0), saw (source), control (position, 220.0, source), 0.6);
+            CHECK (m.morphFundamental() == Approx (220.0).epsilon (1.0e-9));
+        }
     morph::LiveMorph m;
     const auto out = run (m, saw (220.0), saw (440.0), control (0.5, 220.0, 440.0), 1.0);
-    CHECK (m.morphFundamental() == Approx (220.0 * std::sqrt (2.0)).epsilon (0.001));
-    // The core's fundamental sounds; IMPRINT keeps the carrier's pitch.
-    CHECK (levelAt (out, 220.0 * std::sqrt (2.0)) > levelAt (out, 330.0) + 20.0);
+    CHECK (levelAt (out, 220.0) > levelAt (out, 220.0 * std::sqrt (2.0)) + 20.0);
+    // What is not whole octaves still glides, the shortest way: OCT +1 and a semitone up
+    // (a semitone above the octave) sits half a semitone up at 50 %.
+    morph::LiveMorph detuned;
+    run (detuned, saw (220.0), saw (440.0 * std::exp2 (1.0 / 12.0)), control (0.5, 220.0, 440.0 * std::exp2 (1.0 / 12.0)), 0.6);
+    CHECK (detuned.morphFundamental() == Approx (220.0 * std::exp2 (0.5 / 12.0)).epsilon (1.0e-9));
+    // No octave between them: exactly the glide as before (a whole tone apart: a semitone at 50 %).
+    morph::LiveMorph near;
+    run (near, saw (220.0), saw (220.0 * std::exp2 (2.0 / 12.0)), control (0.5, 220.0, 220.0 * std::exp2 (2.0 / 12.0)), 0.6);
+    CHECK (near.morphFundamental() == Approx (220.0 * std::exp2 (1.0 / 12.0)).epsilon (1.0e-9));
     morph::LiveMorph imprint;
     run (imprint, saw (220.0), saw (440.0), control (0.5, 220.0, 440.0, MorphMethod::imprint), 0.5);
     CHECK (imprint.morphFundamental() == Approx (220.0));
