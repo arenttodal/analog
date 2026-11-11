@@ -577,3 +577,15 @@ analog.hybrid2.noise.keys v31 float "Hybrid 2 Noise Keys" label="%" range=0.0000
 analog.send.a v32 float "Send A" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.send.b v32 float "Send B" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.send.c v32 float "Send C" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.movement.shaperDna.enabled v33 bool "Shaper DNA" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.movement.shaperDna.assignment v33 choice "Shaper DNA Assignment" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=CYCLE|CYCLE|KEY ZONES [CYCLE|KEY ZONES]
+analog.movement.shaperDna.profiles v33 choice "Shaper DNA Profiles" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=A / B|A / B|A / B / C [A / B|A / B / C]
+analog.movement.shaperDna.notesPerProfile v33 choice "Shaper DNA Notes per Profile" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=1|2|3 [1|2|3]
+analog.movement.shaperDna.splitAB v33 int "Shaper DNA Split A/B" label="" range=0.0000..126.0000/1.0000 skew=1.00000 default=59.0000 steps=127 texts=C-1|D#4|F#9
+analog.movement.shaperDna.splitBC v33 int "Shaper DNA Split B/C" label="" range=1.0000..127.0000/1.0000 skew=1.00000 default=71.0000 steps=127 texts=C#-1|E4|G9
+analog.movement.shaperDna.a.pattern v33 choice "Shaper DNA A Pattern" label="" range=0.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=13 texts=FOLLOW|EUCLID 3|MACHINE [FOLLOW|PULSE|OFFBEAT|BREATH|THREE|FIVE|EUCLID 3|EUCLID 5|CASCADE|RISE|BROKEN|SCATTER|MACHINE]
+analog.movement.shaperDna.a.rate v33 choice "Shaper DNA A Rate" label="" range=0.0000..6.0000/1.0000 skew=1.00000 default=0.0000 steps=7 texts=FOLLOW|1/8T|1/32 [FOLLOW|1/4|1/8|1/8T|1/16|1/16T|1/32]
+analog.movement.shaperDna.b.pattern v33 choice "Shaper DNA B Pattern" label="" range=0.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=13 texts=FOLLOW|EUCLID 3|MACHINE [FOLLOW|PULSE|OFFBEAT|BREATH|THREE|FIVE|EUCLID 3|EUCLID 5|CASCADE|RISE|BROKEN|SCATTER|MACHINE]
+analog.movement.shaperDna.b.rate v33 choice "Shaper DNA B Rate" label="" range=0.0000..6.0000/1.0000 skew=1.00000 default=2.0000 steps=7 texts=FOLLOW|1/8T|1/32 [FOLLOW|1/4|1/8|1/8T|1/16|1/16T|1/32]
+analog.movement.shaperDna.c.pattern v33 choice "Shaper DNA C Pattern" label="" range=0.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=13 texts=FOLLOW|EUCLID 3|MACHINE [FOLLOW|PULSE|OFFBEAT|BREATH|THREE|FIVE|EUCLID 3|EUCLID 5|CASCADE|RISE|BROKEN|SCATTER|MACHINE]
+analog.movement.shaperDna.c.rate v33 choice "Shaper DNA C Rate" label="" range=0.0000..6.0000/1.0000 skew=1.00000 default=3.0000 steps=7 texts=FOLLOW|1/8T|1/32 [FOLLOW|1/4|1/8|1/8T|1/16|1/16T|1/32]

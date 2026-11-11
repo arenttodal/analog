@@ -317,6 +317,7 @@ const ProductInfo& productInfo()
             andor::analog::params::addSubTo (layout);   // (state version 15: SUB, appended)
             andor::analog::params::addHybrid2To (layout);   // (state version 16: card C's second layer, appended)
             andor::analog::params::addSendsTo (layout);   // (state version 17: the cards' sends, appended)
+            andor::analog::params::addShaperDnaTo (layout);   // (state version 18: SHAPER DNA, appended)
         };
         p.installFactoryPresets = installFactoryPresets;
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
@@ -481,7 +482,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 17;   // (12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
+        p.stateVersion = 18;   // (18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);

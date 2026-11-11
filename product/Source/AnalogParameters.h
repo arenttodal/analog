@@ -215,6 +215,18 @@ namespace andor::analog::params
     inline const juce::String sendB = "analog.send.b";
     inline const juce::String sendC = "analog.send.c";
     void addSendsTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
+    /** State version 18 (SHAPER DNA V1, docs/SHAPER_DNA_V1.md): MOVEMENT lane A's SHAPER per note.
+        OFF in a new instrument and in every session and preset from before. */
+    inline const juce::String dnaEnabled = "analog.movement.shaperDna.enabled";
+    inline const juce::String dnaAssignment = "analog.movement.shaperDna.assignment";
+    inline const juce::String dnaProfiles = "analog.movement.shaperDna.profiles";
+    inline const juce::String dnaNotesPerProfile = "analog.movement.shaperDna.notesPerProfile";
+    inline const juce::String dnaSplitAB = "analog.movement.shaperDna.splitAB";
+    inline const juce::String dnaSplitBC = "analog.movement.shaperDna.splitBC";
+    /** A profile's (0 A, 1 B, 2 C) pattern or rate: "analog.movement.shaperDna.a.pattern" ... */
+    inline juce::String dnaProfileId (int profile, const char* name) { return juce::String ("analog.movement.shaperDna.") + static_cast<char> ('a' + profile) + "." + name; }
+    /** Appends SHAPER DNA's parameters (after the sends). */
+    void addShaperDnaTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends card C's second layer's parameters (after SUB's). */
     void addHybrid2To (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends SUB's parameters (after the FX library's: Product's addParameters). */

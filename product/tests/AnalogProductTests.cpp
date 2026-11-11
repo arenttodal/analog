@@ -5952,7 +5952,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 17);   // (13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
+        CHECK (xml->getIntAttribute ("productVersion") == 18);   // (18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8169,7 +8169,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 17);
+    CHECK (xml->getIntAttribute ("productVersion") == 18);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -8922,4 +8922,113 @@ TEST_CASE ("analog: MORPH lamp screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screen
         setValue (p, params::morphEnabled, 1.0f);
         shoot ("morph-lamp-02-on");
     }
+}
+
+//==============================================================================
+// SHAPER DNA V1, gate 3: persistence (docs/SHAPER_DNA_V1.md)
+
+TEST_CASE ("SHAPER DNA: OFF in a new instrument; every 1.0 project opens with it OFF and its settings at their defaults (OLD-02)", "[analog][shaperdna][state]")
+{
+    {
+        ShellProcessor p;
+        CHECK (p.parameterValue (params::dnaEnabled) < 0.5f);
+        params::Reader reader;
+        reader.attach (p.parameters);
+        CHECK (reader.read().shaperDna == andor::analog::ShaperDnaSettings {});
+    }
+    REQUIRE (fixtureDir().isDirectory());
+    for (const auto& [name, make] : fixtureSessions())
+    {
+        INFO (name);
+        juce::MemoryBlock state;
+        REQUIRE (fixtureDir().getChildFile (name + ".state").loadFileAsData (state));
+        ShellProcessor q;
+        setValue (q, params::dnaEnabled, 1.0f);   // (a stale ON must not survive the load)
+        setValue (q, params::dnaSplitAB, 30.0f);
+        q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+        params::Reader reader;
+        reader.attach (q.parameters);
+        CHECK (reader.read().shaperDna == andor::analog::ShaperDnaSettings {});
+    }
+}
+
+TEST_CASE ("SHAPER DNA: every setting is a host parameter - saved, recalled, read by the engine, undoable (GUI-03)", "[analog][shaperdna][state]")
+{
+    using andor::analog::ShaperDnaSettings;
+    ShellProcessor p;
+    setValue (p, params::dnaEnabled, 1.0f);
+    setValue (p, params::dnaAssignment, 1.0f);   // KEY ZONES
+    setValue (p, params::dnaProfiles, 0.0f);     // A / B
+    setValue (p, params::dnaNotesPerProfile, 2.0f);
+    setValue (p, params::dnaSplitAB, 52.0f);
+    setValue (p, params::dnaSplitBC, 76.0f);
+    setValue (p, params::dnaProfileId (0, "pattern"), 0.0f);   // FOLLOW
+    setValue (p, params::dnaProfileId (1, "pattern"), 5.0f);   // library pattern 4
+    setValue (p, params::dnaProfileId (2, "rate"), 6.0f);      // 1/32
+    params::Reader reader;
+    reader.attach (p.parameters);
+    const auto d = reader.read().shaperDna;
+    CHECK (d.enabled);
+    CHECK (d.assignment == ShaperDnaSettings::Assignment::keyZones);
+    CHECK (d.profiles == 2);
+    CHECK (d.notesPerProfile == 3);
+    CHECK (d.splitAB == 52);
+    CHECK (d.splitBC == 76);
+    CHECK (d.pattern[0] == ShaperDnaSettings::follow);
+    CHECK (d.pattern[1] == 4);
+    CHECK (d.rate[2] == static_cast<int> (osp::ShaperRate::thirtySecond));
+    // Saved and recalled exactly; the state is version 18.
+    juce::MemoryBlock session;
+    p.getStateInformation (session);
+    {
+        auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (xml != nullptr);
+        CHECK (xml->getIntAttribute ("productVersion") == 18);
+    }
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    params::Reader back;
+    back.attach (q.parameters);
+    CHECK (back.read().shaperDna == d);
+    // The patch round trip (presets are written from it).
+    CHECK (params::valuesOf (reader.read()).at (params::dnaSplitBC) == Approx (76.0f));
+    // A host gesture is undoable.
+    auto* enabled = p.parameters.getParameter (params::dnaEnabled);
+    REQUIRE (enabled != nullptr);
+    p.parameters.copyState();
+    p.undoManager.beginNewTransaction();
+    enabled->beginChangeGesture();
+    enabled->setValueNotifyingHost (0.0f);
+    enabled->endChangeGesture();
+    p.parameters.copyState();
+    CHECK (p.parameterValue (params::dnaEnabled) < 0.5f);
+    p.undoManager.beginNewTransaction();
+    p.undoManager.undo();
+    CHECK (p.parameterValue (params::dnaEnabled) >= 0.5f);
+    // Out-of-order splits from automation are kept apart in the sound.
+    setValue (p, params::dnaSplitAB, 100.0f);
+    setValue (p, params::dnaSplitBC, 20.0f);
+    const auto clamped = reader.read().shaperDna;
+    CHECK (clamped.splitAB == 100);
+    CHECK (clamped.splitBC == 101);
+}
+
+TEST_CASE ("SHAPER DNA: switched on through the plugin, it hands lane A's SHAPER over and shapes the notes", "[analog][shaperdna]")
+{
+    ShellProcessor p;
+    setValue (p, "space", 0.0f);
+    setValue (p, "echo", 0.0f);
+    setValue (p, "motion", 100.0f);
+    setValue (p, "movement.mode", static_cast<float> (static_cast<int> (osp::MovementMode::shaper)));
+    const std::vector<Note> chord { { 0, 48, 100 }, { 0, 60, 100 }, { 0, 67, 100 } };
+    const auto global = renderShell (p, 1.0, chord, false);
+    setValue (p, params::dnaEnabled, 1.0f);
+    const auto perNote = renderShell (p, 1.0, chord, false);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    CHECK (engine.synthForTest().shaperHandoff() > 0.999);
+    CHECK (rmsOf (perNote) > 1.0e-3);
+    CHECK (differenceRms (perNote, global) > 1.0e-3);   // (three profiles at three rates: a different groove)
+    setValue (p, params::dnaEnabled, 0.0f);
+    renderShell (p, 0.2, {}, false);
+    CHECK (engine.synthForTest().shaperHandoff() < 1.0e-3);
 }

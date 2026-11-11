@@ -96,6 +96,9 @@ namespace
         iHybrid2Enabled, iHybrid2Type, iHybrid2Level, iHybrid2Octave, iHybrid2Coarse, iHybrid2Fine, iHybrid2Velo, iHybrid2Model, iHybrid2Wave, iHybrid2Width, iHybrid2DcoSaw, iHybrid2DcoPulse, iHybrid2DcoSub, iHybrid2DcoPwmSource, iHybrid2DcoPwmDepth, iHybrid2WideWave, iHybrid2WideShape, iHybrid2WideSpread, iHybrid2NoiseColor, iHybrid2NoiseTone, iHybrid2NoiseMovement, iHybrid2NoiseKeys,
         // State version 17: the cards' sends.
         iSendA, iSendB, iSendC,
+        // State version 18: SHAPER DNA.
+        iDnaEnabled, iDnaAssignment, iDnaProfiles, iDnaNotesPerProfile, iDnaSplitAB, iDnaSplitBC,
+        iDnaPatternA, iDnaRateA, iDnaPatternB, iDnaRateB, iDnaPatternC, iDnaRateC,
         count
     };
 
@@ -207,6 +210,12 @@ namespace
             // State version 17: the cards' sends.
             for (const auto* id : { &sendA, &sendB, &sendC })
                 l.add (*id);
+            // State version 18: SHAPER DNA.
+            for (const auto* id : { &dnaEnabled, &dnaAssignment, &dnaProfiles, &dnaNotesPerProfile, &dnaSplitAB, &dnaSplitBC })
+                l.add (*id);
+            for (int profile = 0; profile < 3; ++profile)
+                for (const char* name : { "pattern", "rate" })
+                    l.add (dnaProfileId (profile, name));
             return l;
         }();
         jassert (withCards.size() == count);
@@ -830,6 +839,38 @@ void addSendsTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                                                               juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
 }
 
+void addShaperDnaTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 18 (SHAPER DNA V1): OFF in a new instrument and every session from before,
+    // so nothing sounds different until the musician switches it on. Append-only: these IDs,
+    // ranges and choice orders are frozen once shipped.
+    const andor::analog::ShaperDnaSettings d;
+    auto v33 = [] (const juce::String& name) { return juce::ParameterID { name, 33 }; };
+    auto keyText = [] (int key, int) { return juce::MidiMessage::getMidiNoteName (key, true, true, 4); };
+    using Choice = juce::AudioParameterChoice;
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v33 (dnaEnabled), "Shaper DNA", d.enabled));
+    layout.add (osp::plugin::parameters::make<Choice> (v33 (dnaAssignment), "Shaper DNA Assignment", juce::StringArray { "CYCLE", "KEY ZONES" }, static_cast<int> (d.assignment)));
+    layout.add (osp::plugin::parameters::make<Choice> (v33 (dnaProfiles), "Shaper DNA Profiles", juce::StringArray { "A / B", "A / B / C" }, d.profiles - 2));
+    layout.add (osp::plugin::parameters::make<Choice> (v33 (dnaNotesPerProfile), "Shaper DNA Notes per Profile", juce::StringArray { "1", "2", "3" }, d.notesPerProfile - 1));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterInt> (v33 (dnaSplitAB), "Shaper DNA Split A/B", 0, 126, d.splitAB,
+                                                                        juce::AudioParameterIntAttributes().withStringFromValueFunction (keyText)));
+    layout.add (osp::plugin::parameters::make<juce::AudioParameterInt> (v33 (dnaSplitBC), "Shaper DNA Split B/C", 1, 127, d.splitBC,
+                                                                        juce::AudioParameterIntAttributes().withStringFromValueFunction (keyText)));
+    juce::StringArray patterns { "FOLLOW" };
+    for (int i = 0; i < osp::RhythmicShaper::patternCount; ++i)
+        patterns.add (osp::RhythmicShaper::patternName (i));
+    juce::StringArray rates { "FOLLOW" };
+    for (int r = 0; r <= static_cast<int> (osp::ShaperRate::thirtySecond); ++r)
+        rates.add (osp::RhythmicShaper::rateName (static_cast<osp::ShaperRate> (r)));
+    for (int profile = 0; profile < 3; ++profile)
+    {
+        const auto i = static_cast<std::size_t> (profile);
+        const juce::String name = juce::String ("Shaper DNA ") + static_cast<char> ('A' + profile);
+        layout.add (osp::plugin::parameters::make<Choice> (v33 (dnaProfileId (profile, "pattern")), name + " Pattern", patterns, d.pattern[i] + 1));
+        layout.add (osp::plugin::parameters::make<Choice> (v33 (dnaProfileId (profile, "rate")), name + " Rate", rates, d.rate[i] + 1));
+    }
+}
+
 const std::vector<osp::mod::ProductDest>& modulationDestinations()
 {
     static const std::vector<osp::mod::ProductDest> list = [] {
@@ -1181,6 +1222,21 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.sendA = 0.01 * v (iSendA);
     p.sendB = 0.01 * v (iSendB);
     p.sendC = 0.01 * v (iSendC);
+    {
+        // SHAPER DNA (state version 18): FOLLOW is each choice's first entry (-1 in the patch).
+        auto& d = p.shaperDna;
+        d.enabled = on (iDnaEnabled);
+        d.assignment = static_cast<ShaperDnaSettings::Assignment> (index (iDnaAssignment, 2));
+        d.profiles = 2 + index (iDnaProfiles, 2);
+        d.notesPerProfile = 1 + index (iDnaNotesPerProfile, 3);
+        d.splitAB = std::clamp (juce::roundToInt (v (iDnaSplitAB)), 0, 126);
+        d.splitBC = std::clamp (juce::roundToInt (v (iDnaSplitBC)), d.splitAB + 1, 127);
+        for (int profile = 0; profile < 3; ++profile)
+        {
+            d.pattern[static_cast<std::size_t> (profile)] = index (iDnaPatternA + 2 * profile, osp::RhythmicShaper::patternCount + 1) - 1;
+            d.rate[static_cast<std::size_t> (profile)] = index (iDnaRateA + 2 * profile, 7) - 1;
+        }
+    }
     p.granular = on (iSourceMode);
     p.grains.position = 0.01 * v (iGrainPosition);
     p.grains.sizeSeconds = 0.001 * v (iGrainSize);
@@ -1517,6 +1573,20 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iSendA, 100.0 * p.sendA);
     put (iSendB, 100.0 * p.sendB);
     put (iSendC, 100.0 * p.sendC);
+    {
+        const auto d = p.shaperDna.sanitised();
+        put (iDnaEnabled, d.enabled ? 1.0 : 0.0);
+        put (iDnaAssignment, static_cast<int> (d.assignment));
+        put (iDnaProfiles, d.profiles - 2);
+        put (iDnaNotesPerProfile, d.notesPerProfile - 1);
+        put (iDnaSplitAB, d.splitAB);
+        put (iDnaSplitBC, d.splitBC);
+        for (int profile = 0; profile < 3; ++profile)
+        {
+            put (iDnaPatternA + 2 * profile, d.pattern[static_cast<std::size_t> (profile)] + 1);
+            put (iDnaRateA + 2 * profile, d.rate[static_cast<std::size_t> (profile)] + 1);
+        }
+    }
     put (iSourceMode, p.granular ? 1.0 : 0.0);
     put (iGrainPosition, 100.0 * p.grains.position);
     put (iGrainSize, 1000.0 * p.grains.sizeSeconds);
