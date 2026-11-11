@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdio>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace testutil
@@ -199,5 +201,39 @@ namespace testutil
                 stray += e;
         }
         return 10.0 * std::log10 (std::max (stray, 1.0e-30) / std::max (total, 1.0e-30));
+    }
+
+    /** Writes a stereo render as a 24-bit PCM WAV (demo renders; no JUCE in these tests). */
+    inline bool writeWav (const std::string& path, const Stereo& s)
+    {
+        std::FILE* f = std::fopen (path.c_str(), "wb");
+        if (f == nullptr)
+            return false;
+        const auto frames = static_cast<std::uint32_t> (s.left.size());
+        const auto rate = static_cast<std::uint32_t> (s.rate);
+        const std::uint32_t bytes = frames * 6u;
+        auto u32 = [f] (std::uint32_t v) { for (int i = 0; i < 4; ++i) std::fputc (static_cast<int> ((v >> (8 * i)) & 0xffu), f); };
+        auto u16 = [f] (std::uint32_t v) { std::fputc (static_cast<int> (v & 0xffu), f); std::fputc (static_cast<int> ((v >> 8) & 0xffu), f); };
+        std::fwrite ("RIFF", 1, 4, f);
+        u32 (36u + bytes);
+        std::fwrite ("WAVEfmt ", 1, 8, f);
+        u32 (16u);
+        u16 (1u);
+        u16 (2u);
+        u32 (rate);
+        u32 (rate * 6u);
+        u16 (6u);
+        u16 (24u);
+        std::fwrite ("data", 1, 4, f);
+        u32 (bytes);
+        for (std::uint32_t i = 0; i < frames; ++i)
+            for (const float x : { s.left[i], s.right[i] })
+            {
+                const auto v = static_cast<std::int32_t> (std::lround (std::clamp (static_cast<double> (x), -1.0, 1.0) * 8388607.0));
+                std::fputc (v & 0xff, f);
+                std::fputc ((v >> 8) & 0xff, f);
+                std::fputc ((v >> 16) & 0xff, f);
+            }
+        return std::fclose (f) == 0;
     }
 }

@@ -5,12 +5,14 @@
 #include "engine/LayerEq.h"
 #include "engine/Modulation.h"
 #include "engine/ReimaginedModes.h"
+#include "engine/SatelliteMotion.h"
 #include "engine/Shaping.h"
 #include "fx/FxSettings.h"
 #include "ShaperDna.h"
 #include "SubOsc.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -240,6 +242,9 @@ struct Patch
     osp::Shaping movementB;   ///< lane B's settings (its movement fields; its SHAPER CUSTOM steps from the shell)
     /** SHAPER DNA V1 (docs/SHAPER_DNA_V1.md): lane A's SHAPER per note. OFF: as before, bit for bit. */
     ShaperDnaSettings shaperDna;
+    /** SATELLITE (docs/features/SATELLITE_RHYTHM_ARCHITECTURE.md): each card's own stereo motion,
+        A, B, C. All off: as before, bit for bit. SUB is never moved. */
+    std::array<osp::satellite::Settings, 3> satellite {};
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45

@@ -603,3 +603,50 @@ TEST_CASE ("RT-01: SHAPER DNA (16 voices, three profiles, FILTER / BOTH, hand-ov
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: SATELLITE (three cards moving, twins starting and stopping, modes switching) never allocates", "[realtime][satellite]")
+{
+    auto synthOwned = std::make_unique<Synth>();
+    Synth& synth = *synthOwned;
+    synth.prepare (48000.0, 512, 4);
+    Patch p = measurementPatch();
+    p.blend = 0.5;
+    p.hybridType = HybridType::oscillator;
+    p.resonance = 0.5;
+    synth.setPatch (p);
+    synth.reset();
+    synth.setCardRouting (true);
+    std::vector<float> left (512), right (512);
+    osp::HostTiming timing;
+    timing.valid = timing.playing = true;
+    timing.bpm = 140.0;
+    counting = true;
+    for (int block = 0; block < 300; ++block)
+    {
+        // Every few blocks: a card on or off, a new mode, FREE or SYNC; notes on single cards
+        // (whole voices) and on all three (twins).
+        for (std::size_t k = 0; k < 3; ++k)
+        {
+            auto& s = p.satellite[k];
+            s.enabled = ((block / (7 + 3 * static_cast<int> (k))) % 2) == 0;
+            s.mode = static_cast<osp::satellite::Mode> ((block / 11 + static_cast<int> (k)) % 3);
+            s.timing = (block / 13) % 2 == 0 ? osp::satellite::Timing::sync : osp::satellite::Timing::free;
+            s.retrigger = (block / 17) % 2 == 0 ? osp::satellite::Retrigger::cycle : osp::satellite::Retrigger::note;
+            s.depth = 0.9;
+            s.width = 0.3;
+        }
+        p.morph.enabled = (block / 40) % 2 == 1;
+        synth.setPatch (p);
+        timing.ppq += 512.0 / 48000.0 * 140.0 / 60.0;
+        synth.setTransport (timing);
+        const int channel = 1 + (block % 8);   // (1: every card; 2..8: card masks)
+        const std::uint8_t noteOn[3] { static_cast<std::uint8_t> (0x90 | (channel - 1)), static_cast<std::uint8_t> (40 + block % 40), 100 };
+        const std::uint8_t noteOff[3] { static_cast<std::uint8_t> (0x80 | (channel - 1)), static_cast<std::uint8_t> (40 + (block + 30) % 40), 0 };
+        synth.handleMidi (noteOn, 3);
+        synth.render (left.data(), right.data(), 256);
+        synth.handleMidi (noteOff, 3);
+        synth.render (left.data(), right.data(), 256);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

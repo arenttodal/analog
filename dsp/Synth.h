@@ -245,6 +245,20 @@ public:
     };
     VoiceView voiceView (int slot) const noexcept;
 
+    /** SATELLITE's telemetry (read only: the panel's live path): where each card is now (its
+        place -1..1 and ORBIT's rear amount), as the audio heard it this control period. */
+    struct SatelliteView
+    {
+        bool moving = false;
+        float x = 0.0f, rear = 0.0f;
+    };
+    SatelliteView satelliteView (int card) const noexcept
+    {
+        const auto k = static_cast<std::size_t> (std::clamp (card, 0, 2));
+        return { satShownLive.load (std::memory_order_relaxed) & (1 << k) ? true : false, satShownX[k].load (std::memory_order_relaxed),
+                 satShownRear[k].load (std::memory_order_relaxed) };
+    }
+
     /**
         The voice filter's telemetry (read only - the FILTER rack's live graph; FX Rack V3). One
         tap per voice slot, written by the audio thread once a control period from what the
@@ -335,6 +349,7 @@ private:
         double unisonOffset = 0.0;                 ///< semitones
         float pan = 0.0f;                          ///< its place, -1..1 (before DRIFT)
         float panL = 1.0f, panR = 1.0f;
+        float panNow = 0.0f;                       ///< its place now (DRIFT and PAN's routes included)
 
         double phase1 = 0.0, phase2 = 0.0;
         BlepLine line1, line2;
@@ -495,6 +510,18 @@ private:
         int pendingChannel = 0, pendingNote = 0;
         float pendingVelocity = 0.0f;
         bool pendingRetrigger = true;
+        // SATELLITE: a voice of several cards splits only the cards that move, each through a
+        // twin of the voice's filter (the same cutoff, resonance, model, high-pass and drive; its
+        // own state), run only while that card moves in this voice; what stays (the other
+        // cards and the filter's interplay) keeps the voice's place. A voice of one card moves
+        // whole, through no twin.
+        std::array<LadderFilter, 3> satFilter;
+        std::array<OtaFilter, 3> satOta;
+        std::array<VoiceHighPass, 3> satHighPass;
+        std::uint8_t satTwins = 0;                 ///< the twins running (bit per card)
+        std::array<double, 3> satDnaS1 {}, satDnaS2 {};   ///< SHAPER DNA's low-pass on each stem
+        std::array<float, 3> satRear {};           ///< ORBIT's rear darkening, per stem (one pole)
+        std::array<float, 3> satNoteX {};          ///< BOUNCE NOTE: this note's place, per card
     };
 
     void startVoice (Voice& v, int channel, int note, float velocity, bool retrigger) noexcept;
@@ -637,6 +664,25 @@ private:
     // is off and has faded out, so OFF renders exactly as before.
     void updateShaperDna (int count) noexcept;
     void applyShaperDna (Voice& v, float& out, float* send, int at) noexcept;
+    // SATELLITE: each card's motion (control rate; the voices interpolate across the chunk).
+    struct SatelliteCard
+    {
+        double amount = 0.0;      ///< 0 off .. 1 on (20 ms either way)
+        double freeCycle = 0.0;   ///< FREE's own cycle
+        double x = 0.0, rear = 0.0;   ///< the path, smoothed (6 ms): a mode or setting change never jumps
+        float x0 = 0.0f, x1 = 0.0f, rear0 = 0.0f, rear1 = 0.0f, width = 1.0f;   ///< this chunk's ends (amount applied)
+        int notes = 0;            ///< BOUNCE NOTE: the card's notes so far
+    };
+    std::array<SatelliteCard, 3> sat {};
+    std::array<std::atomic<float>, 3> satShownX {}, satShownRear {};
+    std::atomic<int> satShownLive { 0 };
+    std::uint8_t satLive = 0;          ///< the cards moving (or gliding back), bit per card
+    double satLocalPpq = 0.0;
+    bool satLocalRunning = false, satPendingStart = false;
+    int satIdle = 0;
+    float satRearCoef = 0.1f;
+    void updateSatellite (int count) noexcept;
+
     static constexpr int dnaMaxChunk = controlPeriod * 8;   ///< internal samples per control chunk (oversampling up to 8)
     ShaperDnaAssigner dnaAssigner;
     int dnaAssigning = 0;                     ///< the profile the next started voice takes

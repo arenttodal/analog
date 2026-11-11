@@ -99,6 +99,7 @@ if(OSP_BUILD_TESTS)
         tests/ShaperDnaTests.cpp
         tests/ShaperDnaAudioTests.cpp
         tests/UserMacroCoreTests.cpp
+        tests/SatelliteTests.cpp
         tests/CardEqTests.cpp
         tests/SampleSourceTests.cpp
         tools/Wav.cpp)

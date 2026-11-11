@@ -157,6 +157,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.mirage2.prepare (internalRate);
         v.highPass.prepare (internalRate);
         v.sendHighPass.prepare (internalRate);
+        for (auto& h : v.satHighPass)
+            h.prepare (internalRate);
         v.organic.prepare (internalRate);
         for (auto& z : v.zones)
             z.prepare (internalRate);
@@ -192,6 +194,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     router.prepare (hostRate, maxBlock);
     chorus.prepare (hostRate, maxBlock);
     dcCoef = static_cast<float> (1.0 - 2.0 * math::pi * 5.0 / hostRate);
+    satRearCoef = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * 2200.0 / internalRate));   // (ORBIT's rear: a darkening near 2 kHz)
     reset();
 }
 
@@ -217,6 +220,18 @@ void Synth::reset() noexcept
     dnaRun = false;
     dnaTail = 0;
     dnaMix = dnaWanted ? 1.0 : 0.0;
+    // SATELLITE: every path from its start (FREE at its PHASE, SYNC wherever the clock is), the
+    // on cards already on (a reset never fades a card in), the local clock waiting.
+    for (std::size_t k = 0; k < sat.size(); ++k)
+    {
+        auto& c = sat[k];
+        c = SatelliteCard {};
+        c.amount = current.satellite[k].enabled ? 1.0 : 0.0;
+    }
+    satLive = 0;
+    satLocalRunning = satPendingStart = false;
+    satLocalPpq = 0.0;
+    satIdle = 0;
     smoothingPrimed = false;
     driftSeed = current.seed;
     rebuildDrift();
@@ -597,11 +612,20 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     {
         effects.noteStarted();
         dnaPendingStart = true;   // (SHAPER DNA's own stopped-transport clock starts with it too)
+        satPendingStart = true;   // (and SATELLITE's)
     }
     v.dnaProfile = dnaAssigning;   // SHAPER DNA: latched for the note's life
     v.channel = channel;
     v.note = note;
     v.cards = cardsFor (channel);
+    // SATELLITE BOUNCE with NOTE: each new note of a card takes the next side, kept for its life.
+    for (std::size_t k = 0; k < 3; ++k)
+        if ((v.cards & (1u << k)) != 0)
+        {
+            const auto st = current.satellite[k].sanitised();
+            if (st.mode == osp::satellite::Mode::bounce && st.retrigger == osp::satellite::Retrigger::note)
+                v.satNoteX[k] = static_cast<float> (osp::satellite::notePlace (st, sat[k].notes++));
+        }
     v.velocity = std::clamp (velocity, 0.0f, 1.0f);
     v.order = ++noteCounter;
     v.tapPeak = 0.0f;   // (telemetry: the envelope's highest of this note)
@@ -618,12 +642,14 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
             v.pitch = note;
         v.unisonOffset = 0.0;
         v.pan = static_cast<float> (current.panPercent / 100.0) + static_cast<float> (current.stereoSpread) * slotPan[static_cast<std::size_t> (v.slot)];
+        v.panNow = v.pan;
         equalPower (v.pan, v.panL, v.panR);
     }
     if (! wasActive)
     {
         v.filter.reset();
         v.sendFilter.reset();
+        v.satTwins = 0;   // (SATELLITE's twins start from rest with it, when next used)
         v.dnaGain = 1.0;
         v.dnaClose = 0.0;
         v.dnaS1 = v.dnaS2 = v.dnaSendS1 = v.dnaSendS2 = 0.0;
@@ -1054,6 +1080,7 @@ void Synth::monoGoTo (int note, bool retrigger, float velocity, int channel) noe
         const double spreadPosition = count > 1 ? 2.0 * i / (count - 1) - 1.0 : 0.0;
         v.unisonOffset = current.unison ? 0.25 * current.unisonDetune * spreadPosition : 0.0;
         v.pan = static_cast<float> (current.panPercent / 100.0 + current.stereoSpread * spreadPosition * (current.unison ? 1.0 : 0.0));
+        v.panNow = v.pan;
         equalPower (v.pan, v.panL, v.panR);
         if (! v.active || ! glide)
             v.pitch = glide ? lastMonoPitch : note;
@@ -1468,6 +1495,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     {
         v.ota.reset();   // (fading in from rest, never from a stale state)
         v.sendOta.reset();
+        for (auto& o : v.satOta)
+            o.reset();
     }
     // The high-pass before the low-pass: its curve the OTA voicing's (JUPITER) or the Juno
     // variant's; switched off, it glides to FLAT and then sleeps (no click either way).
@@ -1479,15 +1508,20 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         {
             v.highPass.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.sendHighPass.setMode (variant, std::clamp (p.highPass, 0, 3));
+            for (auto& h : v.satHighPass)
+                h.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.highPassTail = std::max (1, static_cast<int> (VoiceHighPass::rampSeconds * internalRate) + controlPeriod * oversampling);
         }
         else if (v.highPassTail > 0)
         {
             v.highPass.setMode (variant, flat);
             v.sendHighPass.setMode (variant, flat);
+            for (auto& h : v.satHighPass)
+                h.setMode (variant, flat);
         }
     }
-    equalPower (v.pan + static_cast<float> (v.driftOut[3]) + v.panMod, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
+    v.panNow = v.pan + static_cast<float> (v.driftOut[3]) + v.panMod;
+    equalPower (v.panNow, v.panL, v.panR);   // its place, as DRIFT and PAN's routes move it
     const float driveMoved = moved (p.filterDrive, current.filterDrive);
     v.driveGain = driveMoved != 0.0f ? std::exp2 (4.0f * std::clamp (driveSmoothed + driveMoved, 0.0f, 1.0f)) : driveGain;
     v.makeUp = (1.0f + 0.35f * v.k) / std::sqrt (v.driveGain) * math::dbToGain (p.driveTrimDb);
@@ -2304,6 +2338,75 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
 {
     const auto& p = current;
     const int fadeLength = std::max (1, static_cast<int> (stealFadeSeconds * internalRate));
+
+    // SATELLITE: which of this voice's cards move (none: the original path, untouched). A card
+    // the voice sounds is "present" (its level up; card C while it plays). With MORPH fusing
+    // this note, C's part belongs to its carrier (it moves with OSC 1, OSC 2 or the pair), never
+    // on its own. A voice of exactly one card, which moves, moves whole; otherwise each moving
+    // card is split from the voice through its twin filter.
+    std::uint8_t satMoving = 0, satTwinMask = 0;
+    int satWhole = -1, satRestCard = -1;
+    std::array<float, 3> satL0 {}, satL1 {}, satR0 {}, satR1 {}, satRear0 {}, satRear1 {};
+    if (satLive != 0)
+    {
+        auto present = static_cast<std::uint8_t> (v.cards & 7);
+        if (v.gain1 <= 0.0f && v.gainNoise <= 0.0f)
+            present &= static_cast<std::uint8_t> (~1u);
+        if (v.gain2 <= 0.0f && v.ringNow <= 0.0f)
+            present &= static_cast<std::uint8_t> (~2u);
+        if (! v.organicOn || v.morphOn)
+            present &= static_cast<std::uint8_t> (~4u);
+        satMoving = static_cast<std::uint8_t> (present & satLive);
+        if (satMoving != 0)
+        {
+            if (present == satMoving && (present & (present - 1)) == 0)
+                satWhole = present == 1 ? 0 : (present == 2 ? 1 : 2);
+            else
+            {
+                satTwinMask = satMoving;
+                if (satMoving == present)
+                {
+                    // Every card it sounds moves: the last needs no twin - it is the voice less
+                    // the others (the filter's interplay travels with it: no card stays put).
+                    satRestCard = (present & 4) != 0 ? 2 : 1;
+                    satTwinMask = static_cast<std::uint8_t> (satTwinMask & ~(1u << satRestCard));
+                }
+            }
+            for (std::size_t k = 0; k < 3; ++k)
+            {
+                if ((satMoving & (1u << k)) == 0)
+                    continue;
+                const auto& c = sat[k];
+                float pL = v.panL, pR = v.panR;
+                if (c.width < 1.0f)
+                    equalPower (v.panNow * c.width, pL, pR);   // WIDTH: the card's own spread
+                float x0 = c.x0, x1 = c.x1;
+                const auto& st = current.satellite[k];
+                if (st.mode == osp::satellite::Mode::bounce && st.retrigger == osp::satellite::Retrigger::note)
+                    x0 = x1 = static_cast<float> (c.amount) * v.satNoteX[k];
+                float gL, gR;
+                osp::satellite::gains (x0, gL, gR);
+                satL0[k] = pL * gL;
+                satR0[k] = pR * gR;
+                osp::satellite::gains (x1, gL, gR);
+                satL1[k] = pL * gL;
+                satR1[k] = pR * gR;
+                satRear0[k] = c.rear0;
+                satRear1[k] = c.rear1;
+                if ((satTwinMask & (1u << k)) != 0 && (v.satTwins & (1u << k)) == 0)
+                {
+                    // (a twin starts from rest: the card's motion glides in, so the split is
+                    // inaudible while the twin settles)
+                    v.satFilter[k].reset();
+                    v.satOta[k].reset();
+                    v.satHighPass[k].reset();
+                    v.satDnaS1[k] = v.satDnaS2[k] = 0.0;
+                }
+            }
+        }
+    }
+    v.satTwins = satTwinMask;
+    const float satSpan = 1.0f / static_cast<float> (std::max (1, count));
     for (int done = 0; done < count && v.active;)
     {
         // The mode engine (TAPE FRAME, TOYBOX, MIRAGE) works in intervals of up to 32 samples,
@@ -2340,7 +2443,7 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             const float env = v.env.next();
             scratchEnv[ks] = env;
             scratchSource[ks] = sourceSample (v, env, scratchPolyMod[ks]);
-            if (modes || sendTaps)
+            if (modes || sendTaps || satTwinMask != 0)
             {
                 scratchA[ks] = v.lastA;
                 scratchB[ks] = v.lastB;
@@ -2395,13 +2498,16 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             const int at = done + k;
             // The cards' sends (MAIN + SEND): each card's own part as it reaches the filter.
             float sendIn = 0.0f;
+            std::array<float, 3> sendNow {};
             if (sendTaps)
             {
                 const float t = static_cast<float> (tapBase + at) / static_cast<float> (tapTotal);
                 const float sA = sendFrom[0] + t * (sendTo[0] - sendFrom[0]), sB = sendFrom[1] + t * (sendTo[1] - sendFrom[1]),
                             sC = sendFrom[2] + t * (sendTo[2] - sendFrom[2]);
+                sendNow = { sA, sB, sC };
                 sendIn = (sA * scratchA[ks] + sB * scratchB[ks] + sC * scratchC[ks]) * v.driveGain;
             }
+            const bool highPassOn = v.highPassTail > 0;
             if (v.highPassTail > 0)
             {
                 in = v.highPass.process (in);
@@ -2442,6 +2548,46 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                     sendY = sendLadder + v.otaMix * (sendOta - sendLadder);
                 }
             }
+            // SATELLITE's twins: each moving card's own part (C's, with MORPH, in its carrier's)
+            // through the voice's filter, as the voice's own: what that card alone sounds like.
+            std::array<float, 3> twinY {};
+            if (satTwinMask != 0)
+            {
+                const float cPart = scratchC[ks];
+                const bool ladderOnly = v.otaMix <= 0.0f && v.otaTarget <= 0.0f;
+                const float gOtaTwin = ladderOnly ? g : (v.otaCutoffOffset != 0.0f ? cutoffG (cutoff + v.otaCutoffOffset) : g);
+                const auto character = current.otaVoicing == OtaVoicing::jupiter ? OtaCharacter::jupiter : OtaCharacter::juno;
+                for (std::size_t c = 0; c < 3; ++c)
+                {
+                    if ((satTwinMask & (1u << c)) == 0)
+                        continue;
+                    float part = c == 0 ? scratchA[ks] : (c == 1 ? scratchB[ks] : cPart);
+                    if (v.morphOn && c < 2)
+                    {
+                        const auto carrier = p.morph.carrier;
+                        if (carrier == MorphCarrier::both)
+                            part += 0.5f * cPart;
+                        else if ((carrier == MorphCarrier::osc1) == (c == 0))
+                            part += cPart;
+                    }
+                    float tin = part * v.driveGain;
+                    if (highPassOn)
+                        tin = v.satHighPass[c].process (tin);
+                    if (ladderOnly)
+                        twinY[c] = v.satFilter[c].process (tin, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                    else
+                    {
+                        const float ota = v.satOta[c].process (tin, gOtaTwin, v.resonance01, character, current.otaTwoPole) * v.otaMakeUp;
+                        if (v.otaMix >= 1.0f && v.otaTarget >= 1.0f)
+                            twinY[c] = ota;
+                        else
+                        {
+                            const float ladder = v.satFilter[c].process (tin, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                            twinY[c] = ladder + v.otaMix * (ota - ladder);
+                        }
+                    }
+                }
+            }
             v.outGain += 0.004f * (v.outGainTarget - v.outGain);
             float out = y * scratchAmp[ks] * v.outGain;
             const float fadeGain = v.fade > 0 ? static_cast<float> (v.fade) / static_cast<float> (fadeLength) : 1.0f;
@@ -2452,12 +2598,96 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             float tap = sendTaps ? sendY * scratchAmp[ks] * v.outGain * fadeGain : 0.0f;
             if (dnaRun)
                 applyShaperDna (v, out, sendTaps ? &tap : nullptr, at);   // SHAPER DNA: this note's rhythm (its send too)
-            left[at] += out * v.panL;
-            right[at] += out * v.panR;
-            if (sendTaps)
+            if (satMoving == 0)
             {
-                tapL[at] += tap * v.panL;
-                tapR[at] += tap * v.panR;
+                left[at] += out * v.panL;
+                right[at] += out * v.panR;
+                if (sendTaps)
+                {
+                    tapL[at] += tap * v.panL;
+                    tapR[at] += tap * v.panR;
+                }
+            }
+            else
+            {
+                // SATELLITE: each moving card at its own place (its gains glide across the chunk),
+                // ORBIT's rear half a little quieter and darker; the rest at the voice's place.
+                const float t = static_cast<float> (at) * satSpan;
+                auto rearCue = [this, &v] (std::size_t c, float x, float rear) {
+                    v.satRear[c] += satRearCoef * (x - v.satRear[c]);
+                    if (rear <= 1.0e-4f)
+                        return x;
+                    return (1.0f - 0.3f * rear) * (x + 0.65f * rear * (v.satRear[c] - x));
+                };
+                if (satWhole >= 0)
+                {
+                    const auto c = static_cast<std::size_t> (satWhole);
+                    const float gL = satL0[c] + t * (satL1[c] - satL0[c]), gR = satR0[c] + t * (satR1[c] - satR0[c]);
+                    const float moved = rearCue (c, out, satRear0[c] + t * (satRear1[c] - satRear0[c]));
+                    left[at] += moved * gL;
+                    right[at] += moved * gR;
+                    if (sendTaps)
+                    {
+                        tapL[at] += tap * gL;
+                        tapR[at] += tap * gR;
+                    }
+                }
+                else
+                {
+                    const float level = scratchAmp[ks] * v.outGain * fadeGain;
+                    float rest = out, restTap = tap;
+                    float l = 0.0f, r = 0.0f, tl = 0.0f, tr = 0.0f;
+                    for (std::size_t c = 0; c < 3; ++c)
+                    {
+                        if ((satTwinMask & (1u << c)) == 0)
+                            continue;
+                        float stem = twinY[c] * level;
+                        float stemSend = sendTaps ? sendNow[c] * stem : 0.0f;
+                        if (dnaRun)
+                        {
+                            // SHAPER DNA on the stem as on the voice (its low-pass, its level).
+                            if (v.dnaClose > 1.0e-3)
+                            {
+                                const double gg = v.dnaG, a1 = 1.0 / (1.0 + gg * (gg + 1.3));
+                                const double v1 = a1 * (v.satDnaS1[c] + gg * (static_cast<double> (stem) - v.satDnaS2[c]));
+                                const double v2 = v.satDnaS2[c] + gg * v1;
+                                v.satDnaS1[c] = 2.0 * v1 - v.satDnaS1[c];
+                                v.satDnaS2[c] = 2.0 * v2 - v.satDnaS2[c];
+                                stem = static_cast<float> (v2);
+                            }
+                            else
+                            {
+                                v.satDnaS1[c] = 0.0;
+                                v.satDnaS2[c] = stem;
+                            }
+                            stem *= static_cast<float> (v.dnaGain);
+                            stemSend *= static_cast<float> (v.dnaGain);
+                        }
+                        rest -= stem;
+                        restTap -= stemSend;
+                        const float gL = satL0[c] + t * (satL1[c] - satL0[c]), gR = satR0[c] + t * (satR1[c] - satR0[c]);
+                        const float moved = rearCue (c, stem, satRear0[c] + t * (satRear1[c] - satRear0[c]));
+                        l += moved * gL;
+                        r += moved * gR;
+                        tl += stemSend * gL;
+                        tr += stemSend * gR;
+                    }
+                    float restL = v.panL, restR = v.panR;
+                    if (satRestCard >= 0)
+                    {
+                        const auto c = static_cast<std::size_t> (satRestCard);
+                        restL = satL0[c] + t * (satL1[c] - satL0[c]);
+                        restR = satR0[c] + t * (satR1[c] - satR0[c]);
+                        rest = rearCue (c, rest, satRear0[c] + t * (satRear1[c] - satRear0[c]));
+                    }
+                    left[at] += rest * restL + l;
+                    right[at] += rest * restR + r;
+                    if (sendTaps)
+                    {
+                        tapL[at] += restTap * restL + tl;
+                        tapR[at] += restTap * restR + tr;
+                    }
+                }
             }
             if (v.fade > 0 && --v.fade == 0)
             {
@@ -2587,6 +2817,87 @@ namespace
     {
         return a.pattern == b.pattern && a.rate == b.rate && a.smooth == b.smooth && a.custom == b.custom && a.customSteps == b.customSteps;
     }
+}
+
+void Synth::updateSatellite (int count) noexcept
+{
+    // SATELLITE's clock, as SHAPER DNA's: the host's quarter notes while the transport runs
+    // (sample-accurate from the block's start); stopped, a local clock started by the first note
+    // and kept while anything sounds. Not running: the paths hold still (nothing pretends to move).
+    const double bpm = timing.valid && timing.bpm > 1.0 ? timing.bpm : 120.0;
+    double q = 0.0;
+    bool clockRuns = false;
+    if (timing.valid && timing.playing)
+    {
+        q = ppqAtBlock + static_cast<double> (blockOffset) / hostRate * bpm / 60.0;
+        clockRuns = true;
+        satLocalRunning = false;
+    }
+    else
+    {
+        if (satPendingStart && ! satLocalRunning)
+        {
+            satLocalRunning = true;
+            satLocalPpq = 0.0;
+            satIdle = 0;
+        }
+        satPendingStart = false;
+        q = satLocalPpq;
+        clockRuns = satLocalRunning;
+        if (satLocalRunning)
+        {
+            satLocalPpq += bpm / (60.0 * internalRate) * count;
+            bool soundingNow = false;
+            for (const auto& v : voices)
+                soundingNow = soundingNow || v.active;
+            satIdle = soundingNow ? 0 : satIdle + count;
+            if (satIdle > static_cast<int> (1.5 * internalRate))
+                satLocalRunning = false;
+        }
+    }
+    const double seconds = static_cast<double> (count) / internalRate;
+    const double rampStep = seconds / 0.02;                              // on / off: 20 ms
+    const double glide = 1.0 - std::exp (-seconds / 0.006);             // the path's own smoothing: 6 ms
+    std::uint8_t live = 0;
+    int shown = 0;
+    for (std::size_t k = 0; k < sat.size(); ++k)
+    {
+        auto& c = sat[k];
+        const auto st = current.satellite[k].sanitised();
+        c.amount = st.enabled ? std::min (1.0, c.amount + rampStep) : std::max (0.0, c.amount - rampStep);
+        if (st.timing == osp::satellite::Timing::free && clockRuns)
+        {
+            c.freeCycle += st.rateHz * seconds;
+            c.freeCycle -= std::floor (c.freeCycle);
+        }
+        if (c.amount <= 0.0)
+        {
+            c.x = c.rear = 0.0;
+            c.x0 = c.x1 = c.rear0 = c.rear1 = 0.0f;
+            c.width = 1.0f;
+            continue;
+        }
+        live = static_cast<std::uint8_t> (live | (1u << k));
+        const double cycle = st.timing == osp::satellite::Timing::sync ? osp::satellite::syncCycle (st, q) : c.freeCycle + st.phase;
+        osp::satellite::Point target = osp::satellite::pointAt (st, cycle);
+        if (st.mode == osp::satellite::Mode::bounce && st.retrigger == osp::satellite::Retrigger::note)
+            target = {};   // (each note carries its own place; the card's path rests at the centre)
+        c.x += (target.x - c.x) * glide;
+        c.rear += (target.rear - c.rear) * glide;
+        c.x0 = c.x1;
+        c.rear0 = c.rear1;
+        c.x1 = static_cast<float> (c.amount * c.x);
+        c.rear1 = static_cast<float> (c.amount * c.rear);
+        c.width = static_cast<float> (1.0 + c.amount * (st.width - 1.0));
+        satShownX[k].store (c.x1, std::memory_order_relaxed);
+        satShownRear[k].store (c.rear1, std::memory_order_relaxed);
+        shown |= 1 << k;
+    }
+    for (std::size_t k = 0; k < sat.size(); ++k)
+        if ((live & (1u << k)) != 0 && (satLive & (1u << k)) == 0)
+            sat[k].x0 = sat[k].x1, sat[k].rear0 = sat[k].rear1;   // (just started: no sweep from wherever it last was)
+    satLive = live;
+    satShownLive.store (shown, std::memory_order_relaxed);
 }
 
 void Synth::updateShaperDna (int count) noexcept
@@ -2838,6 +3149,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         tapR = sendMixR.data() + from;
         tapBase = from;
         updateShaperDna (count);
+        updateSatellite (count);
         for (auto& v : voices)
             if (v.active)
                 renderVoice (v, mixL.data() + from, mixR.data() + from, count);
