@@ -784,6 +784,24 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             setValue (q, "analog.arp.cardB.rate", 3.0f);
             setValue (q, "analog.arp.cardC.rate", 3.0f);
         };
+    // SHAPER DNA's settings act while it plays: MOVEMENT heard, lane A in SHAPER, DNA on (the
+    // splits in KEY ZONES; the phrase's 57 / 64 / 69 / 72 / 74 straddle both).
+    {
+        juce::StringArray dnaIds { params::dnaEnabled, params::dnaAssignment, params::dnaProfiles, params::dnaNotesPerProfile, params::dnaSplitAB, params::dnaSplitBC };
+        for (int profile = 0; profile < 3; ++profile)
+            dnaIds.add (params::dnaProfileId (profile, "pattern")), dnaIds.add (params::dnaProfileId (profile, "rate"));
+        for (const auto& id : dnaIds)
+        {
+            const bool zones = id == params::dnaSplitAB || id == params::dnaSplitBC;
+            setups[id] = [zones] (ShellProcessor& q) {
+                setValue (q, "motion", 100.0f);
+                setValue (q, "movement.mode", static_cast<float> (static_cast<int> (osp::MovementMode::shaper)));
+                setValue (q, params::dnaEnabled, 1.0f);
+                if (zones)
+                    setValue (q, params::dnaAssignment, 1.0f);
+            };
+        }
+    }
     for (const char* name : { "shape", "rate", "sync", "division", "phase", "polarity", "mode", "scope" })
         setups[osp::plugin::InstrumentHost::modLfoId (1, name)] = [route, name] (ShellProcessor& q) {
             route (0, 2) (q);   // LFO 2 -> TONE
