@@ -27,6 +27,7 @@
 #include "KontaktImport.h"
 #include "SampleSourceUI.h"
 #include "ShellEditor.h"
+#include "SubPanel.h"
 #include "ShellProcessor.h"
 
 #include "audio/utility/TestSignals.h"
@@ -8357,28 +8358,25 @@ TEST_CASE ("analog: SUB's row in the arpeggiator's housing: its light switches S
     // The popover's RANGE: dragging the low handle moves analog.sub.lowKey (never past the high).
     click (rowPoint);
     REQUIRE (ui.openPopupPanel() != nullptr);
-    juce::Component* bed = nullptr;
-    for (auto* c : ui.openPopupPanel()->getChildren())
-        if (c->getTitle() == "Sub range")
-            bed = c;
-    REQUIRE (bed != nullptr);
+    // (V7: the range lives on the display's keyboard - SubPanel.h.)
+    auto* subPanel = dynamic_cast<andor::analog::SubPanel*> (ui.openPopupPanel());
+    REQUIRE (subPanel != nullptr);
+    auto& bed = subPanel->display();
     CHECK (juce::roundToInt (p.parameterValue (params::subLowKey)) == 48);
-    auto drag = [&] (float fromX, float toX) {
-        const float y = 0.6f * static_cast<float> (bed->getHeight());
-        auto event = [&] (float x) {
-            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), { x, y }, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, bed, bed,
-                                     juce::Time::getCurrentTime(), { fromX, y }, juce::Time::getCurrentTime(), 1, false);
+    auto drag = [&] (juce::Point<float> from, float toX) {
+        const float y = bed.keybedArea().getCentreY();
+        auto event = [&] (juce::Point<float> at) {
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &bed, &bed,
+                                     juce::Time::getCurrentTime(), from, juce::Time::getCurrentTime(), 1, false);
         };
-        bed->mouseDown (event (fromX));
-        bed->mouseDrag (event (toX));
-        bed->mouseUp (event (toX));
+        bed.mouseDown (event (from));
+        bed.mouseDrag (event ({ toX, y }));
+        bed.mouseUp (event ({ toX, y }));
     };
-    // C3 (48) is the 15th white key from C1: the low handle sits at its left edge.
-    const float width = static_cast<float> (bed->getWidth()) - 8.0f;
-    const float white = width / 50.0f;   // (C1 .. C8: 50 white keys)
-    drag (4.0f + 14.0f * white, 4.0f + 7.5f * white);   // to C2's column
+    using Handle = andor::analog::SubResponseDisplay::Handle;
+    drag (bed.handlePosition (Handle::low).translated (0.0f, 6.0f), bed.keyArea (36).getCentreX());   // to C2
     CHECK (juce::roundToInt (p.parameterValue (params::subLowKey)) == 36);
-    drag (4.0f + 7.0f * white, 4.0f + 49.5f * white);   // past the high key: stops at it
+    drag (bed.handlePosition (Handle::low).translated (0.0f, 6.0f), bed.keyArea (107).getCentreX());   // past the high key: stops at it
     CHECK (juce::roundToInt (p.parameterValue (params::subLowKey)) == juce::roundToInt (p.parameterValue (params::subHighKey)));
     ui.closePopup();
 

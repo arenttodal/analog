@@ -16,6 +16,7 @@ andor_add_instrument(ANDOR_Analog
         Source/AnalogEngine.cpp
         Source/AnalogParameters.cpp
         Source/AnalogPopovers.cpp
+        Source/SubPanel.cpp
         Source/AnalogRacks.cpp
         Source/FxRouting.cpp
         Source/FxIdentity.cpp
@@ -40,5 +41,5 @@ juce_add_binary_data(analog_materials
 target_link_libraries(ANDOR_Analog PRIVATE analog_materials)
 
 andor_add_instrument_tests(ANDOR_Analog andor_analog_tests
-    SOURCES tests/AnalogProductTests.cpp
+    SOURCES tests/AnalogProductTests.cpp tests/AnalogSubPanelTests.cpp
     GOLDEN golden/parameter-schema.txt)
