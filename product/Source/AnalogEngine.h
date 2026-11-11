@@ -80,6 +80,8 @@ public:
     void setCardRouting (bool on) noexcept override { synth.setCardRouting (on); }
     /** Tests: the synth as it plays (its voices' views). */
     const Synth& synthForTest() const noexcept { return synth; }
+    /** SATELLITE's live place of card 0..2 (the panel's path display; read only, any thread). */
+    Synth::SatelliteView satelliteView (int card) const noexcept { return synth.satelliteView (card); }
     osp::InstrumentEngine::ModView modulationView() const noexcept override;
     bool sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const override;
 

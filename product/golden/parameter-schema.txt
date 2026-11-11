@@ -595,3 +595,33 @@ analog.userMacro.3 v34 float "User Macro 3" label="%" range=0.0000..100.0000/0.1
 analog.userMacro.4 v34 float "User Macro 4" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.userMacro.5 v34 float "User Macro 5" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.userMacro.6 v34 float "User Macro 6" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.satellite.a.enabled v35 bool "Satellite A On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.satellite.a.mode v35 choice "Satellite A Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=PAN|ORBIT|BOUNCE [PAN|ORBIT|BOUNCE]
+analog.satellite.a.sync v35 choice "Satellite A Timing" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=SYNC|SYNC|FREE [SYNC|FREE]
+analog.satellite.a.division v35 choice "Satellite A Division" label="" range=0.0000..12.0000/1.0000 skew=1.00000 default=2.0000 steps=13 texts=4 BARS|1/4.|1/32 [4 BARS|2 BARS|1/1|1/2.|1/2|1/2T|1/4.|1/4|1/4T|1/8|1/8T|1/16|1/32]
+analog.satellite.a.rate v35 float "Satellite A Rate" label="Hz" range=0.0200..10.0000/0.0010 skew=0.22043 default=0.2500 steps=2147483647 texts=0.02 Hz|0.45 Hz|10.0 Hz
+analog.satellite.a.depth v35 float "Satellite A Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.satellite.a.width v35 float "Satellite A Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.satellite.a.phase v35 float "Satellite A Phase" label="" range=0.0000..360.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0°|180°|360°
+analog.satellite.a.offset v35 float "Satellite A Offset" label="" range=-100.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=L 100|C|R 100
+analog.satellite.a.retrigger v35 choice "Satellite A Bounce" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=CYCLE|CYCLE|NOTE [CYCLE|NOTE]
+analog.satellite.b.enabled v35 bool "Satellite B On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.satellite.b.mode v35 choice "Satellite B Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=PAN|ORBIT|BOUNCE [PAN|ORBIT|BOUNCE]
+analog.satellite.b.sync v35 choice "Satellite B Timing" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=SYNC|SYNC|FREE [SYNC|FREE]
+analog.satellite.b.division v35 choice "Satellite B Division" label="" range=0.0000..12.0000/1.0000 skew=1.00000 default=2.0000 steps=13 texts=4 BARS|1/4.|1/32 [4 BARS|2 BARS|1/1|1/2.|1/2|1/2T|1/4.|1/4|1/4T|1/8|1/8T|1/16|1/32]
+analog.satellite.b.rate v35 float "Satellite B Rate" label="Hz" range=0.0200..10.0000/0.0010 skew=0.22043 default=0.2500 steps=2147483647 texts=0.02 Hz|0.45 Hz|10.0 Hz
+analog.satellite.b.depth v35 float "Satellite B Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.satellite.b.width v35 float "Satellite B Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.satellite.b.phase v35 float "Satellite B Phase" label="" range=0.0000..360.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0°|180°|360°
+analog.satellite.b.offset v35 float "Satellite B Offset" label="" range=-100.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=L 100|C|R 100
+analog.satellite.b.retrigger v35 choice "Satellite B Bounce" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=CYCLE|CYCLE|NOTE [CYCLE|NOTE]
+analog.satellite.c.enabled v35 bool "Satellite C On" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.satellite.c.mode v35 choice "Satellite C Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=PAN|ORBIT|BOUNCE [PAN|ORBIT|BOUNCE]
+analog.satellite.c.sync v35 choice "Satellite C Timing" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=SYNC|SYNC|FREE [SYNC|FREE]
+analog.satellite.c.division v35 choice "Satellite C Division" label="" range=0.0000..12.0000/1.0000 skew=1.00000 default=2.0000 steps=13 texts=4 BARS|1/4.|1/32 [4 BARS|2 BARS|1/1|1/2.|1/2|1/2T|1/4.|1/4|1/4T|1/8|1/8T|1/16|1/32]
+analog.satellite.c.rate v35 float "Satellite C Rate" label="Hz" range=0.0200..10.0000/0.0010 skew=0.22043 default=0.2500 steps=2147483647 texts=0.02 Hz|0.45 Hz|10.0 Hz
+analog.satellite.c.depth v35 float "Satellite C Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=60.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.satellite.c.width v35 float "Satellite C Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.satellite.c.phase v35 float "Satellite C Phase" label="" range=0.0000..360.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0°|180°|360°
+analog.satellite.c.offset v35 float "Satellite C Offset" label="" range=-100.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=L 100|C|R 100
+analog.satellite.c.retrigger v35 choice "Satellite C Bounce" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=CYCLE|CYCLE|NOTE [CYCLE|NOTE]

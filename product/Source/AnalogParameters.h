@@ -238,6 +238,14 @@ namespace andor::analog::params
     int readerIndexOf (const juce::String& id);
     /** The reader's index of USER macro `macro`'s own value. */
     int userMacroReaderIndex (int macro) noexcept;
+    /** State version 20 (SATELLITE, docs/features/SATELLITE_RHYTHM_ARCHITECTURE.md): each card's
+        own stereo motion, card 0 A, 1 B, 2 C: "analog.satellite.a.enabled" ... Off in a new
+        instrument and every session from before. */
+    inline juce::String satelliteId (int card, const char* name) { return juce::String ("analog.satellite.") + static_cast<char> ('a' + card) + "." + name; }
+    inline constexpr const char* satelliteNames[] = { "enabled", "mode", "sync", "division", "rate", "depth", "width", "phase", "offset", "retrigger" };
+    inline constexpr int satelliteFields = 10;
+    /** Appends SATELLITE's parameters (after the USER macros'). */
+    void addSatelliteTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends card C's second layer's parameters (after SUB's). */
     void addHybrid2To (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends SUB's parameters (after the FX library's: Product's addParameters). */

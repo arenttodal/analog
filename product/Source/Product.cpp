@@ -18,6 +18,7 @@
 #include "SampleSourceUI.h"
 #include "ShaperDnaPanel.h"
 #include "UserMacroUI.h"
+#include "SatellitePanel.h"
 #include "ShellProcessor.h"
 #include "ShellProduct.h"
 
@@ -321,6 +322,7 @@ const ProductInfo& productInfo()
             andor::analog::params::addSendsTo (layout);   // (state version 17: the cards' sends, appended)
             andor::analog::params::addShaperDnaTo (layout);   // (state version 18: SHAPER DNA, appended)
             andor::analog::params::addUserMacrosTo (layout);   // (state version 19: the USER macros, appended)
+            andor::analog::params::addSatelliteTo (layout);    // (state version 20: SATELLITE, appended, every card off)
         };
         p.installFactoryPresets = installFactoryPresets;
         // Every control a modulation route can move: ANDOR OSP's (the macros, the amplitude
@@ -475,6 +477,13 @@ const ProductInfo& productInfo()
         p.arpCompanion = { "sub", andor::analog::params::subEnabled, [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSubPopover (host); } };
         // USER MACROS V1.1: the CORE | USER tab and six USER macros in the knobs' places.
         p.userMacros = andor::analog::usermacros::descriptor();
+        // SATELLITE: switched and opened from the per-card arpeggiator's title row.
+        p.satellite = andor::shell::ProductInfo::Satellite {
+            [] (int card) { return andor::analog::params::satelliteId (juce::jlimit (0, 2, card), "enabled"); },
+            [] (osp::plugin::InstrumentHost& host, int card) -> std::unique_ptr<osp::plugin::MiniPanel> {
+                return std::make_unique<andor::analog::SatellitePanel> (host, card);
+            }
+        };
         // SHAPER DNA V1: the key on the MOVEMENT rack's SHAPER and its panel.
         p.shaperDna = andor::shell::ProductInfo::ShaperDna {
             andor::analog::params::dnaEnabled,
@@ -500,7 +509,7 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
-        p.stateVersion = 19;   // (19: the USER macros appended, no assignment - nothing to migrate; 18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
+        p.stateVersion = 20;   // (20: SATELLITE appended, every card off - nothing to migrate; 19: the USER macros appended, no assignment - nothing to migrate; 18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);

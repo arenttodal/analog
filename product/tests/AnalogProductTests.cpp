@@ -31,6 +31,7 @@
 #include "SubPanel.h"
 #include "UserMacroBank.h"
 #include "UserMacroUI.h"
+#include "SatellitePanel.h"
 #include "ShellProcessor.h"
 
 #include "audio/utility/TestSignals.h"
@@ -805,6 +806,26 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             };
         }
     }
+    // SATELLITE acts on its card while it sounds and moves: the card on, travelling (DEPTH up),
+    // card C an oscillator (so it sounds), the voices spread (WIDTH has something to narrow);
+    // RATE in FREE, its NOTE choice in BOUNCE.
+    for (int card = 0; card < 3; ++card)
+        for (const char* name : params::satelliteNames)
+        {
+            const juce::String field (name);
+            setups[params::satelliteId (card, name)] = [card, field] (ShellProcessor& q) {
+                setValue (q, params::satelliteId (card, "enabled"), 1.0f);
+                setValue (q, params::satelliteId (card, "depth"), 90.0f);
+                setValue (q, params::hybridType, 1.0f);
+                setValue (q, params::spread, 100.0f);
+                if (field == "rate")
+                    setValue (q, params::satelliteId (card, "sync"), 1.0f);
+                if (field == "retrigger")
+                    setValue (q, params::satelliteId (card, "mode"), 2.0f);
+                if (field == "depth")
+                    setValue (q, params::satelliteId (card, "depth"), 40.0f);
+            };
+        }
     // A USER macro acts through its assignments: each tried with one, FILTER resonance, up to the top.
     for (int m = 0; m < andor::analog::usermacro::macroCount; ++m)
         setups[params::userMacroId (m)] = [m] (ShellProcessor& q) {
@@ -5987,7 +6008,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 19);   // (19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
+        CHECK (xml->getIntAttribute ("productVersion") == 20);   // (20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8204,7 +8225,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 19);
+    CHECK (xml->getIntAttribute ("productVersion") == 20);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -9018,7 +9039,7 @@ TEST_CASE ("SHAPER DNA: every setting is a host parameter - saved, recalled, rea
     {
         auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 19);
+        CHECK (xml->getIntAttribute ("productVersion") == 20);
     }
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
@@ -9394,7 +9415,7 @@ TEST_CASE ("USER MACROS G1: six parameters at 0, no assignment, nothing saved, t
     p.getStateInformation (session);
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 19);
+    CHECK (xml->getIntAttribute ("productVersion") == 20);
     std::function<bool (const juce::XmlElement&)> hasChild = [&] (const juce::XmlElement& e) {
         for (auto* c : e.getChildIterator())
             if (c->hasTagName ("UserMacros") || hasChild (*c))
@@ -9775,5 +9796,326 @@ TEST_CASE ("USER MACROS screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][
         save ("um-07-pick-banner");
         ui.cancelUserMacroAssign();
         resetBankPreference (p);
+    }
+}
+
+//==============================================================================
+// SATELLITE (docs/features/SATELLITE_RHYTHM_ARCHITECTURE.md), gate 2: through the plugin
+
+TEST_CASE ("SATELLITE G2: off in a new instrument and every older session; saved, recalled and undoable", "[analog][satellite][state]")
+{
+    ShellProcessor p;
+    for (int card = 0; card < 3; ++card)
+        CHECK (p.parameterValue (params::satelliteId (card, "enabled")) == 0.0f);
+    {
+        params::Reader reader;
+        reader.attach (p.parameters);
+        const auto read = reader.read();
+        CHECK (std::none_of (read.satellite.begin(), read.satellite.end(), [] (const osp::satellite::Settings& s) { return s.enabled; }));
+    }
+    setValue (p, params::satelliteId (2, "enabled"), 1.0f);
+    setValue (p, params::satelliteId (2, "mode"), 1.0f);         // ORBIT
+    setValue (p, params::satelliteId (2, "division"), 9.0f);     // 1/8
+    setValue (p, params::satelliteId (2, "offset"), -35.0f);
+    setValue (p, params::satelliteId (1, "phase"), 120.0f);
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    ShellProcessor q;
+    q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    for (int card = 0; card < 3; ++card)
+        for (const char* name : params::satelliteNames)
+        {
+            INFO (params::satelliteId (card, name));
+            CHECK (q.parameterValue (params::satelliteId (card, name)) == Approx (p.parameterValue (params::satelliteId (card, name))).margin (0.01));
+        }
+    params::Reader reader;
+    reader.attach (q.parameters);
+    const auto recalled = reader.read();
+    const auto& c = recalled.satellite[2];
+    CHECK (c.enabled);
+    CHECK (c.mode == osp::satellite::Mode::orbit);
+    CHECK (c.division == 9);
+    CHECK (c.offset == Approx (-0.35).margin (1.0e-3));
+    // An older session (no SATELLITE in it) opens with every card off.
+    auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), static_cast<int> (state.getSize()));
+    REQUIRE (xml != nullptr);
+    std::function<void (juce::XmlElement&)> strip = [&] (juce::XmlElement& e) {
+        for (int i = e.getNumChildElements(); --i >= 0;)
+        {
+            auto* child = e.getChildElement (i);
+            if (child->getStringAttribute ("id").startsWith ("analog.satellite."))
+                e.removeChildElement (child, true);
+            else
+                strip (*child);
+        }
+    };
+    strip (*xml);   // (as a session from before SATELLITE: none of its parameters in it)
+    CHECK (xml->toString().contains ("analog.satellite.") == false);
+    xml->setAttribute ("productVersion", 19);
+    juce::MemoryBlock older;
+    juce::AudioProcessor::copyXmlToBinary (*xml, older);
+    ShellProcessor r;
+    r.setStateInformation (older.getData(), static_cast<int> (older.getSize()));
+    for (int card = 0; card < 3; ++card)
+        CHECK (r.parameterValue (params::satelliteId (card, "enabled")) == 0.0f);
+}
+
+TEST_CASE ("SATELLITE G2: the card arpeggiators' lanes move on their own; LINK on or off, a held card too", "[analog][satellite][arp]")
+{
+    auto sides = [] (const juce::AudioBuffer<float>& b, double from) {
+        const int a = static_cast<int> (from * 48000.0);
+        double l = 0.0, r = 0.0;
+        for (int i = a; i < b.getNumSamples(); ++i)
+        {
+            l += static_cast<double> (b.getSample (0, i)) * b.getSample (0, i);
+            r += static_cast<double> (b.getSample (1, i)) * b.getSample (1, i);
+        }
+        return std::pair { l, r };
+    };
+    for (const bool link : { false, true })
+    {
+        INFO ((link ? "LINK on" : "LINK off"));
+        // Only card C sounds (an oscillator), arpeggiated; SATELLITE C hard right.
+        ShellProcessor p;
+        setValue (p, "space", 0.0f);
+        setValue (p, "echo", 0.0f);
+        setValue (p, params::spread, 0.0f);
+        setValue (p, params::osc1Level, 0.0f);
+        setValue (p, params::osc2Level, 0.0f);
+        setValue (p, params::hybridType, 1.0f);
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, "analog.arp.link", link ? 1.0f : 0.0f);
+        setValue (p, params::satelliteId (2, "enabled"), 1.0f);
+        setValue (p, params::satelliteId (2, "depth"), 0.0f);
+        setValue (p, params::satelliteId (2, "offset"), 100.0f);
+        const auto out = renderShell (p, 1.2, { { 0, 60, 100 }, { 0, 64, 100 }, { 0, 67, 100 } }, false);
+        const auto [l, r] = sides (out, 0.2);
+        REQUIRE (r > 1.0e-3);
+        CHECK (10.0 * std::log10 (l / r) < -50.0);
+        CHECK (engineOfShell (p).satelliteView (2).moving);
+        CHECK (engineOfShell (p).satelliteView (2).x == Approx (1.0f).margin (1.0e-3));
+    }
+    {
+        // A holds (not arpeggiated) and moves; C's lane arpeggiates and stays centred.
+        ShellProcessor p;
+        setValue (p, "space", 0.0f);
+        setValue (p, "echo", 0.0f);
+        setValue (p, params::spread, 0.0f);
+        setValue (p, params::osc2Level, 0.0f);
+        setValue (p, "arp.enabled", 1.0f);
+        setValue (p, "analog.arp.link", 0.0f);
+        setValue (p, "analog.arp.cardA", 0.0f);   // (A holds the chord)
+        setValue (p, params::satelliteId (0, "enabled"), 1.0f);
+        setValue (p, params::satelliteId (0, "depth"), 0.0f);
+        setValue (p, params::satelliteId (0, "offset"), -100.0f);
+        const auto out = renderShell (p, 1.0, { { 0, 48, 100 }, { 0, 55, 100 } }, false);
+        const auto [l, r] = sides (out, 0.2);
+        REQUIRE (l > 1.0e-3);
+        CHECK (10.0 * std::log10 (r / l) < -50.0);   // (C empty: only A sounds, all on the left)
+    }
+}
+
+//==============================================================================
+// SATELLITE, gate 3: the key in the arpeggiator's editor and the panel
+
+namespace
+{
+    osp::plugin::ArpInlinePanel* arpEditorOf (juce::Component& root)
+    {
+        std::function<osp::plugin::ArpInlinePanel* (juce::Component&)> find = [&] (juce::Component& c) -> osp::plugin::ArpInlinePanel* {
+            if (auto* panel = dynamic_cast<osp::plugin::ArpInlinePanel*> (&c))
+                return panel;
+            for (auto* child : c.getChildren())
+                if (auto* f = find (*child))
+                    return f;
+            return nullptr;
+        };
+        return find (root);
+    }
+
+    struct SatelliteRig
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+        andor::shell::ShellEditor* ui = nullptr;
+        osp::plugin::ArpInlinePanel* arp = nullptr;
+        osp::plugin::SatelliteKey* key = nullptr;
+        explicit SatelliteRig (int width = 1448)
+        {
+            osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+            editor.reset (p.createEditorIfNeeded());
+            ui = &dynamic_cast<andor::shell::ShellEditor&> (*editor);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui->instrumentHeight() / 1448.0f));
+            setValue (p, "arp.enabled", 1.0f);
+            ui->setArpExpanded (true);
+            ui->refreshNow();
+            arp = arpEditorOf (*editor);
+            key = arp != nullptr ? arp->satelliteKey() : nullptr;
+        }
+        andor::analog::SatellitePanel* panel() { return dynamic_cast<andor::analog::SatellitePanel*> (ui->openPopupPanel()); }
+        float on (int card) { return p.parameterValue (params::satelliteId (card, "enabled")); }
+        void clickLight() { key->mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), key->lightArea().getCentre().toFloat(), {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, key, key, juce::Time(), key->lightArea().getCentre().toFloat(), juce::Time(), 1, false)); }
+        void clickName()
+        {
+            const auto at = juce::Point<float> (static_cast<float> (key->getWidth()) - 30.0f, 0.5f * static_cast<float> (key->getHeight()));
+            key->mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, key, key, juce::Time(), at, juce::Time(), 1, false));
+        }
+    };
+}
+
+TEST_CASE ("SATELLITE G3: the light switches, the name opens - never both; one undo step; LINK leaves it alone", "[analog][satellite][ui]")
+{
+    SatelliteRig rig;
+    REQUIRE (rig.arp != nullptr);
+    REQUIRE (rig.key != nullptr);
+    CHECK_FALSE (rig.key->anyOn());
+    // The name opens the panel on the card being edited; nothing switches on.
+    rig.clickName();
+    auto* panel = rig.panel();
+    REQUIRE (panel != nullptr);
+    CHECK (panel->shownCard() == 0);
+    CHECK (rig.key->isOpen());
+    for (int card = 0; card < 3; ++card)
+        CHECK (rig.on (card) == 0.0f);
+    // A / B / C in the panel show a card; they never switch it.
+    panel->showCard (2);
+    CHECK (panel->shownCard() == 2);
+    CHECK (rig.on (2) == 0.0f);
+    CHECK (panel->depthKnob().slider.getValue() == Approx (60.0));
+    panel->depthKnob().slider.setValue (85.0, juce::sendNotificationSync);
+    CHECK (rig.p.parameterValue (params::satelliteId (2, "depth")) == Approx (85.0f).margin (0.1f));
+    CHECK (rig.p.parameterValue (params::satelliteId (0, "depth")) == Approx (60.0f).margin (0.1f));   // (A's untouched)
+    // The panel's own light switches the shown card.
+    panel->lamp().toggle();
+    CHECK (rig.on (2) == 1.0f);
+    // The name again closes it; the light stays.
+    rig.clickName();
+    CHECK (rig.panel() == nullptr);
+    CHECK (rig.on (2) == 1.0f);
+    // The key's light: some card on -> all off (one undo step), remembered; again -> back on.
+    rig.p.parameters.copyState();
+    rig.clickLight();
+    CHECK_FALSE (rig.key->anyOn());
+    CHECK (rig.panel() == nullptr);   // (switching never opens it)
+    rig.clickLight();
+    CHECK (rig.on (2) == 1.0f);
+    CHECK (rig.on (0) == 0.0f);
+    rig.p.parameters.copyState();
+    rig.p.undoManager.undo();
+    CHECK_FALSE (rig.key->anyOn());
+    rig.p.undoManager.redo();
+    CHECK (rig.on (2) == 1.0f);
+    // LINK changes the patterns' editing, never SATELLITE.
+    const auto before = allParameterValues (rig.p);
+    rig.arp->toggleLink();
+    auto after = allParameterValues (rig.p);
+    for (const auto& [id, value] : before)
+        if (id.startsWith ("analog.satellite."))
+        {
+            INFO (id);
+            CHECK (after[id] == value);
+        }
+    // Keyboard: Space switches, Return opens.
+    CHECK (rig.key->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK_FALSE (rig.key->anyOn());
+    CHECK (rig.key->keyPressed (juce::KeyPress (juce::KeyPress::returnKey)));
+    CHECK (rig.panel() != nullptr);
+    CHECK (rig.ui->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+    CHECK (rig.panel() == nullptr);
+}
+
+TEST_CASE ("SATELLITE G3: the key on the title row and the panel inside the window at every size; contextual controls", "[analog][satellite][ui]")
+{
+    for (const int width : { 869, 1448, 1810 })
+    {
+        INFO ("width " << width);
+        SatelliteRig rig (width);
+        REQUIRE (rig.key != nullptr);
+        // On the title row, after EDIT A | B | C and before the close key: overlapping nothing.
+        const auto keyBox = rig.key->getBounds().toFloat();
+        CHECK (keyBox.getX() >= rig.arp->editTabArea (2).getRight());
+        CHECK (keyBox.getRight() <= rig.arp->collapseArea().getX());
+        CHECK (keyBox.getCentreY() == Approx (rig.arp->linkArea().getCentreY()).margin (1.0));
+        CHECK_FALSE (keyBox.intersects (rig.arp->linkArea()));
+        rig.clickName();
+        auto* panel = rig.panel();
+        REQUIRE (panel != nullptr);
+        const auto inEditor = rig.editor->getLocalArea (panel, panel->card());   // (the card: the panel without its shadow margin)
+        CHECK (rig.editor->getLocalBounds().contains (inEditor));
+        // RATE in SYNC is a division; in FREE, Hz. BOUNCE's CYCLE / NOTE only in BOUNCE.
+        CHECK (panel->divisionKnob().isVisible());
+        CHECK_FALSE (panel->rateKnob().isVisible());
+        CHECK_FALSE (panel->bounceControl().isVisible());
+        setValue (rig.p, params::satelliteId (0, "sync"), 1.0f);
+        setValue (rig.p, params::satelliteId (0, "mode"), 2.0f);
+        panel->refreshContent();
+        CHECK_FALSE (panel->divisionKnob().isVisible());
+        CHECK (panel->rateKnob().isVisible());
+        CHECK (panel->bounceControl().isVisible());
+    }
+}
+
+TEST_CASE ("SATELLITE G3: the path display shows where the audio has the card - still while nothing moves", "[analog][satellite][ui]")
+{
+    SatelliteRig rig;
+    rig.clickName();
+    auto* panel = rig.panel();
+    REQUIRE (panel != nullptr);
+    panel->display().refresh();
+    rig.ui->refreshNow();
+    CHECK_FALSE (panel->display().markerLive());
+    setValue (rig.p, params::satelliteId (0, "enabled"), 1.0f);
+    setValue (rig.p, params::satelliteId (0, "depth"), 0.0f);
+    setValue (rig.p, params::satelliteId (0, "offset"), 100.0f);
+    setValue (rig.p, "arp.enabled", 0.0f);
+    renderShell (rig.p, 0.4, { { 0, 57, 100 } }, false);
+    juce::Image image (juce::Image::ARGB, 600, 400, true);
+    juce::Graphics g (image);
+    panel->display().paint (g);   // (the marker as the audio has it)
+    CHECK (panel->display().markerLive());
+    CHECK (panel->display().markerAt().x > 0.85f * static_cast<float> (panel->display().getWidth()));
+}
+
+TEST_CASE ("SATELLITE screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-satellite]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    for (const int width : { 1448, 869, 1810 })
+    {
+        SatelliteRig rig (width);
+        auto save = [&] (const juce::String& name, juce::Rectangle<int> area, float scale) {
+            rig.ui->refreshNow();
+            if (auto* panel = rig.ui->openPopupPanel())
+                panel->settleNow();
+            const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (rig.editor->createComponentSnapshot (area, true, scale), stream);
+        };
+        const auto arpArea = rig.editor->getLocalArea (rig.arp, rig.arp->getLocalBounds());
+        save ("sat-00-arp-off", arpArea, 2.0f);
+        setValue (rig.p, "analog.arp.link", 0.0f);
+        setValue (rig.p, params::satelliteId (2, "enabled"), 1.0f);
+        rig.arp->setEditCard (2);
+        save ("sat-01-arp-unlinked-on", arpArea, 2.0f);
+        rig.clickName();
+        setValue (rig.p, params::satelliteId (2, "mode"), 1.0f);
+        setValue (rig.p, params::satelliteId (2, "depth"), 80.0f);
+        save ("sat-02-panel-orbit", rig.editor->getLocalBounds(), 1.0f);
+        if (auto* panel = rig.panel())
+        {
+            const auto box = rig.editor->getLocalArea (panel, panel->getLocalBounds()).expanded (8);
+            save ("sat-03-panel-orbit-crop", box, 2.0f);
+            setValue (rig.p, params::satelliteId (2, "mode"), 2.0f);
+            setValue (rig.p, params::satelliteId (2, "sync"), 1.0f);
+            panel->refreshContent();
+            save ("sat-04-panel-bounce-free", box, 2.0f);
+            panel->showCard (0);
+            setValue (rig.p, params::satelliteId (0, "offset"), -40.0f);
+            panel->refreshContent();
+            save ("sat-05-panel-card-a-off", box, 2.0f);
+        }
     }
 }

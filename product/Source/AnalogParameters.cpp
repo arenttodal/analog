@@ -101,6 +101,8 @@ namespace
         iDnaPatternA, iDnaRateA, iDnaPatternB, iDnaRateB, iDnaPatternC, iDnaRateC,
         // State version 19: the USER macros (their own values; the patch does not read them).
         iUserMacro1, iUserMacro2, iUserMacro3, iUserMacro4, iUserMacro5, iUserMacro6,
+        // State version 20: SATELLITE, ten fields a card (satelliteNames), A, B, C.
+        iSatellite, iSatelliteLast = iSatellite + 3 * satelliteFields - 1,
         count
     };
 
@@ -221,6 +223,10 @@ namespace
             // State version 19: the USER macros.
             for (int macro = 0; macro < 6; ++macro)
                 l.add (userMacroId (macro));
+            // State version 20: SATELLITE.
+            for (int card = 0; card < 3; ++card)
+                for (const char* name : satelliteNames)
+                    l.add (satelliteId (card, name));
             return l;
         }();
         jassert (withCards.size() == count);
@@ -886,6 +892,47 @@ void addUserMacrosTo (juce::AudioProcessorValueTreeState::ParameterLayout& layou
                                                                               juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
 }
 
+void addSatelliteTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 20 (SATELLITE): every card off in a new instrument and every session from
+    // before. Append-only: IDs, ranges and choice orders frozen once shipped.
+    namespace sat = osp::satellite;
+    const sat::Settings d;
+    auto v35 = [] (const juce::String& name) { return juce::ParameterID { name, 35 }; };
+    using Choice = juce::AudioParameterChoice;
+    using Float = juce::AudioParameterFloat;
+    juce::StringArray divisions;
+    for (const auto& division : sat::divisions)
+        divisions.add (division.name);
+    juce::NormalisableRange<float> rateRange (static_cast<float> (sat::minRateHz), static_cast<float> (sat::maxRateHz), 0.001f);
+    rateRange.setSkewForCentre (0.45f);
+    auto hzText = [] (float hz, int) { return hz < 1.0f ? juce::String (hz, 2) + " Hz" : juce::String (hz, 1) + " Hz"; };
+    auto degreeText = [] (float deg, int) { return juce::String (juce::roundToInt (deg)) + juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")); };
+    auto placeText = [] (float v, int) {
+        const int n = juce::roundToInt (v);
+        return n == 0 ? juce::String ("C") : (n < 0 ? "L " : "R ") + juce::String (std::abs (n));
+    };
+    for (int card = 0; card < 3; ++card)
+    {
+        const juce::String name = juce::String ("Satellite ") + static_cast<char> ('A' + card);
+        layout.add (osp::plugin::parameters::make<juce::AudioParameterBool> (v35 (satelliteId (card, "enabled")), name + " On", d.enabled));
+        layout.add (osp::plugin::parameters::make<Choice> (v35 (satelliteId (card, "mode")), name + " Mode", juce::StringArray { "PAN", "ORBIT", "BOUNCE" }, static_cast<int> (d.mode)));
+        layout.add (osp::plugin::parameters::make<Choice> (v35 (satelliteId (card, "sync")), name + " Timing", juce::StringArray { "SYNC", "FREE" }, static_cast<int> (d.timing)));
+        layout.add (osp::plugin::parameters::make<Choice> (v35 (satelliteId (card, "division")), name + " Division", divisions, d.division));
+        layout.add (osp::plugin::parameters::make<Float> (v35 (satelliteId (card, "rate")), name + " Rate", rateRange, static_cast<float> (d.rateHz),
+                                                          juce::AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction (hzText)));
+        layout.add (osp::plugin::parameters::make<Float> (v35 (satelliteId (card, "depth")), name + " Depth", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                          static_cast<float> (100.0 * d.depth), juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
+        layout.add (osp::plugin::parameters::make<Float> (v35 (satelliteId (card, "width")), name + " Width", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                          static_cast<float> (100.0 * d.width), juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
+        layout.add (osp::plugin::parameters::make<Float> (v35 (satelliteId (card, "phase")), name + " Phase", juce::NormalisableRange<float> (0.0f, 360.0f, 0.1f),
+                                                          static_cast<float> (360.0 * d.phase), juce::AudioParameterFloatAttributes().withStringFromValueFunction (degreeText)));
+        layout.add (osp::plugin::parameters::make<Float> (v35 (satelliteId (card, "offset")), name + " Offset", juce::NormalisableRange<float> (-100.0f, 100.0f, 0.1f),
+                                                          static_cast<float> (100.0 * d.offset), juce::AudioParameterFloatAttributes().withStringFromValueFunction (placeText)));
+        layout.add (osp::plugin::parameters::make<Choice> (v35 (satelliteId (card, "retrigger")), name + " Bounce", juce::StringArray { "CYCLE", "NOTE" }, static_cast<int> (d.retrigger)));
+    }
+}
+
 int readerIndexOf (const juce::String& id)
 {
     return ids().indexOf (id);
@@ -1262,6 +1309,23 @@ Patch Reader::readWith (const float* raw) const noexcept
             d.rate[static_cast<std::size_t> (profile)] = index (iDnaRateA + 2 * profile, 7) - 1;
         }
     }
+    // SATELLITE (state version 20).
+    for (int card = 0; card < 3; ++card)
+    {
+        const int base = iSatellite + card * satelliteFields;
+        auto& st = p.satellite[static_cast<std::size_t> (card)];
+        st.enabled = on (base + 0);
+        st.mode = static_cast<osp::satellite::Mode> (index (base + 1, 3));
+        st.timing = static_cast<osp::satellite::Timing> (index (base + 2, 2));
+        st.division = index (base + 3, static_cast<int> (osp::satellite::divisions.size()));
+        st.rateHz = v (base + 4);
+        st.depth = v (base + 5) / 100.0;
+        st.width = v (base + 6) / 100.0;
+        st.phase = v (base + 7) / 360.0;
+        st.offset = v (base + 8) / 100.0;
+        st.retrigger = static_cast<osp::satellite::Retrigger> (index (base + 9, 2));
+        st = st.sanitised();
+    }
     p.granular = on (iSourceMode);
     p.grains.position = 0.01 * v (iGrainPosition);
     p.grains.sizeSeconds = 0.001 * v (iGrainSize);
@@ -1611,6 +1675,21 @@ std::map<juce::String, float> valuesOf (const Patch& p)
             put (iDnaPatternA + 2 * profile, d.pattern[static_cast<std::size_t> (profile)] + 1);
             put (iDnaRateA + 2 * profile, d.rate[static_cast<std::size_t> (profile)] + 1);
         }
+    }
+    for (int card = 0; card < 3; ++card)
+    {
+        const int base = iSatellite + card * satelliteFields;
+        const auto st = p.satellite[static_cast<std::size_t> (card)].sanitised();
+        put (base + 0, st.enabled ? 1.0 : 0.0);
+        put (base + 1, static_cast<int> (st.mode));
+        put (base + 2, static_cast<int> (st.timing));
+        put (base + 3, st.division);
+        put (base + 4, st.rateHz);
+        put (base + 5, 100.0 * st.depth);
+        put (base + 6, 100.0 * st.width);
+        put (base + 7, 360.0 * st.phase);
+        put (base + 8, 100.0 * st.offset);
+        put (base + 9, static_cast<int> (st.retrigger));
     }
     put (iSourceMode, p.granular ? 1.0 : 0.0);
     put (iGrainPosition, 100.0 * p.grains.position);
