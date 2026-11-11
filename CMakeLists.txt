@@ -52,6 +52,7 @@ add_library(analog_dsp STATIC
     dsp/LiveGranulator.cpp
     dsp/Synth.cpp
     dsp/SubOsc.cpp
+    dsp/ShaperDna.cpp
     dsp/fx/FxGraph.cpp
     dsp/fx/FxEngine.cpp
     dsp/fx/FxProcessors.cpp
@@ -95,6 +96,7 @@ if(OSP_BUILD_TESTS)
         tests/MorphTests.cpp
         tests/LiveMorphTests.cpp
         tests/MovementLaneTests.cpp
+        tests/ShaperDnaTests.cpp
         tests/CardEqTests.cpp
         tests/SampleSourceTests.cpp
         tools/Wav.cpp)
