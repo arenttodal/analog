@@ -9740,11 +9740,11 @@ TEST_CASE ("USER MACROS G2/G4: lens drag, right-click Assign, pick mode, rename,
     CHECK (engineOfShell (p).userMacros().maps[0][0].map.low == Approx (0.9f));
     p.undoManager.undo();
     CHECK (engineOfShell (p).userMacros().maps[0][0].map.high == Approx (0.9f));
-    // Right-click on a control: Assign to USER with the six names; on a switch: nothing.
+    // Right-click on a control: Assign to Macro with the six names; on a switch: nothing.
     const auto menu = ui.controlContextMenu (params::resonance);
     bool hasAssign = false;
     for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
-        hasAssign = hasAssign || it.getItem().text == "Assign to USER";
+        hasAssign = hasAssign || it.getItem().text == "Assign to Macro";
     CHECK (hasAssign);
     CHECK_FALSE (um::eligible (p, params::dnaEnabled));
     CHECK_FALSE (um::eligible (p, params::userMacroId (1)));
@@ -11051,3 +11051,414 @@ TEST_CASE ("card C with an unpitched recording says HYBRID in the source-name li
     CHECK (card.headerRoot().isEmpty());
     CHECK (card.headerName() == "HYBRID");
 }
+
+//==============================================================================
+// DESTINATION-FIRST MACRO ASSIGNMENT (docs/MACRO_DESTINATION_FIRST.md): right-click a control,
+// Assign to Macro, its range on the knob's halo, dragged; selected-macro highlighting.
+
+namespace
+{
+    namespace um = andor::analog::usermacros;
+
+    /** The editor at 1448, USER bank shown, OSC 1 LEVEL at 50 %. */
+    struct MacroDestRig
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+        andor::shell::ShellEditor* ui = nullptr;
+        juce::Slider* level = nullptr;
+        explicit MacroDestRig (int width = 1448)
+        {
+            resetBankPreference (p);
+            osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+            p.parameters.getParameter (params::osc1Level)->setValueNotifyingHost (0.5f);
+            editor.reset (p.createEditorIfNeeded());
+            ui = &dynamic_cast<andor::shell::ShellEditor&> (*editor);
+            editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui->instrumentHeight() / 1448.0f));
+            editor->setVisible (true);
+            ui->refreshNow();
+            level = slider (params::osc1Level);
+        }
+        juce::Slider* slider (const juce::String& id)
+        {
+            juce::Slider* found = nullptr;
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+                for (auto* child : c.getChildren())
+                {
+                    if (! child->isVisible())
+                        continue;
+                    if (auto* s = dynamic_cast<juce::Slider*> (child); s != nullptr && found == nullptr && s->getProperties()["paramId"].toString() == id)
+                        found = s;
+                    walk (*child);
+                }
+            };
+            walk (*editor);
+            return found;
+        }
+        osp::plugin::ModulationOverlay& overlay() { return ui->modulationOverlay(); }
+        float value (const juce::String& id) { return p.parameters.getParameter (id)->getValue(); }
+        /** The item of a menu (any depth) whose text starts with `text`, or nullptr. */
+        static const juce::PopupMenu::Item* itemOf (const juce::PopupMenu& menu, const juce::String& text)
+        {
+            for (juce::PopupMenu::MenuItemIterator it (menu, true); it.next();)
+                if (it.getItem().text.startsWith (text))
+                    return &it.getItem();
+            return nullptr;
+        }
+        void choose (const juce::String& id, const juce::String& text)
+        {
+            const auto menu = ui->controlContextMenu (id);
+            const auto* item = itemOf (menu, text);
+            REQUIRE (item != nullptr);
+            REQUIRE (item->action != nullptr);
+            item->action();
+            ui->refreshNow();
+        }
+        /** A point on a control's halo at a knob position (0..1), overlay coordinates. */
+        juce::Point<float> ringPoint (const juce::String& id, float position)
+        {
+            auto* s = slider (id);
+            const auto rotary = s->getRotaryParameters();
+            const float angle = rotary.startAngleRadians + position * (rotary.endAngleRadians - rotary.startAngleRadians);
+            return overlay().haloCentre (id).getPointOnCircumference (overlay().haloRadius (id), angle);
+        }
+        juce::MouseEvent mouse (juce::Point<float> at, juce::Point<float> down, juce::ModifierKeys mods = {})
+        {
+            auto& o = overlay();
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &o, &o, juce::Time::getCurrentTime(), down,
+                                     juce::Time::getCurrentTime(), 1, false);
+        }
+        /** Drags a macro range end along the ring to `position` (one gesture). */
+        void dragEnd (const juce::String& id, int macro, int end, float position, bool cancel = false)
+        {
+            auto& o = overlay();
+            const auto from = o.macroHandle (id, macro, end);
+            REQUIRE (from != juce::Point<float>());
+            o.mouseMove (mouse (from, from));
+            o.mouseDown (mouse (from, from));
+            REQUIRE (o.isEditingMacro());
+            const auto to = ringPoint (id, position);
+            o.mouseDrag (mouse (from + 0.5f * (to - from), from));
+            o.mouseDrag (mouse (to, from));
+            if (cancel)
+                CHECK (o.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+            else
+                o.mouseUp (mouse (to, from));
+            CHECK_FALSE (o.isEditingMacro());
+            ui->refreshNow();
+        }
+    };
+}
+
+TEST_CASE ("MACRO DESTINATION: right-click OSC 1 LEVEL - Assign to Macro 1 - BRIGHTNESS; at once its range on the knob, no jump", "[analog][usermacro][macrodest][ui]")
+{
+    MacroDestRig rig;
+    REQUIRE (rig.level != nullptr);
+    um::edit (rig.p, [] (andor::analog::UserMacroState& s) { s.names[0] = "BRIGHTNESS"; }, "name");
+    rig.ui->refreshNow();
+    // Its menu: the existing items, then Assign to Macro with the six names (custom names shown).
+    {
+        const auto menu = rig.ui->controlContextMenu (params::osc1Level);
+        REQUIRE (MacroDestRig::itemOf (menu, "Assign to Macro") != nullptr);
+        CHECK (MacroDestRig::itemOf (menu, juce::String::fromUTF8 ("Macro 1 \xe2\x80\x94 BRIGHTNESS")) != nullptr);
+        CHECK (MacroDestRig::itemOf (menu, "Macro 2") != nullptr);
+        CHECK (MacroDestRig::itemOf (menu, "Remove from") == nullptr);   // (nothing assigned yet)
+        CHECK (MacroDestRig::itemOf (menu, "MIDI Controllers") != nullptr);   // (its existing items kept)
+    }
+    renderShell (rig.p, 0.2, {}, false);
+    ShellProcessor ref;
+    ref.parameters.getParameter (params::osc1Level)->setValueNotifyingHost (0.5f);
+    renderShell (ref, 0.2, {}, false);
+    // Right-click destination -> Assign to Macro -> done.
+    rig.choose (params::osc1Level, juce::String::fromUTF8 ("Macro 1 \xe2\x80\x94 BRIGHTNESS"));
+    const auto& state = engineOfShell (rig.p).userMacros();
+    REQUIRE (state.find (0, params::osc1Level) == 0);
+    CHECK (rig.p.userMacros()->targets (rig.p, 0).contains (params::osc1Level));   // (the macro's own list: its panel's)
+    // A visible default range around where the control sits, made at macro 0 %: no jump.
+    const auto& map = state.maps[0][0].map;
+    CHECK (map.anchorTarget == Approx (0.5f));
+    CHECK (map.high == Approx (0.75f));
+    CHECK (map.low == Approx (0.25f));
+    renderShell (rig.p, 0.2, {}, false);
+    CHECK (engineOfShell (rig.p).userMacroOffsetOf (params::osc1Level) == 0.0);
+    CHECK (differenceRms (renderShell (rig.p, 0.4), renderShell (ref, 0.4)) == 0.0);
+    // Its macro chosen: the halo is its range (50 % -> 75 %), handles live, in the macro's name.
+    CHECK (rig.ui->chosenUserMacro() == 0);
+    CHECK (rig.overlay().macroFocus() == 0);
+    CHECK (rig.overlay().primaryMacro (params::osc1Level) == 0);
+    const auto arcs = rig.overlay().macroArcsOf (params::osc1Level);
+    REQUIRE (arcs.size() == 1);
+    CHECK (arcs[0].atMin == Approx (0.5f));
+    CHECK (arcs[0].atMax == Approx (0.75f));
+    CHECK (arcs[0].name == juce::String::fromUTF8 ("MACRO 1 \xc2\xb7 BRIGHTNESS"));
+    CHECK (rig.overlay().macroHandle (params::osc1Level, 0, 1) != juce::Point<float>());
+    CHECK (rig.overlay().macroReadout (params::osc1Level)[0].contains ("BRIGHTNESS"));
+    // The menu now: a checkmark on Macro 1, and its range, details and removal.
+    const auto menu = rig.ui->controlContextMenu (params::osc1Level);
+    const auto* tick = MacroDestRig::itemOf (menu, juce::String::fromUTF8 ("Macro 1 \xe2\x80\x94 BRIGHTNESS"));
+    REQUIRE (tick != nullptr);
+    CHECK (tick->isTicked);
+    for (const auto* text : { "Edit Macro Range", "Reset Macro Range", "Show Macro Assignment Details", "Remove from Macro 1" })
+    {
+        INFO (text);
+        CHECK (MacroDestRig::itemOf (menu, text) != nullptr);
+    }
+    CHECK (MacroDestRig::itemOf (menu, "Remove All Macro Assignments") == nullptr);   // (one only)
+    // A switch: no misleading assignment item.
+    CHECK (MacroDestRig::itemOf (rig.ui->controlContextMenu (params::dnaEnabled), "Assign to Macro") == nullptr);
+    // A click elsewhere: back to the quiet arc (the assignment stays, subtly drawn).
+    rig.ui->pressAnywhere (rig.level);
+    rig.ui->refreshNow();
+    CHECK (rig.overlay().macroFocus() == -1);
+    CHECK (rig.overlay().primaryMacro (params::osc1Level) == -1);
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level).size() == 1);
+}
+
+TEST_CASE ("MACRO DESTINATION: the halo's handles set the range (20 % -> 85 %), inverted too; the DSP follows; one undo step; Escape cancels", "[analog][usermacro][macrodest][ui]")
+{
+    MacroDestRig rig;
+    rig.choose (params::osc1Level, "Macro 1");
+    REQUIRE (rig.overlay().macroFocus() == 0);
+    // The 100 % end to 85 %: the stored range changes (its LOW-HIGH in the control's travel).
+    rig.dragEnd (params::osc1Level, 0, 1, 0.85f);
+    const auto& state = engineOfShell (rig.p).userMacros();
+    CHECK (state.maps[0][0].map.high == Approx (0.85f).margin (0.01f));
+    CHECK (rig.value (params::osc1Level) == Approx (0.5f));   // (that end never moves the knob)
+    // The 0 % end to 20 %: made at macro 0 %, that end is the control's own value - the knob
+    // itself moves there (honest: at 0 % the macro adds nothing), the 100 % end stays at 85 %.
+    rig.dragEnd (params::osc1Level, 0, 0, 0.2f);
+    CHECK (rig.value (params::osc1Level) == Approx (0.2f).margin (0.01f));
+    auto arcs = rig.overlay().macroArcsOf (params::osc1Level);
+    REQUIRE (arcs.size() == 1);
+    CHECK (arcs[0].atMin == Approx (0.2f).margin (0.01f));
+    CHECK (arcs[0].atMax == Approx (0.85f).margin (0.01f));
+    // The engine: macro 0 % -> 20 %, 100 % -> 85 %, 50 % -> halfway.
+    for (const auto& [at, expected] : std::vector<std::pair<float, float>> { { 0.0f, 0.2f }, { 50.0f, 0.525f }, { 100.0f, 0.85f } })
+    {
+        INFO ("macro at " << at << " %");
+        setValue (rig.p, params::userMacroId (0), at);
+        renderShell (rig.p, 0.3, {}, false);   // (the glides settle)
+        CHECK (rig.value (params::osc1Level) + static_cast<float> (engineOfShell (rig.p).userMacroOffsetOf (params::osc1Level)) == Approx (expected).margin (0.01f));
+        rig.ui->refreshNow();
+        CHECK (rig.overlay().macroArcsOf (params::osc1Level)[0].now == Approx (expected).margin (0.01f));   // (the halo's marker: what the engine plays)
+    }
+    // And the sound: the oscillator louder at 100 % than at 0 % (OSC 2 silent: OSC 1 alone).
+    rig.p.parameters.getParameter (params::osc2Level)->setValueNotifyingHost (0.0f);
+    setValue (rig.p, params::userMacroId (0), 0.0f);
+    renderShell (rig.p, 0.3, {}, false);
+    const double quiet = rmsOf (renderShell (rig.p, 0.4));
+    setValue (rig.p, params::userMacroId (0), 100.0f);
+    renderShell (rig.p, 0.3, {}, false);
+    const double loud = rmsOf (renderShell (rig.p, 0.4));
+    INFO ("rms at 0 % " << quiet << ", at 100 % " << loud);
+    CHECK (loud > 1.5 * quiet);
+    setValue (rig.p, params::userMacroId (0), 0.0f);
+    rig.p.parameters.getParameter (params::osc2Level)->setValueNotifyingHost (1.0f);
+    rig.ui->refreshNow();
+    // Inverted: the 100 % end dragged below the 0 % end (85 % -> 10 %).
+    rig.dragEnd (params::osc1Level, 0, 1, 0.1f);
+    arcs = rig.overlay().macroArcsOf (params::osc1Level);
+    CHECK (arcs[0].atMax == Approx (0.1f).margin (0.01f));
+    CHECK (arcs[0].atMin == Approx (0.2f).margin (0.01f));
+    setValue (rig.p, params::userMacroId (0), 100.0f);
+    renderShell (rig.p, 0.3, {}, false);
+    CHECK (rig.value (params::osc1Level) + static_cast<float> (engineOfShell (rig.p).userMacroOffsetOf (params::osc1Level)) == Approx (0.1f).margin (0.01f));
+    setValue (rig.p, params::userMacroId (0), 0.0f);
+    rig.ui->refreshNow();
+    // One undo step per drag: undo the inversion -> 85 % again; redo -> 10 %.
+    rig.p.parameters.copyState();
+    rig.p.undoManager.undo();
+    rig.ui->refreshNow();
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level)[0].atMax == Approx (0.85f).margin (0.01f));
+    rig.p.undoManager.redo();
+    rig.ui->refreshNow();
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level)[0].atMax == Approx (0.1f).margin (0.01f));
+    // Undo the 0 % drag (the knob's move and the range together): the knob back at 50 %.
+    rig.p.undoManager.undo();   // (the inversion)
+    rig.p.undoManager.undo();   // (the 0 % end)
+    rig.ui->refreshNow();
+    CHECK (rig.value (params::osc1Level) == Approx (0.5f).margin (0.01f));
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level)[0].atMax == Approx (0.85f).margin (0.01f));
+    // Escape mid-drag: nothing changed, no undo step.
+    const auto before = engineOfShell (rig.p).userMacros();
+    const auto undoText = rig.p.undoManager.getUndoDescription();
+    rig.dragEnd (params::osc1Level, 0, 1, 0.3f, true);
+    CHECK (engineOfShell (rig.p).userMacros() == before);
+    CHECK (rig.p.undoManager.getUndoDescription() == undoText);
+    // Shift: fine (a fifth of the pointer's travel).
+    {
+        auto& o = rig.overlay();
+        const auto from = o.macroHandle (params::osc1Level, 0, 1);
+        o.mouseMove (rig.mouse (from, from));
+        o.mouseDown (rig.mouse (from, from));
+        const auto to = rig.ringPoint (params::osc1Level, 0.35f);   // (0.5 of travel away)
+        o.mouseDrag (rig.mouse (to, from, juce::ModifierKeys (juce::ModifierKeys::shiftModifier)));
+        o.mouseUp (rig.mouse (to, from));
+        CHECK (engineOfShell (rig.p).userMacros().maps[0][0].map.high == Approx (0.85f - 0.2f * 0.5f).margin (0.01f));
+    }
+}
+
+TEST_CASE ("MACRO DESTINATION: assignments made the old way show their halos untouched; with a modulation route both are drawn and each editable; host automation moves the halo", "[analog][usermacro][macrodest][ui]")
+{
+    MacroDestRig rig;
+    // The old workflow's neutral assignment (made through the panel's path, before this change).
+    andor::analog::UserMacroAssignment old;
+    old.target = params::resonance;
+    old.map.anchorMacro = 0.0f;
+    old.map.anchorTarget = old.map.low = old.map.high = rig.value (params::resonance);
+    um::edit (rig.p, [&old] (andor::analog::UserMacroState& s) { s.maps[2].push_back (old); }, "old");
+    rig.ui->refreshNow();
+    auto arcs = rig.overlay().macroArcsOf (params::resonance);
+    REQUIRE (arcs.size() == 1);
+    CHECK (arcs[0].macro == 2);
+    CHECK (arcs[0].atMin == Approx (arcs[0].base));
+    CHECK (arcs[0].atMax == Approx (arcs[0].base));
+    CHECK (engineOfShell (rig.p).userMacros().maps[2][0] == old);   // (shown, never rewritten)
+    // OSC 1 LEVEL: Macro 1's range and an LFO 1 route on the same control.
+    rig.choose (params::osc1Level, "Macro 1");
+    const auto dest = osp::plugin::modui::destinationFor (params::osc1Level, false);
+    REQUIRE (dest != osp::mod::Dest::none);
+    const int slot = rig.overlay().assign (1, dest);
+    REQUIRE (slot >= 0);
+    rig.ui->refreshNow();
+    // Macro chosen: its range is the ring, the route a thin arc outside; the route keeps its data.
+    CHECK (rig.overlay().primaryMacro (params::osc1Level) == 0);
+    CHECK (rig.overlay().haloRoute (params::osc1Level) == slot);
+    // Chosen elsewhere: the route is the ring (its depth edited by dragging it, as before).
+    rig.ui->pressAnywhere (rig.level);
+    rig.ui->refreshNow();
+    CHECK (rig.overlay().primaryMacro (params::osc1Level) == -1);
+    CHECK (rig.overlay().haloRoute (params::osc1Level) == slot);
+    // Modulation applies after the macro (the engine's order): the route's base is the knob
+    // plus the macro's offset now.
+    setValue (rig.p, params::userMacroId (0), 100.0f);   // (as host automation sets it)
+    rig.ui->refreshNow();
+    auto* param = rig.p.parameters.getParameter (params::osc1Level);
+    const float withMacro = 0.5f + 0.25f;
+    CHECK (rig.overlay().haloReadout (params::osc1Level).joinIntoString ("|").contains ("Base " + param->getText (withMacro, 0)));
+    // The macro's halo follows the automation: its marker at 75 %.
+    arcs = rig.overlay().macroArcsOf (params::osc1Level);
+    REQUIRE (arcs.size() == 1);
+    CHECK (arcs[0].now == Approx (withMacro).margin (0.005f));
+    CHECK (arcs[0].macroValue == Approx (1.0f));
+}
+
+TEST_CASE ("MACRO DESTINATION: remove from the control's menu (undo / redo), rename propagates, save and reopen keeps names, ranges and direction", "[analog][usermacro][macrodest][ui]")
+{
+    MacroDestRig rig;
+    rig.choose (params::osc1Level, "Macro 1");
+    rig.choose (params::osc1Level, "Macro 3");
+    REQUIRE (engineOfShell (rig.p).userMacros().find (2, params::osc1Level) == 0);
+    // Two macros: each removable, and all at once.
+    {
+        const auto menu = rig.ui->controlContextMenu (params::osc1Level);
+        CHECK (MacroDestRig::itemOf (menu, "Remove from Macro 1") != nullptr);
+        CHECK (MacroDestRig::itemOf (menu, "Remove from Macro 3") != nullptr);
+        CHECK (MacroDestRig::itemOf (menu, "Remove All Macro Assignments") != nullptr);
+    }
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level).size() == 2);
+    rig.choose (params::osc1Level, "Remove from Macro 3");
+    CHECK (engineOfShell (rig.p).userMacros().find (2, params::osc1Level) < 0);
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level).size() == 1);
+    rig.p.undoManager.undo();
+    rig.ui->refreshNow();
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level).size() == 2);
+    rig.p.undoManager.redo();
+    rig.ui->refreshNow();
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level).size() == 1);
+    // Renamed: the menu, the halo's name and the macro's knob say BRIGHTNESS; nothing else moves.
+    rig.p.userMacros()->rename (rig.p, 0, "Brightness");
+    rig.ui->refreshNow();
+    CHECK (MacroDestRig::itemOf (rig.ui->controlContextMenu (params::osc1Level), juce::String::fromUTF8 ("Macro 1 \xe2\x80\x94 BRIGHTNESS")) != nullptr);
+    CHECK (rig.overlay().macroArcsOf (params::osc1Level)[0].name.endsWith ("BRIGHTNESS"));
+    CHECK (engineOfShell (rig.p).userMacros().find (0, params::osc1Level) == 0);
+    // An inverted range, saved and reopened: everything as it was.
+    rig.dragEnd (params::osc1Level, 0, 1, 0.3f);
+    juce::MemoryBlock saved;
+    rig.p.getStateInformation (saved);
+    ShellProcessor reopened;
+    reopened.setStateInformation (saved.getData (), static_cast<int> (saved.getSize()));
+    CHECK (engineOfShell (reopened).userMacros() == engineOfShell (rig.p).userMacros());
+    CHECK (engineOfShell (reopened).userMacros().displayName (0) == "BRIGHTNESS");
+    CHECK (engineOfShell (reopened).userMacros().maps[0][0].map.high == Approx (0.3f).margin (0.01f));
+}
+
+TEST_CASE ("MACRO DESTINATION screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-macrodest]")
+{
+    const auto dirName = juce::SystemStats::getEnvironmentVariable ("ANALOG_SCREENSHOT_DIR", {});
+    if (dirName.isEmpty())
+        return;
+    const juce::File dir (dirName);
+    dir.createDirectory();
+    auto save = [&dir] (juce::Component& editor, juce::Rectangle<int> area, const juce::String& name, float scale = 2.0f) {
+        const auto shot = editor.createComponentSnapshot (area, true, scale);
+        juce::FileOutputStream out (dir.getChildFile (name + ".png"));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (shot, out);
+    };
+    {
+        MacroDestRig rig;
+        auto around = [&rig] (const juce::String& id, int w = 300, int h = 190) {
+            const auto c = rig.editor->getLocalPoint (rig.slider (id), rig.slider (id)->getLocalBounds().getCentre());
+            return juce::Rectangle<int> (w, h).withCentre (c).translated (50, 0);
+        };
+        um::edit (rig.p, [] (andor::analog::UserMacroState& s) { s.names[0] = "BRIGHTNESS"; }, "name");
+        rig.ui->refreshNow();
+        save (*rig.editor, around (params::osc1Level), "md-01-before");
+        rig.choose (params::osc1Level, "Macro 1");
+        save (*rig.editor, around (params::osc1Level), "md-02-assigned-focused");
+        rig.dragEnd (params::osc1Level, 0, 1, 0.85f);
+        rig.dragEnd (params::osc1Level, 0, 0, 0.2f);
+        // Mid-drag: the grabbed handle, the readout.
+        auto& o = rig.overlay();
+        const auto from = o.macroHandle (params::osc1Level, 0, 1);
+        o.mouseMove (rig.mouse (from, from));
+        o.mouseDown (rig.mouse (from, from));
+        o.mouseDrag (rig.mouse (rig.ringPoint (params::osc1Level, 0.8f), from));
+        save (*rig.editor, around (params::osc1Level, 420), "md-03-range-editing");
+        o.mouseUp (rig.mouse (rig.ringPoint (params::osc1Level, 0.8f), from));
+        rig.ui->refreshNow();
+        setValue (rig.p, params::userMacroId (0), 60.0f);
+        rig.ui->refreshNow();
+        save (*rig.editor, around (params::osc1Level), "md-04-focused-macro-at-60");
+        rig.ui->pressAnywhere (rig.level);
+        rig.ui->refreshNow();
+        rig.overlay().mouseExit (rig.mouse ({}, {}));   // (the pointer away)
+        rig.ui->refreshNow();
+        save (*rig.editor, around (params::osc1Level), "md-05-quiet-unfocused");
+        // With an LFO 1 route: the route's ring, the macro quietly outside; Macro 1 chosen: the reverse.
+        rig.overlay().assign (1, osp::plugin::modui::destinationFor (params::osc1Level, false));
+        rig.ui->pressAnywhere (rig.level);
+        rig.ui->refreshNow();
+        rig.overlay().mouseExit (rig.mouse ({}, {}));   // (the pointer away)
+        rig.ui->refreshNow();
+        save (*rig.editor, around (params::osc1Level), "md-06-modulation-and-macro");
+        rig.ui->setChosenUserMacro (0);
+        rig.ui->refreshNow();
+        save (*rig.editor, around (params::osc1Level), "md-07-modulation-and-macro-focused");
+        // Several controls on Macro 1: all highlighted (the whole window).
+        rig.choose (params::resonance, "Macro 1");
+        rig.choose (params::osc2Level, "Macro 1");
+        rig.ui->setChosenUserMacro (0);
+        rig.ui->refreshNow();
+        rig.overlay().mouseExit (rig.mouse ({}, {}));   // (the pointer away)
+        rig.ui->refreshNow();
+        save (*rig.editor, rig.editor->getLocalBounds(), "md-08-macro1-highlight-1448", 1.0f);
+        rig.ui->setChosenUserMacro (-1);
+        rig.ui->refreshNow();
+        rig.overlay().mouseExit (rig.mouse ({}, {}));   // (the pointer away)
+        rig.ui->refreshNow();
+        save (*rig.editor, rig.editor->getLocalBounds(), "md-09-quiet-1448", 1.0f);
+    }
+    for (const int width : { 869, 1810 })
+    {
+        MacroDestRig rig (width);
+        rig.choose (params::osc1Level, "Macro 1");
+        rig.choose (params::resonance, "Macro 1");
+        rig.ui->setChosenUserMacro (0);
+        rig.ui->refreshNow();
+        save (*rig.editor, rig.editor->getLocalBounds(), "md-10-macro1-highlight-" + juce::String (width), width > 1448 ? 1.0f : 1.5f);
+    }
+}
+

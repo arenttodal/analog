@@ -28,6 +28,17 @@
 >     - MORPH acts in RHYTHM's AUDIO / BOTH, as a GLOBAL MORPH with the loop;
 >     - the arp / sub lights lost a seam cross at fractional display scales (OSP skin).
 >
+> - Destination-first macro assignment (docs/MACRO_DESTINATION_FIRST.md):
+>   - right-click any eligible control → Assign to Macro (names, checkmarks, range, details,
+>     removal);
+>   - the USER macros' ranges drawn by the modulation halos (quiet arcs; the focused macro's
+>     range as the ring), with draggable 0 % / 100 % handles, reverse ranges, Shift fine,
+>     Escape, one undo step;
+>   - a visible default range with no jump;
+>   - modulation's base includes the macros (the engine's order).
+>
+>   OSP unchanged (opt-in hooks).
+>
 > Next: USER MACROS gate 5 (FX-library slot targets, orphan / reconnect), its CPU figures and a
 > draft PR. Not run here: hosts, real input, listening (SATELLITE and RHYTHM included).
 

@@ -91,7 +91,7 @@ Baseline, branches and the inventory: [USER_MACROS_V1_1_GATE0.md](USER_MACROS_V1
   - `(H - b0) · shape((m - a) / (1 - a))` above it;
   - exactly 0 at `a`.
   `shape` is linear, or smoothstep for EASE.
-- A new map starts neutral (`L = H = b0`), so assigning never changes the sound.
+- Assigning never changes the sound: the offset is exactly 0 at the anchor. A new map started neutral (`L = H = b0`); since the destination-first update ([MACRO_DESTINATION_FIRST.md](MACRO_DESTINATION_FIRST.md)) it gets a visible default range of a quarter of the travel each way, still anchored, so there is still no jump.
 - Offsets from several macros on one control add, then clamp once, in the parameter reader.
 - Moving the knob itself moves the base: the overlay rides on it.
 

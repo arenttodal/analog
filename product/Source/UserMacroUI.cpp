@@ -111,6 +111,14 @@ namespace usermacros
         return 0.0f;
     }
 
+    std::pair<float, float> defaultRange (float b0)
+    {
+        constexpr float span = 0.25f, least = 0.1f;
+        const float up = std::min (1.0f, b0 + span), down = std::max (0.0f, b0 - span);
+        return { b0 - down >= least ? down : up,     // LOW: below, unless the control sits at its bottom
+                 up - b0 >= least ? up : down };     // HIGH: above, unless it sits at its top
+    }
+
     bool assign (InstrumentHost& host, int macro, const juce::String& id)
     {
         if (macro < 0 || macro >= usermacro::macroCount || ! eligible (host, id) || engineIf (host) == nullptr)
@@ -124,10 +132,229 @@ namespace usermacros
         a.target = id;
         a.map.anchorMacro = macroValue (host, macro);
         a.map.anchorTarget = host.apvts().getParameter (id)->getValue();   // the target's own value now
-        a.map.low = a.map.high = a.map.anchorTarget;                        // neutral: no jump
+        // A visible default range around it, towards the room there is (a quarter of the travel
+        // each way). The anchor keeps it exactly where it is at the macro's position now: no jump.
+        const auto range = defaultRange (a.map.anchorTarget);
+        a.map.low = range.first;
+        a.map.high = range.second;
         edit (host, [macro, &a] (UserMacroState& s) { s.maps[static_cast<std::size_t> (macro)].push_back (a); },
               "Assign " + targetName (host, id) + " to " + now.displayName (macro));
         return true;
+    }
+
+    namespace
+    {
+        constexpr float anchorEpsilon = 1.0e-6f;
+
+        /** A map rebased on the control's value now: its offsets kept, b0 = the base, so LOW and
+            HIGH are where macro 0 % and 100 % put the control (clamped to the travel). */
+        void rebase (usermacro::Mapping& map, float base)
+        {
+            const float shift = base - map.anchorTarget;
+            map.low = std::clamp (map.low + shift, 0.0f, 1.0f);
+            map.high = std::clamp (map.high + shift, 0.0f, 1.0f);
+            map.anchorTarget = base;
+        }
+
+        /** The one range drag in progress (message thread; one pointer). */
+        struct RangeDrag
+        {
+            InstrumentHost* host = nullptr;
+            int macro = -1;
+            juce::String target;
+            UserMacroState start;
+            float paramStart = 0.0f;
+            bool paramMoved = false;
+        };
+        RangeDrag& rangeDrag()
+        {
+            static RangeDrag drag;
+            return drag;
+        }
+    }
+
+    std::vector<andor::shell::ProductInfo::UserMacros::Range> ranges (InstrumentHost& host, const juce::String& id)
+    {
+        std::vector<andor::shell::ProductInfo::UserMacros::Range> out;
+        auto* engine = engineIf (host);
+        auto* p = host.apvts().getParameter (id);
+        if (engine == nullptr || p == nullptr)
+            return out;
+        const float base = p->getValue();
+        const auto& state = engine->userMacros();
+        for (int m = 0; m < usermacro::macroCount; ++m)
+        {
+            const int i = state.find (m, id);
+            if (i < 0)
+                continue;
+            const auto& a = state.maps[static_cast<std::size_t> (m)][static_cast<std::size_t> (i)];
+            if (a.orphaned)
+                continue;
+            const float mv = macroValue (host, m);
+            andor::shell::ProductInfo::UserMacros::Range r;
+            r.macro = m;
+            r.base = base;
+            r.macroValue = mv;
+            r.enabled = a.map.enabled;
+            // This assignment alone, as the engine adds it to the control's own value (then clamps).
+            auto at = [&] (double position) { return std::clamp (base + static_cast<float> (usermacro::offsetOf (a.map, position)), 0.0f, 1.0f); };
+            r.atMin = at (0.0);
+            r.atMax = at (1.0);
+            r.now = at (mv);
+            out.push_back (r);
+        }
+        return out;
+    }
+
+    float offsetNow (InstrumentHost& host, const juce::String& id)
+    {
+        auto* engine = engineIf (host);
+        if (engine == nullptr)
+            return 0.0f;
+        double sum = 0.0;
+        const auto& state = engine->userMacros();
+        for (int m = 0; m < usermacro::macroCount; ++m)
+            if (const int i = state.find (m, id); i >= 0)
+                if (const auto& a = state.maps[static_cast<std::size_t> (m)][static_cast<std::size_t> (i)]; ! a.orphaned)
+                    sum += usermacro::offsetOf (a.map, macroValue (host, m));
+        return static_cast<float> (sum);
+    }
+
+    void editRange (InstrumentHost& host, int macro, const juce::String& id, int end, float position, int phase)
+    {
+        auto* engine = engineIf (host);
+        auto* p = host.apvts().getParameter (id);
+        if (engine == nullptr || p == nullptr || macro < 0 || macro >= usermacro::macroCount)
+            return;
+        auto& drag = rangeDrag();
+        if (phase == 0)
+        {
+            drag = {};
+            drag.host = &host;
+            drag.macro = macro;
+            drag.target = id;
+            drag.start = engine->userMacros();
+            drag.paramStart = p->getValue();
+            // One undo step for the whole drag: the range, and the control's own value when the
+            // dragged end is the anchor's (below). (Changes not yet recorded go first, in their own.)
+            host.apvts().copyState();
+            host.undo().beginNewTransaction ("Macro range");
+            auto next = drag.start;
+            if (const int i = next.find (macro, id); i >= 0)
+            {
+                rebase (next.maps[static_cast<std::size_t> (macro)][static_cast<std::size_t> (i)].map, p->getValue());
+                engine->setUserMacros (next);
+            }
+            return;
+        }
+        if (drag.host != &host || drag.macro != macro || drag.target != id)
+            return;
+        if (phase == 1)
+        {
+            auto next = engine->userMacros();
+            const int i = next.find (macro, id);
+            if (i < 0)
+                return;
+            auto& map = next.maps[static_cast<std::size_t> (macro)][static_cast<std::size_t> (i)].map;
+            position = std::clamp (position, 0.0f, 1.0f);
+            const float a = map.anchorMacro;
+            // The end the anchor sits on is the control's own value there (an anchored map adds
+            // nothing at its anchor): that end moves the knob itself, the other end stays put.
+            const bool anchoredEnd = end == 0 ? a <= anchorEpsilon : a >= 1.0f - anchorEpsilon;
+            if (anchoredEnd)
+            {
+                if (! drag.paramMoved)
+                {
+                    p->beginChangeGesture();
+                    drag.paramMoved = true;
+                }
+                p->setValueNotifyingHost (position);
+                map.anchorTarget = position;
+                (end == 0 ? map.low : map.high) = position;
+            }
+            else
+                (end == 0 ? map.low : map.high) = position;
+            engine->setUserMacros (next);
+            return;
+        }
+        if (phase == 2)
+        {
+            const auto after = engine->userMacros();
+            if (drag.paramMoved)
+            {
+                p->endChangeGesture();
+                host.apvts().copyState();   // (the parameter's change joins this step)
+            }
+            engine->setUserMacros (drag.start);
+            if (! (after == drag.start))
+                host.undo().perform (new UserMacroEdit (*engine, drag.start, after), "Macro range");
+            else
+                engine->setUserMacros (after);
+            drag = {};
+            return;
+        }
+        // Cancelled: as it was.
+        engine->setUserMacros (drag.start);
+        if (drag.paramMoved)
+        {
+            p->setValueNotifyingHost (drag.paramStart);
+            p->endChangeGesture();
+        }
+        drag = {};
+    }
+
+    void resetEnd (InstrumentHost& host, int macro, const juce::String& id, int end)
+    {
+        auto* p = host.apvts().getParameter (id);
+        if (p == nullptr)
+            return;
+        const float base = p->getValue();
+        edit (host, [macro, &id, end, base] (UserMacroState& s) {
+            if (const int i = s.find (macro, id); i >= 0)
+            {
+                auto& map = s.maps[static_cast<std::size_t> (macro)][static_cast<std::size_t> (i)].map;
+                rebase (map, base);
+                (end == 0 ? map.low : map.high) = base;
+            }
+        }, "Reset macro range end");
+    }
+
+    void resetRange (InstrumentHost& host, int macro, const juce::String& id)
+    {
+        auto* p = host.apvts().getParameter (id);
+        if (p == nullptr)
+            return;
+        const float base = p->getValue();
+        edit (host, [macro, &id, base] (UserMacroState& s) {
+            if (const int i = s.find (macro, id); i >= 0)
+            {
+                auto& map = s.maps[static_cast<std::size_t> (macro)][static_cast<std::size_t> (i)].map;
+                map.anchorTarget = base;
+                const auto range = defaultRange (base);
+                map.low = range.first;
+                map.high = range.second;
+            }
+        }, "Reset macro range");
+    }
+
+    void unassign (InstrumentHost& host, int macro, const juce::String& id)
+    {
+        if (engineIf (host) == nullptr || macro < 0 || macro >= usermacro::macroCount)
+            return;
+        edit (host, [macro, &id] (UserMacroState& s) {
+            auto& list = s.maps[static_cast<std::size_t> (macro)];
+            list.erase (std::remove_if (list.begin(), list.end(), [&id] (const UserMacroAssignment& a) { return a.target == id; }), list.end());
+        }, "Remove " + targetName (host, id) + " from " + engineOf (host).userMacros().displayName (macro));
+    }
+
+    void unassignAll (InstrumentHost& host, const juce::String& id)
+    {
+        if (engineIf (host) == nullptr)
+            return;
+        edit (host, [&id] (UserMacroState& s) {
+            for (auto& list : s.maps)
+                list.erase (std::remove_if (list.begin(), list.end(), [&id] (const UserMacroAssignment& a) { return a.target == id; }), list.end());
+        }, "Remove macro assignments");
     }
 
     andor::shell::ProductInfo::UserMacros descriptor()
@@ -172,6 +399,13 @@ namespace usermacros
             return std::make_unique<UserMacroPanel> (host, m, select);
         };
         d.targetName = [] (InstrumentHost& host, const juce::String& id) { return targetName (host, id); };
+        d.ranges = [] (InstrumentHost& host, const juce::String& id) { return ranges (host, id); };
+        d.offsetNow = [] (InstrumentHost& host, const juce::String& id) { return offsetNow (host, id); };
+        d.editRange = [] (InstrumentHost& host, int m, const juce::String& id, int end, float position, int phase) { editRange (host, m, id, end, position, phase); };
+        d.resetEnd = [] (InstrumentHost& host, int m, const juce::String& id, int end) { resetEnd (host, m, id, end); };
+        d.resetRange = [] (InstrumentHost& host, int m, const juce::String& id) { resetRange (host, m, id); };
+        d.unassign = [] (InstrumentHost& host, int m, const juce::String& id) { unassign (host, m, id); };
+        d.unassignAll = [] (InstrumentHost& host, const juce::String& id) { unassignAll (host, id); };
         d.revision = [] (InstrumentHost& host) {
             auto* engine = engineIf (host);
             return engine != nullptr ? engine->userMacroRevision() : std::uint64_t { 0 };
