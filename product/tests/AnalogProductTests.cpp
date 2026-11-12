@@ -943,6 +943,9 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         setValue (q, "layerB.start", 50.0f);
         setValue (q, "layerB.tune", 12.0f);   // (twice as fast: the held notes reach the loop)
     };
+    // Card C's grains act while card C plays GRANULAR (its recording is loaded above).
+    for (const char* name : { "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
+        setups[osp::plugin::InstrumentHost::layerParameterId (1, name)] = [] (ShellProcessor& q) { setValue (q, "layerB.sourceMode", 1.0f); };
     // SUB's settings act while SUB is on (Cinematic V6 gate 2; the phrase is in its range and
     // above TAPER's C4).
     for (const auto* id : { &params::subWave, &params::subOctave, &params::subGrit, &params::subLevel, &params::subLowKey, &params::subHighKey,
