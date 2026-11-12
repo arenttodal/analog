@@ -13,6 +13,26 @@
 > static SQLite on Windows with a DLL check, and pluginval in macOS CI. The header below
 > (30 October) and some rows are older than the code; where they differ, the scorecard is current.
 
+> **12 Nov 2026: the FX rack reads its instrument through one interface** (branch
+> `claude/epic-feynman-fsf8ij`, for ANDOR Modular, which shows the same rack for one effect
+> module of a patch). No behaviour of ANDOR ANALOG changes: its parameters, their order,
+> ranges, defaults, state and pictures are as before (`[analog][fx][rack][seam]`, the
+> complete suite).
+> - `FxRackSource` (product/Source/FxRackSource.h): the effect's running processor (its
+>   meters), a CONVOLUTION's impulse, a rack's page / preset memory and its heading.
+>   `FxRack.cpp` depends on it and on `InstrumentHost` only; ANALOG's engine is the source,
+>   found through the shell in `FxRackShell.cpp` (with `openFxRack (ShellEditor&)`).
+>   `createFxRackFor (host, id)` shows one named effect without the "shown effect" state.
+> - `dsp/fx/FxParameterTable`: the one table of every new effect's settings (names, ranges,
+>   defaults, writes), in the engine library, free of JUCE; `FxParameters.cpp` builds the host
+>   parameters from it (`[fx][parameters]`).
+> - `fxpresets::setUserRoot`: another instrument's own preset folder (default: ANALOG's).
+> - **Found, not changed (owner's decision):** a real parameter declared without a centre is
+>   still skewed when its range contains -1, the "no centre" marker (`addTo`). COMPRESSOR
+>   THRESHOLD and BAND THRESHOLD (-60..0 dB) most of all: nearly the whole knob covers the
+>   top 6 dB. Milder on OUTPUT, MAKEUP, the band gains, PAN. Fixing it changes how hosts'
+>   recorded automation maps.
+
 _30 October 2026: state version 4, the unified expansion (docs/UNIFIED_ANALOG_EXPANSION_PLAN.md).
 Each slot can be CLASSIC, DCO or WIDE. There are now OTA filters, a high-pass, a chorus, Juno
 modulation, ORGANIC (one recording beside the oscillators) and MORPH (IMPRINT, FUSE, WEAVE).

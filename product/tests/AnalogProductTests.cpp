@@ -15,7 +15,9 @@
 #include "RackControls.h"
 #include "ParameterRack.h"
 #include "AnalogRacks.h"
+#include "FxParameters.h"
 #include "FxPresets.h"
+#include "fx/FxParameterTable.h"
 #include "FxRack.h"
 #include "FxRouting.h"
 #include "FxIdentity.h"
@@ -6169,6 +6171,119 @@ TEST_CASE ("analog: screenshots of FX ROUTING (ANALOG_SCREENSHOT_DIR)", "[.][scr
         width = w;
         shoot ("routing-" + juce::String (w) + "-classic");
     }
+}
+
+TEST_CASE ("analog: the FX rack reads the instrument through FxRackSource alone - the engine, a named effect, a host's own memory and title", "[analog][fx][rack][seam]")
+{
+    namespace fx = andor::analog::fx;
+    namespace fxparams = andor::analog::fxparams;
+    using osp::plugin::rack::Kind;
+    ShellProcessor p;
+    p.prepareToPlay (48000.0, 256);
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+
+    // The host parameters are the engine library's table (dsp/fx/FxParameterTable), unchanged:
+    // every name, range, default and choice, in its order.
+    for (int t = 0; t < fx::typeCount; ++t)
+    {
+        const auto type = static_cast<fx::Type> (t);
+        const auto& table = fx::parameterSpecs (type);
+        const auto& specs = fxparams::specsOf (type);
+        REQUIRE (specs.size() == table.size());
+        for (std::size_t i = 0; i < specs.size(); ++i)
+        {
+            INFO (fx::typeName (type) << " " << table[i].name);
+            CHECK (specs[i].name == juce::String::fromUTF8 (table[i].name.c_str()));
+            CHECK (specs[i].title == juce::String::fromUTF8 (table[i].title.c_str()));
+            CHECK (static_cast<int> (specs[i].kind) == static_cast<int> (table[i].kind));
+            CHECK (specs[i].low == table[i].low);
+            CHECK (specs[i].high == table[i].high);
+            CHECK (specs[i].fallback == table[i].fallback);
+            CHECK (specs[i].centre == table[i].centre);
+            CHECK (specs[i].choices.size() == static_cast<int> (table[i].choices.size()));
+            auto* parameter = p.apvts().getParameter (fxparams::idOf ({ type, 0 }, specs[i].name));
+            REQUIRE (parameter != nullptr);
+            CHECK (parameter->convertFrom0to1 (parameter->getDefaultValue()) == Catch::Approx (table[i].fallback).margin (1.0e-4));
+        }
+    }
+    CHECK (fxparams::specsOf (fx::Type::retro)[5].choices[0] == juce::String::fromUTF8 ("33\xe2\x85\x93"));
+
+    // ANALOG's engine is the source behind its shell's processor (installed with the product);
+    // the engine is an FxRackSource and answers as it always did.
+    andor::analog::FxRackSource& source = engine;
+    REQUIRE (engine.setFxRoute ([] {
+        auto g = fx::classicGraph();
+        return g;
+    }()));
+    const fx::InstanceId second { fx::Type::compressor, 1 };
+    CHECK (source.fxProcessor (second) == engine.fxProcessor (second));
+    CHECK (source.fxRackMemory (second) == nullptr);   // (ANALOG: one memory per pool slot)
+    CHECK (source.fxRackTitle (second).isEmpty());
+
+    // A named effect's rack, whatever the shown one is: the second compressor while the rack's
+    // interface state says EQ. Its title, its parameters; the shown effect is not changed.
+    andor::analog::setFxRackShown ({ fx::Type::eq, 0 });
+    auto named = andor::analog::createFxRackFor (p, second);
+    REQUIRE (named != nullptr);
+    CHECK (named->title() == "COMPRESSOR 2");
+    CHECK (andor::analog::fxRackShown() == fx::InstanceId { fx::Type::eq, 0 });
+    auto shown = andor::analog::createFxRack (p);
+    CHECK (shown->title() == "EQUALIZER 1");
+    named->setSize (1400, 214);
+    CHECK (named->createComponentSnapshot (named->getLocalBounds(), true, 1.0f).isValid());
+
+    // A host that is its own source (another instrument showing one effect of its own): the
+    // rack takes its title and keeps its page with it, never in the pool slot's memory.
+    struct OwnSource final : andor::analog::FxRackSource
+    {
+        explicit OwnSource (AnalogEngine& e) : engine (e) {}
+        const fx::Processor* fxProcessor (fx::InstanceId id) const override
+        {
+            ++asked;
+            return engine.fxProcessor (id);
+        }
+        std::shared_ptr<const fx::Impulse> fxConvolutionImpulse (int slot) const override { return engine.convolutionImpulse (slot); }
+        Memory* fxRackMemory (fx::InstanceId) override { return &memory; }
+        juce::String fxRackTitle (fx::InstanceId) const override { return "MY COMPRESSOR"; }
+        AnalogEngine& engine;
+        Memory memory;
+        mutable int asked = 0;
+    };
+    static OwnSource* current = nullptr;
+    OwnSource own (engine);
+    current = &own;
+    andor::analog::setFxRackSourceFinder ([] (osp::plugin::InstrumentHost&) -> andor::analog::FxRackSource* { return current; });
+    {
+        auto mine = andor::analog::createFxRackFor (p, { fx::Type::compressor, 0 });
+        CHECK (mine->title() == "MY COMPRESSOR");
+        auto* device = dynamic_cast<osp::plugin::rack::ParameterRack*> (mine.get());
+        REQUIRE (device != nullptr);
+        mine->setSize (1400, 214);
+        device->showPage (1);
+        CHECK (own.memory.page == 1);   // (its own memory holds the page)
+        CHECK (mine->createComponentSnapshot (mine->getLocalBounds(), true, 1.0f).isValid());
+        CHECK (own.asked > 0);          // (the graph's meters asked this source)
+    }
+    // ... and without any source the rack still shows its settings (no meters, no crash).
+    andor::analog::setFxRackSourceFinder (nullptr);
+    {
+        auto bare = andor::analog::createFxRackFor (p, { fx::Type::convolution, 0 });
+        bare->setSize (1400, 214);
+        CHECK (bare->createComponentSnapshot (bare->getLocalBounds(), true, 1.0f).isValid());
+    }
+    andor::analog::installShellFxRack();   // (ANALOG's own, as the product installs it)
+    current = nullptr;
+
+    // User presets: ANDOR ANALOG's folder by default; another instrument's root when it sets one.
+    namespace fxpresets = andor::analog::fxpresets;
+    const auto analogs = fxpresets::userFolder (fx::Type::phaser);
+    CHECK (analogs.getFullPathName().contains ("ANDOR Analog"));
+    const auto other = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("andor-fx-root-test");
+    fxpresets::setUserRoot (other);
+    CHECK (fxpresets::userFolder (fx::Type::phaser) == other.getChildFile ("FX Presets").getChildFile (fx::typeName (fx::Type::phaser)));
+    CHECK (fxpresets::chainFolder() == other.getChildFile ("FX Chains"));
+    fxpresets::setUserRoot ({});
+    CHECK (fxpresets::userFolder (fx::Type::phaser) == analogs);
 }
 
 TEST_CASE ("analog: the FX rack - every new effect opens in the one 214 px module, its quick settings expand to it; views change nothing", "[analog][fx][rack][ui]")

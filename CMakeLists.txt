@@ -59,7 +59,8 @@ add_library(analog_dsp STATIC
     dsp/fx/FxDynamics.cpp
     dsp/fx/FxModulation.cpp
     dsp/fx/FxSpectral.cpp
-    dsp/fx/FxRetro.cpp)
+    dsp/fx/FxRetro.cpp
+    dsp/fx/FxParameterTable.cpp)
 target_include_directories(analog_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/dsp)
 target_link_libraries(analog_dsp PUBLIC osp_dsp)
 set_target_properties(analog_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -80,6 +81,7 @@ if(OSP_BUILD_TESTS)
         tests/FxGraphTests.cpp
         tests/FxEffectTests.cpp
         tests/FxRetroTests.cpp
+        tests/FxParameterTableTests.cpp
         tests/ReimaginedCardTests.cpp
         tests/SubTests.cpp
         tests/HybridLayerTests.cpp

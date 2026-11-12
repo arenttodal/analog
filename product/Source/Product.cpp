@@ -336,6 +336,7 @@ const ProductInfo& productInfo()
         p.rackModules = { osp::plugin::rack::Kind::movement, osp::plugin::rack::Kind::echo, osp::plugin::rack::Kind::space };
         // FILTER and MORPH: the product's own inline racks (the same rack, the same parts),
         // opened from their macro's name as the others (their popovers stay the quick view).
+        andor::analog::installShellFxRack();   // (the FX rack reads this product's engine: FxRackShell.cpp)
         p.productRacks = { { andor::analog::params::tone, osp::plugin::rack::Kind::filter, andor::analog::createFilterRack },
                            { andor::analog::params::morphPosition, osp::plugin::rack::Kind::morph, andor::analog::createMorphRack },
                            // The FX library's rack: no macro of its own; FX ROUTING opens it.
