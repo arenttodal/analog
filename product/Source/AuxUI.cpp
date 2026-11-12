@@ -283,7 +283,7 @@ namespace
     class TextKey final : public juce::Button
     {
     public:
-        explicit TextKey (const juce::String& text, bool dotsOnly = false) : juce::Button (text), dots (dotsOnly)
+        explicit TextKey (const juce::String& text, bool dotsOnly = false, bool menu = false) : juce::Button (text), dots (dotsOnly), chevron (menu)
         {
             setWantsKeyboardFocus (true);
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -304,13 +304,16 @@ namespace
             else
             {
                 g.setFont (fonts::make (11.0f, fonts::Weight::medium, 0.08f));
-                g.drawText (getButtonText(), r.withTrimmedRight (12.0f), juce::Justification::centred, false);
-                juce::Path chevron;
-                const auto c = juce::Point<float> (r.getRight() - 11.0f, r.getCentreY());
-                chevron.startNewSubPath (c.x - 3.0f, c.y - 1.5f);
-                chevron.lineTo (c.x, c.y + 1.5f);
-                chevron.lineTo (c.x + 3.0f, c.y - 1.5f);
-                g.strokePath (chevron, juce::PathStrokeType (1.2f));
+                g.drawText (getButtonText(), chevron ? r.withTrimmedRight (12.0f) : r, juce::Justification::centred, false);
+                if (chevron)   // (a menu: ROUTE)
+                {
+                    juce::Path p;
+                    const auto c = juce::Point<float> (r.getRight() - 11.0f, r.getCentreY());
+                    p.startNewSubPath (c.x - 3.0f, c.y - 1.5f);
+                    p.lineTo (c.x, c.y + 1.5f);
+                    p.lineTo (c.x + 3.0f, c.y - 1.5f);
+                    g.strokePath (p, juce::PathStrokeType (1.2f));
+                }
             }
             if (hasKeyboardFocus (false))
             {
@@ -320,7 +323,7 @@ namespace
         }
 
     private:
-        bool dots;
+        bool dots, chevron;
     };
 
     //==========================================================================
@@ -376,7 +379,7 @@ namespace
             load->onClick = [this] { loadForMode(); };
             addAndMakeVisible (*load);
 
-            route = std::make_unique<TextKey> ("ROUTE");
+            route = std::make_unique<TextKey> ("ROUTE", false, true);
             route->setTooltip ("Where D goes: through the cards' FILTER (it follows the FILTER macro and rack) or around it, then the shared effects");
             route->onClick = [this] { showRouteMenu(); };
             addAndMakeVisible (*route);

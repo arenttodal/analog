@@ -1,0 +1,16 @@
+D / AUX demo renders (48 kHz, 24-bit stereo), made by the product test
+"AUX: renders ..." (AuxProductTests.cpp, hidden tag [renders]):
+ANALOG_RENDER_DIR=<dir> andor_analog_tests "AUX: renders*"
+
+aux-01-noise-filter-sweep.wav   D NOISE (white, FREE gate, LEVEL 0 dB) soloed, held; the FILTER
+                                macro (analog.tone) swept from 10 % to 95 % over 4 s. D follows it:
+                                -41.7 dB RMS closed -> -21.7 dB RMS open (+20 dB).
+aux-02-rhythm-space-echo.wav    D RHYTHM (a 100 BPM noise-burst loop on the 120 BPM clock) soloed,
+                                SPACE 70 %, ECHO 60 %: the shared effects carry D.
+                                -46.5 dB RMS, peak -20.4 dBFS.
+aux-03-cards-and-d.wav          Cards A / B / C (C NOISE) playing a chord with D RHYTHM layered:
+                                peak -6.9 dBFS.
+aux-04-legacy-null-difference.wav
+                                The instrument with D never powered minus the same instrument with
+                                D configured (NOISE, +6 dB, a loop) but off: digital silence
+                                (max difference 0) - D off is bit-identical.

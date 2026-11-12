@@ -28,6 +28,20 @@
 >     - MORPH acts in RHYTHM's AUDIO / BOTH, as a GLOBAL MORPH with the loop;
 >     - the arp / sub lights lost a seam cross at fractional display scales (OSP skin).
 >
+> - D / AUX, gates 0–8 (`feature/aux-d` in both repositories, stacked on the Kontakt experiment;
+>   docs/aux/AUX_REPORT.md):
+>   - an optional strip under cards A / B / C, shown or hidden from the main menu (a view
+>     setting: kept with the session, never with a preset);
+>   - D's own stereo source: RHYTHM (a host-synced loop), NOISE (white / pink / brown, keyed or
+>     free) or KONTAKT (its own instance, the musician's keys before the arpeggiator);
+>   - through the FILTER (it follows the FILTER macro and rack) and into the shared DRIVE /
+>     MOVEMENT / ECHO / SPACE and the FX route; mute / solo / power ramped; latency reported;
+>   - a full-width AUX rack (double-click, `...`), Escape closing one level;
+>   - `analog.aux.*` (version hint 37), state version 23; D off is bit-identical.
+>
+>   Card C HYBRID is unchanged. MORPH behaves as Option A until the owner decides
+>   (docs/aux/MORPH_DECISION.md: OPEN). Real Kontakt and DAWs: UNVERIFIED (OWNER TEST).
+>
 > - Destination-first macro assignment (docs/MACRO_DESTINATION_FIRST.md):
 >   - right-click any eligible control → Assign to Macro (names, checkmarks, range, details,
 >     removal);
