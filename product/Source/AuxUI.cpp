@@ -829,7 +829,7 @@ namespace
                 --g->noticeTicks;
         }
 
-        explicit AuxRack (InstrumentHost& h) : ParameterRack (h, "AUX", aux::colour(), 0.66f)
+        explicit AuxRack (InstrumentHost& h) : ParameterRack (h, "AUX", aux::colour(), 0.72f)
         {
             setHeaderSwitch (params::auxEnabled, "ON", "D / AUX: a fourth source through the FILTER and the shared effects (off: idle, nothing at all)");
             setGraph (std::make_unique<AuxGraph> (h));
@@ -896,6 +896,11 @@ namespace
                                    {}, 80);
                 knob (auxLevel, "LEVEL", textOf (host, auxLevel));
             }
+            // D MORPH (Option D): the second MORPH stage - A/B/C (after the FILTER) x D - its own
+            // position, in every mode (0 %: off, D layered).
+            group ("MORPH");
+            knob (auxMorph, "D MORPH", textOf (host, auxMorph))
+                .slider.setTooltip ("D MORPH: the cards' sound takes on D's spectrum (50 %: the hybrid), then becomes D (100 %). It acts only while D sounds; the MORPH macro is unchanged");
         }
 
     private:

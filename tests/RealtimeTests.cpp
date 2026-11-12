@@ -746,6 +746,8 @@ TEST_CASE ("realtime: D / AUX's bus allocates nothing - its three modes, switche
             p.aux.heard = (block / 50) % 4 != 3;
             p.aux.filterFollow = (block / 100) % 2 == 0;
             p.aux.enabled = block < 350;
+            p.aux.morph = (block / 50) % 3 == 1 ? 0.0 : 0.3 * static_cast<double> ((block / 50) % 4);   // (D MORPH on, off, back)
+            p.aux.pitchSemis = (block / 50) % 2 == 0 ? 7.0 : -12.0;
             s->setPatch (p);
         }
         s->setAuxExternal (cl.data(), cr.data(), 512, block > 200 ? 256 : 0);

@@ -279,6 +279,9 @@ namespace andor::analog::params
     // hidden and unread (state recall only): D always goes through the FILTER now.
     inline const juce::String auxPitch = "analog.aux.rhythm.pitch";     ///< -12..12 semitones
     inline const juce::String auxOctave = "analog.aux.rhythm.octave";   ///< -2..2 octaves
+    /** D MORPH (docs/aux/MORPH_DECISION.md, Option D): the second, global MORPH stage, A/B/C
+        (after the FILTER) x D; 0 %: off (D layered). Its own control, never the MORPH macro. */
+    inline const juce::String auxMorph = "analog.aux.morph";
     /** RATE's choices (its musical speed against the loop's detected tempo). */
     inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */

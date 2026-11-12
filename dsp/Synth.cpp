@@ -223,6 +223,12 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
     auxDelayL.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
     auxDelayR.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
+    auxMorphL.assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    auxMorphR.assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    auxMorph.prepare (hostRate, maxBlock);
+    auxMorphNow = 0.0f;
+    auxMorphTail = 0;
+    auxMorphRunning = false;
     auxLoop.prepare (hostRate);
     for (auto& h : auxFilter.highPass)
         h.prepare (hostRate);
@@ -280,6 +286,9 @@ void Synth::reset() noexcept
     auxFilter.heldCount = 0;
     auxFilter.pedal = false;
     auxFilter.env.kill();
+    auxMorphNow = 0.0f;
+    auxMorphTail = 0;
+    auxMorphRunning = false;
     satLocalRunning = satPendingStart = false;
     satLocalPpq = 0.0;
     satIdle = 0;
@@ -3325,6 +3334,10 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
     // Its level (and MUTE / SOLO / POWER), ramped (10 ms): never a click.
     const bool levelMod = rhythmMod && a.modTarget == Patch::Aux::ModTarget::auxLevel;
     const auto amount = static_cast<float> (std::clamp (a.modAmount, 0.0, 1.0));
+    // D MORPH (Option D): its stage runs only while it is up, gliding down, or settling - at 0
+    // from the start nothing here changes (D is added as ever, bit for bit).
+    const auto morphTarget = static_cast<float> (std::clamp (a.morph, 0.0, 1.0));
+    const bool morphing = morphTarget > 0.0f || auxMorphNow > 0.0f || auxMorphTail > 0;
     float g = auxGainNow, peak = 0.0f;
     for (std::size_t i = 0; i < un; ++i)
     {
@@ -3332,11 +3345,21 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
         g = g < want ? std::min (want, g + step * std::max (1.0f, want)) : std::max (want, g - step * std::max (1.0f, g));
         const float m = levelMod ? 1.0f - amount * (1.0f - auxEnvBuf[i]) : 1.0f;
         const float l = g * m * auxL[i], r = g * m * auxR[i];
-        left[i] += l;
-        right[i] += r;
+        if (morphing)
+        {
+            auxL[i] = l;   // (D at its level: the morph's character)
+            auxR[i] = r;
+        }
+        else
+        {
+            left[i] += l;
+            right[i] += r;
+        }
         peak = std::max (peak, std::max (std::abs (l), std::abs (r)));
     }
     auxGainNow = g;
+    if (morphing)
+        mixAuxMorph (left, right, n, morphTarget);
     auxPeakShown.store (peak, std::memory_order_relaxed);
     if (! a.enabled && auxGainNow <= 0.0f)
     {
@@ -3344,6 +3367,53 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
         auxLatencyNow = 0;
         auxPeakShown.store (0.0f, std::memory_order_relaxed);
     }
+}
+
+void Synth::mixAuxMorph (float* left, float* right, int n, float target) noexcept
+{
+    // D MORPH (docs/aux/MORPH_DECISION.md, Option D, decided): the second MORPH stage. Its
+    // carrier is everything before D - A/B/C after the FILTER, C's buses - and its character is D
+    // after its own AUX FILTER, at its level. GlobalMorph (the tested zero-latency spectral
+    // imprint): 0 the carrier, 0.5 the hybrid at D's band energies, 1 D. D's dry layer gives way
+    // as the imprint deepens (equal power, gone at 0.5), so 0 is exactly the layered sound.
+    if (! auxMorphRunning)
+    {
+        auxMorph.reset();
+        auxMorphRunning = true;
+    }
+    const auto un = static_cast<std::size_t> (n);
+    std::copy (left, left + n, auxMorphL.begin());
+    std::copy (right, right + n, auxMorphR.begin());
+    const float step = static_cast<float> (1.0 / (0.015 * hostRate));   // (GlobalMorph's own 15 ms)
+    const float from = auxMorphNow;
+    float p = from;
+    for (int i = 0; i < n; ++i)
+        p = p < target ? std::min (target, p + step) : std::max (target, p - step);
+    // Only while D sounds: scaled by D's activity (the imprint's own follower; 0 while D is silent,
+    // muted or off), so a quiet D never takes the cards away - they and D stay layered.
+    const float active = std::clamp (auxMorph.activity(), 0.0f, 1.0f);
+    auxMorph.process (auxMorphL.data(), auxMorphR.data(), auxL.data(), auxR.data(), n, static_cast<double> (target * active));
+    p = from;
+    for (std::size_t i = 0; i < un; ++i)
+    {
+        p = p < target ? std::min (target, p + step) : std::max (target, p - step);
+        const float dry = std::cos (std::min (1.0f, 2.0f * p * active) * 1.5707963f);
+        left[i] = auxMorphL[i] + dry * auxL[i];
+        right[i] = auxMorphR[i] + dry * auxR[i];
+    }
+    auxMorphNow = p;
+    // Back at 0: it runs on for 60 ms (GlobalMorph settling to the carrier), then stops.
+    if (target <= 0.0f && auxMorphNow <= 0.0f)
+    {
+        if (auxMorphTail <= 0 && from > 0.0f)
+            auxMorphTail = static_cast<int> (0.060 * hostRate);
+        else
+            auxMorphTail = std::max (0, auxMorphTail - n);
+        if (auxMorphTail <= 0)
+            auxMorphRunning = false;
+    }
+    else
+        auxMorphTail = 0;
 }
 
 void Synth::externalKeyEvent (const std::uint8_t* data, int size) noexcept

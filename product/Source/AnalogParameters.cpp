@@ -111,7 +111,7 @@ namespace
         iAuxEnabled, iAuxMode, iAuxLevel, iAuxMute, iAuxSolo, iAuxFilterFollow,
         iAuxSync, iAuxRate, iAuxModAmount, iAuxModTarget, iAuxSensitivity, iAuxAttack, iAuxRelease,
         iAuxNoiseColor, iAuxNoiseTone, iAuxNoiseGate, iAuxNoiseAttack, iAuxNoiseRelease, iAuxNoiseMovement, iAuxNoiseWidth,
-        iAuxPitch, iAuxOctave,
+        iAuxPitch, iAuxOctave, iAuxMorph,
         count
     };
 
@@ -246,7 +246,7 @@ namespace
             for (const auto* id : { &auxEnabled, &auxMode, &auxLevel, &auxMute, &auxSolo, &auxFilterFollow,
                                     &auxSync, &auxRate, &auxModAmount, &auxModTarget, &auxSensitivity, &auxAttack, &auxRelease,
                                     &auxNoiseColor, &auxNoiseTone, &auxNoiseGate, &auxNoiseAttack, &auxNoiseRelease, &auxNoiseMovement, &auxNoiseWidth,
-                                    &auxPitch, &auxOctave })
+                                    &auxPitch, &auxOctave, &auxMorph })
                 l.add (*id);
             return l;
         }();
@@ -767,6 +767,8 @@ namespace
             // State version 8 (appended): card B's own grains (its POS, SIZE, DENS and SPREAD are
             // ANDOR OSP's layer C destinations).
             { iGrainTune2, "GRAIN TUNE B", O::voice },
+            // D / AUX (appended): D MORPH, the second MORPH stage's position (the instrument's).
+            { iAuxMorph, "D MORPH", O::global },
         };
         return list;
     }
@@ -1043,6 +1045,8 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                                           const int o = juce::roundToInt (v);
                                                           return (o > 0 ? "+" : "") + juce::String (o) + " oct";
                                                       })));
+    // D MORPH (Option D, decided): its own position, 0 % (off) by default. Appended.
+    percentage (auxMorph, "AUX D Morph", d.morph);
 }
 
 int readerIndexOf (const juce::String& id)
@@ -1473,6 +1477,7 @@ Patch Reader::readWith (const float* raw) const noexcept
         // (PITCH at its own 0.01 st resolution: a value the host's float snapping leaves a hair
         // off - 12.000000000000002 on some platforms - plays exactly as OCT +1 does)
         a.pitchSemis = std::round (100.0 * v (iAuxPitch)) / 100.0 + 12.0 * std::round (v (iAuxOctave));
+        a.morph = 0.01 * v (iAuxMorph);
         a.sync = index (iAuxSync, 2) == 0;
         a.rate = auxRates[static_cast<std::size_t> (index (iAuxRate, static_cast<int> (auxRates.size())))];
         a.modAmount = 0.01 * v (iAuxModAmount);
@@ -1882,6 +1887,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (iAuxFilterFollow, 1.0);
         put (iAuxPitch, a.pitchSemis - 12.0 * std::round (a.pitchSemis / 12.0));
         put (iAuxOctave, std::clamp (std::round (a.pitchSemis / 12.0), -2.0, 2.0));
+        put (iAuxMorph, 100.0 * a.morph);
         put (iAuxSync, a.sync ? 0.0 : 1.0);
         int rateIndex = 2;
         for (std::size_t i = 0; i < auxRates.size(); ++i)

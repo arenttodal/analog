@@ -27,3 +27,12 @@ aux03-06-rate-2x-pitch-plus5.wav   RATE 2x, PITCH +5 st
 aux03-07-pitch-automated.wav       PITCH swept -12 .. +12 st over 6 s, one value a block
 Every hit lands on the unpitched loop's grid (within 6 ms; checked in the test): the tempo and
 the loop's length never change. Peaks -8.8 .. -8.9 dBFS throughout (no spike).
+
+D MORPH (product test "AUX D MORPH renders ...", hidden tag [dmorph]): a held C major chord on
+the cards (C3 G3 C4 E4) with D RHYTHM (a 120 BPM noise-burst loop) at -3 dB:
+dmorph-01-off.wav     D MORPH 0 %: layered (peak -7.0 dBFS, RMS -18.3 dB)
+dmorph-02-half.wav    50 %: the chord with the loop's spectrum and dynamics (peak -7.1, RMS -35.8 dB)
+dmorph-03-full.wav    100 %: D alone (peak -7.2, RMS -38.1 dB)
+dmorph-04-sweep.wav   0 -> 100 % over 6 s
+(The hybrid sits at D's band energies: a sparse, percussive D gates the chord - average level
+falls with the morph, peaks hold.)

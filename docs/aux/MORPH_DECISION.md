@@ -1,12 +1,21 @@
 # MORPH with D / AUX: the owner's decision
 
-**Status: OPEN, for the owner to decide. Not implemented.**
+**Status: DECIDED (12 Nov 2026): Option D, fusing into the filtered A/B/C bus, with its own control. Implemented as D MORPH.**
 
-This version behaves as **Option A**:
-- MORPH is card C's existing per-voice A / B ↔ C morph (with its carrier choice and the method rack).
-- When C is EXTERNAL or plays its RHYTHM loop, MORPH is the GLOBAL MORPH between A + B and C's bus.
-- D is never a MORPH origin or destination. It is layered beside everything else, through its AUX FILTER and the shared effects.
-- No control suggests otherwise: there is no MORPH destination selector.
+- **The stage:** the original per-voice MORPH (A + B → C, the MORPH macro, its rack) is untouched. D MORPH is a second, global stage. Its carrier is everything before D: A/B/C after the FILTER and C's buses. Its character is D, after its AUX FILTER, at its level. It reuses `GlobalMorph`, the tested zero-latency spectral imprint.
+- **The control:** `analog.aux.morph` (D MORPH, 0–100 %, 0 = off by default; version hint 37). It sits in the AUX rack's MORPH group in every mode, is a modulation destination ("D MORPH", global), and can be assigned to USER macros and automated. The MORPH macro never moves it.
+- **What it does:**
+  - **0 %:** the layered sound, bit for bit (the stage never runs).
+  - **0–50 %:** D's spectrum is imprinted on the cards while D's own layer fades out (equal power, gone at 50 %).
+  - **50 %:** the hybrid, at D's band energies.
+  - **50–100 %:** an equal-power fade from the hybrid to D.
+  - **100 %:** D alone.
+- **It acts only while D sounds:** the position is scaled by D's activity, the imprint's own follower, so a silent, muted or switched-off D never takes the cards away.
+- **The level follows D:** at 50 % the hybrid sits at D's band energies, so a sparse, percussive D gates the cards' sound. Average level falls while peaks hold (demo: `docs/demos/aux/dmorph-*.wav`).
+- **Host note:** D MORPH is appended to the modulation routes' destination list. A saved route keeps its destination; the host-normalised value of `mod.routeN.dest` shifts slightly, exactly as when C RHYTHM was appended to the sources (the 1.0 fixtures test checks the index).
+- **Cost:** no latency; about 2 % of one core while it runs (`GlobalMorph`'s measured figure for C EXTERNAL); nothing at 0 %.
+
+The options as they were put to the owner follow.
 
 ## The question
 
@@ -97,4 +106,4 @@ D ─ AUX FILTER ─────────────────────
 
 D's bus is built so that Option D can be added at its mixing point without changing D's sources.
 
-**Owner: please choose A, B, C or D, the fusion point, and the control.**
+**Owner's choice: D; fusion into the filtered A/B/C bus; its own position control.**

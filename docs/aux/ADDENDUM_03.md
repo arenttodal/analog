@@ -2,7 +2,7 @@
 
 Branch: `feature/aux-d` in both repositories. Baseline: analog `19a6a45`, OSP `4b6772a5` (the D / AUX implementation, gates 0–8). Nothing is merged into `main` or the 1.0.0 release candidate.
 
-**MORPH:** untouched, as this addendum requires. The D MORPH stage (Option D, approved just before this addendum) is paused, unpushed, in `git stash` ("D MORPH (Option D) - paused for Addendum 03").
+**MORPH:** untouched by the addendum itself. D MORPH (Option D) was paused during it and landed afterwards, at the owner's word (see `MORPH_DECISION.md`).
 
 ## Gate 0: audit
 
@@ -36,7 +36,7 @@ Branch: `feature/aux-d` in both repositories. Baseline: analog `19a6a45`, OSP `4
 | D's strip (well or elsewhere on it) | D |
 | D's rack (graph or elsewhere on it) | D |
 | A / B cards | the existing rules |
-| Empty plugin space | **the existing rule** (ANALOG: the hybrid recording, card C), never D. See "For the owner" |
+| Empty plugin space | **nothing** (the owner's decision after this addendum: `ProductInfo::AuxStrip::emptyDropsIgnored`, ANALOG on; ANDOR OSP's rule unchanged) |
 
 ### Gate 2: always through the FILTER
 
@@ -117,8 +117,8 @@ Branch: `feature/aux-d` in both repositories. Baseline: analog `19a6a45`, OSP `4
 - **Listening:** PITCH / OCT on real loops (drums vs sustained material); the FILTER on D in a real session.
 - **Real Kontakt as D** (load, window, state); **DAW** automation of PITCH / OCT, sync and offline bounce.
 
-## For the owner
+## Decisions after this addendum (owner)
 
-1. **A drop on empty plugin space** keeps the existing rule: in ANALOG it loads the hybrid recording (card C), as the editor always did. The addendum's table says "existing behavior", but its test list says "neither C nor D". Should a drop outside the cards and D do nothing?
-2. **PITCH beyond ±12 st on sustained loops:** keep slice re-pitch, or add a time-preserving pitch shifter (latency, CPU)?
-3. **D MORPH (Option D):** paused for this addendum. Land it now?
+1. **A drop on empty space does nothing** (no card, no D). Implemented and tested.
+2. **D MORPH: landed** (Option D). See `MORPH_DECISION.md`.
+3. **PITCH beyond ±12 st on sustained loops:** still open. It keeps slice re-pitch for now.

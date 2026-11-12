@@ -284,6 +284,10 @@ public:
     float auxCutoffHz() const noexcept { return auxRunning && current.aux.filterFollow ? auxFilter.cutoffHz : 0.0f; }
     /** Whether D's bus runs (it does nothing at all while off and faded out). */
     bool auxActive() const noexcept { return auxRunning; }
+    /** D MORPH: whether its stage runs now, and its position (0..1, smoothed). */
+    bool auxMorphActive() const noexcept { return auxMorphRunning; }
+    float auxMorphPosition() const noexcept { return auxMorphNow; }
+    const GlobalMorph& auxMorphState() const noexcept { return auxMorph; }
 
     /** Tests: RHYTHM's loop's filter cutoff now (Hz), 0 while it is not filtered. */
     float rhythmCutoffHz() const noexcept { return rhythmFilter.running ? rhythmFilter.cutoffHz : 0.0f; }
@@ -788,9 +792,16 @@ private:
     // D / AUX's bus.
     void renderAux (int numSamples) noexcept;   ///< its envelope (control rate reads it) before the voices
     void mixAux (float* left, float* right, int numSamples) noexcept;
+    void mixAuxMorph (float* left, float* right, int n, float target) noexcept;   ///< D MORPH's stage
     float auxNoiseSample (int channel, float toneCoefficient) noexcept;
     rhythm::LoopPlayer auxLoop;
     std::vector<float> auxL, auxR, auxDryL, auxDryR, auxLevelBuf, auxTransientBuf, auxEnvBuf, auxDelayL, auxDelayR;
+    // D MORPH: the second MORPH stage (A/B/C x D, GlobalMorph), idle (never processed) at 0.
+    GlobalMorph auxMorph;
+    std::vector<float> auxMorphL, auxMorphR;
+    float auxMorphNow = 0.0f;
+    int auxMorphTail = 0;           ///< samples it keeps running at 0 (its own smoothing settles)
+    bool auxMorphRunning = false;
     struct AuxExternal
     {
         const float* left = nullptr;

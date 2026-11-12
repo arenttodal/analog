@@ -51,7 +51,12 @@
 >   - the wells load on a click or a drop (no LOAD buttons); a failed load keeps the loop;
 >   - RHYTHM PITCH / OCT re-pitch the slices on the grid, the tempo and the length unchanged.
 >
->   D MORPH (Option D) is paused (stashed, unpushed) for the addendum.
+>   Then, at the owner's word:
+>   - D MORPH, Option D (docs/aux/MORPH_DECISION.md: DECIDED): a second, global MORPH stage,
+>     A/B/C (after the FILTER) × D. Its own control (`analog.aux.morph`, 0 % = off; the AUX rack,
+>     a modulation destination, USER macros). It acts only while D sounds; the MORPH macro is
+>     unchanged.
+>   - A file dropped on empty space loads nothing.
 >
 > - Destination-first macro assignment (docs/MACRO_DESTINATION_FIRST.md):
 >   - right-click any eligible control → Assign to Macro (names, checkmarks, range, details,

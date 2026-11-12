@@ -656,3 +656,4 @@ analog.aux.noise.movement v37 float "AUX Noise Movement" label="%" range=0.0000.
 analog.aux.noise.width v37 float "AUX Noise Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.aux.rhythm.pitch v37 float "AUX Rhythm Pitch" label="st" range=-12.0000..12.0000/0.0100 skew=1.00000 default=0.0000 steps=2147483647 texts=-12.0 st|0.0 st|+12.0 st
 analog.aux.rhythm.octave v37 float "AUX Rhythm Octave" label="oct" range=-2.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=2147483647 texts=-2 oct|0 oct|+2 oct
+analog.aux.morph v37 float "AUX D Morph" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %

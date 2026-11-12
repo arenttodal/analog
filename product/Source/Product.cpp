@@ -411,6 +411,7 @@ const ProductInfo& productInfo()
         // menu (a view setting, hidden by default; the sound never depends on it).
         p.auxStrip = ProductInfo::AuxStrip {};
         p.auxStrip->create = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createAuxStrip (host); };
+        p.auxStrip->emptyDropsIgnored = true;   // (Addendum 03: a drop on empty space loads nothing)
         p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)

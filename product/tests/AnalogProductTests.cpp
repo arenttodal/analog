@@ -954,7 +954,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     // D / AUX (docs/aux) acts while it is on: its switches and level on D NOISE (your keys open
     // its gate); RHYTHM's settings on a test tick loop (100 BPM against the 120 BPM clock), its
     // envelope's settings with MOD AMOUNT up (the cards' FILTER moved); NOISE's in NOISE.
-    for (const auto* id : { &params::auxEnabled, &params::auxLevel, &params::auxMute, &params::auxSolo, &params::auxFilterFollow })
+    for (const auto* id : { &params::auxEnabled, &params::auxLevel, &params::auxMute, &params::auxSolo, &params::auxFilterFollow, &params::auxMorph })
     {
         const juce::String which (*id);
         setups[*id] = [which] (ShellProcessor& q) {
@@ -1077,6 +1077,12 @@ TEST_CASE ("analog: every modulation destination it offers moves the sound (VEL 
 
     auto [context, modes] = soundContext();
     modes["reimagined"] = [] (Patch& c) { c.reimaginedSettings.mode = osp::ReimaginedMode::kaleidoscope; };
+    // D MORPH acts while D sounds: D NOISE, always on.
+    modes[params::auxMorph] = [] (Patch& c) {
+        c.aux.enabled = true;
+        c.aux.mode = Patch::Aux::Mode::noise;
+        c.aux.noiseFree = true;
+    };
     const auto vel = static_cast<float> (osp::mod::sourceIndex (osp::mod::Source::vel) + 1);
     for (const auto& [dest, id] : dests)
     {
@@ -8124,6 +8130,12 @@ TEST_CASE ("analog: projects saved by 1.0 open with the same settings and the sa
                 // A route's source: the same one (its index; the list grew by C RHYTHM after
                 // 1.0, 13 choices then, 14 now - its normalised value moved, its meaning not).
                 CHECK (juce::roundToInt (now * osp::mod::sourceCount) == juce::roundToInt (was * osp::mod::baseSourceCount));
+            }
+            else if (id.startsWith ("mod.route") && id.endsWith (".dest"))
+            {
+                // A route's destination: the same one (its index; ANDOR ANALOG's list grew by
+                // D MORPH after 1.0, appended - its normalised value moved, its meaning not).
+                CHECK (juce::roundToInt (now * (osp::mod::hostChoiceCount() - 1)) == juce::roundToInt (was * (osp::mod::hostChoiceCount() - 2)));
             }
             else if (id == params::hybridType)
             {

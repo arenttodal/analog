@@ -506,3 +506,107 @@ TEST_CASE ("AUX Addendum 03: with PITCH up, a host tempo change moves the ticks 
     CHECK (fast >= 3);
     CHECK (burstHz (l, starts[1], 0.003) == Approx (4000.0).epsilon (0.08));
 }
+
+//==============================================================================
+// D MORPH (docs/aux/MORPH_DECISION.md, Option D): the second MORPH stage, A/B/C x D.
+
+namespace
+{
+    /** A saw on card A (a held C3) and D NOISE (FREE) together: the stage's two inputs. */
+    Patch morphPatch (double morph)
+    {
+        Patch p = measurementPatch();
+        p.aux.enabled = true;
+        p.aux.mode = Mode::noise;
+        p.aux.noiseFree = true;
+        p.aux.levelDb = -6.0;
+        p.aux.morph = morph;
+        return p;
+    }
+
+    double rmsDiff (const std::vector<float>& a, const std::vector<float>& b, double from, double to)
+    {
+        double s = 0.0;
+        const auto i0 = static_cast<std::size_t> (from * rate), i1 = std::min (a.size(), static_cast<std::size_t> (to * rate));
+        for (auto i = i0; i < i1; ++i)
+            s += std::pow (static_cast<double> (a[i]) - b[i], 2.0);
+        return std::sqrt (s / static_cast<double> (std::max<std::size_t> (1, i1 - i0)));
+    }
+}
+
+TEST_CASE ("D MORPH: at 0 % the layered sound bit for bit (the stage never runs); at 100 % D alone; at 50 % a hybrid of both", "[aux][morph]")
+{
+    const std::vector<Event> held { on (0, 48) };
+    auto layered = makeSynth (morphPatch (0.0));
+    const auto plain = play (*layered, 1.2, held);
+    CHECK_FALSE (layered->auxMorphActive());
+    // 0 %: exactly the layered instrument (D MORPH never touched it).
+    Patch before = morphPatch (0.0);
+    before.aux.morph = 0.0;
+    CHECK (play (*makeSynth (before), 1.2, held).left == plain.left);
+
+    // D alone (the cards silent): what 100 % should become.
+    Patch dOnly = morphPatch (0.0);
+    dOnly.osc1Level = dOnly.osc2Level = 0.0;
+    dOnly.osc1Enabled = dOnly.osc2Enabled = false;
+    const auto d = play (*makeSynth (dOnly), 1.2, held);
+    auto full = makeSynth (morphPatch (1.0));
+    const auto morphed = play (*full, 1.2, held);
+    CHECK (full->auxMorphActive());
+    const double toD = rmsDiff (morphed.left, d.left, 0.4, 1.2), dLevel = rmsOf (d.left, 0.4, 1.2);
+    INFO ("100 %: " << toD << " from D alone (D at " << dLevel << ")");
+    CHECK (toD < 0.1 * dLevel);
+    // 50 %: neither the layered sound nor D - the cards' saw with D's spectrum (its noise's
+    // colour) imprinted; finite, near the layered level.
+    const auto half = play (*makeSynth (morphPatch (0.5)), 1.2, held);
+    const double fromLayered = rmsDiff (half.left, plain.left, 0.4, 1.2), fromD = rmsDiff (half.left, d.left, 0.4, 1.2);
+    INFO ("50 %: " << fromLayered << " from layered, " << fromD << " from D");
+    CHECK (fromLayered > 0.05 * rmsOf (plain.left, 0.4, 1.2));
+    CHECK (fromD > 0.05 * dLevel);
+    for (const float x : half.left)
+        REQUIRE (std::isfinite (x));
+    CHECK (rmsOf (half.left, 0.4, 1.2) < 2.0 * rmsOf (plain.left, 0.4, 1.2));
+}
+
+TEST_CASE ("D MORPH: a silent D (off, muted, nothing loaded) never takes the cards away", "[aux][morph]")
+{
+    const std::vector<Event> held { on (0, 48) };
+    Patch ref = measurementPatch();
+    const auto cards = play (*makeSynth (ref), 1.0, held);
+    // D on in RHYTHM with no loop (silent), D MORPH at 100 %: the cards as they are.
+    Patch p = morphPatch (1.0);
+    p.aux.mode = Mode::rhythm;
+    const auto out = play (*makeSynth (p), 1.0, held);
+    INFO ("difference " << rmsDiff (out.left, cards.left, 0.2, 1.0) << " of " << rmsOf (cards.left, 0.2, 1.0));
+    CHECK (rmsDiff (out.left, cards.left, 0.2, 1.0) < 0.02 * rmsOf (cards.left, 0.2, 1.0));
+    // MUTED D at 100 %: the same.
+    Patch m = morphPatch (1.0);
+    m.aux.heard = false;
+    const auto muted = play (*makeSynth (m), 1.0, held);
+    CHECK (rmsDiff (muted.left, cards.left, 0.3, 1.0) < 0.02 * rmsOf (cards.left, 0.3, 1.0));
+}
+
+TEST_CASE ("D MORPH: moved up and back to 0, it glides (no click) and then stops - the layered sound again", "[aux][morph]")
+{
+    auto p = morphPatch (0.0);
+    auto s = makeSynth (p);
+    const int block = 256, total = static_cast<int> (2.0 * rate);
+    std::vector<float> l (static_cast<std::size_t> (total)), r (l.size());
+    s->handleMidi (on (0, 48).bytes, 3);
+    float worstStep = 0.0f;
+    for (int pos = 0; pos < total; pos += block)
+    {
+        p.aux.morph = pos > static_cast<int> (0.4 * rate) && pos < static_cast<int> (1.0 * rate) ? 0.8 : 0.0;
+        s->setPatch (p);
+        s->render (l.data() + pos, r.data() + pos, std::min (block, total - pos));
+    }
+    for (std::size_t i = 1; i < l.size(); ++i)
+        worstStep = std::max (worstStep, std::abs (l[i] - l[i - 1]));
+    float peak = 0.0f;
+    for (const float x : l)
+        peak = std::max (peak, std::abs (x));
+    INFO ("largest sample step " << worstStep << ", peak " << peak);
+    CHECK (worstStep < 0.6f * peak + 0.05f);   // (noise and a saw: no step beyond their own)
+    CHECK_FALSE (s->auxMorphActive());         // (back at 0: the stage stopped)
+    CHECK (s->auxMorphPosition() == 0.0f);
+}

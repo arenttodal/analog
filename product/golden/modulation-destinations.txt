@@ -85,3 +85,4 @@
 159 analog.morph.formants "MORPH FORMANTS" voice
 160 analog.morph.detail "MORPH DETAIL" voice
 161 layerC.granular.tune "GRAIN TUNE B" voice
+162 analog.aux.morph "D MORPH" global

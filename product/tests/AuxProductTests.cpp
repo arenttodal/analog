@@ -645,6 +645,47 @@ TEST_CASE ("AUX 03 gate 1: a file dropped on D (strip, its well, the rack) loads
     CHECK (q.currentInstrument (1) != nullptr);
 }
 
+TEST_CASE ("AUX 03: a file dropped on empty space (neither a card nor D) loads nothing", "[analog][aux][drop]")
+{
+    DropRig rig;
+    // The macro panel, the header and the keyboard: none owns drops, none is a card.
+    dropOn (rig.ui, rig.ui.modulationPanel(), rig.loopA);
+    dropOn (rig.ui, rig.ui, rig.loopA, { rig.ui.getWidth() / 2, 12 });
+    rig.p.waitForLoads (5000);
+    rig.p.pollLoads();
+    CHECK_FALSE (rig.cardC());
+    CHECK (engineOf (rig.p).auxRecordingState().status == AnalogEngine::AuxRecordingState::Status::none);
+    CHECK (engineOf (rig.p).auxLoop() == nullptr);
+    // ... while card C's own well still takes one.
+    dropOn (rig.ui, rig.ui.engineCard (1).display(), rig.loopB);
+    CHECK (rig.cardC());
+}
+
+TEST_CASE ("AUX D MORPH: its own parameter (0 %: off), a modulation destination, in the AUX rack in every mode", "[analog][aux][morph]")
+{
+    ShellProcessor p;
+    auto* param = p.parameters.getParameter (params::auxMorph);
+    REQUIRE (param != nullptr);
+    CHECK (param->getDefaultValue() == 0.0f);
+    CHECK (params::engineParameterIds().contains (params::auxMorph));
+    bool offered = false;
+    for (const auto& d : params::modulationDestinations())
+        offered = offered || juce::String (d.id) == params::auxMorph;
+    CHECK (offered);
+    // The MORPH macro is untouched by it, and it by the macro.
+    CHECK (params::auxMorph != params::morphPosition);
+    // D NOISE (always on) with a held chord: D MORPH 0 % vs 100 % differ; 0 % is the layered sound.
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 1.0f);
+    set (p, params::auxNoiseGate, 1.0f);
+    const auto layered = render (p, 0.6);
+    set (p, params::auxMorph, 100.0f);
+    const auto morphed = render (p, 0.6);
+    CHECK_FALSE (identical (layered, morphed));
+    set (p, params::auxMorph, 0.0f);
+    CHECK (identical (layered, render (p, 0.6)));
+}
+
 TEST_CASE ("AUX 03 gate 5: an unsupported file dropped on D changes nothing and says why; a failed load keeps the loop in use", "[analog][aux][drop]")
 {
     DropRig rig;
@@ -868,4 +909,66 @@ TEST_CASE ("AUX 03 renders: D RHYTHM at PITCH -12 / 0 / +12, OCT -1 / +1, RATE 2
     }
     renderWith ("aux03-06-rate-2x-pitch-plus5", 5.0f, 0.0f, 3.0f, false);
     renderWith ("aux03-07-pitch-automated", 0.0f, 0.0f, 2.0f, true);
+}
+
+TEST_CASE ("AUX D MORPH renders: a chord on the cards x D RHYTHM at D MORPH 0 / 50 / 100 %, and swept (ANALOG_RENDER_DIR)", "[.][renders][dmorph]")
+{
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("ANALOG_RENDER_DIR", {});
+    REQUIRE (dir.isNotEmpty());
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto loop = [] {
+        constexpr double beat = 0.5;
+        std::vector<float> x (static_cast<std::size_t> (8 * beat * rate), 0.0f);
+        juce::Random noise (5);
+        for (int k = 0; k < 16; ++k)
+        {
+            const auto first = static_cast<std::size_t> (k * beat * 0.5 * rate);
+            for (std::size_t i = 0; i < static_cast<std::size_t> (0.2 * rate) && first + i < x.size(); ++i)
+                x[first + i] += static_cast<float> ((k % 4 == 0 ? 0.6 : 0.3) * std::exp (-static_cast<double> (i) / rate / (k % 2 == 0 ? 0.05 : 0.012))
+                                                    * (noise.nextFloat() * 2.0f - 1.0f));
+        }
+        return andor::analog::rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+    }();
+    auto renderWith = [&] (const juce::String& name, float morph, bool sweep) {
+        ShellProcessor p;
+        engineOf (p).setAuxLoopForTest (loop);
+        set (p, params::auxEnabled, 1.0f);
+        set (p, params::auxMode, 0.0f);
+        set (p, params::auxLevel, -3.0f);
+        set (p, params::auxMorph, morph);
+        p.prepareToPlay (rate, block);
+        const int total = static_cast<int> (6.0 * rate);
+        juce::AudioBuffer<float> audio (2, total), buffer (2, block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            juce::MidiBuffer midi;
+            if (pos == 0)
+                for (const int note : { 48, 55, 60, 64 })
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, static_cast<juce::uint8> (100)), 0);
+            if (sweep)
+                set (p, params::auxMorph, 100.0f * static_cast<float> (pos) / static_cast<float> (total));
+            p.processBlock (buffer, midi);
+            const int n = std::min (block, total - pos);
+            for (int ch = 0; ch < 2; ++ch)
+                audio.copyFrom (ch, pos, buffer, ch, 0, n);
+        }
+        const auto file = out.getChildFile (name + ".wav");
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> stream (file.createOutputStream().release());
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.get(), rate, 2, 24, {}, 0));
+        REQUIRE (writer != nullptr);
+        stream.release();
+        writer->writeFromAudioSampleBuffer (audio, 0, total);
+        WARN (name << ": peak " << juce::Decibels::gainToDecibels (audio.getMagnitude (0, total)) << " dBFS, RMS "
+                   << juce::Decibels::gainToDecibels (static_cast<float> (rms (audio))) << " dB");
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < total; ++i)
+                REQUIRE (std::isfinite (audio.getSample (ch, i)));
+    };
+    renderWith ("dmorph-01-off", 0.0f, false);
+    renderWith ("dmorph-02-half", 50.0f, false);
+    renderWith ("dmorph-03-full", 100.0f, false);
+    renderWith ("dmorph-04-sweep", 0.0f, true);
 }
