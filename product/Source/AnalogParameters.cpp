@@ -1470,7 +1470,9 @@ Patch Reader::readWith (const float* raw) const noexcept
         a.mode = static_cast<Patch::Aux::Mode> (index (iAuxMode, 3));
         a.levelDb = v (iAuxLevel);
         a.filterFollow = true;   // (Addendum 03: always through the FILTER; the old switch is unread)
-        a.pitchSemis = v (iAuxPitch) + 12.0 * std::round (v (iAuxOctave));
+        // (PITCH at its own 0.01 st resolution: a value the host's float snapping leaves a hair
+        // off - 12.000000000000002 on some platforms - plays exactly as OCT +1 does)
+        a.pitchSemis = std::round (100.0 * v (iAuxPitch)) / 100.0 + 12.0 * std::round (v (iAuxOctave));
         a.sync = index (iAuxSync, 2) == 0;
         a.rate = auxRates[static_cast<std::size_t> (index (iAuxRate, static_cast<int> (auxRates.size())))];
         a.modAmount = 0.01 * v (iAuxModAmount);
