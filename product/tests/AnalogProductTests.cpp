@@ -10994,3 +10994,34 @@ TEST_CASE ("the arp / sub lights: one smooth lens at fractional display scales -
         CHECK (worst < 0.06f);
     }
 }
+
+TEST_CASE ("SUB's display lights the keys being played (with their place on the curve), and lets them go", "[analog][sub][ui]")
+{
+    ShellProcessor p;
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    andor::analog::SubPanel panel (p);
+    if (panel.getWidth() == 0)
+        panel.setSize (660, 520);
+    auto& display = panel.display();
+    REQUIRE (display.isKeyDown != nullptr);
+    display.pollHeldKeys();
+    CHECK (display.heldKeys().none());
+    // A chord in SUB's range and one key above it (lit too, quieter: SUB is silent there).
+    for (const int key : { 52, 55, 60, 96 })
+        p.keyboardState.noteOn (1, key, 0.8f);
+    display.pollHeldKeys();
+    for (const int key : { 52, 55, 60, 96 })
+        CHECK (display.heldKeys()[static_cast<std::size_t> (key)]);
+    CHECK (display.heldKeys().count() == 4);
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("ANALOG_SCREENSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto shot = panel.createComponentSnapshot (panel.getLocalBounds(), true, 2.0f);
+        juce::FileOutputStream out (juce::File (dir).getChildFile ("sub-played-keys.png"));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (shot, out);
+    }
+    p.keyboardState.allNotesOff (0);
+    display.pollHeldKeys();
+    CHECK (display.heldKeys().none());
+}

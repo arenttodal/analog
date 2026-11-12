@@ -1,5 +1,8 @@
 #pragma once
 
+#include <bitset>
+#include <functional>
+
 #include "InstrumentHost.h"
 #include "ShapingPopups.h"
 
@@ -44,9 +47,17 @@ namespace subview
     (vertical) on the curve, while TAPER is chosen. Everything it shows is read from the
     parameters, so knobs, automation, presets and undo move it at once.
 */
-class SubResponseDisplay final : public juce::Component, public juce::SettableTooltipClient
+class SubResponseDisplay final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
+    /** Whether a key is down now (the instrument's keyboard state: played, from the host or the
+        on-screen keys). Set by the panel; the keys held are lit on the keyboard, with their
+        place on the curve, so the range and the response read against what is playing. */
+    std::function<bool (int key)> isKeyDown;
+    /** The keys shown as held (tests). */
+    const std::bitset<128>& heldKeys() const noexcept { return held; }
+    /** Reads the keys held now (the timer's work; tests call it directly). */
+    void pollHeldKeys();
     SubResponseDisplay (osp::plugin::InstrumentHost& host, juce::Colour accent);
     ~SubResponseDisplay() override;
 
@@ -110,6 +121,8 @@ private:
     int spanLow0 = 0, spanHigh0 = 0, spanKey0 = 0;
     bool coincident = false;   ///< a press on two ends drawn together: the drag's direction picks one
     juce::Point<float> pressAt;
+    std::bitset<128> held;
+    void timerCallback() override { pollHeldKeys(); }
 };
 
 /**

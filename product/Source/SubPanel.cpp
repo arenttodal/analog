@@ -4,6 +4,7 @@
 #include "Binding.h"
 #include "Design.h"
 #include "OspLookAndFeel.h"
+#include "ShellProcessor.h"
 
 #include <algorithm>
 #include <cmath>
@@ -90,11 +91,26 @@ SubResponseDisplay::SubResponseDisplay (InstrumentHost& h, juce::Colour accentCo
                 "with Shift, the high end). With TAPER: drag the first point for FROM, the second up or down for the slope");
     setWantsKeyboardFocus (true);
     binding::tag (*this, params::subLowKey);
+    startTimerHz (30);   // (the keys held: a few ms behind the playing is enough to read)
 }
 
 SubResponseDisplay::~SubResponseDisplay()
 {
+    stopTimer();
     endDrag();   // (a popover closed mid-drag still ends its host gesture)
+}
+
+void SubResponseDisplay::pollHeldKeys()
+{
+    std::bitset<128> now;
+    if (isKeyDown != nullptr)
+        for (int k = 0; k < 128; ++k)
+            now[static_cast<std::size_t> (k)] = isKeyDown (k);
+    if (now != held)
+    {
+        held = now;
+        repaint();
+    }
 }
 
 juce::RangedAudioParameter& SubResponseDisplay::parameter (const juce::String& id) const
@@ -459,6 +475,38 @@ void SubResponseDisplay::paint (juce::Graphics& g)
             g.setColour (in ? accent.darker (0.55f) : juce::Colour (0xff2a2927));
             g.fillRoundedRectangle (keyArea (k), 1.0f);
         }
+    // The keys being played: lit in the accent (a quieter tint outside SUB's range, where it is
+    // silent), with their place on the curve - where the playing sits in the range and response.
+    if (held.any())
+    {
+        const auto keyLit = [&] (int k) {
+            const bool in = k >= lo && k <= hi, black = subview::isBlack (k);
+            const auto a = black ? keyArea (k) : keyArea (k).reduced (0.5f, 0.0f);
+            // (darker than the range's pale tint on ivory, brighter than graphite on black)
+            const auto lit = black ? accent.brighter (0.5f) : accent.darker (0.2f);
+            g.setColour (in ? lit : lit.withAlpha (0.5f));
+            g.fillRoundedRectangle (a, black ? 1.0f : 1.5f);
+            // A small lamp at the key's foot: readable at a glance, whatever the tint around it.
+            const float d = std::min (4.0f, a.getWidth() - 2.0f);
+            g.setColour (juce::Colour (0xfffff1e2).withAlpha (in ? 0.95f : 0.6f));
+            g.fillEllipse (juce::Rectangle<float> (d, d).withCentre ({ a.getCentreX(), a.getBottom() - d - 1.5f }));
+        };
+        for (int k = v.first; k <= v.last; ++k)
+            if (held[static_cast<std::size_t> (k)] && ! subview::isBlack (k))
+                keyLit (k);
+        for (int k = v.first; k <= v.last; ++k)
+            if (held[static_cast<std::size_t> (k)] && subview::isBlack (k))
+                keyLit (k);
+        for (int k = v.first; k <= v.last; ++k)
+            if (held[static_cast<std::size_t> (k)] && k >= lo && k <= hi)
+            {
+                const juce::Point<float> c { keyCentre (k), curveY (k) };
+                g.setColour (accent.withAlpha (0.35f));
+                g.fillRect (juce::Rectangle<float> (c.x - 0.5f, c.y, 1.0f, bed.getY() - c.y));
+                g.setColour (accent.brighter (0.35f));
+                g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (c));
+            }
+    }
     g.setFont (fonts::label (8.5f));
     g.setColour (colour::wellText);
     for (int k = v.first; k <= v.last; ++k)
@@ -805,6 +853,8 @@ SubPanel::SubPanel (InstrumentHost& h) : MiniPanel ("SUB"), host (h), accent (de
     from = knob (subTaperStart, "FROM", true);
     slopeKnobPtr = knob (subTaperSlope, "dB / OCT", true);
     responseDisplay = std::make_unique<SubResponseDisplay> (host, accent);
+    if (auto* shell = dynamic_cast<andor::shell::ShellProcessor*> (&host))
+        responseDisplay->isKeyDown = [shell] (int key) { return shell->keyboardState.isNoteOnForChannels (0xffff, key); };
     addAndMakeVisible (*responseDisplay);
     gritValve = std::make_unique<SubGritValve>();
     addAndMakeVisible (*gritValve);
