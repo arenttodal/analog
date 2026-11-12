@@ -2,6 +2,7 @@
 
 #include "AnalogParameters.h"
 #include "FxParameters.h"
+#include "FxRackSource.h"
 #include "ShellEngine.h"
 #include "Synth.h"
 
@@ -22,7 +23,7 @@ namespace andor::analog
     Threads: prepare() on the message thread (allocates); process() on the audio thread
     (no allocation, no locks); sourcePicture() on the message thread (parameters only).
 */
-class AnalogEngine final : public andor::shell::Engine, private ControlModulator
+class AnalogEngine final : public andor::shell::Engine, public andor::analog::FxRackSource, private ControlModulator
 {
 public:
     /** 4x is the shipping quality; tests may ask for less. */
@@ -112,7 +113,9 @@ public:
     /** Called (message thread) whenever the route changes: an edit, a session or preset. */
     std::function<void()> onFxRouteChanged;
     /** A new effect's processor (null for the original four, or before prepare): its meters. */
-    const andor::analog::fx::Processor* fxProcessor (andor::analog::fx::InstanceId id) const;
+    const andor::analog::fx::Processor* fxProcessor (andor::analog::fx::InstanceId id) const override;
+    /** (FxRackSource: the FX rack reads the engine through it.) */
+    std::shared_ptr<const andor::analog::fx::Impulse> fxConvolutionImpulse (int slot) const override { return convolutionImpulse (slot); }
     /** The voice filter's telemetry (Synth::FilterTap; any thread reads it); null before
         prepare. The FILTER rack's live graph. */
     const Synth::FilterTap* filterTap (int slot) const noexcept { return prepared ? &synth.filterTap (slot) : nullptr; }

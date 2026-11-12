@@ -2,14 +2,10 @@
 
 #include <complex>
 #include "FxIdentity.h"
-#include "AnalogEngine.h"
 #include "FxParameters.h"
 #include "FxPresets.h"
-#include "FxRouting.h"
 #include "OspLookAndFeel.h"
 #include "RackControls.h"
-#include "ShellEditor.h"
-#include "ShellProcessor.h"
 #include "EqEditor.h"
 #include "fx/Effects.h"
 #include "engine/DriveProcessor.h"
@@ -29,10 +25,30 @@ namespace
 {
     ParameterRack::Faceplate faceplateFor (Type type);
     InstanceId shownInstance { Type::eq, 0 };
-    std::array<int, fx::totalInstances()> fxPageMemory {};
-    std::array<juce::String, fx::totalInstances()> presetNames;
+    // (Each pool slot's page and preset name, where the host's source keeps none of its own.)
+    std::array<FxRackSource::Memory, fx::totalInstances()> slotMemory;
 
-    AnalogEngine& engineOf (osp::plugin::InstrumentHost& host) { return dynamic_cast<AnalogEngine&> (dynamic_cast<andor::shell::ShellProcessor&> (host).productEngine()); }
+    // The instrument behind the host (FxRackSource.h): the host itself where it is a source,
+    // else whatever the instrument's finder returns. Never a cast to a shell or an engine.
+    FxRackSourceFinder sourceFinder = nullptr;
+    FxRackSource* sourceOf (osp::plugin::InstrumentHost& host)
+    {
+        if (auto* own = dynamic_cast<FxRackSource*> (&host))
+            return own;
+        return sourceFinder != nullptr ? sourceFinder (host) : nullptr;
+    }
+    const fx::Processor* processorOf (osp::plugin::InstrumentHost& host, InstanceId id)
+    {
+        const auto* source = sourceOf (host);
+        return source != nullptr ? source->fxProcessor (id) : nullptr;
+    }
+    FxRackSource::Memory& memoryOf (osp::plugin::InstrumentHost& host, InstanceId id)
+    {
+        if (auto* source = sourceOf (host))
+            if (auto* own = source->fxRackMemory (id))
+                return *own;
+        return slotMemory[static_cast<std::size_t> (id.flatIndex())];
+    }
 
     juce::String pid (InstanceId id, const char* name) { return fxparams::idOf (id, name); }
     float value (osp::plugin::InstrumentHost& host, InstanceId id, const char* name) { return host.parameterValue (pid (id, name)); }
@@ -225,7 +241,7 @@ namespace
         }
 
     private:
-        const fx::Processor* live() const { return engineOf (host).fxProcessor (id); }
+        const fx::Processor* live() const { return processorOf (host, id); }
 
         juce::Rectangle<float> handle (int b) const
         {
@@ -656,7 +672,8 @@ namespace
         void paintConv (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
         {
             const auto& s = settings.conv[static_cast<std::size_t> (id.slot)];
-            const auto ir = engineOf (host).convolutionImpulse (id.slot);
+            const auto* source = sourceOf (host);
+            const auto ir = source != nullptr ? source->fxConvolutionImpulse (id.slot) : nullptr;
             auto body = area.reduced (14.0f, 0.0f).withTrimmedTop (26.0f).withTrimmedBottom (24.0f);
             if (ir != nullptr && ! ir->envelope.empty())
             {
@@ -905,7 +922,7 @@ namespace
         /** One analysis step (the timer's; tests call it after playing). */
         void analyse()
         {
-            const auto* p = dynamic_cast<const fx::Equalizer*> (engineOf (host).fxProcessor (id));
+            const auto* p = dynamic_cast<const fx::Equalizer*> (processorOf (host, id));
             if (p == nullptr)
                 return;
             const int head = p->spectrumOut.head.load (std::memory_order_acquire);
@@ -1530,13 +1547,13 @@ namespace
 
         juce::String current() const
         {
-            auto& name = presetNames[static_cast<std::size_t> (id.flatIndex())];
+            const auto& name = memoryOf (host, id).preset;
             return name.isEmpty() ? juce::String ("Default") : name;
         }
 
         bool modified() const
         {
-            const auto name = presetNames[static_cast<std::size_t> (id.flatIndex())];
+            const auto name = memoryOf (host, id).preset;
             for (const auto& list : { fxpresets::factory (id.type), fxpresets::user (id.type) })
                 for (const auto& p : list)
                     if (p.name == name)
@@ -1585,7 +1602,7 @@ namespace
                     if (const auto name = w->getTextEditorContents ("name").trim(); name.isNotEmpty())
                     {
                         fxpresets::saveUser (safe->id.type, fxpresets::capture (safe->host, safe->id, name));
-                        presetNames[static_cast<std::size_t> (safe->id.flatIndex())] = name;
+                        memoryOf (safe->host, safe->id).preset = name;
                         safe->repaint();
                     }
             }), true);
@@ -1597,7 +1614,7 @@ namespace
             juce::PopupMenu m;
             addActions (m);
             m.addSeparator();
-            m.addItem ("Reset to defaults", [this] { load ({}); presetNames[static_cast<std::size_t> (id.flatIndex())] = {}; repaint(); });
+            m.addItem ("Reset to defaults", [this] { load ({}); memoryOf (host, id).preset = {}; repaint(); });
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
         }
 
@@ -1614,7 +1631,7 @@ namespace
                 isUser = isUser || p.name == current();
             m.addItem ("Delete " + current(), isUser, false, [this] {
                 fxpresets::removeUser (id.type, current());
-                presetNames[static_cast<std::size_t> (id.flatIndex())] = {};
+                memoryOf (host, id).preset = {};
                 repaint();
             });
             m.addItem ("Show presets folder", [this] {
@@ -1633,7 +1650,7 @@ namespace
         void load (const fxpresets::Preset& p)
         {
             fxpresets::apply (host, id, p);
-            presetNames[static_cast<std::size_t> (id.flatIndex())] = p.name;
+            memoryOf (host, id).preset = p.name;
             repaint();
         }
         void step (int delta)
@@ -1731,20 +1748,23 @@ namespace
     class FxRack final : public ParameterRack
     {
     public:
-        explicit FxRack (osp::plugin::InstrumentHost& h) : ParameterRack (h, "FX", visualIdentityFor (shownInstance.type).motifInk, shareFor (shownInstance.type)), id (shownInstance)
+        FxRack (osp::plugin::InstrumentHost& h, InstanceId shown) : ParameterRack (h, "FX", visualIdentityFor (shown.type).motifInk, shareFor (shown.type)), id (shown)
         {
             juce::String title = fx::typeName (id.type);
             if (fx::capacity[static_cast<std::size_t> (id.type)] > 1)
                 title << " " << (id.slot + 1);
+            if (const auto* source = sourceOf (h))
+                if (const auto own = source->fxRackTitle (id); own.isNotEmpty())
+                    title = own;   // (a host that names its effects itself)
             setHeading (title);
             if (! fx::isLegacy (id.type))
                 setHeaderSwitch (pid (id, "on"), "ON", juce::String (fx::typeName (id.type)) + " on (its own bypass: the route keeps it in place)");
             if (id.type == Type::drive || id.type == Type::eq)
                 ;   // (one page: DRIVE's own controls; EQ: the graphic is the module)
             else if (id.type == Type::retro)
-                setPages ({ "MAIN", "MACHINE", "MOTION", "DYNAMICS" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
+                setPages ({ "MAIN", "MACHINE", "MOTION", "DYNAMICS" }, &memoryOf (h, id).page);
             else if (pagedType (id.type))
-                setPages ({ "MAIN", "DETAIL" }, &fxPageMemory[static_cast<std::size_t> (id.flatIndex())]);
+                setPages ({ "MAIN", "DETAIL" }, &memoryOf (h, id).page);
             // (FREQ SHIFTER, PHASER, FLANGER, FX FILTER: everything in one row - no pages)
             if (id.type == Type::eq)
             {
@@ -2372,9 +2392,13 @@ std::unique_ptr<juce::Component> createFxQuickPopover (osp::plugin::InstrumentHo
     return q;
 }
 
-std::unique_ptr<osp::plugin::rack::Module> createFxRack (osp::plugin::InstrumentHost& host) { return std::make_unique<FxRack> (host); }
+std::unique_ptr<osp::plugin::rack::Module> createFxRack (osp::plugin::InstrumentHost& host) { return std::make_unique<FxRack> (host, shownInstance); }
+std::unique_ptr<osp::plugin::rack::Module> createFxRackFor (osp::plugin::InstrumentHost& host, InstanceId id) { return std::make_unique<FxRack> (host, id); }
+
+void setFxRackSourceFinder (FxRackSourceFinder finder) { sourceFinder = finder; }
 
 InstanceId fxRackShown() { return shownInstance; }
+void setFxRackShown (InstanceId id) { shownInstance = id; }
 
 namespace
 {
@@ -2411,23 +2435,6 @@ juce::Point<float> fxEqNode (osp::plugin::rack::Module& module, int band)
 }
 
 juce::Component* fxEqGraphic (osp::plugin::rack::Module& module) { return eqGraphicOf (module); }
-
-void openFxRack (andor::shell::ShellEditor& editor, InstanceId id)
-{
-    using osp::plugin::rack::Kind;
-    switch (id.type)
-    {
-        case Type::movement: editor.setRackExpanded (Kind::movement, true); return;
-        case Type::echo: editor.setRackExpanded (Kind::echo, true); return;
-        case Type::space: editor.setRackExpanded (Kind::space, true); return;
-        case Type::drive: break;   // (V2: DRIVE's hardware rack - its macro's popover stays the quick view)
-        default: break;
-    }
-    // One FX rack at a time: another effect swaps the module (the rack keeps its height).
-    shownInstance = id;
-    editor.setRackExpanded (Kind::fx, false);
-    editor.setRackExpanded (Kind::fx, true);
-}
 
 juce::String quickModeId (InstanceId id)
 {

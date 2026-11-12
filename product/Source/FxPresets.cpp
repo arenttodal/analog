@@ -88,8 +88,11 @@ namespace
         }
     }
 
+    juce::File userRootOverride;   // (setUserRoot: another instrument's own folder)
     juce::File root()
     {
+        if (userRootOverride != juce::File())
+            return userRootOverride;
         return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("ANDOR").getChildFile ("ANDOR Analog");
     }
 
@@ -132,6 +135,7 @@ const std::vector<Preset>& factory (Type type)
     return all[static_cast<std::size_t> (type)];
 }
 
+void setUserRoot (const juce::File& folder) { userRootOverride = folder; }
 juce::File userFolder (Type type) { return root().getChildFile ("FX Presets").getChildFile (fx::typeName (type)); }
 
 std::vector<Preset> user (Type type)

@@ -25,6 +25,10 @@ struct Preset
 
 const std::vector<Preset>& factory (fx::Type type);
 juce::File userFolder (fx::Type type);
+/** Where user presets and chains live, for an instrument that keeps its own (`<folder>/FX
+    Presets/<TYPE>`, `<folder>/FX Chains`). An empty file: ANDOR ANALOG's, the default. Set once,
+    before the first rack is shown (message thread). */
+void setUserRoot (const juce::File& folder);
 std::vector<Preset> user (fx::Type type);
 
 /** Sets the slot's parameters to the preset (each with a host gesture; unnamed ones untouched). */

@@ -117,6 +117,18 @@ what plays. The rail carries the preset browser, a save key beside it, the "..."
 Meters read the engine's processor (`AnalogEngine::fxProcessor`); before any sound they are empty,
 never synthetic.
 
+### What the rack depends on
+
+`FxRack.cpp` reads the instrument through `osp::plugin::InstrumentHost` (the parameters, by
+`analog.fx.<type>.<n>.<name>`) and `FxRackSource` (FxRackSource.h: the running processor whose
+meters the graph draws, a CONVOLUTION's impulse, the rack's page / preset memory, its heading)
+and nothing else. ANDOR ANALOG's engine is the source behind its shell (`FxRackShell.cpp`,
+which also holds `openFxRack (ShellEditor&)`); a host that implements `FxRackSource` itself
+needs nothing. `createFxRackFor (host, id)` builds the rack of one named effect. The effects'
+settings are defined once, in the engine library (`dsp/fx/FxParameterTable`): the host
+parameters are made from that table, and another instrument that plays these processors
+offers the same settings from it.
+
 ## Quick settings
 
 A click on a tile opens a small popover anchored to it (under it, above it, or beside it when
