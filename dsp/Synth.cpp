@@ -218,6 +218,18 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     for (auto* b : { &loopL, &loopR, &loopLevel, &loopTransient, &rhythmValues })
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
     loopPlayer.prepare (hostRate);
+    // D / AUX: its bus (idle until it is powered).
+    for (auto* b : { &auxL, &auxR, &auxDryL, &auxDryR, &auxLevelBuf, &auxTransientBuf, &auxEnvBuf })
+        b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    auxDelayL.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
+    auxDelayR.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
+    auxLoop.prepare (hostRate);
+    for (auto& h : auxFilter.highPass)
+        h.prepare (hostRate);
+    auxFilter.env.setSampleRate (hostRate);
+    auxGate.setSampleRate (hostRate);
+    auxRunning = auxRhythmRun = false;
+    auxGainNow = 0.0f;
     reset();
 }
 
@@ -1863,7 +1875,11 @@ void Synth::controlUpdate() noexcept
     const double seconds = static_cast<double> (controlPeriod) / hostRate;
 
     // Smoothed knobs (about 15 ms), jumping to their values the first time.
-    const auto wantedTone = static_cast<float> (math::hzToNote (math::toneToHz (p.tone)));
+    auto wantedTone = static_cast<float> (math::hzToNote (math::toneToHz (p.tone)));
+    // D RHYTHM's envelope onto FILTER (MOD AMOUNT, target FILTER): the cards' cutoff and D's
+    // own move with it. (D off or no envelope: nothing added.)
+    if (auxRhythmRun && p.aux.enabled && p.aux.modTarget == Patch::Aux::ModTarget::filter && p.aux.modAmount > 0.0)
+        wantedTone += static_cast<float> (36.0 * p.aux.modAmount) * auxEnvNow;
     const float c = smoothingPrimed ? math::smoothingCoefficient (0.015, hostRate / controlPeriod) : 1.0f;
     toneNote += c * (wantedTone - toneNote);
     resonanceSmoothed += c * (static_cast<float> (p.resonance) - resonanceSmoothed);
@@ -3054,9 +3070,261 @@ void Synth::startOrganicGrains (Voice& v) noexcept
     v.organicGrainsRevision = grainsCRevision;
 }
 
+//==============================================================================
+// D / AUX (docs/aux): its own stereo bus beside the voices.
+
+void Synth::setAuxExternal (const float* left, const float* right, int length, int latency) noexcept
+{
+    auxExternal.left = left;
+    auxExternal.right = right;
+    auxExternal.length = left != nullptr && right != nullptr ? std::max (0, length) : 0;
+    auxExternal.read = 0;
+    auxExternal.latency = std::clamp (latency, 0, maxExternalLatency - 1);
+}
+
+void Synth::auxKeyEvent (const std::uint8_t* data, int size) noexcept
+{
+    // The played keys: D's filter envelope and key tracking (as Kontakt's bus), and D NOISE's
+    // gate - a note after silence opens it, the last one released closes it (legato: one gate).
+    const int before = auxFilter.heldCount;
+    busKeyEvent (auxFilter, data, size);
+    const int after = auxFilter.heldCount;
+    if (before == 0 && after > 0)
+        auxGate.noteOn();
+    else if (before > 0 && after == 0)
+        auxGate.noteOff();
+}
+
+void Synth::renderAux (int numSamples) noexcept
+{
+    const auto& a = current.aux;
+    if (a.enabled && ! auxRunning)
+    {
+        // Powered: from rest (its filter, noise, gate and delay), the mode it plays now.
+        auxRunning = true;
+        auxModePlaying = a.mode;
+        auxGainNow = 0.0f;
+        auxFilterMix = a.filterFollow ? 1.0f : 0.0f;
+        for (auto& f : auxFilter.ladder)
+            f.reset();
+        for (auto& f : auxFilter.ota)
+            f.reset();
+        for (auto& h : auxFilter.highPass)
+            h.reset();
+        auxFilter.countdown = 0;
+        for (std::size_t c = 0; c < auxNoise.size(); ++c)
+        {
+            auxNoise[c] = {};
+            auxNoise[c].rng.reseed (osp::Prng::deriveSeed (current.seed, c, 0x41555844ull));
+        }
+        auxMovePhase = 0.0;
+        auxDelayAt = 0;
+        std::fill (auxDelayL.begin(), auxDelayL.end(), 0.0f);
+        std::fill (auxDelayR.begin(), auxDelayR.end(), 0.0f);
+        auxEnvNow = 0.0f;
+        auxModNow = 0.0f;
+    }
+    // RHYTHM: the loop (and its envelope) on the host's clock while the transport runs; with no
+    // transport at all (a standalone), on its own clock from when it was powered. Powered off:
+    // neither (MUTE keeps both: the envelope still modulates).
+    auxRhythmRun = auxRunning && a.enabled && auxModePlaying == Patch::Aux::Mode::rhythm && auxLoop.loop() != nullptr
+                   && numSamples <= static_cast<int> (auxL.size());
+    if (! auxRhythmRun)
+    {
+        auxEnvShown.store (0.0f, std::memory_order_relaxed);
+        return;
+    }
+    const double bpm = timing.valid && timing.bpm > 1.0 ? timing.bpm : 120.0;
+    const double perSample = bpm / 60.0 / hostRate;
+    const bool hostClock = timing.valid;
+    const double q0 = hostClock ? ppqAtBlock + static_cast<double> (blockOffset) * perSample : auxFreePpq;
+    const bool running = hostClock ? timing.playing : true;
+    if (! hostClock)
+        auxFreePpq += static_cast<double> (numSamples) * perSample;
+    const auto n = static_cast<std::size_t> (numSamples);
+    std::fill (auxL.begin(), auxL.begin() + static_cast<std::ptrdiff_t> (n), 0.0f);
+    std::fill (auxR.begin(), auxR.begin() + static_cast<std::ptrdiff_t> (n), 0.0f);
+    rhythm::LoopPlayer::Settings settings;
+    settings.sync = a.sync;
+    settings.tempoFactor = std::clamp (a.rate, 0.25, 4.0);
+    auxLoop.render (auxL.data(), auxR.data(), 1.0f, auxLevelBuf.data(), auxTransientBuf.data(), numSamples, q0, perSample, running, settings);
+    // Its envelope: the loop's level above SENSITIVITY's threshold, through ATTACK / RELEASE.
+    const float threshold = static_cast<float> (0.6 * (1.0 - std::clamp (a.sensitivity, 0.0, 1.0)));
+    const float attack = static_cast<float> (1.0 - std::exp (-1.0 / (std::max (0.5, a.attackMs) * 0.001 * hostRate)));
+    const float release = static_cast<float> (1.0 - std::exp (-1.0 / (std::max (5.0, a.releaseMs) * 0.001 * hostRate)));
+    float env = auxModNow;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        const float x = std::clamp ((auxLevelBuf[i] - threshold) / std::max (0.05f, 1.0f - threshold), 0.0f, 1.0f);
+        env += (x > env ? attack : release) * (x - env);
+        auxEnvBuf[i] = env;
+    }
+    auxModNow = env;
+    auxEnvShown.store (env, std::memory_order_relaxed);
+}
+
+float Synth::auxNoiseSample (int channel, float lowCoefficient) noexcept
+{
+    auto& c = auxNoise[static_cast<std::size_t> (channel)];
+    const auto w = static_cast<float> (c.rng.bipolar());
+    float x = 0.0f;
+    switch (std::clamp (current.aux.noiseColor, 0, 2))
+    {
+        case 1:   // PINK (Kellet's filter)
+        {
+            auto& b = c.pink;
+            b[0] = 0.99886f * b[0] + w * 0.0555179f;
+            b[1] = 0.99332f * b[1] + w * 0.0750759f;
+            b[2] = 0.96900f * b[2] + w * 0.1538520f;
+            b[3] = 0.86650f * b[3] + w * 0.3104856f;
+            b[4] = 0.55000f * b[4] + w * 0.5329522f;
+            b[5] = -0.7616f * b[5] - w * 0.0168980f;
+            x = 0.11f * (b[0] + b[1] + b[2] + b[3] + b[4] + b[5] + b[6] + w * 0.5362f);
+            b[6] = w * 0.115926f;
+            break;
+        }
+        case 2:   // BROWN (leaky integration)
+            c.brown = (c.brown + 0.02f * w) / 1.02f;
+            x = 3.5f * c.brown;
+            break;
+        default:   // WHITE
+            x = 0.5f * w;
+            break;
+    }
+    c.low += lowCoefficient * (x - c.low);
+    return c.low;
+}
+
+void Synth::mixAux (float* left, float* right, int numSamples) noexcept
+{
+    const auto& a = current.aux;
+    if (! auxRunning)
+        return;   // (never powered: the instrument as before, bit for bit)
+    const int n = std::min (numSamples, maxBlock);
+    // Another mode: the one playing fades out first (10 ms), then the new one fades in.
+    const bool switching = a.mode != auxModePlaying;
+    if (switching && auxGainNow <= 0.0f)
+    {
+        auxModePlaying = a.mode;
+        auxGate.noteOff();
+        auxGate.kill();
+    }
+    const float level = a.levelDb <= -47.99 ? 0.0f : math::dbToGain (static_cast<float> (a.levelDb));
+    const float target = a.enabled && a.heard && a.mode == auxModePlaying ? level : 0.0f;
+    const auto un = static_cast<std::size_t> (n);
+    // Its source, at the host rate.
+    switch (auxModePlaying)
+    {
+        case Patch::Aux::Mode::rhythm:
+            if (! auxRhythmRun)
+            {
+                std::fill (auxL.begin(), auxL.begin() + static_cast<std::ptrdiff_t> (un), 0.0f);
+                std::fill (auxR.begin(), auxR.begin() + static_cast<std::ptrdiff_t> (un), 0.0f);
+            }
+            break;
+        case Patch::Aux::Mode::noise:
+        {
+            auxGate.setTimes (std::max (0.001, a.noiseAttack), 0.05, 1.0, std::max (0.005, a.noiseRelease));
+            const double rateHz = 0.15 + 0.6 * std::clamp (a.noiseMovement, 0.0, 1.0);
+            const float width = static_cast<float> (std::clamp (a.noiseWidth, 0.0, 1.0));
+            for (std::size_t i = 0; i < un; ++i)
+            {
+                const float gate = a.noiseFree ? 1.0f : auxGate.next();
+                // TONE: 200 Hz .. 20 kHz; MOVEMENT wanders it up to an octave and a half each way.
+                auxMovePhase += rateHz / hostRate;
+                auxMovePhase -= std::floor (auxMovePhase);
+                const double octaves = std::clamp (a.noiseTone, 0.0, 1.0) * 6.64 + 1.5 * std::clamp (a.noiseMovement, 0.0, 1.0) * std::sin (2.0 * math::pi * auxMovePhase);
+                const double hz = std::min (0.45 * hostRate, 200.0 * std::exp2 (octaves));
+                const auto coefficient = static_cast<float> (1.0 - std::exp (-2.0 * math::pi * hz / hostRate));
+                const float l = auxNoiseSample (0, coefficient), r2 = auxNoiseSample (1, coefficient);
+                auxL[i] = gate * l;
+                auxR[i] = gate * ((1.0f - width) * l + width * r2);
+            }
+            break;
+        }
+        case Patch::Aux::Mode::kontakt:
+        {
+            const int from = auxExternal.read;
+            auxExternal.read += n;
+            const int available = std::clamp (auxExternal.length - from, 0, n);
+            for (int i = 0; i < n; ++i)
+            {
+                const auto k = static_cast<std::size_t> (i);
+                auxL[k] = i < available ? auxExternal.left[from + i] : 0.0f;
+                auxR[k] = i < available ? auxExternal.right[from + i] : 0.0f;
+            }
+            break;
+        }
+    }
+    // KONTAKT reports latency: everything before D waits for it (the voices, C's buses), so all
+    // meet; the reported latency is C's plus D's.
+    if (const int lag = auxModePlaying == Patch::Aux::Mode::kontakt && a.enabled ? auxExternal.latency : 0; lag > 0)
+        for (int i = 0; i < n; ++i)
+        {
+            const int at = (auxDelayAt - lag + maxExternalLatency) % maxExternalLatency;
+            const float l = left[i], r = right[i];
+            left[i] = auxDelayL[static_cast<std::size_t> (at)];
+            right[i] = auxDelayR[static_cast<std::size_t> (at)];
+            auxDelayL[static_cast<std::size_t> (auxDelayAt)] = l;
+            auxDelayR[static_cast<std::size_t> (auxDelayAt)] = r;
+            auxDelayAt = (auxDelayAt + 1) % maxExternalLatency;
+        }
+    auxLatencyNow = auxModePlaying == Patch::Aux::Mode::kontakt && a.enabled ? auxExternal.latency : 0;
+    // Its FILTER: the cards' (TONE and what moves it, RESONANCE, DRIVE, the model, the high-pass,
+    // key tracking, the envelope from the played keys), its stereo bus filter; FOLLOW off
+    // crossfades it out (10 ms).
+    const bool rhythmMod = auxRhythmRun && a.modAmount > 0.0;
+    configureBusFilter (auxFilter);
+    auxFilter.extraSemis = rhythmMod && a.modTarget == Patch::Aux::ModTarget::auxFilter ? static_cast<float> (36.0 * a.modAmount) * auxModNow : 0.0f;
+    const float step = static_cast<float> (1.0 / (0.010 * hostRate));
+    const float mixTarget = a.filterFollow ? 1.0f : 0.0f;
+    if (mixTarget > 0.0f || auxFilterMix > 0.0f)
+    {
+        if (mixTarget < 1.0f || auxFilterMix < 1.0f)
+        {
+            std::copy (auxL.begin(), auxL.begin() + static_cast<std::ptrdiff_t> (un), auxDryL.begin());
+            std::copy (auxR.begin(), auxR.begin() + static_cast<std::ptrdiff_t> (un), auxDryR.begin());
+        }
+        filterBus (auxFilter, auxL.data(), auxR.data(), n);
+        if (mixTarget < 1.0f || auxFilterMix < 1.0f)
+            for (std::size_t i = 0; i < un; ++i)
+            {
+                auxFilterMix = auxFilterMix < mixTarget ? std::min (mixTarget, auxFilterMix + step) : std::max (mixTarget, auxFilterMix - step);
+                auxL[i] = auxFilterMix * auxL[i] + (1.0f - auxFilterMix) * auxDryL[i];
+                auxR[i] = auxFilterMix * auxR[i] + (1.0f - auxFilterMix) * auxDryR[i];
+            }
+    }
+    // Its level (and MUTE / SOLO / POWER), ramped (10 ms): never a click.
+    const bool levelMod = rhythmMod && a.modTarget == Patch::Aux::ModTarget::auxLevel;
+    const auto amount = static_cast<float> (std::clamp (a.modAmount, 0.0, 1.0));
+    float g = auxGainNow, peak = 0.0f;
+    for (std::size_t i = 0; i < un; ++i)
+    {
+        const float want = switching ? 0.0f : target;
+        g = g < want ? std::min (want, g + step * std::max (1.0f, want)) : std::max (want, g - step * std::max (1.0f, g));
+        const float m = levelMod ? 1.0f - amount * (1.0f - auxEnvBuf[i]) : 1.0f;
+        const float l = g * m * auxL[i], r = g * m * auxR[i];
+        left[i] += l;
+        right[i] += r;
+        peak = std::max (peak, std::max (std::abs (l), std::abs (r)));
+    }
+    auxGainNow = g;
+    auxPeakShown.store (peak, std::memory_order_relaxed);
+    if (! a.enabled && auxGainNow <= 0.0f)
+    {
+        auxRunning = auxRhythmRun = false;   // (faded out: back to the instrument as before)
+        auxLatencyNow = 0;
+        auxPeakShown.store (0.0f, std::memory_order_relaxed);
+    }
+}
+
 void Synth::externalKeyEvent (const std::uint8_t* data, int size) noexcept
 {
-    auto& f = externalFilter;
+    busKeyEvent (externalFilter, data, size);
+}
+
+void Synth::busKeyEvent (ExternalFilter& f, const std::uint8_t* data, int size) noexcept
+{
     if (size < 1)
         return;
     const int status = data[0] & 0xf0;
@@ -3183,7 +3451,7 @@ void Synth::filterBus (ExternalFilter& f, float* left, float* right, int n) noex
         if (--f.countdown <= 0)
         {
             f.countdown = 8;
-            const float note = f.baseNote + f.keyTrack * static_cast<float> (f.lastKey - 60) + envSemis;
+            const float note = f.baseNote + f.keyTrack * static_cast<float> (f.lastKey - 60) + envSemis + f.extraSemis;
             const double hz = std::clamp (440.0 * std::exp2 ((static_cast<double> (note) - 69.0) / 12.0), 8.0, 0.45 * hostRate);
             f.cutoffHz = static_cast<float> (hz);
             f.g = static_cast<float> (std::tan (math::pi * hz / hostRate));
@@ -3636,12 +3904,14 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     effects.setShaperHandoff (dnaWanted);
 
     renderRhythm (numSamples);   // (first: C RHYTHM is this block's, ready for its control periods)
+    renderAux (numSamples);      // (D RHYTHM's loop and envelope, likewise)
     int pos = 0;
     while (pos < numSamples)
     {
         if (controlCountdown <= 0)
         {
             modRuntime.setRhythm (rhythmRun ? rhythmValues[static_cast<std::size_t> (pos)] : 0.0f);
+            auxEnvNow = auxRhythmRun ? auxEnvBuf[static_cast<std::size_t> (pos)] : 0.0f;
             controlUpdate();
             controlCountdown = controlPeriod;
         }
@@ -3689,6 +3959,7 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
 
     mixRhythm (left, right, numSamples);   // card C's loop joins the voices (AUDIO, BOTH)
     mixExternal (left, right, numSamples);   // EXPERIMENT: card C's external instrument (and GLOBAL MORPH)
+    mixAux (left, right, numSamples);        // D / AUX: its own bus, through its FILTER, into the shared stages below
 
     // The chorus (state version 4; off: the buffers untouched), on the voices' sum.
     chorus.setMode (current.chorusMode);

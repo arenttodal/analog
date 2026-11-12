@@ -714,3 +714,43 @@ TEST_CASE ("realtime: card C's external bus and GLOBAL MORPH (on / off, MORPH sw
     counting = false;
     CHECK (allocations.load() == 0);
 }
+
+TEST_CASE ("realtime: D / AUX's bus allocates nothing - its three modes, switches, MUTE, POWER, its filter and latency", "[realtime][aux]")
+{
+    Patch p = measurementPatch();
+    p.aux.enabled = true;
+    p.aux.mode = Patch::Aux::Mode::noise;
+    p.aux.modAmount = 0.5;
+    std::vector<float> ticks (static_cast<std::size_t> (2 * 48000), 0.0f);
+    for (std::size_t k = 0; k < 4; ++k)
+        for (std::size_t i = 0; i < 1000; ++i)
+            ticks[k * 24000 + i] = 0.5f * std::sin (0.26f * static_cast<float> (i)) * std::exp (-static_cast<float> (i) / 300.0f);
+    const auto loop = andor::analog::rhythm::prepareLoop (ticks.data(), ticks.data(), ticks.size(), 48000.0);
+    auto s = makeSynth (p, 48000.0, 4, 512);
+    s->setAuxLoop (loop.get());
+    std::vector<float> l (512), r (512), cl (512), cr (512);
+    for (std::size_t i = 0; i < cl.size(); ++i)
+        cl[i] = cr[i] = 0.2f * std::sin (0.031f * static_cast<float> (i));
+    counting = true;
+    for (int block = 0; block < 400; ++block)
+    {
+        if (block % 40 == 0)
+        {
+            const std::uint8_t on[3] { 0x90, static_cast<std::uint8_t> (48 + block / 40), 100 };
+            s->handleMidi (on, 3);
+            s->auxKeyEvent (on, 3);
+        }
+        if (block % 50 == 0)
+        {
+            p.aux.mode = static_cast<Patch::Aux::Mode> ((block / 50) % 3);
+            p.aux.heard = (block / 50) % 4 != 3;
+            p.aux.filterFollow = (block / 100) % 2 == 0;
+            p.aux.enabled = block < 350;
+            s->setPatch (p);
+        }
+        s->setAuxExternal (cl.data(), cr.data(), 512, block > 200 ? 256 : 0);
+        s->render (l.data(), r.data(), 512);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}

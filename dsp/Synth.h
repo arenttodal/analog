@@ -267,6 +267,24 @@ public:
     void externalKeyEvent (const std::uint8_t* data, int size) noexcept;
     /** Tests: the external bus's filter cutoff now (Hz), 0 while it is not running. */
     float externalCutoffHz() const noexcept { return externalRunning ? externalFilter.cutoffHz : 0.0f; }
+    //== D / AUX (docs/aux) ======================================================================
+    /** D RHYTHM's prepared loop (owned by the caller, alive while set; null: none). */
+    void setAuxLoop (const rhythm::PreparedLoop* loop) noexcept { auxLoop.setLoop (loop); }
+    /** D KONTAKT's bus for this block (the hosted instrument's output, its reported latency);
+        null: none. Read in order across the block's pieces, as setExternal's. */
+    void setAuxExternal (const float* left, const float* right, int length, int latency) noexcept;
+    /** One of the played keys' events (before any arpeggiator, channel 1): D NOISE's gate and
+        D's filter envelope and key tracking. */
+    void auxKeyEvent (const std::uint8_t* data, int size) noexcept;
+    /** Telemetry (the strip, tests): D's envelope (0..1), its playhead (source seconds; -1 idle),
+        its output level now (peak, 0..1), and its filter cutoff (Hz; 0: not filtered). */
+    float auxEnvelope() const noexcept { return auxEnvShown.load (std::memory_order_relaxed); }
+    double auxPlayheadSeconds() const noexcept { return auxLoop.playheadSeconds(); }
+    float auxPeak() const noexcept { return auxPeakShown.load (std::memory_order_relaxed); }
+    float auxCutoffHz() const noexcept { return auxRunning && current.aux.filterFollow ? auxFilter.cutoffHz : 0.0f; }
+    /** Whether D's bus runs (it does nothing at all while off and faded out). */
+    bool auxActive() const noexcept { return auxRunning; }
+
     /** Tests: RHYTHM's loop's filter cutoff now (Hz), 0 while it is not filtered. */
     float rhythmCutoffHz() const noexcept { return rhythmFilter.running ? rhythmFilter.cutoffHz : 0.0f; }
     const GlobalMorph& globalMorphState() const noexcept { return globalMorph; }
@@ -763,8 +781,41 @@ private:
             depth and velocity, the highest), given per block - not this bus's. */
         bool voiceEnvelope = false;
         float envFrom = 0.0f, envTo = 0.0f;   ///< semitones, across the block
+        float extraSemis = 0.0f;              ///< a modulation's offset this block (D RHYTHM's envelope)
         bool running = false;
-    } externalFilter, rhythmFilter;
+    } externalFilter, rhythmFilter, auxFilter;
+    void busKeyEvent (ExternalFilter& f, const std::uint8_t* data, int size) noexcept;
+    // D / AUX's bus.
+    void renderAux (int numSamples) noexcept;   ///< its envelope (control rate reads it) before the voices
+    void mixAux (float* left, float* right, int numSamples) noexcept;
+    float auxNoiseSample (int channel, float toneCoefficient) noexcept;
+    rhythm::LoopPlayer auxLoop;
+    std::vector<float> auxL, auxR, auxDryL, auxDryR, auxLevelBuf, auxTransientBuf, auxEnvBuf, auxDelayL, auxDelayR;
+    struct AuxExternal
+    {
+        const float* left = nullptr;
+        const float* right = nullptr;
+        int length = 0, read = 0, latency = 0;
+    } auxExternal;
+    struct AuxNoiseChannel
+    {
+        osp::Prng rng { 1 };
+        std::array<float, 7> pink {};
+        float brown = 0.0f, low = 0.0f;
+    };
+    std::array<AuxNoiseChannel, 2> auxNoise {};
+    Envelope auxGate;            ///< D NOISE: the keys' gate
+    double auxMovePhase = 0.0;
+    bool auxRunning = false, auxRhythmRun = false;
+    Patch::Aux::Mode auxModePlaying = Patch::Aux::Mode::rhythm;
+    float auxGainNow = 0.0f, auxFilterMix = 1.0f, auxEnvNow = 0.0f, auxModNow = 0.0f;
+    int auxDelayAt = 0, auxLatencyNow = 0;
+    double auxFreePpq = 0.0;
+public:
+    /** D's latency now (samples: D KONTAKT's reported, while it plays; else 0). */
+    int auxLatency() const noexcept { return auxLatencyNow; }
+private:
+    std::atomic<float> auxEnvShown { 0.0f }, auxPeakShown { 0.0f };
     void updateExternalFilter() noexcept;   ///< control rate: the cards' filter settings
     void configureBusFilter (ExternalFilter& f) noexcept;
     void filterExternal (int n) noexcept;   ///< the bus (externalL / R) through it

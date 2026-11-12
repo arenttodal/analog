@@ -264,6 +264,35 @@ struct Patch
         double depth = 1.0;           ///< 0..1: C RHYTHM's height
     };
     Rhythm rhythm;
+    /** D / AUX (docs/aux): an optional fourth source on its own stereo bus - RHYTHM (a loop on
+        the host's grid), NOISE (played by the keys) or KONTAKT (one hosted instrument) - mixed
+        with the voices before the shared chorus, KALEIDOSCOPE and FX route, through its own
+        stereo filter that follows the cards' FILTER. Off (the default, every older patch): not
+        a sample of it, the instrument as before, bit for bit. */
+    struct Aux
+    {
+        enum class Mode { rhythm, noise, kontakt };       ///< stable order: append only
+        enum class ModTarget { filter, auxFilter, auxLevel };
+        bool enabled = false;          ///< POWER: its audio and its envelope (MUTE keeps the envelope)
+        Mode mode = Mode::rhythm;
+        double levelDb = -6.0;         ///< -48 and below: silent
+        bool heard = true;             ///< its MUTE / SOLO, resolved with the cards'
+        bool filterFollow = true;      ///< through the cards' FILTER (the default)
+        // RHYTHM
+        bool sync = true;              ///< on the host's grid (a loop with a pulse), else FREE
+        double rate = 1.0;             ///< its musical speed: 0.25 / 0.5 / 1 / 2 / 4 x its detected tempo
+        double modAmount = 0.0;        ///< 0..1: its envelope onto modTarget (0: no modulation)
+        ModTarget modTarget = ModTarget::filter;
+        double sensitivity = 0.5, attackMs = 5.0, releaseMs = 120.0;
+        // NOISE
+        int noiseColor = 0;            ///< 0 WHITE, 1 PINK, 2 BROWN
+        double noiseTone = 0.75;       ///< 0..1: its low-pass, about 200 Hz .. 20 kHz
+        bool noiseFree = false;        ///< FREE: always sounding; else played by the keys
+        double noiseAttack = 0.005, noiseRelease = 0.3;   ///< seconds (the keys' gate)
+        double noiseMovement = 0.0;    ///< 0..1: its tone wanders
+        double noiseWidth = 0.5;       ///< 0 mono .. 1 two independent channels
+    };
+    Aux aux;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12
     double lfoPitch2 = 0.4;
     double lfoWidth1 = 0.15;        ///< pulse width, -0.45..0.45
