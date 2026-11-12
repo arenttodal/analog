@@ -8,6 +8,7 @@
 #include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
 #include "AnalogRacks.h"
+#include "AuxUI.h"
 #include "FxIdentity.h"
 #include "FxRack.h"
 #include "FxRouting.h"
@@ -347,7 +348,9 @@ const ProductInfo& productInfo()
         p.productRacks = { { andor::analog::params::tone, osp::plugin::rack::Kind::filter, andor::analog::createFilterRack },
                            { andor::analog::params::morphPosition, osp::plugin::rack::Kind::morph, andor::analog::createMorphRack },
                            // The FX library's rack: no macro of its own; FX ROUTING opens it.
-                           { {}, osp::plugin::rack::Kind::fx, andor::analog::createFxRack } };
+                           { {}, osp::plugin::rack::Kind::fx, andor::analog::createFxRack },
+                           // D / AUX's rack: no macro; its strip opens it (a double-click, its menu).
+                           { {}, osp::plugin::rack::Kind::aux, andor::analog::createAuxRack } };
         // MOVEMENT's two lanes (state version 11): A is MOVEMENT itself, B a second one.
         {
             using namespace andor::analog::params;
@@ -404,6 +407,10 @@ const ProductInfo& productInfo()
             p.rackFaceplates = { { Kind::movement, movement }, { Kind::echo, echo }, { Kind::space, space } };
             p.fullBleedRacks = true;
         }
+        // D / AUX (docs/aux): the optional strip under the cards, shown or hidden from the main
+        // menu (a view setting, hidden by default; the sound never depends on it).
+        p.auxStrip = ProductInfo::AuxStrip {};
+        p.auxStrip->create = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createAuxStrip (host); };
         p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)

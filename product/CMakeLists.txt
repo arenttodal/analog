@@ -22,6 +22,7 @@ andor_add_instrument(ANDOR_Analog
         Source/UserMacroUI.cpp
         Source/SatellitePanel.cpp
         Source/RhythmPanel.cpp
+        Source/AuxUI.cpp
         Source/ExternalInstrument.cpp
         Source/AnalogRacks.cpp
         Source/FxRouting.cpp
@@ -50,7 +51,7 @@ juce_add_binary_data(analog_materials
 target_link_libraries(ANDOR_Analog PRIVATE analog_materials)
 
 andor_add_instrument_tests(ANDOR_Analog andor_analog_tests
-    SOURCES tests/AnalogProductTests.cpp tests/AnalogSubPanelTests.cpp tests/ExternalInstrumentTests.cpp
+    SOURCES tests/AnalogProductTests.cpp tests/AnalogSubPanelTests.cpp tests/ExternalInstrumentTests.cpp tests/AuxProductTests.cpp
     GOLDEN golden/parameter-schema.txt)
 
 # The Kontakt experiment's stand-in (tests only, never shipped): a small VST3 instrument the

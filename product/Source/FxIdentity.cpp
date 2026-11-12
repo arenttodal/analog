@@ -102,7 +102,8 @@ const FxVisualIdentity& synthIdentity (SynthRack rack) noexcept
 {
     static const FxVisualIdentity filter = make (0xff5f7462, 0xffc9d6c2, Motif::resonance, "FILTER", "SYNTH  /  VOICE FILTER");
     static const FxVisualIdentity morph = make (0xffa66f58, 0xffe4c7b4, Motif::weave, "MORPH", "SYNTH  /  SPECTRAL MORPH");
-    return rack == SynthRack::voiceFilter ? filter : morph;
+    static const FxVisualIdentity aux = make (0xff6e5568, 0xffe2cfdc, Motif::grooves, "AUX", "SOURCE  /  D AUX");
+    return rack == SynthRack::voiceFilter ? filter : rack == SynthRack::aux ? aux : morph;
 }
 
 void paintFxMotif (juce::Graphics& g, Motif motif, juce::Rectangle<float> b, const FxVisualIdentity& id, MotifScale scale)

@@ -72,7 +72,8 @@ const FxVisualIdentity& visualIdentityFor (fx::Type type) noexcept;
 enum class SynthRack
 {
     voiceFilter,
-    morph
+    morph,
+    aux   ///< D / AUX (docs/aux): a source rack, plum enamel
 };
 const FxVisualIdentity& synthIdentity (SynthRack rack) noexcept;
 
