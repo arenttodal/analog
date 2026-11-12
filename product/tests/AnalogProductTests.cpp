@@ -11025,3 +11025,29 @@ TEST_CASE ("SUB's display lights the keys being played (with their place on the 
     display.pollHeldKeys();
     CHECK (display.heldKeys().none());
 }
+
+TEST_CASE ("card C with an unpitched recording says HYBRID in the source-name line, not \"?\"", "[analog][ui][heading]")
+{
+    // Rain-like noise: no pitch is found in it (deterministic: osp::Prng).
+    Scratch scratch;
+    osp::AudioData audio;
+    audio.sampleRate = 48000.0;
+    audio.channels.assign (2, std::vector<float> (static_cast<std::size_t> (2.0 * audio.sampleRate)));
+    osp::Prng prng (7);
+    for (std::size_t i = 0; i < audio.channels[0].size(); ++i)
+        audio.channels[0][i] = audio.channels[1][i] = 0.3f * static_cast<float> (2.0 * prng.nextDouble() - 1.0);
+    const auto file = scratch.dir.getChildFile ("rain.wav");
+    std::string error;
+    REQUIRE (osp::io::writeAudioFile (std::filesystem::path (file.getFullPathName().toStdString()), audio, osp::io::SampleFormat::pcm24, error));
+    ShellProcessor p;
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    loadOrganic (p, file);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.refreshNow();
+    auto& card = ui.engineCard (1);
+    INFO ("root '" << card.headerRoot() << "', name '" << card.headerName() << "'");
+    CHECK (card.headerRoot().isEmpty());
+    CHECK (card.headerName() == "HYBRID");
+}

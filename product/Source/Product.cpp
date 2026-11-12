@@ -484,6 +484,7 @@ const ProductInfo& productInfo()
         p.arpCompanion = { "sub", andor::analog::params::subEnabled, [] (osp::plugin::InstrumentHost& host) { return andor::analog::createSubPopover (host); } };
         // USER MACROS V1.1: the CORE | USER tab and six USER macros in the knobs' places.
         p.userMacros = andor::analog::usermacros::descriptor();
+        p.unpitchedSourceName = "HYBRID";   // (card C with an unpitched recording: HYBRID, not "?")
         p.rhythmSource = true;   // (C RHYTHM in the routes' source list: RHYTHMIC MORPH)
         // SATELLITE: switched and opened from the per-card arpeggiator's title row.
         p.satellite = andor::shell::ProductInfo::Satellite {
