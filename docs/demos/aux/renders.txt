@@ -14,3 +14,16 @@ aux-04-legacy-null-difference.wav
                                 The instrument with D never powered minus the same instrument with
                                 D configured (NOISE, +6 dB, a loop) but off: digital silence
                                 (max difference 0) - D off is bit-identical.
+
+AUX Refinement Addendum 03 (product test "AUX 03 renders ...", hidden tag [aux03]):
+ANALOG_RENDER_DIR=<dir> andor_analog_tests "AUX 03 renders*"
+A 100 BPM loop (a 440 Hz pluck on each beat, a noise tick off the beat), D RHYTHM soloed, 6 s:
+aux03-01-pitch-0.wav               as recorded
+aux03-02-pitch-minus12.wav         PITCH -12 st
+aux03-03-pitch-plus12.wav          PITCH +12 st
+aux03-04-oct-minus1.wav            OCT -1
+aux03-05-oct-plus1.wav             OCT +1
+aux03-06-rate-2x-pitch-plus5.wav   RATE 2x, PITCH +5 st
+aux03-07-pitch-automated.wav       PITCH swept -12 .. +12 st over 6 s, one value a block
+Every hit lands on the unpitched loop's grid (within 6 ms; checked in the test): the tempo and
+the loop's length never change. Peaks -8.8 .. -8.9 dBFS throughout (no spike).
