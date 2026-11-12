@@ -275,6 +275,10 @@ namespace andor::analog::params
     inline const juce::String auxNoiseRelease = "analog.aux.noise.release";
     inline const juce::String auxNoiseMovement = "analog.aux.noise.movement";
     inline const juce::String auxNoiseWidth = "analog.aux.noise.width";
+    // AUX Addendum 03: D RHYTHM's transposition (new IDs; nothing reused). auxFilterFollow stays,
+    // hidden and unread (state recall only): D always goes through the FILTER now.
+    inline const juce::String auxPitch = "analog.aux.rhythm.pitch";     ///< -12..12 semitones
+    inline const juce::String auxOctave = "analog.aux.rhythm.octave";   ///< -2..2 octaves
     /** RATE's choices (its musical speed against the loop's detected tempo). */
     inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */

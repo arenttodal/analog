@@ -108,6 +108,9 @@ public:
         Status status = Status::none;
         juce::String name;      ///< the file's name (without extension)
         juce::String message;   ///< what went wrong (missing / error)
+        /** A replacement that failed (unreadable, no audio, not copied): the recording before
+            it plays on, unchanged, and this says why. Cleared by the next load. */
+        juce::String lastError;
     };
     /** Message thread: a recording (WAV, AIFF, FLAC) for D RHYTHM. It is copied into
         `assetFolder` (named by its content, as card C's imports), decoded and analysed for its
@@ -371,11 +374,13 @@ private:
     std::uint64_t auxGeneration = 0;
     AuxRecordingState auxState;
     juce::String auxAsset;                                   ///< the stored file's name ("" none)
+    juce::String auxLoading;                                 ///< a replacement on its way (its name; "" none)
     std::shared_ptr<const rhythm::PreparedLoop> auxLatest;   ///< (the strip's display)
     osp::ModelExchange<LoadedLoop> auxExchange;              ///< (published under auxMutex)
     const LoadedLoop* auxPlaying = nullptr;                  ///< audio thread
     void publishAuxLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation, AuxRecordingState state, juce::String asset);
-    void decodeAuxRecording (juce::File stored, juce::String name, juce::String asset, std::uint64_t generation);
+    void decodeAuxRecording (juce::File stored, juce::String name, juce::String asset, std::uint64_t generation, bool keepOnFailure);
+    void failAuxLoad (std::uint64_t generation, const juce::String& why);
     ExternalInstrument auxKontakt;
     juce::MidiBuffer auxMidi;                 ///< D KONTAKT's lane, this block (preallocated)
     std::vector<float> auxExtL, auxExtR;      ///< its stereo bus, this block

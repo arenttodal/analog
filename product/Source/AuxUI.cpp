@@ -4,6 +4,8 @@
 #include "AnalogParameters.h"
 #include "Binding.h"
 #include "Design.h"
+#include "DropOwner.h"
+#include "EngineCard.h"
 #include "FxIdentity.h"
 #include "OspLookAndFeel.h"
 #include "RackControls.h"
@@ -120,7 +122,7 @@ namespace
                 using S = AnalogEngine::AuxRecordingState::Status;
                 const auto text = state.status == S::loading ? juce::String ("LOADING ") + state.name.toUpperCase()
                                   : state.status == S::missing || state.status == S::error ? state.message.toUpperCase()
-                                                                                          : juce::String ("DROP A LOOP OR CLICK LOAD");
+                                                                                          : juce::String ("DROP A LOOP OR CLICK TO LOAD");
                 g.drawText (text, area, juce::Justification::centred, true);
                 return;
             }
@@ -220,7 +222,7 @@ namespace
         }
         // KONTAKT: its state and name, and its level over time as a bar.
         g.setFont (fonts::label (compact ? 10.0f : 12.0f));
-        juce::String text = "KONTAKT NOT LOADED" + dot() + "LOAD HOSTS IT FOR D";
+        juce::String text = "KONTAKT NOT LOADED" + dot() + "CLICK TO LOAD";
         if (engine != nullptr)
         {
             const auto& k = engine->auxInstrument();
@@ -242,52 +244,69 @@ namespace
     }
 
     //==========================================================================
-    /** A small on / off key bound to one of D's switches (M, S): a ceramic key, its letter lit
-        while on (SOLO in D's plum, MUTE in graphite), as the cards' M / S. */
-    class AuxKey final : public juce::Button
+    /** What D does with files dropped on its strip or rack (only ever D: never card C). One
+        WAV / AIFF / FLAC: D RHYTHM's loop (D switches to RHYTHM). Anything else: refused, with
+        the reason, nothing changed. */
+    juce::String loadAuxFiles (InstrumentHost& host, const juce::StringArray& files)
     {
-    public:
-        AuxKey (InstrumentHost& h, const juce::String& id, const juce::String& letter, juce::Colour litColour)
-            : juce::Button (letter), host (h), lit (litColour),
-              attachment (h.apvts(), id, *this)
-        {
-            setClickingTogglesState (true);
-            setWantsKeyboardFocus (true);
-            setMouseCursor (juce::MouseCursor::PointingHandCursor);
-            binding::tag (*this, id);
-        }
+        if (files.size() != 1)
+            return "ONE RECORDING AT A TIME";
+        if (! isAudioFile (files[0]))
+            return "NOT A WAV, AIFF OR FLAC RECORDING";
+        auto* engine = engineOf (host);
+        if (engine == nullptr)
+            return {};
+        setParameter (host, params::auxMode, 0.0f);   // (a recording is D RHYTHM's)
+        engine->loadAuxRecording (juce::File (files[0]), importFolder (host));
+        return {};
+    }
 
-        void paintButton (juce::Graphics& g, bool over, bool down) override
-        {
-            using namespace design;
-            const auto r = getLocalBounds().toFloat().reduced (1.0f);
-            const bool on = getToggleState();
-            draw::button (g, r, 6.0f, on, over || down, lit);
-            g.setColour (on ? juce::Colours::white : colour::textSecondary);
-            g.setFont (fonts::make (12.0f, fonts::Weight::medium, 0.04f));
-            g.drawText (getButtonText(), r, juce::Justification::centred, false);
-            if (hasKeyboardFocus (false))
+    /** A click on D's well (the strip's or the rack's): RHYTHM browses for a loop, KONTAKT loads
+        it (or opens its window); NOISE has nothing to load. */
+    void clickAuxSurface (InstrumentHost& host, juce::Component& near)
+    {
+        const int mode = modeOf (host);
+        if (mode == 0)
+            aux::chooseRecording (host, near);
+        else if (mode == 2)
+            if (auto* engine = engineOf (host))
             {
-                g.setColour (colour::text.withAlpha (0.35f));
-                g.drawRoundedRectangle (r.expanded (1.0f), 7.0f, 1.0f);
+                auto& k = engine->auxInstrument();
+                if (k.state() == ExternalInstrument::State::ready)
+                    k.openEditor();
+                else
+                    k.loadKontakt();
             }
+    }
+
+    /** The drop target and a refusal's reason, over a well (strip or rack). */
+    void paintDropState (juce::Graphics& g, juce::Rectangle<float> well, bool over, const juce::String& notice, float radius)
+    {
+        if (over)
+        {
+            g.setColour (aux::onDark().withAlpha (0.14f));
+            g.fillRoundedRectangle (well, radius);
+            g.setColour (aux::onDark().withAlpha (0.9f));
+            g.drawRoundedRectangle (well.reduced (1.0f), radius, 1.5f);
         }
+        if (notice.isNotEmpty())
+        {
+            auto band = well.reduced (10.0f, 4.0f).removeFromBottom (14.0f);
+            g.setColour (juce::Colour (0xffe9b4a4));
+            g.setFont (fonts::label (10.0f));
+            g.drawText (notice, band, juce::Justification::centredLeft, true);
+        }
+    }
 
-    private:
-        InstrumentHost& host;
-        juce::Colour lit;
-        juce::AudioProcessorValueTreeState::ButtonAttachment attachment;
-    };
-
-    /** A plain text key on the ceramic (ROUTE, ...): its word, a quiet chevron or dots. */
+    /** A plain text key on the ceramic (the rack's LOAD KONTAKT / OPEN / UNLOAD). */
     class TextKey final : public juce::Button
     {
     public:
-        explicit TextKey (const juce::String& text, bool dotsOnly = false, bool menu = false) : juce::Button (text), dots (dotsOnly), chevron (menu)
+        explicit TextKey (const juce::String& text) : juce::Button (text)
         {
             setWantsKeyboardFocus (true);
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
-            setTitle (dots ? juce::String ("D AUX menu") : text);
+            setTitle (text);
         }
 
         void paintButton (juce::Graphics& g, bool over, bool down) override
@@ -296,47 +315,114 @@ namespace
             const auto r = getLocalBounds().toFloat().reduced (1.0f);
             draw::button (g, r, 6.0f, down, over, aux::colour());
             g.setColour (colour::textSecondary);
-            if (dots)
-            {
-                for (int i = -1; i <= 1; ++i)
-                    g.fillEllipse (juce::Rectangle<float> (3.0f, 3.0f).withCentre (r.getCentre().translated (6.0f * static_cast<float> (i), 0.0f)));
-            }
-            else
-            {
-                g.setFont (fonts::make (11.0f, fonts::Weight::medium, 0.08f));
-                g.drawText (getButtonText(), chevron ? r.withTrimmedRight (12.0f) : r, juce::Justification::centred, false);
-                if (chevron)   // (a menu: ROUTE)
-                {
-                    juce::Path p;
-                    const auto c = juce::Point<float> (r.getRight() - 11.0f, r.getCentreY());
-                    p.startNewSubPath (c.x - 3.0f, c.y - 1.5f);
-                    p.lineTo (c.x, c.y + 1.5f);
-                    p.lineTo (c.x + 3.0f, c.y - 1.5f);
-                    g.strokePath (p, juce::PathStrokeType (1.2f));
-                }
-            }
+            g.setFont (fonts::make (11.0f, fonts::Weight::medium, 0.08f));
+            g.drawText (getButtonText(), r, juce::Justification::centred, false);
             if (hasKeyboardFocus (false))
             {
                 g.setColour (colour::text.withAlpha (0.35f));
                 g.drawRoundedRectangle (r.expanded (1.0f), 7.0f, 1.0f);
             }
         }
+    };
 
-    private:
-        bool dots, chevron;
+    /** RACK: the cards' utility key (EQ / NOTES: the same ceramic face, size and type), pressed
+        in while the AUX rack is open. */
+    class RackKey final : public juce::Button, public skin::KeyFace
+    {
+    public:
+        RackKey() : juce::Button ("RACK")
+        {
+            setWantsKeyboardFocus (true);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            setTitle ("D AUX rack");
+            setTooltip ("D's rack: every setting of its mode (Escape or its X closes it)");
+        }
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            using namespace design;
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            const bool open = getToggleState();
+            if (! skin::drawnBySurface())
+                draw::button (g, r, 7.0f, open || down, over, colour::accent);
+            g.setFont (type::button (12.5f));
+            g.setColour (colour::text.withAlpha (open ? 0.92f : 0.62f));
+            g.drawText ("RACK", r, juce::Justification::centred, false);
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (colour::text.withAlpha (0.35f));
+                g.drawRoundedRectangle (r.expanded (1.0f), 8.0f, 1.0f);
+            }
+        }
+        void buttonStateChanged() override { skin::repaintKey (*this); }
+        skin::KeyRole keyRole() const override { return skin::KeyRole::eq; }
+        skin::KeyState keyState() const override
+        {
+            return getToggleState() || isDown() ? skin::KeyState::pressed : isOver() ? skin::KeyState::hover : skin::KeyState::normal;
+        }
+        juce::Rectangle<float> keyArea (juce::Rectangle<float> bounds) const override { return bounds.reduced (1.0f); }
+    };
+
+    /** The cards' menu dots (three, vertical: the quietest control). */
+    class MenuDots final : public juce::Button
+    {
+    public:
+        MenuDots() : juce::Button ("D AUX menu")
+        {
+            setWantsKeyboardFocus (true);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            setTitle ("D AUX menu");
+        }
+        void paintButton (juce::Graphics& g, bool over, bool) override
+        {
+            const auto r = getLocalBounds().toFloat();
+            if (over)
+            {
+                g.setColour (design::colour::text.withAlpha (0.06f));
+                g.fillRoundedRectangle (r, 6.0f);
+            }
+            const float d = 4.2f * r.getHeight() / 36.0f, gap = 8.5f * r.getHeight() / 36.0f;
+            g.setColour (design::colour::text.withAlpha (over ? 0.9f : 0.72f));
+            for (int i = -1; i <= 1; ++i)
+                g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (r.getCentre().translated (0.0f, static_cast<float> (i) * gap)));
+        }
     };
 
     //==========================================================================
-    /** The well's live picture (the strip's). */
-    class AuxDisplay final : public juce::Component
+    /** D's dark well in the strip (B's width and place): the loading surface - a click loads (by
+        mode), the readout at its top, the live picture under it. */
+    class AuxDisplay final : public juce::Component, public juce::SettableTooltipClient
     {
     public:
         explicit AuxDisplay (InstrumentHost& h) : host (h)
         {
-            setInterceptsMouseClicks (false, false);
             setTitle ("D AUX display");
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
         }
-        void paint (juce::Graphics& g) override { paintAuxPicture (g, getLocalBounds().toFloat(), host, true, shownPlayheadX); }
+        std::function<juce::String()> notice;   ///< (a refused drop, a failed load)
+        bool dropOver = false;
+        int headerWidth = 0;                     ///< the mode selector's room (the readout after it)
+        void paint (juce::Graphics& g) override
+        {
+            const auto b = getLocalBounds().toFloat();
+            g.setColour (graphite);
+            g.fillRoundedRectangle (b, 9.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.4f));
+            g.drawRoundedRectangle (b.reduced (0.5f), 9.0f, 1.0f);
+            auto inner = b.reduced (12.0f, 6.0f);
+            auto top = inner.removeFromTop (22.0f);
+            top.removeFromLeft (static_cast<float> (headerWidth) + 10.0f);
+            g.setColour (cream.withAlpha (0.6f));
+            g.setFont (fonts::label (10.0f));
+            g.drawText (aux::readout (host), top, juce::Justification::centredRight, true);
+            inner.removeFromTop (3.0f);
+            paintAuxPicture (g, inner, host, true, shownPlayheadX);
+            paintDropState (g, b, dropOver, notice != nullptr ? notice() : juce::String(), 9.0f);
+        }
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (e.mouseWasClicked() && e.getNumberOfClicks() == 1 && getLocalBounds().contains (e.getPosition()))
+                clickAuxSurface (host, *this);
+        }
         float playheadX() const noexcept { return shownPlayheadX; }
 
     private:
@@ -345,7 +431,7 @@ namespace
     };
 
     //==========================================================================
-    class AuxStrip final : public juce::Component, public juce::SettableTooltipClient, public juce::FileDragAndDropTarget, private juce::Timer
+    class AuxStrip final : public juce::Component, public juce::SettableTooltipClient, public osp::plugin::DropOwner, private juce::Timer
     {
     public:
         explicit AuxStrip (InstrumentHost& h) : host (h)
@@ -358,13 +444,15 @@ namespace
             power->setTitle ("D power");
             binding::tag (*power, params::auxEnabled);
             addAndMakeVisible (*power);
-            mute = std::make_unique<AuxKey> (h, params::auxMute, "M", juce::Colour (0xff4a4f50));
-            mute->setTooltip ("Mute D (its level glides down, it keeps running)");
+            // M / S: the cards' own keys (sizes, faces, states), bound to D's parameters.
+            mute = std::make_unique<LayerStateButton> (h, params::auxMute, false, aux::colour(), "D");
             addAndMakeVisible (*mute);
-            solo = std::make_unique<AuxKey> (h, params::auxSolo, "S", aux::colour());
-            solo->setTooltip ("Solo D (with the cards' SOLO: only the soloed sources are heard; only while D is on)");
+            solo = std::make_unique<LayerStateButton> (h, params::auxSolo, true, aux::onDark(), "D");
             addAndMakeVisible (*solo);
 
+            display = std::make_unique<AuxDisplay> (h);
+            display->notice = [this] { return currentNotice(); };
+            addAndMakeVisible (*display);
             modeSelector = std::make_unique<ValueSelector> (*h.apvts().getParameter (params::auxMode), juce::String());
             modeSelector->setPlain (true);
             modeSelector->setOnDark (true);
@@ -372,18 +460,12 @@ namespace
             modeSelector->setTooltip ("What D plays: a RHYTHM loop (host-synced), NOISE (white, pink, brown), or KONTAKT (its own instance, your keys)");
             modeSelector->setTitle ("D mode");
             binding::tag (*modeSelector, params::auxMode);
-            addAndMakeVisible (*modeSelector);
-            display = std::make_unique<AuxDisplay> (h);
-            addAndMakeVisible (*display);
-            load = std::make_unique<TextKey> ("LOAD");
-            load->onClick = [this] { loadForMode(); };
-            addAndMakeVisible (*load);
+            addAndMakeVisible (*modeSelector);   // (over the well, at its top left)
 
-            route = std::make_unique<TextKey> ("ROUTE", false, true);
-            route->setTooltip ("Where D goes: through the cards' FILTER (it follows the FILTER macro and rack) or around it, then the shared effects");
-            route->onClick = [this] { showRouteMenu(); };
-            addAndMakeVisible (*route);
-            menu = std::make_unique<TextKey> ("...", true);
+            rackKey = std::make_unique<RackKey>();
+            rackKey->onClick = [this] { setAuxRackOpen (*this, ! auxRackOpen (*this)); };
+            addAndMakeVisible (*rackKey);
+            menu = std::make_unique<MenuDots>();
             menu->setTooltip ("D's menu: hide the strip, its rack, reset");
             menu->onClick = [this] { showMenu(); };
             addAndMakeVisible (*menu);
@@ -406,9 +488,8 @@ namespace
             if (name == "solo") return solo.get();
             if (name == "mode") return modeSelector.get();
             if (name == "display") return display.get();
-            if (name == "route") return route.get();
+            if (name == "rack") return rackKey.get();
             if (name == "menu") return menu.get();
-            if (name == "load") return load.get();
             for (const auto& k : knobs)
                 if (k->captionText() == name)
                     return k.get();
@@ -448,44 +529,57 @@ namespace
                 }
         }
 
+        /** The three zones, aligned to the cards above: A's (D, M / S, AUX, power), B's well
+            (exactly B's dark well's place and width), C's (the mode's knobs, RACK, the menu). */
         void resized() override
         {
-            // [ D AUX ][ power ][ M S ] | [ well: MODE  display  LOAD ] | knobs ... | ROUTE ...
-            auto r = getLocalBounds().reduced (16, 0);
-            const int cy = getHeight() / 2;
-            badge = juce::Rectangle<int> (44, 44).withPosition (r.getX(), cy - 22);
-            r.removeFromLeft (44 + 10);
-            nameArea = juce::Rectangle<int> (44, 44).withPosition (r.getX(), cy - 22);
-            r.removeFromLeft (44 + 8);
-            power->setBounds (juce::Rectangle<int> (30, 30).withPosition (r.getX(), cy - 15));
-            r.removeFromLeft (30 + 12);
-            mute->setBounds (juce::Rectangle<int> (28, 24).withPosition (r.getX(), cy - 12));
-            solo->setBounds (juce::Rectangle<int> (28, 24).withPosition (r.getX() + 32, cy - 12));
-            r.removeFromLeft (60 + 18);
-
-            auto right = r.removeFromRight (30 + 8 + 86);
-            menu->setBounds (juce::Rectangle<int> (30, 26).withPosition (right.getRight() - 30, cy - 13));
-            route->setBounds (juce::Rectangle<int> (86, 26).withPosition (right.getX(), cy - 13));
-            r.removeFromRight (16);
-
-            // Three knob cells (the most any mode shows), right-aligned before ROUTE.
-            const int cellWidth = 92;
-            auto knobArea = r.removeFromRight (3 * cellWidth);
-            r.removeFromRight (16);
-            for (std::size_t i = 0; i < knobs.size(); ++i)
+            const int h = getHeight();
+            juce::Rectangle<int> wellA, wellB, wellC, cardA, cardC;
+            if (auto* editor = editorOf (*this))
             {
-                const int slot = 3 - static_cast<int> (knobs.size()) + static_cast<int> (i);
-                knobs[i]->setBounds (knobArea.getX() + slot * cellWidth, 4, cellWidth, getHeight() - 8);
+                const auto origin = getPosition();
+                wellA = editor->cardDisplayBounds (0) - origin;
+                wellB = editor->cardDisplayBounds (2) - origin;   // (B: OSC 2, the shell's layer C)
+                wellC = editor->cardDisplayBounds (1) - origin;
+                cardA = editor->engineCard (0).getBounds() - origin;
+                cardC = editor->engineCard (1).getBounds() - origin;
             }
-
-            well = r.withTrimmedTop (8).withTrimmedBottom (8);
-            auto inner = well.reduced (10, 6);
-            auto top = inner.removeFromTop (22);
-            modeSelector->setBounds (top.removeFromLeft (124));
-            load->setVisible (builtMode != 2 || true);
-            load->setBounds (top.removeFromRight (64).withSizeKeepingCentre (64, 20));
-            inner.removeFromTop (3);
-            display->setBounds (inner);
+            if (wellB.isEmpty())
+            {
+                // (no cards to align to: thirds of the strip)
+                const int third = getWidth() / 3;
+                wellA = { 14, 0, third - 28, h };
+                wellB = { third + 14, 0, third - 28, h };
+                wellC = { 2 * third + 14, 0, third - 28, h };
+                cardA = { 0, 0, third, h };
+                cardC = { 2 * third, 0, third, h };
+            }
+            // A's zone: the badge where the cards' badges are, M / S beside it, AUX, power.
+            const int top = (h - 43) / 2;
+            badge = { cardA.getX() + 21, top, 47, 43 };
+            mute->setBounds (badge.getRight() + 9, top, 27, 21);
+            solo->setBounds (badge.getRight() + 9, top + 22, 27, 21);
+            nameArea = { mute->getRight() + 14, top, 64, 43 };
+            power->setBounds (juce::Rectangle<int> (30, 30).withCentre ({ nameArea.getRight() + 18, h / 2 }));
+            // B's zone: the well, at B's well's x and width.
+            const auto well = juce::Rectangle<int> (wellB.getX(), 8, wellB.getWidth(), h - 16);
+            display->setBounds (well);
+            placeModeSelector();
+            // C's zone: the menu at the cards' menu's place, RACK beside it, the knobs before.
+            menu->setBounds (cardC.getRight() - 51, h / 2 - 18, 30, 36);
+            rackKey->setBounds (menu->getX() - 8 - 60, h / 2 - 16, 60, 33);
+            // The knobs: RHYTHM's five fill C's zone (a long caption, MOD AMOUNT, a double cell);
+            // the other modes' keep the same cells, from the left.
+            const int knobLeft = wellC.getX(), knobRight = rackKey->getX() - 10;
+            auto weight = [] (const juce::String& caption) { return caption.length() > 6 ? 2.0 : 1.0; };
+            const double unit = (knobRight - knobLeft) / 6.0;   // (RATE PITCH OCT MOD-AMOUNT LEVEL: 1 + 1 + 1 + 2 + 1)
+            double x = knobLeft;
+            for (auto& k : knobs)
+            {
+                const double w = unit * weight (k->captionText());
+                k->setBounds (juce::roundToInt (x), 4, juce::roundToInt (w), h - 8);
+                x += w;
+            }
         }
 
         void paint (juce::Graphics& g) override
@@ -493,7 +587,7 @@ namespace
             using namespace design;
             const auto bounds = getLocalBounds().toFloat();
             draw::raised (g, bounds, layout::cardRadius, colour::cardTop, colour::cardBottom);
-            // D's badge, as the cards' A / B / C.
+            skin::drawKeys (g, *this);   // (M / S and RACK: the ceramic keys, as on the cards)
             {
                 const auto b = badge.toFloat();
                 juce::Path shape;
@@ -516,47 +610,81 @@ namespace
                 g.setFont (fonts::label (10.0f));
                 g.drawText (poweredOf (host) ? juce::String ("ON") : juce::String ("OFF"), n, juce::Justification::topLeft, false);
             }
-            // The graphite well (the cards' displays).
-            const auto w = well.toFloat();
-            g.setColour (graphite);
-            g.fillRoundedRectangle (w, 9.0f);
-            g.setColour (juce::Colours::black.withAlpha (0.4f));
-            g.drawRoundedRectangle (w.reduced (0.5f), 9.0f, 1.0f);
         }
 
         void paintOverChildren (juce::Graphics& g) override
         {
-            // Not heard (muted, or another source soloed) or off: a veil over the well, as a card's.
-            const bool on = poweredOf (host);
-            const bool muted = host.parameterValue (params::auxMute) >= 0.5f;
-            if (on && ! muted)
+            // Not heard (off, muted, or another source soloed): a veil over the well, as a card's
+            // display, its reason at the well's foot.
+            const auto why = unheardReason();
+            if (why.isEmpty())
                 return;
-            const auto w = well.toFloat();
+            const auto w = display->getBounds().toFloat();
             g.setColour (juce::Colour (0xff15191a).withAlpha (0.45f));
-            g.fillRoundedRectangle (w, 9.0f);
+            g.fillRoundedRectangle (w.withTrimmedTop (30.0f), 9.0f);
             g.setColour (juce::Colour (0xffd9dcd8).withAlpha (0.6f));
             g.setFont (fonts::make (11.0f, fonts::Weight::medium, 0.12f));
-            g.drawText (on ? "MUTED" : "OFF", w.withTrimmedLeft (140.0f).withTrimmedRight (80.0f).removeFromTop (34.0f), juce::Justification::centred, false);
+            g.drawText (why, w.withTrimmedTop (28.0f), juce::Justification::centred, false);
         }
 
         void mouseDoubleClick (const juce::MouseEvent&) override { setAuxRackOpen (*this, ! auxRackOpen (*this)); }
 
-        bool isInterestedInFileDrag (const juce::StringArray& files) override { return files.size() == 1 && isAudioFile (files[0]); }
-        void fileDragEnter (const juce::StringArray&, int, int) override { dragOver = true; repaint(); }
-        void fileDragExit (const juce::StringArray&) override { dragOver = false; repaint(); }
-        void filesDropped (const juce::StringArray& files, int, int) override
+        // osp::plugin::DropOwner: a file dropped anywhere on the strip is D's (never card C's).
+        void dropHover (const juce::StringArray&, bool over) override
         {
-            dragOver = false;
-            if (files.size() == 1 && isAudioFile (files[0]))
-                if (auto* engine = engineOf (host))
-                {
-                    setParameter (host, params::auxMode, 0.0f);   // (a recording is D RHYTHM's)
-                    engine->loadAuxRecording (juce::File (files[0]), importFolder (host));
-                }
-            repaint();
+            display->dropOver = over;
+            display->repaint();
+        }
+        void dropFiles (const juce::StringArray& files, juce::Point<int>) override
+        {
+            display->dropOver = false;
+            showNotice (loadAuxFiles (host, files));
         }
 
+        void refreshNow() { timerCallback(); }
+
     private:
+        juce::String unheardReason() const
+        {
+            if (! poweredOf (host))
+                return "OFF";
+            if (host.parameterValue (params::auxMute) >= 0.5f && host.parameterValue (params::auxSolo) < 0.5f)
+                return "MUTED";
+            const bool anySolo = host.parameterValue (params::auxSolo) >= 0.5f || host.parameterValue ("layerA.solo") >= 0.5f
+                                 || host.parameterValue ("layerB.solo") >= 0.5f || host.parameterValue ("layerC.solo") >= 0.5f;
+            if (anySolo && host.parameterValue (params::auxSolo) < 0.5f)
+                return "NOT SOLOED";
+            return {};
+        }
+
+        juce::String currentNotice() const
+        {
+            if (noticeTicks > 0)
+                return notice;
+            if (auto* engine = engineOf (host))
+                return engine->auxRecordingState().lastError.toUpperCase();
+            return {};
+        }
+
+        void showNotice (const juce::String& text)
+        {
+            notice = text;
+            noticeTicks = text.isEmpty() ? 0 : 120;   // (4 s)
+            display->repaint();
+        }
+
+        void placeModeSelector()
+        {
+            // Top left of the well, at the cards' wells' inset; as wide as its name, so it never
+            // moves when the mode changes (it is drawn right-aligned in its own bounds).
+            const auto well = display->getBounds();
+            const auto font = type::popupMode (0.55f * 22.0f);
+            const auto text = modeSelector->textOverride != nullptr ? modeSelector->textOverride() : aux::modeName (modeOf (host));
+            const int width = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, text.toUpperCase()) + 0.5f * 22.0f + 3.0f + 2.0f);
+            modeSelector->setBounds (well.getX() + 12, well.getY() + 6, width, 22);
+            display->headerWidth = width;
+        }
+
         void buildKnobs()
         {
             knobs.clear();
@@ -572,6 +700,8 @@ namespace
             if (builtMode == 0)
             {
                 add (params::auxRate, "RATE", "The loop's speed against the host's tempo (1x: as detected), without changing its pitch");
+                add (params::auxPitch, "PITCH", "D RHYTHM's pitch (semitones): the loop on the same grid, as long - only its pitch moves");
+                add (params::auxOctave, "OCT", "D RHYTHM's octave: the loop on the same grid, as long - only its pitch moves");
                 add (params::auxModAmount, "MOD AMOUNT", "How far D's rhythm envelope moves its target (the rack's MOD TARGET; 0 by default)");
             }
             else if (builtMode == 1)
@@ -583,85 +713,67 @@ namespace
             resized();
         }
 
-        void loadForMode()
-        {
-            if (modeOf (host) == 2)
-            {
-                if (auto* engine = engineOf (host))
-                {
-                    auto& k = engine->auxInstrument();
-                    if (k.state() == ExternalInstrument::State::ready)
-                        k.openEditor();
-                    else
-                        k.loadKontakt();
-                }
-                return;
-            }
-            if (modeOf (host) == 1)
-            {
-                setAuxRackOpen (*this, true);   // (NOISE has nothing to load: its rack)
-                return;
-            }
-            aux::chooseRecording (host, *this);
-        }
-
-        void showRouteMenu()
-        {
-            juce::PopupMenu m;
-            const bool follow = host.parameterValue (params::auxFilterFollow) >= 0.5f;
-            m.addSectionHeader ("D ROUTE");
-            m.addItem ("Through the FILTER (follows the FILTER macro and rack)", true, follow, [this] { setParameter (host, params::auxFilterFollow, 1.0f); });
-            m.addItem ("Around the FILTER", true, ! follow, [this] { setParameter (host, params::auxFilterFollow, 0.0f); });
-            m.addSeparator();
-            m.addItem ("Then DRIVE, MOVEMENT, ECHO, SPACE and the FX route", false, true, [] {});
-            m.addItem ("SEND / DIRECT: not in this version", false, false, [] {});
-            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (route.get()));
-        }
-
-    public:
-        void refreshNow() { timerCallback(); }
-
-    private:
         void showMenu() { createMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menu.get())); }
 
         void timerCallback() override
         {
             if (modeOf (host) != builtMode)
-                buildKnobs();
-            load->setButtonText (builtMode == 2 ? (engineOf (host) != nullptr && engineOf (host)->auxInstrument().state() == ExternalInstrument::State::ready ? "OPEN" : "LOAD")
-                                                : (builtMode == 1 ? "RACK" : "LOAD"));
-            load->setTooltip (builtMode == 0 ? "Load a loop (WAV, AIFF or FLAC): it plays on the host's grid"
-                              : builtMode == 1 ? "NOISE's rack: its gate, envelope, movement and width"
-                                               : "Load Kontakt for D (its own instance; your keys, before the arpeggiator), or open its window");
-            display->repaint();
-            const bool on = poweredOf (host), muted = host.parameterValue (params::auxMute) >= 0.5f;
-            if (on != shownOn || muted != shownMuted)
             {
-                shownOn = on;
-                shownMuted = muted;
+                buildKnobs();
+                placeModeSelector();
+            }
+            display->setTooltip (builtMode == 0 ? "Click to load a loop (WAV, AIFF or FLAC), or drop one here: it plays on the host's grid"
+                                 : builtMode == 1 ? "NOISE: its settings are in the rack"
+                                                  : "Click to load Kontakt for D (its own instance; your keys, before the arpeggiator), or to open its window");
+            const bool open = auxRackOpen (*this);
+            if (rackKey->getToggleState() != open)
+                rackKey->setToggleState (open, juce::dontSendNotification);
+            if (noticeTicks > 0 && --noticeTicks == 0)
+                display->repaint();
+            display->repaint();
+            const auto why = unheardReason();
+            if (why != shownReason)
+            {
+                shownReason = why;
                 repaint();
             }
         }
 
         InstrumentHost& host;
         std::unique_ptr<rackui::PowerKey> power;
-        std::unique_ptr<AuxKey> mute, solo;
+        std::unique_ptr<LayerStateButton> mute, solo;
         std::unique_ptr<ValueSelector> modeSelector;
         std::unique_ptr<AuxDisplay> display;
-        std::unique_ptr<TextKey> load, route, menu;
+        std::unique_ptr<RackKey> rackKey;
+        std::unique_ptr<MenuDots> menu;
         std::vector<std::unique_ptr<MiniKnob>> knobs;
-        juce::Rectangle<int> badge, nameArea, well;
+        juce::Rectangle<int> badge, nameArea;
+        juce::String notice, shownReason = "-";
+        int noticeTicks = 0;
         int builtMode = -1;
-        bool shownOn = false, shownMuted = false, dragOver = false;
         friend struct andor::analog::AuxStripView;
     };
 
     //==========================================================================
-    class AuxGraph final : public GraphFrame
+    /** The rack's graph: D's picture, and its loading surface too (a click loads by mode). */
+    class AuxGraph final : public GraphFrame, public juce::SettableTooltipClient
     {
     public:
-        explicit AuxGraph (InstrumentHost& h) : host (h) {}
+        explicit AuxGraph (InstrumentHost& h) : host (h)
+        {
+            setInterceptsMouseClicks (true, false);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            setTooltip ("Click to load (a loop in RHYTHM, Kontakt in KONTAKT), or drop a loop here");
+        }
         void refresh() override { repaint(); }
+        bool dropOver = false;
+        juce::String notice;
+        int noticeTicks = 0;
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (e.mouseWasClicked() && getLocalBounds().contains (e.getPosition()))
+                clickAuxSurface (host, *this);
+        }
 
     protected:
         void paintGraph (juce::Graphics& g, juce::Rectangle<float> area) override
@@ -676,16 +788,48 @@ namespace
             inner.removeFromTop (8.0f);
             float x = -1.0f;
             paintAuxPicture (g, inner, host, false, x);
+            juce::String shown = noticeTicks > 0 ? notice : juce::String();
+            if (shown.isEmpty())
+                if (auto* engine = engineOf (host))
+                    shown = engine->auxRecordingState().lastError.toUpperCase();
+            paintDropState (g, area, dropOver, shown, 6.0f);
         }
 
     private:
         InstrumentHost& host;
     };
 
-    class AuxRack final : public ParameterRack
+    class AuxRack final : public ParameterRack, public osp::plugin::DropOwner
     {
     public:
-        explicit AuxRack (InstrumentHost& h) : ParameterRack (h, "AUX", aux::colour(), 0.62f)
+        // osp::plugin::DropOwner: a file dropped anywhere on the AUX rack is D's (never card C's).
+        void dropHover (const juce::StringArray&, bool over) override
+        {
+            if (auto* g = dynamic_cast<AuxGraph*> (graph()))
+            {
+                g->dropOver = over;
+                g->repaint();
+            }
+        }
+        void dropFiles (const juce::StringArray& files, juce::Point<int>) override
+        {
+            const auto why = loadAuxFiles (host, files);
+            if (auto* g = dynamic_cast<AuxGraph*> (graph()))
+            {
+                g->dropOver = false;
+                g->notice = why;
+                g->noticeTicks = why.isEmpty() ? 0 : 120;
+                g->repaint();
+            }
+        }
+        void refresh() override
+        {
+            ParameterRack::refresh();
+            if (auto* g = dynamic_cast<AuxGraph*> (graph()); g != nullptr && g->noticeTicks > 0)
+                --g->noticeTicks;
+        }
+
+        explicit AuxRack (InstrumentHost& h) : ParameterRack (h, "AUX", aux::colour(), 0.66f)
         {
             setHeaderSwitch (params::auxEnabled, "ON", "D / AUX: a fourth source through the FILTER and the shared effects (off: idle, nothing at all)");
             setGraph (std::make_unique<AuxGraph> (h));
@@ -708,8 +852,9 @@ namespace
             {
                 selectorSegment (auxSync, "CLOCK", { { "SYNC", "Sync", 0.0f }, { "FREE", "Free", 1.0f } }, 140,
                                  "SYNC: on the host's grid (its transport). FREE: its own clock at the loop's tempo");
-                selectorComponent (makeKey ("LOAD LOOP", [this] { aux::chooseRecording (host, *this); }), "RECORDING", 120);
                 steppedKnob (auxRate, "RATE", textOf (host, auxRate));
+                knob (auxPitch, "PITCH", textOf (host, auxPitch));
+                steppedKnob (auxOctave, "OCT", textOf (host, auxOctave));
                 knob (auxLevel, "LEVEL", textOf (host, auxLevel));
                 group ("MOD");
                 listCell (auxModTarget, "TARGET", "What D's rhythm envelope moves: the cards' FILTER, D's own filter, or D's level");
@@ -751,9 +896,6 @@ namespace
                                    {}, 80);
                 knob (auxLevel, "LEVEL", textOf (host, auxLevel));
             }
-            group ({}, true);
-            switchCell (auxFilterFollow, "FILTER", { { "FOLLOW", "Follow", 1.0f }, { "AROUND", "Around", 0.0f } },
-                        "FOLLOW: D goes through the cards' FILTER (the FILTER macro and rack move it). AROUND: it does not");
         }
 
     private:

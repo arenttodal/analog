@@ -272,6 +272,7 @@ void Synth::reset() noexcept
     auxRunning = auxRhythmRun = false;
     auxGainNow = auxEnvNow = auxModNow = 0.0f;
     auxFreePpq = 0.0;
+    auxPitchNow = 0.0;
     auxLoop.reset();
     auxGate.kill();
     auxFilter.held.fill (0);
@@ -3115,6 +3116,7 @@ void Synth::renderAux (int numSamples) noexcept
         // Powered: from rest (its filter, noise, gate and delay), the mode it plays now.
         auxRunning = true;
         auxModePlaying = a.mode;
+        auxPitchNow = std::clamp (a.pitchSemis, -24.0, 24.0);
         auxGainNow = 0.0f;
         auxFilterMix = a.filterFollow ? 1.0f : 0.0f;
         for (auto& f : auxFilter.ladder)
@@ -3146,19 +3148,33 @@ void Synth::renderAux (int numSamples) noexcept
         auxEnvShown.store (0.0f, std::memory_order_relaxed);
         return;
     }
-    const double bpm = timing.valid && timing.bpm > 1.0 ? timing.bpm : 120.0;
+    // Its clock: the host's (SYNC, the transport present); else its own - at 120 BPM with no
+    // transport, at the loop's own tempo in FREE. A rhythmic loop is always played by its slices
+    // on that clock, so PITCH / OCT never change its tempo or its length (FREE included).
+    const auto* loop = auxLoop.loop();
+    const bool rhythmicLoop = loop != nullptr && loop->rhythmic();
+    const bool ownTempo = ! a.sync && rhythmicLoop;
+    const bool hostClock = timing.valid && ! ownTempo;
+    const double bpm = ownTempo ? loop->analysis.bpm : (timing.valid && timing.bpm > 1.0 ? timing.bpm : 120.0);
     const double perSample = bpm / 60.0 / hostRate;
-    const bool hostClock = timing.valid;
     const double q0 = hostClock ? ppqAtBlock + static_cast<double> (blockOffset) * perSample : auxFreePpq;
-    const bool running = hostClock ? timing.playing : true;
-    if (! hostClock)
+    const bool running = timing.valid ? timing.playing : true;
+    if (! hostClock && running)
         auxFreePpq += static_cast<double> (numSamples) * perSample;
     const auto n = static_cast<std::size_t> (numSamples);
     std::fill (auxL.begin(), auxL.begin() + static_cast<std::ptrdiff_t> (n), 0.0f);
     std::fill (auxR.begin(), auxR.begin() + static_cast<std::ptrdiff_t> (n), 0.0f);
+    // PITCH / OCT (Addendum 03): its slices re-pitched where they stand (glided, 20 ms: an
+    // automated move never clicks); 0.25..4 (two octaves either way) is the player's range.
+    const double pitchTarget = std::clamp (a.pitchSemis, -24.0, 24.0);
+    auxPitchNow += (pitchTarget - auxPitchNow) * (1.0 - std::exp (-static_cast<double> (numSamples) / (0.020 * hostRate)));
+    if (std::abs (pitchTarget - auxPitchNow) < 1.0e-4)
+        auxPitchNow = pitchTarget;
     rhythm::LoopPlayer::Settings settings;
-    settings.sync = a.sync;
+    settings.sync = a.sync || rhythmicLoop;
     settings.tempoFactor = std::clamp (a.rate, 0.25, 4.0);
+    settings.pitchRatio = std::exp2 (auxPitchNow / 12.0);
+    settings.envelopeOnGrid = true;   // (its modulation keeps the loop's own timing, whatever the pitch)
     auxLoop.render (auxL.data(), auxR.data(), 1.0f, auxLevelBuf.data(), auxTransientBuf.data(), numSamples, q0, perSample, running, settings);
     // Its envelope: the loop's level above SENSITIVITY's threshold, through ATTACK / RELEASE.
     const float threshold = static_cast<float> (0.6 * (1.0 - std::clamp (a.sensitivity, 0.0, 1.0)));

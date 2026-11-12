@@ -111,6 +111,7 @@ namespace
         iAuxEnabled, iAuxMode, iAuxLevel, iAuxMute, iAuxSolo, iAuxFilterFollow,
         iAuxSync, iAuxRate, iAuxModAmount, iAuxModTarget, iAuxSensitivity, iAuxAttack, iAuxRelease,
         iAuxNoiseColor, iAuxNoiseTone, iAuxNoiseGate, iAuxNoiseAttack, iAuxNoiseRelease, iAuxNoiseMovement, iAuxNoiseWidth,
+        iAuxPitch, iAuxOctave,
         count
     };
 
@@ -244,7 +245,8 @@ namespace
             // State version 23: D / AUX.
             for (const auto* id : { &auxEnabled, &auxMode, &auxLevel, &auxMute, &auxSolo, &auxFilterFollow,
                                     &auxSync, &auxRate, &auxModAmount, &auxModTarget, &auxSensitivity, &auxAttack, &auxRelease,
-                                    &auxNoiseColor, &auxNoiseTone, &auxNoiseGate, &auxNoiseAttack, &auxNoiseRelease, &auxNoiseMovement, &auxNoiseWidth })
+                                    &auxNoiseColor, &auxNoiseTone, &auxNoiseGate, &auxNoiseAttack, &auxNoiseRelease, &auxNoiseMovement, &auxNoiseWidth,
+                                    &auxPitch, &auxOctave })
                 l.add (*id);
             return l;
         }();
@@ -315,6 +317,9 @@ const juce::StringArray& engineParameterIds()
             // frozen, for older sessions' migration).
             for (const auto& id : { keyDna, keyDnaAmount, keyDnaIndividuality, keyDnaPosition, keyDnaSize, keyDnaDensity, keyDnaSpread, keyDnaTune })
                 n.add (id);
+            // AUX Addendum 03: D always goes through the FILTER; the old switch stays (an older
+            // experimental session recalls without error) but nothing reads it.
+            n.add (auxFilterFollow);
             return n;
         }();
         juce::StringArray l;
@@ -1027,6 +1032,17 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     layout.add (osp::plugin::parameters::make<Float> (v37 (auxNoiseRelease), "AUX Noise Release", nRelease, static_cast<float> (d.noiseRelease), Attributes().withLabel ("s").withStringFromValueFunction (secondsText)));
     percentage (auxNoiseMovement, "AUX Noise Movement", d.noiseMovement);
     percentage (auxNoiseWidth, "AUX Noise Width", d.noiseWidth);
+    // AUX Addendum 03: D RHYTHM's PITCH (semitones) and OCT, its slices re-pitched on the grid
+    // (the tempo and the loop's length never change). Appended.
+    layout.add (osp::plugin::parameters::make<Float> (v37 (auxPitch), "AUX Rhythm Pitch", juce::NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
+                                                      Attributes().withLabel ("st").withStringFromValueFunction ([] (float v, int) {
+                                                          return (v > 0.004f ? "+" : "") + juce::String (std::abs (v) < 0.005f ? 0.0f : v, 1) + " st";
+                                                      })));
+    layout.add (osp::plugin::parameters::make<Float> (v37 (auxOctave), "AUX Rhythm Octave", juce::NormalisableRange<float> (-2.0f, 2.0f, 1.0f), 0.0f,
+                                                      Attributes().withLabel ("oct").withStringFromValueFunction ([] (float v, int) {
+                                                          const int o = juce::roundToInt (v);
+                                                          return (o > 0 ? "+" : "") + juce::String (o) + " oct";
+                                                      })));
 }
 
 int readerIndexOf (const juce::String& id)
@@ -1453,7 +1469,8 @@ Patch Reader::readWith (const float* raw) const noexcept
         a.enabled = on (iAuxEnabled);
         a.mode = static_cast<Patch::Aux::Mode> (index (iAuxMode, 3));
         a.levelDb = v (iAuxLevel);
-        a.filterFollow = on (iAuxFilterFollow);
+        a.filterFollow = true;   // (Addendum 03: always through the FILTER; the old switch is unread)
+        a.pitchSemis = v (iAuxPitch) + 12.0 * std::round (v (iAuxOctave));
         a.sync = index (iAuxSync, 2) == 0;
         a.rate = auxRates[static_cast<std::size_t> (index (iAuxRate, static_cast<int> (auxRates.size())))];
         a.modAmount = 0.01 * v (iAuxModAmount);
@@ -1860,7 +1877,9 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (iAuxEnabled, a.enabled ? 1.0 : 0.0);
         put (iAuxMode, static_cast<int> (a.mode));
         put (iAuxLevel, a.levelDb);
-        put (iAuxFilterFollow, a.filterFollow ? 1.0 : 0.0);
+        put (iAuxFilterFollow, 1.0);
+        put (iAuxPitch, a.pitchSemis - 12.0 * std::round (a.pitchSemis / 12.0));
+        put (iAuxOctave, std::clamp (std::round (a.pitchSemis / 12.0), -2.0, 2.0));
         put (iAuxSync, a.sync ? 0.0 : 1.0);
         int rateIndex = 2;
         for (std::size_t i = 0; i < auxRates.size(); ++i)

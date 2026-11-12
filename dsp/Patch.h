@@ -291,6 +291,9 @@ struct Patch
         double noiseAttack = 0.005, noiseRelease = 0.3;   ///< seconds (the keys' gate)
         double noiseMovement = 0.0;    ///< 0..1: its tone wanders
         double noiseWidth = 0.5;       ///< 0 mono .. 1 two independent channels
+        /** RHYTHM's transposition (PITCH + 12 x OCT, semitones): its slices re-pitched where
+            they stand on the grid, the tempo and the loop's length unchanged. */
+        double pitchSemis = 0.0;
     };
     Aux aux;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12

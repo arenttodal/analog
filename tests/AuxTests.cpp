@@ -338,3 +338,171 @@ TEST_CASE ("AUX G5: KONTAKT's bus is heard as given; its reported latency delays
     };
     CHECK (onset (out.left) == onset (ref.left) + 256);
 }
+
+//==============================================================================
+// AUX Addendum 03: D RHYTHM's PITCH / OCT (Patch::Aux::pitchSemis = PITCH + 12 x OCT).
+
+namespace
+{
+    std::vector<double> tickStarts (const std::vector<float>& x, float threshold = 0.02f)
+    {
+        std::vector<double> starts;
+        int quiet = 1 << 30;
+        for (std::size_t i = 0; i < x.size(); ++i)
+        {
+            if (std::abs (x[i]) > threshold && quiet > static_cast<int> (0.04 * rate))
+                starts.push_back (static_cast<double> (i) / rate);
+            quiet = std::abs (x[i]) > threshold ? 0 : quiet + 1;
+        }
+        return starts;
+    }
+
+    /** The burst's frequency after `from` (s): its zero crossings while it is clearly sounding. */
+    double burstHz (const std::vector<float>& x, double from, double seconds)
+    {
+        const auto a = static_cast<std::size_t> (from * rate), z = std::min (x.size(), static_cast<std::size_t> ((from + seconds) * rate));
+        std::vector<double> crossings;
+        for (auto i = a + 1; i < z; ++i)
+            if ((x[i - 1] < 0.0f) != (x[i] < 0.0f) && std::max (std::abs (x[i - 1]), std::abs (x[i])) > 0.01f)
+                crossings.push_back (static_cast<double> (i - 1) + x[i - 1] / (x[i - 1] - x[i]));
+        if (crossings.size() < 3)
+            return 0.0;
+        return 0.5 * rate * static_cast<double> (crossings.size() - 1) / (crossings.back() - crossings.front());
+    }
+}
+
+TEST_CASE ("AUX Addendum 03: RHYTHM PITCH / OCT move the pitch, never the tempo - the ticks on the same grid, the loop as long", "[aux][pitch]")
+{
+    std::vector<double> reference;
+    for (const double semis : { 0.0, 12.0, -12.0, 7.0, 24.0 })
+    {
+        auto p = auxOnly (Mode::rhythm);
+        p.tone = 1.0;   // (the FILTER open: the ticks' pitch is measured, not the filter's)
+        p.aux.pitchSemis = semis;
+        auto s = makeSynth (p);
+        s->setAuxLoop (tickLoop().get());
+        const auto out = play (*s, 4.2);
+        const auto starts = tickStarts (out.left);
+        INFO ("PITCH " << semis << " st: " << starts.size() << " ticks");
+        REQUIRE (starts.size() >= 8);
+        if (reference.empty())
+            reference = starts;
+        // The same grid: every tick where it was (the 120 BPM clock; 0.5 s apart), the loop
+        // (8 beats) as long - the 9th tick is the loop's first again, 4 s later.
+        for (std::size_t k = 0; k < 8; ++k)
+            CHECK (starts[k] == Approx (reference[k]).margin (0.004));
+        for (std::size_t k = 1; k < 8; ++k)
+            CHECK (starts[k] - starts[k - 1] == Approx (0.5).margin (0.004));
+        // The pitch: the 2 kHz tick at 2 kHz x 2^(semis / 12).
+        const double want = 2000.0 * std::exp2 (semis / 12.0);
+        const double hz = burstHz (out.left, starts[1], 0.004);
+        INFO ("tick at " << hz << " Hz (want " << want << ")");
+        CHECK (hz == Approx (want).epsilon (0.08));
+    }
+}
+
+TEST_CASE ("AUX Addendum 03: RHYTHM's envelope keeps the loop's own timing whatever the pitch (the modulation's pulses never move)", "[aux][pitch]")
+{
+    // The player alone: its level output at pitch 1 and 2 (envelopeOnGrid), on a 120 BPM clock.
+    auto levels = [] (double ratio) {
+        rhythm::LoopPlayer player;
+        player.prepare (rate);
+        player.setLoop (tickLoop().get());
+        rhythm::LoopPlayer::Settings st;
+        st.sync = true;
+        st.pitchRatio = ratio;
+        st.envelopeOnGrid = true;
+        const int total = static_cast<int> (2.0 * rate), block = 256;
+        std::vector<float> l (static_cast<std::size_t> (total)), r (l.size()), level (l.size()), transient (l.size());
+        const double perSample = 2.0 / rate;   // (120 BPM: 2 beats a second)
+        for (int pos = 0; pos < total; pos += block)
+            player.render (l.data() + pos, r.data() + pos, 1.0f, level.data() + pos, transient.data() + pos, std::min (block, total - pos),
+                           pos * perSample, perSample, true, st);
+        return level;
+    };
+    const auto plain = levels (1.0), raised = levels (2.0);
+    // Each pulse's peak: at the same sample (within 1 ms), as tall.
+    for (int beat = 1; beat < 4; ++beat)
+    {
+        const auto a = static_cast<std::size_t> ((beat * 0.5 - 0.01) * rate), z = static_cast<std::size_t> ((beat * 0.5 + 0.02) * rate);
+        auto peakAt = [&] (const std::vector<float>& x) {
+            return std::distance (x.begin(), std::max_element (x.begin() + static_cast<std::ptrdiff_t> (a), x.begin() + static_cast<std::ptrdiff_t> (z)));
+        };
+        INFO ("beat " << beat);
+        CHECK (std::abs (peakAt (raised) - peakAt (plain)) <= static_cast<std::ptrdiff_t> (0.001 * rate));
+        CHECK (raised[static_cast<std::size_t> (peakAt (raised))] == Approx (plain[static_cast<std::size_t> (peakAt (plain))]).epsilon (0.1));
+    }
+}
+
+TEST_CASE ("AUX Addendum 03: automating PITCH / OCT is smooth - no spike, no stop, no jump of the grid", "[aux][pitch]")
+{
+    auto p = auxOnly (Mode::rhythm);
+    auto s = makeSynth (p);
+    s->setAuxLoop (tickLoop().get());
+    const auto steady = play (*s, 3.0);
+    // A sweep -12 .. +12 st over 3 s, one value a block, then a jump of an octave (OCT).
+    auto t = makeSynth (p);
+    t->setAuxLoop (tickLoop().get());
+    Stereo out;
+    const int block = 256, total = static_cast<int> (3.0 * rate);
+    out.left.assign (static_cast<std::size_t> (total), 0.0f);
+    out.right.assign (out.left.size(), 0.0f);
+    for (int pos = 0; pos < total; pos += block)
+    {
+        p.aux.pitchSemis = pos < total / 2 ? -12.0 + 24.0 * pos / (total / 2) : 12.0 - 12.0;   // (then OCT -1 from +12: a jump)
+        t->setPatch (p);
+        t->render (out.left.data() + pos, out.right.data() + pos, std::min (block, total - pos));
+    }
+    float peak = 0.0f, peakSteady = 0.0f;
+    for (std::size_t i = 0; i < out.left.size(); ++i)
+    {
+        REQUIRE (std::isfinite (out.left[i]));
+        peak = std::max (peak, std::abs (out.left[i]));
+        peakSteady = std::max (peakSteady, std::abs (steady.left[i]));
+    }
+    INFO ("peak " << peak << " (steady " << peakSteady << ")");
+    CHECK (peak < 1.6f * peakSteady);   // (no spike: never far above the loop's own level)
+    const auto starts = tickStarts (out.left), plainStarts = tickStarts (steady.left);
+    REQUIRE (starts.size() >= 5);
+    for (std::size_t k = 0; k < 5; ++k)
+        CHECK (starts[k] == Approx (plainStarts[k]).margin (0.004));   // (the grid kept, never reset)
+}
+
+TEST_CASE ("AUX Addendum 03: with PITCH up, a host tempo change moves the ticks to the new grid at once - the pitch never moves the tempo", "[aux][pitch]")
+{
+    // The host's transport: 100 BPM for 2.4 s, then 140 BPM; D RHYTHM at +12 st.
+    auto p = auxOnly (Mode::rhythm);
+    p.tone = 1.0;
+    p.aux.pitchSemis = 12.0;
+    auto s = makeSynth (p);
+    s->setAuxLoop (tickLoop().get());
+    const int block = 256, total = static_cast<int> (4.8 * rate);
+    std::vector<float> l (static_cast<std::size_t> (total)), r (l.size());
+    double ppq = 0.0;
+    for (int pos = 0; pos < total; pos += block)
+    {
+        osp::HostTiming t;
+        t.valid = t.playing = true;
+        t.bpm = pos < static_cast<int> (2.4 * rate) ? 100.0 : 140.0;
+        t.ppq = ppq;
+        s->setTransport (t);
+        const int n = std::min (block, total - pos);
+        s->render (l.data() + pos, r.data() + pos, n);
+        ppq += n * t.bpm / 60.0 / rate;
+    }
+    const auto starts = tickStarts (l);
+    REQUIRE (starts.size() >= 8);
+    // Beats at 100 BPM (0.6 s apart), then at 140 (0.4286 s apart): the host's grid, not the pitch's.
+    int slow = 0, fast = 0;
+    for (std::size_t k = 1; k < starts.size(); ++k)
+    {
+        const double gap = starts[k] - starts[k - 1];
+        if (starts[k] < 2.3)
+            slow += std::abs (gap - 0.6) < 0.005 ? 1 : 0;
+        else if (starts[k - 1] > 2.5)
+            fast += std::abs (gap - 60.0 / 140.0) < 0.005 ? 1 : 0;
+    }
+    CHECK (slow >= 2);
+    CHECK (fast >= 3);
+    CHECK (burstHz (l, starts[1], 0.003) == Approx (4000.0).epsilon (0.08));
+}

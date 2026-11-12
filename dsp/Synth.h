@@ -811,6 +811,7 @@ private:
     float auxGainNow = 0.0f, auxFilterMix = 1.0f, auxEnvNow = 0.0f, auxModNow = 0.0f;
     int auxDelayAt = 0, auxLatencyNow = 0;
     double auxFreePpq = 0.0;
+    double auxPitchNow = 0.0;   ///< RHYTHM's PITCH / OCT now (semitones, glided)
 public:
     /** D's latency now (samples: D KONTAKT's reported, while it plays; else 0). */
     int auxLatency() const noexcept { return auxLatencyNow; }

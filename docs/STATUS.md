@@ -42,6 +42,17 @@
 >   Card C HYBRID is unchanged. MORPH behaves as Option A until the owner decides
 >   (docs/aux/MORPH_DECISION.md: OPEN). Real Kontakt and DAWs: UNVERIFIED (OWNER TEST).
 >
+>   AUX Refinement Addendum 03 (docs/aux/ADDENDUM_03.md):
+>   - drops on D's strip or rack load D only, never card C (the shell's DropOwner);
+>   - D always goes through the FILTER (ROUTE removed; the old switch is hidden and unread);
+>   - M / S are the cards' own keys;
+>   - D's well sits at card B's well's place and width; RACK sits beside the menu; the mode
+>     selector is fixed at the top left;
+>   - the wells load on a click or a drop (no LOAD buttons); a failed load keeps the loop;
+>   - RHYTHM PITCH / OCT re-pitch the slices on the grid, the tempo and the length unchanged.
+>
+>   D MORPH (Option D) is paused (stashed, unpushed) for the addendum.
+>
 > - Destination-first macro assignment (docs/MACRO_DESTINATION_FIRST.md):
 >   - right-click any eligible control → Assign to Macro (names, checkmarks, range, details,
 >     removal);

@@ -964,14 +964,15 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         };
     }
     for (const auto* id : { &params::auxMode, &params::auxSync, &params::auxRate, &params::auxModAmount, &params::auxModTarget, &params::auxSensitivity,
-                            &params::auxAttack, &params::auxRelease })
+                            &params::auxAttack, &params::auxRelease, &params::auxPitch, &params::auxOctave })
     {
         const juce::String which (*id);
         setups[*id] = [which] (ShellProcessor& q) {
             dynamic_cast<AnalogEngine&> (q.productEngine()).setAuxLoopForTest (testTickLoop());
             setValue (q, params::auxEnabled, 1.0f);
             setValue (q, params::auxMode, 0.0f);
-            if (which != params::auxMode && which != params::auxSync && which != params::auxRate && which != params::auxModAmount)
+            if (which != params::auxMode && which != params::auxSync && which != params::auxRate && which != params::auxModAmount
+                && which != params::auxPitch && which != params::auxOctave)
                 setValue (q, params::auxModAmount, 80.0f);
         };
     }

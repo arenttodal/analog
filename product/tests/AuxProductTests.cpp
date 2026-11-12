@@ -6,6 +6,7 @@
 #include "AnalogParameters.h"
 #include "AuxUI.h"
 #include "CeramicSkin.h"
+#include "DropOwner.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
@@ -13,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <functional>
 
 using andor::shell::ShellProcessor;
 using andor::analog::AnalogEngine;
@@ -218,9 +220,11 @@ TEST_CASE ("AUX strip: the mode's knobs, the C-style mode dropdown, the rack fro
     auto& ui = editorOf (editor);
     ui.setAuxStripShown (true);
     auto& strip = *ui.auxStripComponent();
-    for (const auto& name : { "power", "mute", "solo", "mode", "display", "route", "menu" })
+    for (const auto& name : { "power", "mute", "solo", "mode", "display", "rack", "menu" })
         CHECK (AuxStripView::part (strip, name) != nullptr);
-    CHECK (AuxStripView::knobCaptions (strip) == juce::StringArray ({ "RATE", "MOD AMOUNT", "LEVEL" }));
+    CHECK (AuxStripView::knobCaptions (strip) == juce::StringArray ({ "RATE", "PITCH", "OCT", "MOD AMOUNT", "LEVEL" }));
+    CHECK (AuxStripView::part (strip, "route") == nullptr);   // (Addendum 03: no ROUTE, no LOAD)
+    CHECK (AuxStripView::part (strip, "load") == nullptr);
     set (p, params::auxMode, 1.0f);
     ui.refreshNow();
     refreshStrip (ui);
@@ -310,7 +314,9 @@ TEST_CASE ("AUX: a missing or unreadable recording fails beautifully and is writ
     junk.replaceWithText ("not audio");
     engine.loadAuxRecording (junk, scratch.dir.getChildFile ("store"));
     REQUIRE (engine.waitForAuxRecording (20000));
-    CHECK (engine.auxRecordingState().status == AnalogEngine::AuxRecordingState::Status::error);
+    // (Addendum 03: a failed load leaves D as it was - here without a loop - and says why)
+    CHECK (engine.auxRecordingState().status == AnalogEngine::AuxRecordingState::Status::none);
+    CHECK (engine.auxRecordingState().lastError.isNotEmpty());
     CHECK (engine.auxLoop() == nullptr);
     set (p, params::auxEnabled, 1.0f);
     CHECK (rms (render (p, 0.3)) >= 0.0);   // (plays on: D silent, nothing crashes)
@@ -389,7 +395,7 @@ TEST_CASE ("AUX: screenshots - the strip in its three modes, its rack, hidden (A
     auto shoot = [&] (const juce::String& name, int width) {
         const float h = ui.instrumentHeight() * static_cast<float> (width) / osp::plugin::design::width;
         editor->setSize (width, juce::roundToInt (h));
-        ui.refreshNow();
+        refreshStrip (ui);
         const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
         const auto file = out.getChildFile (name + "-" + juce::String (width) + ".png");
         file.deleteFile();
@@ -420,6 +426,24 @@ TEST_CASE ("AUX: screenshots - the strip in its three modes, its rack, hidden (A
     refreshStrip (ui);
     shoot ("aux-06-rack-kontakt", 1448);
     ui.setRackExpanded (osp::plugin::rack::Kind::aux, false);
+    // A loop dragged over D's strip: the well shows where it will land (only D's).
+    set (p, params::auxMode, 0.0f);
+    if (auto* owner = dynamic_cast<osp::plugin::DropOwner*> (ui.auxStripComponent()))
+    {
+        owner->dropHover ({ "loop.wav" }, true);
+        shoot ("aux-08-drop-hover", 1448);
+        owner->dropHover ({ "loop.wav" }, false);
+    }
+    // Muted, and another card soloed (D not heard: the cards' veil and reasons).
+    set (p, params::auxMute, 1.0f);
+    shoot ("aux-09-muted", 1448);
+    set (p, params::auxMute, 0.0f);
+    set (p, "layerA.solo", 1.0f);
+    shoot ("aux-10-not-soloed", 1448);
+    set (p, "layerA.solo", 0.0f);
+    set (p, params::auxSolo, 1.0f);
+    shoot ("aux-11-soloed", 1448);
+    set (p, params::auxSolo, 0.0f);
     set (p, params::auxEnabled, 0.0f);
     shoot ("aux-07-off", 1448);
 }
@@ -522,4 +546,326 @@ TEST_CASE ("AUX: renders - D under a FILTER sweep, through SPACE / ECHO, with ca
         WARN ("D off null: max difference " << diff.getMagnitude (0, diff.getNumSamples()));
         CHECK (identical (x, y));
     }
+}
+
+
+//==============================================================================
+// AUX Refinement Addendum 03.
+
+namespace
+{
+    /** A drop as the host delivers it: on the editor, at a point of `target` (its centre by
+        default), through the editor's own drop handling (the overlays above the parts and all). */
+    void dropOn (andor::shell::ShellEditor& ui, juce::Component& target, const juce::File& file, juce::Point<int> at = { -1, -1 })
+    {
+        if (at.x < 0)
+            at = target.getLocalBounds().getCentre();
+        const auto p = ui.getLocalPoint (&target, at);
+        const juce::StringArray files { file.getFullPathName() };
+        REQUIRE (ui.isInterestedInFileDrag (files));
+        ui.fileDragEnter (files, p.x, p.y);
+        ui.fileDragMove (files, p.x, p.y);
+        ui.filesDropped (files, p.x, p.y);
+    }
+
+    juce::String auxName (ShellProcessor& p) { return engineOf (p).auxRecordingState().name; }
+
+    struct DropRig
+    {
+        Scratch scratch;
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor { p.createEditorIfNeeded() };
+        andor::shell::ShellEditor& ui = editorOf (editor);
+        juce::File loopA = writeLoop (scratch.dir, "aux-loop.wav"), loopB = writeLoop (scratch.dir, "card-c-loop.wav");
+        DropRig()
+        {
+            editor->setSize (1448, 1086);
+            ui.setAuxStripShown (true);
+            ui.refreshNow();
+        }
+        bool cardC() { p.waitForLoads (20000); p.pollLoads(); return p.currentInstrument (1) != nullptr; }
+    };
+}
+
+TEST_CASE ("AUX 03 gate 1: a file dropped on D (strip, its well, the rack) loads D only; one dropped on card C loads C only", "[analog][aux][drop]")
+{
+    DropRig rig;
+    auto& strip = *rig.ui.auxStripComponent();
+    auto& well = *AuxStripView::part (strip, "display");
+    // 1. The strip's well: D, never C.
+    dropOn (rig.ui, well, rig.loopA);
+    REQUIRE (engineOf (rig.p).waitForAuxRecording (20000));
+    CHECK (auxName (rig.p) == "aux-loop");
+    CHECK_FALSE (rig.cardC());
+    // 2. Elsewhere on the strip (beside its knobs): D's too.
+    dropOn (rig.ui, strip, rig.loopB, { strip.getWidth() - 4, 4 });
+    REQUIRE (engineOf (rig.p).waitForAuxRecording (20000));
+    CHECK (auxName (rig.p) == "card-c-loop");
+    CHECK_FALSE (rig.cardC());
+    // 3. The AUX rack (its graph and the rest of it): D.
+    rig.ui.setRackExpanded (osp::plugin::rack::Kind::aux, true);
+    rig.ui.refreshNow();
+    juce::Component* rack = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (dynamic_cast<osp::plugin::DropOwner*> (child) != nullptr && child->isVisible())
+                rack = child;
+            find (*child);
+        }
+    };
+    find (rig.ui.effectsRack());
+    REQUIRE (rack != nullptr);
+    dropOn (rig.ui, *rack, rig.loopA);
+    REQUIRE (engineOf (rig.p).waitForAuxRecording (20000));
+    CHECK (auxName (rig.p) == "aux-loop");
+    CHECK_FALSE (rig.cardC());
+    // 4. Card C's well: C, and D unchanged.
+    rig.ui.setRackExpanded (osp::plugin::rack::Kind::aux, false);
+    rig.ui.refreshNow();
+    dropOn (rig.ui, rig.ui.engineCard (1).display(), rig.loopB);
+    CHECK (rig.cardC());
+    CHECK (auxName (rig.p) == "aux-loop");
+    // 5. Hidden and shown again, the rack opened and closed: the same ownership.
+    rig.ui.setAuxStripShown (false);
+    rig.ui.setAuxStripShown (true);
+    rig.ui.refreshNow();
+    dropOn (rig.ui, *AuxStripView::part (*rig.ui.auxStripComponent(), "display"), rig.loopB);
+    REQUIRE (engineOf (rig.p).waitForAuxRecording (20000));
+    CHECK (auxName (rig.p) == "card-c-loop");
+    // 6. Saved and reloaded: each its own.
+    juce::MemoryBlock session;
+    rig.p.getStateInformation (session);
+    ShellProcessor q;
+    q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
+    REQUIRE (engineOf (q).waitForAuxRecording (20000));
+    CHECK (auxName (q) == "card-c-loop");
+    q.waitForLoads (20000);
+    q.pollLoads();
+    CHECK (q.currentInstrument (1) != nullptr);
+}
+
+TEST_CASE ("AUX 03 gate 5: an unsupported file dropped on D changes nothing and says why; a failed load keeps the loop in use", "[analog][aux][drop]")
+{
+    DropRig rig;
+    auto& well = *AuxStripView::part (*rig.ui.auxStripComponent(), "display");
+    dropOn (rig.ui, well, rig.loopA);
+    REQUIRE (engineOf (rig.p).waitForAuxRecording (20000));
+    const auto before = engineOf (rig.p).auxLoop();
+    REQUIRE (before != nullptr);
+    // Not audio at all (a text file): refused by D, never handed to C.
+    const auto text = rig.scratch.dir.getChildFile ("notes.txt");
+    text.replaceWithText ("hello");
+    dropOn (rig.ui, well, text);
+    CHECK (engineOf (rig.p).auxLoop() == before);
+    CHECK (auxName (rig.p) == "aux-loop");
+    CHECK_FALSE (rig.cardC());
+    // A .wav that is not one: the load fails; the loop in use plays on, the reason is kept.
+    const auto broken = rig.scratch.dir.getChildFile ("broken.wav");
+    broken.replaceWithText ("not audio");
+    dropOn (rig.ui, well, broken);
+    REQUIRE (engineOf (rig.p).waitForAuxRecording (20000));
+    CHECK (engineOf (rig.p).auxLoop() == before);
+    CHECK (auxName (rig.p) == "aux-loop");
+    CHECK (engineOf (rig.p).auxRecordingState().status == AnalogEngine::AuxRecordingState::Status::ready);
+    CHECK (engineOf (rig.p).auxRecordingState().lastError.isNotEmpty());
+    CHECK_FALSE (rig.cardC());
+}
+
+TEST_CASE ("AUX 03 gates 3-4: the strip's zones align to the cards - B's well exactly; M / S are the cards' keys; RACK beside the menu", "[analog][aux][ui]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    editor->setSize (1448, 1086);
+    ui.setAuxStripShown (true);
+    ui.refreshNow();
+    auto& strip = *ui.auxStripComponent();
+    auto* well = AuxStripView::part (strip, "display");
+    const auto wellB = ui.cardDisplayBounds (2);
+    const auto wellD = well->getBounds() + strip.getPosition();
+    CHECK (wellD.getX() == wellB.getX());
+    CHECK (wellD.getWidth() == wellB.getWidth());
+    // M / S: the cards' own key (osp::plugin::LayerStateButton), the cards' size.
+    auto* mute = dynamic_cast<osp::plugin::LayerStateButton*> (AuxStripView::part (strip, "mute"));
+    auto* solo = dynamic_cast<osp::plugin::LayerStateButton*> (AuxStripView::part (strip, "solo"));
+    REQUIRE (mute != nullptr);
+    REQUIRE (solo != nullptr);
+    CHECK (mute->getWidth() == 27);
+    CHECK (mute->getHeight() == 21);
+    set (p, params::auxMute, 1.0f);
+    CHECK (mute->isOn());
+    set (p, params::auxSolo, 1.0f);
+    CHECK (solo->isOn());
+    // RACK: at the right end, immediately left of the menu; not over the well.
+    auto* rack = AuxStripView::part (strip, "rack");
+    auto* menu = AuxStripView::part (strip, "menu");
+    CHECK (rack->getRight() < menu->getX());
+    CHECK (menu->getX() - rack->getRight() <= 10);
+    CHECK (rack->getX() > well->getRight());
+    CHECK_FALSE (well->getBounds().intersects (rack->getBounds()));
+    // The knobs in C's zone, before RACK, none overlapping it.
+    for (const auto& caption : AuxStripView::knobCaptions (strip))
+    {
+        auto* k = AuxStripView::part (strip, caption);
+        CHECK (k->getX() >= well->getRight());
+        CHECK (k->getRight() <= rack->getX());
+    }
+    // The mode selector: top left of the well, the same left edge in every mode.
+    std::vector<int> lefts;
+    for (int mode = 0; mode < 3; ++mode)
+    {
+        set (p, params::auxMode, static_cast<float> (mode));
+        refreshStrip (ui);
+        auto* selector = AuxStripView::part (strip, "mode");
+        lefts.push_back (selector->getX());
+        CHECK (selector->getX() == well->getX() + 12);
+        CHECK (selector->getY() == well->getY() + 6);
+    }
+    CHECK (lefts[0] == lefts[1]);
+    CHECK (lefts[1] == lefts[2]);
+}
+
+TEST_CASE ("AUX 03 gate 2: D always goes through the FILTER - the old switch is unread and hidden; ROUTE is gone", "[analog][aux]")
+{
+    ShellProcessor p;
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 1.0f);
+    set (p, params::auxNoiseGate, 1.0f);
+    set (p, params::auxSolo, 1.0f);
+    set (p, params::tone, 10.0f);
+    const auto closed = render (p, 0.5);
+    set (p, params::tone, 95.0f);
+    const auto open = render (p, 0.5);
+    CHECK (rms (open, 12000, 24000) > 3.0 * rms (closed, 12000, 24000));   // (the FILTER macro moves D)
+    // An older experimental session with AROUND: through the FILTER now, as every other.
+    set (p, params::tone, 10.0f);
+    set (p, params::auxFilterFollow, 0.0f);
+    CHECK (identical (closed, render (p, 0.5)));
+    CHECK_FALSE (params::engineParameterIds().contains (params::auxFilterFollow));   // (not offered to a host)
+}
+
+TEST_CASE ("AUX 03 gate 6: PITCH and OCT are host parameters at 0; OCT +1 is PITCH +12; they move D RHYTHM", "[analog][aux][pitch]")
+{
+    const auto loop = [] {
+        std::vector<float> x (static_cast<std::size_t> (2.0 * rate), 0.0f);
+        for (int k = 0; k < 4; ++k)
+            for (std::size_t i = 0; i < static_cast<std::size_t> (0.03 * rate); ++i)
+                x[static_cast<std::size_t> (k * 0.5 * rate) + i] = static_cast<float> (0.6 * std::exp (-static_cast<double> (i) / rate / 0.006)
+                                                                                         * std::sin (2.0 * juce::MathConstants<double>::pi * 1500.0 * static_cast<double> (i) / rate));
+        return andor::analog::rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+    }();
+    ShellProcessor a, b, c;
+    for (auto* p : { &a, &b, &c })
+    {
+        engineOf (*p).setAuxLoopForTest (loop);
+        set (*p, params::auxEnabled, 1.0f);
+        set (*p, params::auxMode, 0.0f);
+        set (*p, params::auxSolo, 1.0f);
+    }
+    REQUIRE (a.parameters.getParameter (params::auxPitch) != nullptr);
+    REQUIRE (a.parameters.getParameter (params::auxOctave) != nullptr);
+    CHECK (a.parameters.getParameter (params::auxPitch)->getDefaultValue() == Catch::Approx (0.5f));   // (0 st)
+    CHECK (a.parameters.getParameter (params::auxOctave)->getDefaultValue() == Catch::Approx (0.5f));  // (0 oct)
+    set (a, params::auxPitch, 12.0f);
+    set (b, params::auxOctave, 1.0f);
+    const auto up = render (a, 1.2);
+    CHECK (identical (up, render (b, 1.2)));   // (one transposition, however it is set)
+    CHECK_FALSE (identical (up, render (c, 1.2)));
+    CHECK (params::engineParameterIds().contains (params::auxPitch));
+    CHECK (params::engineParameterIds().contains (params::auxOctave));
+}
+
+TEST_CASE ("AUX 03 renders: D RHYTHM at PITCH -12 / 0 / +12, OCT -1 / +1, RATE 2x with PITCH +5, and PITCH automated (ANALOG_RENDER_DIR)", "[.][renders][aux03]")
+{
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("ANALOG_RENDER_DIR", {});
+    REQUIRE (dir.isNotEmpty());
+    const juce::File out (dir);
+    out.createDirectory();
+    // A 100 BPM loop: a tonal hit on each beat (a 440 Hz pluck), a noise tick on the off-beats.
+    const auto loop = [] {
+        constexpr double beat = 0.6;
+        std::vector<float> x (static_cast<std::size_t> (8 * beat * rate), 0.0f);
+        juce::Random noise (3);
+        for (int k = 0; k < 16; ++k)
+        {
+            const auto first = static_cast<std::size_t> (k * beat * 0.5 * rate);
+            for (std::size_t i = 0; i < static_cast<std::size_t> (0.25 * rate) && first + i < x.size(); ++i)
+            {
+                const double t = static_cast<double> (i) / rate;
+                x[first + i] += static_cast<float> (k % 2 == 0 ? 0.5 * std::exp (-t / 0.08) * std::sin (2.0 * juce::MathConstants<double>::pi * 440.0 * t)
+                                                              : 0.25 * std::exp (-t / 0.01) * (noise.nextFloat() * 2.0f - 1.0f));
+            }
+        }
+        return andor::analog::rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+    }();
+    auto renderWith = [&] (const juce::String& name, float pitch, float octave, float rateIndex, bool automate) {
+        ShellProcessor p;
+        engineOf (p).setAuxLoopForTest (loop);
+        set (p, params::auxEnabled, 1.0f);
+        set (p, params::auxMode, 0.0f);
+        set (p, params::auxSolo, 1.0f);
+        set (p, params::auxLevel, 0.0f);
+        set (p, params::tone, 95.0f);
+        set (p, params::auxPitch, pitch);
+        set (p, params::auxOctave, octave);
+        set (p, params::auxRate, rateIndex);
+        p.prepareToPlay (rate, block);
+        const int total = static_cast<int> (6.0 * rate);
+        juce::AudioBuffer<float> audio (2, total), buffer (2, block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            if (automate)
+                set (p, params::auxPitch, -12.0f + 24.0f * static_cast<float> (pos) / static_cast<float> (total));
+            juce::MidiBuffer none;
+            p.processBlock (buffer, none);
+            const int n = std::min (block, total - pos);
+            for (int ch = 0; ch < 2; ++ch)
+                audio.copyFrom (ch, pos, buffer, ch, 0, n);
+        }
+        const auto file = out.getChildFile (name + ".wav");
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> stream (file.createOutputStream().release());
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.get(), rate, 2, 24, {}, 0));
+        REQUIRE (writer != nullptr);
+        stream.release();
+        writer->writeFromAudioSampleBuffer (audio, 0, total);
+        // Where the beats start (above -30 dBFS after 40 ms of quiet): the grid, whatever the pitch.
+        std::vector<double> starts;
+        int quiet = 1 << 30;
+        for (int i = 0; i < total; ++i)
+        {
+            const float v = std::abs (audio.getSample (0, i));
+            if (v > 0.03f && quiet > static_cast<int> (0.04 * rate))
+                starts.push_back (i / rate);
+            quiet = v > 0.03f ? 0 : quiet + 1;
+        }
+        juce::String line;
+        for (std::size_t k = 0; k < std::min<std::size_t> (6, starts.size()); ++k)
+            line << juce::String (starts[k], 3) << " ";
+        WARN (name << ": peak " << juce::Decibels::gainToDecibels (audio.getMagnitude (0, total)) << " dBFS; first hits at " << line << "s");
+        return starts;
+    };
+    const auto plain = renderWith ("aux03-01-pitch-0", 0.0f, 0.0f, 2.0f, false);
+    for (const auto& [name, pitch, octave] : { std::tuple<const char*, float, float> { "aux03-02-pitch-minus12", -12.0f, 0.0f },
+                                               { "aux03-03-pitch-plus12", 12.0f, 0.0f },
+                                               { "aux03-04-oct-minus1", 0.0f, -1.0f },
+                                               { "aux03-05-oct-plus1", 0.0f, 1.0f } })
+    {
+        const auto starts = renderWith (name, pitch, octave, 2.0f, false);
+        REQUIRE (starts.size() >= 3);
+        // Every hit heard lands on the unpitched loop's grid (a slower slice's tail may hide the
+        // quiet before the next hit from this detector - never move the hit).
+        for (const double t : starts)
+        {
+            double nearest = 1.0e9;
+            for (const double q : plain)
+                nearest = std::min (nearest, std::abs (q - t));
+            INFO (name << ": hit at " << t << " s");
+            CHECK (nearest < 0.006);
+        }
+    }
+    renderWith ("aux03-06-rate-2x-pitch-plus5", 5.0f, 0.0f, 3.0f, false);
+    renderWith ("aux03-07-pitch-automated", 0.0f, 0.0f, 2.0f, true);
 }

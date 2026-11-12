@@ -50,6 +50,11 @@ public:
             still starts on its place in the grid and plays faster (higher, shorter: a gap
             after it) or slower (lower, longer: cut at the next slice), as a sampler's slices. */
         double pitchRatio = 1.0;
+        /** Opt-in (D RHYTHM's PITCH / OCT): the level and transient outputs follow the loop as
+            played un-pitched - each slice's envelope at its original timing, whatever the
+            pitch - so the modulation's pulses never move or squeeze. Off: as the head reads
+            (card C's RHYTHM, unchanged). */
+        bool envelopeOnGrid = false;
     };
 
     void prepare (double hostRate) noexcept;
@@ -75,11 +80,12 @@ private:
     struct Head
     {
         double pos = 0.0;   ///< source frames (absolute)
+        double origin = 0.0;   ///< where it started (envelopeOnGrid: its envelope read from here at the un-pitched speed)
         float gain = 0.0f, target = 0.0f, step = 0.0f;
         bool on = false;
         const PreparedLoop* source = nullptr;
     };
-    void start (const PreparedLoop* source, double pos, float rampSeconds) noexcept;
+    void start (const PreparedLoop* source, double pos, float rampSeconds) noexcept;   // (the head's origin: pos)
     void fadeAll (float seconds) noexcept;
     float read (const Head& h, int channel) const noexcept;
 

@@ -125,6 +125,7 @@ void LoopPlayer::start (const PreparedLoop* source, double pos, float rampSecond
     h.on = true;
     h.source = source;
     h.pos = pos;
+    h.origin = pos;
     h.gain = rampSeconds <= 0.0f ? 1.0f : 0.0f;
     h.target = 1.0f;
     h.step = rampSeconds <= 0.0f ? 1.0f : 1.0f / std::max (1.0f, rampSeconds * static_cast<float> (hostRate));
@@ -275,7 +276,8 @@ void LoopPlayer::render (float* outL, float* outR, float gain, float* level, flo
                 if (! a.envelope.empty())
                 {
                     const auto frames = static_cast<double> (h.source->left.size());
-                    double p = std::fmod (h.pos, frames);
+                    const double at = settings.envelopeOnGrid ? h.origin + (h.pos - h.origin) / pitch : h.pos;
+                    double p = std::fmod (at, frames);
                     if (p < 0.0)
                         p += frames;
                     const double seconds = p / h.source->rate;

@@ -240,12 +240,12 @@ void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File
             const std::lock_guard<std::mutex> lock (auxMutex);
             generation = ++auxGeneration;
             auxAsset = asset;
-            auxState = { AuxRecordingState::Status::loading, name, {} };
+            auxState = { AuxRecordingState::Status::loading, name, {}, {} };
         }
         if (asset.isEmpty() || asset.containsAnyOf ("/\\") || ! stored.existsAsFile())
-            publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::missing, name, "The recording is missing: load it again" }, asset);
+            publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::missing, name, "The recording is missing: load it again", {} }, asset);
         else
-            sourceLoader.addJob ([this, stored, name, asset, generation] { decodeAuxRecording (stored, name, asset, generation); });
+            sourceLoader.addJob ([this, stored, name, asset, generation] { decodeAuxRecording (stored, name, asset, generation, false); });
     }
     else
         clearAuxRecording();
@@ -588,48 +588,72 @@ void AnalogEngine::setRhythmLoopForTest (std::shared_ptr<const rhythm::PreparedL
 
 void AnalogEngine::loadAuxRecording (const juce::File& recording, const juce::File& assetFolder)
 {
+    // A replacement: the recording in use plays on until this one is ready; if it fails, it
+    // stays (with the reason) - a failed import never leaves D broken.
     std::uint64_t generation = 0;
     const auto name = recording.getFileNameWithoutExtension();
     {
         const std::lock_guard<std::mutex> lock (auxMutex);
         generation = ++auxGeneration;
-        auxState = { AuxRecordingState::Status::loading, name, {} };
+        auxLoading = name;
+        auxState.lastError.clear();
     }
     // (copied, decoded and analysed on the loader thread; a newer load makes this one stale)
     sourceLoader.addJob ([this, recording, assetFolder, name, generation] {
+        const auto ext = recording.getFileExtension().toLowerCase();
+        if (ext != ".wav" && ext != ".aif" && ext != ".aiff" && ext != ".flac")
+        {
+            failAuxLoad (generation, recording.getFileName() + " is not a WAV, AIFF or FLAC recording");
+            return;
+        }
         const auto asset = import::storeAsset (recording, assetFolder);
         if (asset.isEmpty())
         {
-            publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "It could not be copied into the instrument's store" }, {});
+            failAuxLoad (generation, recording.getFileName() + " could not be copied into the instrument's store");
             return;
         }
-        decodeAuxRecording (assetFolder.getChildFile (asset), name, asset, generation);
+        decodeAuxRecording (assetFolder.getChildFile (asset), name, asset, generation, true);
     });
 }
 
-void AnalogEngine::decodeAuxRecording (juce::File stored, juce::String name, juce::String asset, std::uint64_t generation)
+void AnalogEngine::failAuxLoad (std::uint64_t generation, const juce::String& why)
+{
+    const std::lock_guard<std::mutex> lock (auxMutex);
+    if (generation != auxGeneration)
+        return;
+    auxLoading.clear();
+    auxState.lastError = why;   // (the recording in use, its asset and its state: unchanged)
+}
+
+void AnalogEngine::decodeAuxRecording (juce::File stored, juce::String name, juce::String asset, std::uint64_t generation, bool keepOnFailure)
 {
     // Loader thread. WAV, AIFF, FLAC (JUCE's basic formats); up to 60 s of it.
+    auto fail = [&] (const juce::String& why) {
+        if (keepOnFailure)
+            failAuxLoad (generation, name + ": " + why);
+        else
+            publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, why, {} }, asset);
+    };
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (stored));
     if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0 || reader->sampleRate <= 0.0)
     {
-        publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "It is not a recording this instrument can read (WAV, AIFF or FLAC)" }, asset);
+        fail ("it is not a recording this instrument can read (WAV, AIFF or FLAC)");
         return;
     }
     const auto frames = static_cast<int> (std::min<juce::int64> (reader->lengthInSamples, static_cast<juce::int64> (reader->sampleRate * 60.0)));
     juce::AudioBuffer<float> buffer (std::min (2, static_cast<int> (reader->numChannels)), frames);
     if (! reader->read (&buffer, 0, frames, 0, true, buffer.getNumChannels() > 1))
     {
-        publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "It could not be read" }, asset);
+        fail ("it could not be read");
         return;
     }
     auto loop = rhythm::prepareLoop (buffer.getReadPointer (0), buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr, static_cast<std::size_t> (frames), reader->sampleRate);
     if (loop == nullptr)
-        publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "No rhythm was found in it" }, asset);
+        fail ("no audio was found in it");
     else
-        publishAuxLoop (std::move (loop), generation, { AuxRecordingState::Status::ready, name, {} }, asset);
+        publishAuxLoop (std::move (loop), generation, { AuxRecordingState::Status::ready, name, {}, {} }, asset);
 }
 
 void AnalogEngine::publishAuxLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation, AuxRecordingState next, juce::String asset)
@@ -641,6 +665,7 @@ void AnalogEngine::publishAuxLoop (std::shared_ptr<const rhythm::PreparedLoop> l
     if (generation != auxGeneration)
         return;   // (a newer recording since)
     auxState = std::move (next);
+    auxLoading.clear();
     // (a failed new load keeps nothing: its asset is kept only if it is the stored file, so a
     // missing one is written back exactly as it was read)
     auxAsset = asset;
@@ -662,7 +687,14 @@ void AnalogEngine::clearAuxRecording()
 AnalogEngine::AuxRecordingState AnalogEngine::auxRecordingState() const
 {
     const std::lock_guard<std::mutex> lock (auxMutex);
-    return auxState;
+    auto state = auxState;
+    if (auxLoading.isNotEmpty())
+    {
+        // (a replacement on its way: shown as loading; the one in use plays until it is ready)
+        state.status = AuxRecordingState::Status::loading;
+        state.name = auxLoading;
+    }
+    return state;
 }
 
 std::shared_ptr<const rhythm::PreparedLoop> AnalogEngine::auxLoop() const
@@ -690,7 +722,7 @@ void AnalogEngine::setAuxLoopForTest (std::shared_ptr<const rhythm::PreparedLoop
         const std::lock_guard<std::mutex> lock (auxMutex);
         generation = ++auxGeneration;
     }
-    publishAuxLoop (std::move (loop), generation, { AuxRecordingState::Status::ready, "test", {} }, {});
+    publishAuxLoop (std::move (loop), generation, { AuxRecordingState::Status::ready, "test", {}, {} }, {});
 }
 
 juce::String AnalogEngine::status (const juce::String& topic) const
