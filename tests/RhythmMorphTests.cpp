@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <numbers>
@@ -339,4 +340,83 @@ TEST_CASE ("RHYTHMIC MORPH: MORPH in MOD is the voices' own (the loop silent) - 
     noRhythm.rhythm.enabled = false;
     const std::vector<Event> held { on (0, 48, 100), off (static_cast<int> (1.6 * rate), 48) };
     CHECK (render (*loopSynth (p), 2.0, held).left == render (*loopSynth (noRhythm), 2.0, held).left);
+}
+
+namespace
+{
+    /** The tick's frequency (Hz) from its zero crossings over 1.5 ms after it starts. */
+    double tickHz (const std::vector<float>& x, double start)
+    {
+        const auto a = static_cast<std::size_t> (start * rate) + 8, z = a + static_cast<std::size_t> (0.0015 * rate);
+        int crossings = 0;
+        for (auto i = a + 1; i < z && i < x.size(); ++i)
+            crossings += (x[i - 1] < 0.0f) != (x[i] < 0.0f) ? 1 : 0;
+        return 0.5 * crossings / ((static_cast<double> (z - a)) / rate);
+    }
+}
+
+TEST_CASE ("RHYTHMIC MORPH: card C's OCT, TUNE and DETUNE move the loop's pitch; its slices stay on the grid", "[rhythm][synth][pitch]")
+{
+    auto ticksWith = [] (int octave, double tune, double cents) {
+        Patch p = rhythmPatch();
+        p.hybridOctave = octave;
+        p.organic.tuneSemitones = tune;
+        p.hybridFineCents = cents;
+        return render (*loopSynth (p), 2.2, { on (0, 60, 100), off (static_cast<int> (2.1 * rate), 60) }).left;
+    };
+    const auto plain = ticksWith (0, 0.0, 0.0), up = ticksWith (1, 0.0, 0.0), fifth = ticksWith (0, 7.0, 0.0), down = ticksWith (-1, 0.0, 0.0);
+    for (const auto* x : { &plain, &up, &fifth, &down })
+    {
+        const auto t = tickStarts (*x);
+        REQUIRE (t.size() >= 4);
+        for (std::size_t k = 0; k < 4; ++k)
+            CHECK (t[k] == Approx (0.5 * static_cast<double> (k)).margin (0.002));   // (the grid, whatever the pitch)
+    }
+    const double f0 = tickHz (plain, 1.0), f1 = tickHz (up, 1.0), f7 = tickHz (fifth, 1.0), fm = tickHz (down, 1.0);
+    INFO ("tick at " << f0 << " Hz; OCT +1 " << f1 << ", TUNE +7 " << f7 << ", OCT -1 " << fm);
+    CHECK (f0 == Approx (2000.0).epsilon (0.12));
+    CHECK (f1 / f0 == Approx (2.0).epsilon (0.12));
+    CHECK (f7 / f0 == Approx (1.4983).epsilon (0.12));
+    CHECK (fm / f0 == Approx (0.5).epsilon (0.15));
+}
+
+TEST_CASE ("RHYTHMIC MORPH: the loop goes through the cards' FILTER - TONE darkens it, the filter envelope opens it with card C's notes", "[rhythm][synth][filter]")
+{
+    auto play = [] (double tone, double envDepth) {
+        Patch p = rhythmPatch();
+        p.tone = tone;
+        p.envDepthSemitones = envDepth;
+        p.filterAttack = 0.001;
+        p.filterDecay = 0.15;
+        p.filterSustain = 0.0;
+        auto s = loopSynth (p);
+        const auto out = render (*s, 1.2, { on (0, 60, 100), off (static_cast<int> (1.1 * rate), 60) }).left;
+        return out;
+    };
+    const auto open = play (1.0, 0.0), closed = play (0.25, 0.0);
+    const double rOpen = rmsOf (open, 0.0, 1.0), rClosed = rmsOf (closed, 0.0, 1.0);
+    INFO ("loop rms open " << rOpen << ", TONE 25 % " << rClosed);
+    CHECK (rOpen > 0.005);
+    CHECK (rClosed < 0.3 * rOpen);   // (the 2 kHz ticks under a closed low-pass)
+    // The filter envelope (card C's voice's): open at the note's start, closed again after its decay.
+    Patch p = rhythmPatch();
+    p.tone = 0.25;
+    p.envDepthSemitones = 48.0;
+    p.filterAttack = 0.001;
+    p.filterDecay = 0.15;
+    p.filterSustain = 0.0;
+    auto s = loopSynth (p);
+    const unsigned char noteOn[3] { 0x90, 60, 100 };
+    s->handleMidi (noteOn, 3);
+    std::vector<float> l (480), r (480);
+    std::vector<float> cutoff;
+    for (int b = 0; b < 100; ++b)
+    {
+        s->render (l.data(), r.data(), 480);
+        cutoff.push_back (s->rhythmCutoffHz());
+    }
+    const float peak = *std::max_element (cutoff.begin(), cutoff.begin() + 5);
+    INFO ("cutoff peak (first 50 ms) " << peak << " Hz, at 0.8 s " << cutoff[80] << " Hz");
+    CHECK (peak > 6.0f * cutoff[80]);
+    CHECK (cutoff[80] > 0.0f);
 }

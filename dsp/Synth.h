@@ -267,6 +267,8 @@ public:
     void externalKeyEvent (const std::uint8_t* data, int size) noexcept;
     /** Tests: the external bus's filter cutoff now (Hz), 0 while it is not running. */
     float externalCutoffHz() const noexcept { return externalRunning ? externalFilter.cutoffHz : 0.0f; }
+    /** Tests: RHYTHM's loop's filter cutoff now (Hz), 0 while it is not filtered. */
+    float rhythmCutoffHz() const noexcept { return rhythmFilter.running ? rhythmFilter.cutoffHz : 0.0f; }
     const GlobalMorph& globalMorphState() const noexcept { return globalMorph; }
 
     /** RHYTHMIC MORPH: card C's prepared loop (owned by the caller, alive while set; null: none). */
@@ -751,9 +753,16 @@ private:
         float cutoffHz = 0.0f;
         bool otaModel = false, otaWasModel = false, highPassOn = false;
         int countdown = 0;
-    } externalFilter;
+        /** RHYTHM's loop: the envelope is card C's voices' own (their filter envelopes, at their
+            depth and velocity, the highest), given per block - not this bus's. */
+        bool voiceEnvelope = false;
+        float envFrom = 0.0f, envTo = 0.0f;   ///< semitones, across the block
+        bool running = false;
+    } externalFilter, rhythmFilter;
     void updateExternalFilter() noexcept;   ///< control rate: the cards' filter settings
+    void configureBusFilter (ExternalFilter& f) noexcept;
     void filterExternal (int n) noexcept;   ///< the bus (externalL / R) through it
+    void filterBus (ExternalFilter& f, float* left, float* right, int n) noexcept;
     bool externalRunning = false;
     static constexpr int maxExternalLatency = 8192;   ///< samples (an instrument reporting more: not aligned past it)
     std::vector<float> externalL, externalR, morphOutL, morphOutR, voicesDelayL, voicesDelayR;

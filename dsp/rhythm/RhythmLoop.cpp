@@ -158,7 +158,8 @@ void LoopPlayer::render (float* outL, float* outR, float gain, float* level, flo
     }
     wasRunning = running;
     const bool sync = loop != nullptr && settings.sync && loop->rhythmic();
-    const double step = loop != nullptr ? loop->rate / hostRate : 1.0;   // (source frames a host sample: its own speed)
+    const double pitch = std::clamp (settings.pitchRatio, 0.25, 4.0);
+    const double step = (loop != nullptr ? loop->rate / hostRate : 1.0) * pitch;   // (source frames a host sample: its own speed, times TUNE)
     for (int i = 0; i < n; ++i)
     {
         if (loop != nullptr && running)
@@ -171,7 +172,7 @@ void LoopPlayer::render (float* outL, float* outR, float gain, float* level, flo
                 const double beats = static_cast<double> (loop->analysis.beats) * factor;
                 const double framesPerBeat = loop->loopFrames / beats;
                 const double hostSecondsPerBeat = ppqPerSample > 0.0 ? 1.0 / (ppqPerSample * hostRate) : 0.5;
-                const double toSource = hostSecondsPerBeat * loop->rate / framesPerBeat;   // (loop frames on the grid -> source frames played)
+                const double toSource = pitch * hostSecondsPerBeat * loop->rate / framesPerBeat;   // (loop frames on the grid -> source frames played, at TUNE's speed)
                 const double preroll = 0.002 * loop->rate;                                 // (source frames)
                 double b = std::fmod (ppq + static_cast<double> (i) * ppqPerSample, beats);
                 if (b < 0.0)
@@ -192,7 +193,8 @@ void LoopPlayer::render (float* outL, float* outR, float gain, float* level, flo
                 const double elapsed = (inLoop - anchor) * toSource;   // (source frames from the attack; -preroll .. )
                 const double expected = loop->loopStart + anchor + elapsed;
                 // (it must be silent by the next slice's pre-roll: its 3 ms fade ends there)
-                const bool inSlice = anchor + elapsed < nextAnchor - preroll - 0.003 * loop->rate;
+                const double fadeFrames = 0.003 * loop->rate * pitch;   // (the 3 ms fade, in source frames at TUNE's speed)
+                const bool inSlice = anchor + elapsed < nextAnchor - preroll - fadeFrames;
                 const auto* m = main >= 0 ? &heads[static_cast<std::size_t> (main)] : nullptr;
                 // A seek or the host's loop: the clock itself jumps (a tempo change never does -
                 // the playing slice keeps its own speed; only the next one is placed anew).
@@ -220,7 +222,7 @@ void LoopPlayer::render (float* outL, float* outR, float gain, float* level, flo
                         rel += loop->loopFrames;
                     else if (rel > 0.5 * loop->loopFrames)
                         rel -= loop->loopFrames;
-                    if (rel >= nextAnchor - anchor - preroll - 0.003 * loop->rate)
+                    if (rel >= nextAnchor - anchor - preroll - fadeFrames)
                     {
                         auto& h = heads[static_cast<std::size_t> (main)];
                         h.target = 0.0f;

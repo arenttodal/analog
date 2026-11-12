@@ -100,9 +100,12 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
     rhythmMorphNow = 0.0f;
     rhythmMorphRunning = false;
-    for (auto& h : externalFilter.highPass)
-        h.prepare (hostRate);
+    for (auto* f : { &externalFilter, &rhythmFilter })
+        for (auto& h : f->highPass)
+            h.prepare (hostRate);
     externalFilter.env.setSampleRate (hostRate);
+    rhythmFilter.voiceEnvelope = true;
+    rhythmFilter.running = false;
     externalRunning = false;
     externalGainNow = externalMorphNow = 0.0f;
     for (auto* b : { &sendMixL, &sendMixR })
@@ -2868,6 +2871,8 @@ void Synth::renderRhythm (int numSamples) noexcept
     andor::analog::rhythm::LoopPlayer::Settings settings;
     settings.sync = rs.sync;
     settings.tempoFactor = rs.tempo == 0 ? 0.5 : (rs.tempo == 2 ? 2.0 : 1.0);
+    // Card C's own pitch knobs (TUNE, OCT, DETUNE) move the loop as they move its keys.
+    settings.pitchRatio = std::exp2 ((12.0 * current.hybridOctave + current.organic.tuneSemitones + current.hybridFineCents / 100.0) / 12.0);
     loopPlayer.render (loopL.data(), loopR.data(), 1.0f, loopLevel.data(), loopTransient.data(), numSamples, q0, bpm / 60.0 / hostRate, running, settings);
     // C RHYTHM: above the threshold (SENSITIVITY), through its ATTACK and RELEASE, times DEPTH.
     const float threshold = static_cast<float> (0.6 * (1.0 - std::clamp (rs.sensitivity, 0.0, 1.0)));
@@ -3040,10 +3045,14 @@ void Synth::externalKeyEvent (const std::uint8_t* data, int size) noexcept
 
 void Synth::updateExternalFilter() noexcept
 {
+    configureBusFilter (externalFilter);
+}
+
+void Synth::configureBusFilter (ExternalFilter& f) noexcept
+{
     // The cards' filter, as SUB follows it: TONE (smoothed) and what moves the cards' cutoff
     // beyond it; their resonance, drive, model, high-pass; their envelope and amounts.
     const auto& p = current;
-    auto& f = externalFilter;
     f.baseNote = toneNote + subCutoffMoved;
     f.keyTrack = static_cast<float> (p.keyTrack);
     f.envDepth = static_cast<float> (p.envDepthSemitones);
@@ -3082,23 +3091,28 @@ void Synth::updateExternalFilter() noexcept
 
 void Synth::filterExternal (int n) noexcept
 {
-    auto& f = externalFilter;
+    filterBus (externalFilter, externalL.data(), externalR.data(), n);
+}
+
+void Synth::filterBus (ExternalFilter& f, float* left, float* right, int n) noexcept
+{
     const auto character = current.otaVoicing == OtaVoicing::jupiter ? OtaCharacter::jupiter : OtaCharacter::juno;
     const float velocityScale = 1.0f - f.velocityToEnv + f.velocityToEnv * f.velocity;
+    const float span = 1.0f / static_cast<float> (std::max (1, n));
     for (int i = 0; i < n; ++i)
     {
-        const float env = f.env.next();
+        // Its envelope (semitones): the bus's own, or card C's voices' (RHYTHM), glided across the block.
+        const float envSemis = f.voiceEnvelope ? f.envFrom + (f.envTo - f.envFrom) * static_cast<float> (i) * span : f.env.next() * f.envDepth * velocityScale;
         // The cutoff every 8 samples (the envelope moves it): at the host rate, its own g.
         if (--f.countdown <= 0)
         {
             f.countdown = 8;
-            const float note = f.baseNote + f.keyTrack * static_cast<float> (f.lastKey - 60) + env * f.envDepth * velocityScale;
+            const float note = f.baseNote + f.keyTrack * static_cast<float> (f.lastKey - 60) + envSemis;
             const double hz = std::clamp (440.0 * std::exp2 ((static_cast<double> (note) - 69.0) / 12.0), 8.0, 0.45 * hostRate);
             f.cutoffHz = static_cast<float> (hz);
             f.g = static_cast<float> (std::tan (math::pi * hz / hostRate));
         }
-        const auto k = static_cast<std::size_t> (i);
-        float* bus[2] { &externalL[k], &externalR[k] };
+        float* bus[2] { &left[i], &right[i] };
         for (std::size_t ch = 0; ch < 2; ++ch)
         {
             float in = *bus[ch] * f.gainIn;
@@ -3124,7 +3138,44 @@ void Synth::mixRhythm (float* left, float* right, int numSamples) noexcept
         rhythmGate = 0.0f;
         rhythmMorphNow = 0.0f;
         rhythmMorphRunning = false;
+        rhythmFilter.running = false;
         return;
+    }
+    // The loop goes through the cards' FILTER, as every card C source does: TONE and what moves
+    // it, RESONANCE, DRIVE, the model, the high-pass, key tracking (card C's newest note) and the
+    // filter envelope (card C's voices' own, at their depth and velocity: the highest).
+    {
+        auto& f = rhythmFilter;
+        if (! f.running)
+        {
+            for (auto& l : f.ladder)
+                l.reset();
+            for (auto& o : f.ota)
+                o.reset();
+            for (auto& h : f.highPass)
+                h.reset();
+            f.envTo = 0.0f;
+        }
+        configureBusFilter (f);
+        float envSemis = 0.0f;
+        std::uint64_t newest = 0;
+        bool any = false;
+        for (const auto& v : voices)
+            if (v.active && (v.cards & 4) != 0)
+            {
+                const float e = v.env.value() * v.envDepth;
+                envSemis = any ? (std::abs (e) > std::abs (envSemis) ? e : envSemis) : e;
+                any = true;
+                if (v.order >= newest)
+                {
+                    newest = v.order;
+                    f.lastKey = static_cast<int> (std::lround (v.pitch));
+                }
+            }
+        f.envFrom = f.running ? f.envTo : envSemis;
+        f.envTo = envSemis;
+        f.running = true;
+        filterBus (f, loopL.data(), loopR.data(), numSamples);
     }
     // Heard while card C's notes sound (their AMP: attack, hold, release), at card C's LEVEL
     // (its mute and solo too), at SATELLITE C's place.

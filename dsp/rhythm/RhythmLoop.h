@@ -46,6 +46,10 @@ public:
     {
         bool sync = true;           ///< follow the host grid (a rhythmic loop only)
         double tempoFactor = 1.0;   ///< HALF 0.5 / DETECTED 1 / DOUBLE 2
+        /** Card C's TUNE, OCT and DETUNE as a speed (2^(semitones / 12), 0.25..4): each slice
+            still starts on its place in the grid and plays faster (higher, shorter: a gap
+            after it) or slower (lower, longer: cut at the next slice), as a sampler's slices. */
+        double pitchRatio = 1.0;
     };
 
     void prepare (double hostRate) noexcept;
