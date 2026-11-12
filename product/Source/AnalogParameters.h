@@ -299,7 +299,7 @@ namespace andor::analog::params
         double keyDnaCardAmount() const noexcept;
 
         // Modulation (real-time safe).
-        static constexpr int maxValues = 448;
+        static constexpr int maxValues = 512;
         using Values = std::array<float, maxValues>;
         /** Every raw value now, in the reader's order. */
         void snapshot (Values& raw) const noexcept;

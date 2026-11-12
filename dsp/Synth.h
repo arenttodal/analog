@@ -336,6 +336,8 @@ public:
         card's picture; `card` 0: A, OSC 1; 1: B, OSC 2); returns how many were written (at
         most `max`). Audio thread. */
     int collectGrains (int card, LiveGranulator::GrainDot* out, int max) const noexcept;
+    /** Card C GRANULAR's grains (its display), as the oscillator cards' (0 while it is off). */
+    int collectOrganicGrains (LiveGranulator::GrainDot* out, int max) const noexcept;
     /** ORGANIC's read heads (card B's playheads, as ANDOR OSP's One Shot voices): one per voice
         playing the recording, where it reads (0..1 of the recording shown) and how loud the
         note is (its amplitude envelope, 0..1). Returns how many. Any thread that renders. */
@@ -418,6 +420,10 @@ private:
         double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
         // ORGANIC: the recording this note plays beside the oscillators (into the same mixer).
         OrganicVoice organic;
+        /** Card C GRANULAR: its recording as ANDOR OSP's grains instead of read through. */
+        osp::GranularSource organicGrains;
+        bool organicGrainsOn = false;
+        std::uint32_t organicGrainsRevision = 0;
         std::array<ZonePlayer, SampleSource::maxLayers> zones;   ///< an imported source's zones for this note
         std::array<double, SampleSource::maxLayers> zoneSteps {};
         std::array<float, SampleSource::maxLayers> zoneGains {};
@@ -763,6 +769,11 @@ private:
     void configureBusFilter (ExternalFilter& f) noexcept;
     void filterExternal (int n) noexcept;   ///< the bus (externalL / R) through it
     void filterBus (ExternalFilter& f, float* left, float* right, int n) noexcept;
+    /** Card C GRANULAR: a note's grains from the recording (its settings now). */
+    void startOrganicGrains (Voice& v) noexcept;
+    osp::GranularParams organicGrainParams() const noexcept;
+    osp::GranularParams lastGrainsC;
+    std::uint32_t grainsCRevision = 0;   ///< bumped when card C's grain settings change (voices follow)
     bool externalRunning = false;
     static constexpr int maxExternalLatency = 8192;   ///< samples (an instrument reporting more: not aligned past it)
     std::vector<float> externalL, externalR, morphOutL, morphOutR, voicesDelayL, voicesDelayR;

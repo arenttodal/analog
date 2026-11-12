@@ -341,6 +341,19 @@ void Synth::setPatch (const Patch& patch) noexcept
     const int oldGroup = groupSize();
     current = patch;
     current.polyphony = std::clamp (current.polyphony, 1, maxVoices);
+    {
+        // Card C's grain settings changed: the playing grains take them (at their next control tick).
+        const auto& a = current.grainsC;
+        const auto& b = lastGrainsC;
+        if (a.position != b.position || a.sizeSeconds != b.sizeSeconds || a.density != b.density || a.tuneSemitones != b.tuneSemitones || a.spread != b.spread
+            || current.organic.reverse != lastGrainsC.reverse || current.organic.follow != lastGrainsC.follow)
+        {
+            lastGrainsC = a;
+            lastGrainsC.reverse = current.organic.reverse;
+            lastGrainsC.follow = current.organic.follow;
+            ++grainsCRevision;
+        }
+    }
     if (wasMono != monophonic() || (monophonic() && oldGroup != groupSize()))
     {
         // Another way of playing: what sounds is released, the held keys forgotten.
@@ -464,6 +477,25 @@ int Synth::collectGrains (int card, LiveGranulator::GrainDot* out, int max) cons
     for (const auto& v : voices)
         if (v.active && n < max)
             n += card == 1 ? v.granulator2.collect (v.recording2, out + n, max - n) : v.granulator.collect (v.recording, out + n, max - n);
+    return n;
+}
+
+int Synth::collectOrganicGrains (LiveGranulator::GrainDot* out, int max) const noexcept
+{
+    if (! current.granularC)
+        return 0;
+    std::array<osp::GranularSource::GrainView, osp::GranularSource::maxGrains> views;
+    int n = 0;
+    for (const auto& v : voices)
+    {
+        if (n >= max)
+            break;
+        if (! v.active || ! v.organicGrainsOn)
+            continue;
+        const int got = v.organicGrains.collect (views.data(), std::min (static_cast<int> (views.size()), max - n));
+        for (int i = 0; i < got; ++i)
+            out[n++] = { views[static_cast<std::size_t> (i)].position, views[static_cast<std::size_t> (i)].level, views[static_cast<std::size_t> (i)].lane };
+    }
     return n;
 }
 
@@ -812,6 +844,11 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
             v.organic.start (organicSource, current.organic.start, current.organic.reverse);
         else
             v.organic.stop();
+        // Card C GRANULAR: the same recording as grains (the read-through above stays the
+        // note's clock: it never advances while the grains play).
+        v.organicGrainsOn = false;
+        if ((v.cards & 4) != 0 && sampleSource == nullptr && organicSource != nullptr && current.granularC)
+            startOrganicGrains (v);
         // Card C's second layer: its own source's zones (a file or an instrument patch).
         for (auto& z : v.c2.zones)
             z.stop();
@@ -1454,6 +1491,19 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         }
     }
     controlLayer2 (v, p, common, lfoNow);   // (card C's second layer: off, nothing)
+    // Card C GRANULAR switched or retuned while the note plays: its grains follow.
+    if (const bool want = p.granularC && (v.cards & 4) != 0 && sampleSource == nullptr && organicSource != nullptr && ! v.organic.finished(); want != v.organicGrainsOn)
+    {
+        if (want)
+            startOrganicGrains (v);
+        else
+            v.organicGrainsOn = false;
+    }
+    else if (v.organicGrainsOn && v.organicGrainsRevision != grainsCRevision)
+    {
+        v.organicGrains.setParams (organicGrainParams());
+        v.organicGrainsRevision = grainsCRevision;
+    }
     v.organicOn = ! v.organic.finished() || zonesOn || generating || v.c2.on;
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
                     && ! v.organicOn;
@@ -2140,7 +2190,15 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
     float organic = 0.0f;
     if (v.organicOn)
     {
-        float source = v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
+        float source = 0.0f;
+        if (v.organicGrainsOn)
+        {
+            float gl = 0.0f, gr = 0.0f;   // (card C GRANULAR: its grains, summed to the card's mono part)
+            v.organicGrains.render (gl, gr, v.organicStep);
+            source = 0.5f * (gl + gr);
+        }
+        else
+            source = v.organic.next (v.organicStep, (v.held || v.sustained) && p.organic.loop);
         for (int i = 0; i < v.zoneCount; ++i)
             source += v.zoneGains[static_cast<std::size_t> (i)] * v.zones[static_cast<std::size_t> (i)].next (v.zoneSteps[static_cast<std::size_t> (i)], p.organic.loop);
         if (v.hybridGen != HybridType::sample)
@@ -2976,6 +3034,24 @@ void Synth::mixExternal (float* left, float* right, int numSamples) noexcept
     externalMorphNow = m;
     if (! external.active && externalGainNow <= 0.0f && externalMorphNow <= 0.0f)
         externalRunning = false;   // (faded out: back to the instrument as before)
+}
+
+osp::GranularParams Synth::organicGrainParams() const noexcept
+{
+    auto g = current.grainsC;
+    g.reverse = current.organic.reverse;   // (card C's REVERSE and FOLLOW, as a layer's)
+    g.follow = current.organic.follow;
+    return g;
+}
+
+void Synth::startOrganicGrains (Voice& v) noexcept
+{
+    if (organicSource == nullptr || ! organicSource->isValid())
+        return;
+    v.organicGrains.start (*organicSource->original.source, organicGrainParams(), internalRate, osp::Prng::deriveSeed (v.seed, 0x6772436eull, 0),
+                           &organicSource->analysis.envelope, organicSource->analysis.source.durationSeconds);
+    v.organicGrainsOn = true;
+    v.organicGrainsRevision = grainsCRevision;
 }
 
 void Synth::externalKeyEvent (const std::uint8_t* data, int size) noexcept

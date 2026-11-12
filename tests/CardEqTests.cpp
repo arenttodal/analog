@@ -4,6 +4,7 @@
 
 #include "TestUtil.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -291,4 +292,66 @@ TEST_CASE ("three engines: each oscillator's card M / S silences only its oscill
     auto fine = both;
     fine.osc1FineCents = 30.0;
     CHECK (maxDifference (play (both, nullptr, note), play (fine, nullptr, note)) > 1.0e-3f);
+}
+
+// Card C GRANULAR (its own REGULAR / GRANULAR switch): its recording as ANDOR OSP's grains.
+namespace
+{
+    double rmsBetween (const std::vector<float>& x, double from, double to, double rate = 48000.0)
+    {
+        double s = 0.0;
+        const auto a = static_cast<std::size_t> (from * rate), z = std::min (x.size(), static_cast<std::size_t> (to * rate));
+        for (auto i = a; i < z; ++i)
+            s += static_cast<double> (x[i]) * x[i];
+        return std::sqrt (s / static_cast<double> (std::max<std::size_t> (1, z - a)));
+    }
+
+    double zeroCrossingHz (const std::vector<float>& x, double from, double to, double rate = 48000.0)
+    {
+        int crossings = 0;
+        const auto a = static_cast<std::size_t> (from * rate), z = std::min (x.size(), static_cast<std::size_t> (to * rate));
+        for (auto i = a + 1; i < z; ++i)
+            crossings += (x[i - 1] < 0.0f) != (x[i] < 0.0f) ? 1 : 0;
+        return 0.5 * crossings / (static_cast<double> (z - a) / rate);
+    }
+}
+
+TEST_CASE ("card C GRANULAR: its recording as grains - sustains past its end while held, at the note's pitch, deterministic; off as before", "[cardeq][granularc]")
+{
+    // A short recording (0.4 s) with LOOP off: read through it ends; as grains it holds.
+    const auto model = sineRecording (220.0, 0.4, 57.0);
+    auto regular = organicOnly();
+    regular.organic.loop = false;
+    auto granular = regular;
+    granular.granularC = true;
+    granular.grainsC.position = 0.5;
+    const std::vector<Event> held { on (0, 69), off (static_cast<int> (1.4 * 48000), 69) };
+    const auto a = play (regular, model.get(), held, 1.5);
+    const auto b = play (granular, model.get(), held, 1.5);
+    const double regularLate = rmsBetween (a.left, 0.8, 1.3), granularLate = rmsBetween (b.left, 0.8, 1.3);
+    INFO ("at 0.8-1.3 s: regular " << regularLate << ", granular " << granularLate);
+    CHECK (regularLate < 1.0e-4);           // (played out)
+    CHECK (granularLate > 0.02);            // (grains while the key is held)
+    // At the note's pitch: A4 on a 220 Hz recording rooted at A3 -> 440 Hz.
+    CHECK (zeroCrossingHz (b.left, 0.8, 1.3) == Catch::Approx (440.0).epsilon (0.06));
+    // Deterministic (seeded per note).
+    CHECK (play (granular, model.get(), held, 1.5).left == b.left);
+    // Off: exactly as before (the switch's default).
+    CHECK (play (regular, model.get(), held, 1.5).left == a.left);
+    // Switched on while a note plays: its grains take over (sound past the recording's end).
+    auto s = makeSynth (regular);
+    s->setOrganic (model.get());
+    const unsigned char noteOn[3] { 0x90, 69, 100 };
+    s->handleMidi (noteOn, 3);
+    std::vector<float> l (480), r (480), late;
+    for (int block = 0; block < 130; ++block)
+    {
+        if (block == 8)   // (0.08 s: the recording, read an octave up, ends at 0.2 s)
+            s->setPatch (granular);
+        s->render (l.data(), r.data(), 480);
+        if (block >= 80)
+            late.insert (late.end(), l.begin(), l.end());
+    }
+    INFO ("after the switch, 0.8-1.3 s: " << rmsBetween (late, 0.0, 1.0));
+    CHECK (rmsBetween (late, 0.0, 1.0) > 0.02);
 }

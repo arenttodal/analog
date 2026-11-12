@@ -303,6 +303,11 @@ struct Patch
     // Card B's, independently (state version 8): OSC 2 (and the ring) or its grains.
     bool granular2 = false;
     osp::GranularParams grains2;
+    /** Card C's own REGULAR / GRANULAR (the shell's layer B settings): its recording as ANDOR
+        OSP's grains (POS, SIZE, DENS, TUNE, SPREAD), at the note's pitch, through the card as
+        ever (its level, EQ, MORPH, the FILTER). Off: as before, bit for bit. */
+    bool granularC = false;
+    osp::GranularParams grainsC;
 
     // REIMAGINED: ANDOR OSP's modes on the live sound (KALEIDOSCOPE, TAPE FRAME, TOYBOX,
     // MIRAGE; MOSAIC needs a recording's harmonic analysis and leaves the sound unchanged).

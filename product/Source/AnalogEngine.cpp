@@ -852,6 +852,16 @@ void AnalogEngine::publishGrains() noexcept
         organicHeads.playheadLevel[k].store (level[k], std::memory_order_relaxed);
     }
     organicHeads.playheads.store (heads, std::memory_order_release);
+    // Card C GRANULAR: its grains on its display (none while it plays its recording through).
+    const int n = synth.collectOrganicGrains (dots.data(), Snapshot::capacity);
+    for (int i = 0; i < n; ++i)
+    {
+        const auto k = static_cast<std::size_t> (i);
+        organicHeads.position[k].store (dots[k].position, std::memory_order_relaxed);
+        organicHeads.level[k].store (dots[k].level, std::memory_order_relaxed);
+        organicHeads.lane[k].store (dots[k].lane, std::memory_order_relaxed);
+    }
+    organicHeads.count.store (n, std::memory_order_release);
 }
 
 void AnalogEngine::setModulationCurve (int index, const osp::mod::Curve& curve) noexcept
