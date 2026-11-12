@@ -4,6 +4,7 @@
 #include "FxSettings.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,7 +25,10 @@ struct ParameterSpec
     std::string name;           ///< "mix", "band2.gain" (saved: never renamed)
     std::string title;          ///< "Mix", "Band 2 Gain"
     enum class Kind { real, choice, toggle } kind = Kind::real;
-    float low = 0.0f, high = 1.0f, fallback = 0.0f, centre = -1.0f;   ///< centre: the skew's mid value (-1: linear)
+    float low = 0.0f, high = 1.0f, fallback = 0.0f;
+    /** The value at the middle of the control's travel (strictly inside the range), when the
+        range is skewed; none: linear. (Never a marker value: -1 lies inside many ranges.) */
+    std::optional<float> centre;
     std::string unit;           ///< "%", "dB", "Hz", "ms", "us", "s", "st", "deg", "x", "cents"
     std::vector<std::string> choices;   ///< a choice's positions (UTF-8)
     /** Writes `value` (in the parameter's own units) into `slot`'s settings. Real-time safe. */

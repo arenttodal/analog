@@ -14,8 +14,9 @@ using Kind = ParameterSpec::Kind;
 
 namespace
 {
-    // Builders: a real parameter (linear or skewed about `centre`), a choice, a switch.
-    Spec real (const char* name, const char* title, float lo, float hi, float def, const char* unit, std::function<void (Settings&, int, float)> w, float centre = -1.0f)
+    // Builders: a real parameter (linear, or skewed about `centre` when one is given), a choice,
+    // a switch.
+    Spec real (const char* name, const char* title, float lo, float hi, float def, const char* unit, std::function<void (Settings&, int, float)> w, std::optional<float> centre = std::nullopt)
     {
         Spec s;
         s.name = name;

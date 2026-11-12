@@ -27,11 +27,85 @@
 >   defaults, writes), in the engine library, free of JUCE; `FxParameters.cpp` builds the host
 >   parameters from it (`[fx][parameters]`).
 > - `fxpresets::setUserRoot`: another instrument's own preset folder (default: ANALOG's).
-> - **Found, not changed (owner's decision):** a real parameter declared without a centre is
->   still skewed when its range contains -1, the "no centre" marker (`addTo`). COMPRESSOR
->   THRESHOLD and BAND THRESHOLD (-60..0 dB) most of all: nearly the whole knob covers the
->   top 6 dB. Milder on OUTPUT, MAKEUP, the band gains, PAN. Fixing it changes how hosts'
->   recorded automation maps.
+> - Found here and fixed in the next entry: a real parameter declared without a centre was
+>   skewed when its range held -1, the "no centre" marker.
+
+> **12 Nov 2026: an FX parameter without a centre is linear** (branch
+> `claude/wizardly-cray-mcmqmg`, on `claude/epic-feynman-fsf8ij`).
+> - **What was wrong.** The table marked "no centre" with the value -1, and `addTo` skewed any
+>   range that held it so that -1 sat at mid-travel. 34 settings (66 host parameters) were
+>   skewed by accident. COMPRESSOR THRESHOLD and BAND THRESHOLD (-60..0 dB, skew 41) worst:
+>   -18 dB at 4e-7 of the travel, the knob at its default pointing at the minimum, the top
+>   6 dB on nearly all of the knob and the automation lane.
+> - **What changed.** `fx::ParameterSpec::centre` (and `fxparams::Spec::centre`) is a
+>   `std::optional<float>`: a centre is given or it is not, and `addTo` skews only when one
+>   is. Linear now: every effect's OUTPUT; COMPRESSOR THRESHOLD, MAKEUP, FET INPUT / OUTPUT,
+>   BAND THRESHOLD, the three bands' GAIN and THRESHOLD OFFSET; EQUALIZER's four band gains;
+>   FX FILTER PAN and FORMANT SHIFT; PHASER and FLANGER FEEDBACK; UTILITY GAIN and BALANCE;
+>   RETRO INPUT, TONE and SIDECHAIN TILT. The 48 settings with a centre (90 host parameters)
+>   are as they were. Nothing else of a parameter moved: IDs, order, ranges, defaults, units,
+>   how a value reads, version hints (28, 29) and the state version.
+> - **Compatibility, decided: fixed in place, before 1.0.0 is tagged.**
+>   - Sessions, presets and FX presets hold each value in its own unit and open exactly as
+>     before: the eleven real 1.0 sessions (`tests/fixtures/state-1.0`) read the same value
+>     for every parameter under the old mapping and the new (compared to nine decimals), and
+>     their recorded loudness contours still pass.
+>   - A host's recorded automation is stored in 0..1, so a lane of one of these 66 parameters
+>     written with an earlier build plays at other values now (a THRESHOLD point at mid-lane
+>     was -1 dB and is -30 dB; a lane drawn at -18 dB sat at the very bottom and plays as
+>     -60 dB). It has to be recorded again. No way around it exists: a host cannot be told to
+>     remap, and JUCE's version hint only orders the AU list (changing it on a parameter that
+>     exists would reorder that list and break other lanes, and remap nothing).
+>   - Why in place: no public build exists (no release tag; 1.0.0 is a release candidate), and
+>     PARAMETER_REGISTRY's rule binds a parameter "once released". New IDs beside the old would
+>     leave 66 parameters in every host's list that mislead for good. After 1.0.0 the mapping
+>     is frozen with the rest, so this is the last moment it costs only a tester's lanes.
+>   - **For the release:** `main` and `claude/release-candidate` still carry the skew. This
+>     commit has to be in the build that is tagged 1.0.0 (RELEASE.md, known blockers); a
+>     tester who automated one of these parameters in a candidate build records it again.
+> - **Evidence.** `[analog][fx][parameters][skew]` (every real FX parameter of every slot:
+>   skew 1 and a linear mid-point without a centre, the centre at mid-travel with one;
+>   THRESHOLD -18 dB at 0.7; the rack's THRESHOLD and MAKEUP knobs at 70 % and a third of
+>   their travel) failed on 66 parameters before and passes; `[fx][parameters]` in
+>   `analog_dsp_tests` (a centre lies strictly inside its range; the 48 centres kept).
+> - **Goldens, each changed only for this:**
+>   - `product/golden/parameter-schema.txt`: the 66 lines, `skew=` (now 1) and the mid-travel
+>     text; MAKEUP's default also prints 0.0000 where it printed -0.0000.
+>   - `tests/fixtures/state-1.0/*.values.txt` (the listing is in 0..1): the 66 parameters'
+>     lines in each of the eleven listings. The `.state` files and the contours are untouched.
+>   - `product/golden/v6-baseline-renders.txt`: the two Linux hashes of `custom-all` (the one
+>     baseline render that passes through the new effects). Two defaults used to come back a
+>     float's width off after their trip through 0..1 (MAKEUP -0.00000095 dB, FET OUTPUT
+>     -12.0000019 dB) and are exact now. Measured: with the old rule put back, today's build
+>     gives the stored hashes bit for bit; the new render differs by at most 5.4e-7 (-125
+>     dBFS, 97 dB under the signal). The contours are 1.0's, unchanged, and pass.
+> - **The knobs and the reference screenshots.** A rack knob takes its travel from its
+>   parameter, so nothing else was needed: THRESHOLD at -18 dB points at 70 % of its travel
+>   (it pointed at the minimum), MAKEUP at 0 dB at a third, OUTPUT at 0 dB at 60 %; looked at
+>   869 / 1448 / 1810. Every `[screenshots]` picture was rendered before and after (780
+>   each): the fix changes 91, all of them FX racks, route tiles and quick settings.
+>   - Regenerated, 13 committed references that were current but for this (they differed from
+>     the code only by the SAVE key added to a rack's header since, or by one grey level of
+>     anti-aliasing): `fx-v5/after/v5-rack-1448-{compressor,convolution,retro,utility}`,
+>     `v5-rack-869-compressor`, `v5-tile-{comp,eq,flanger,phaser,utility}`,
+>     `routing-cleanup/v5-04-routing-eight-others-board`, `v6-gate4/g4-2-main-{1448,869}`.
+>   - Left as they are, 8 that had already fallen behind the code for other reasons, so a new
+>     render would replace an approved V4 / V5 picture with a later layout:
+>     `fx-v5/after/v5-rack-1448-{flanger,fxfilter,phaser,shifter}` (the two-page racks of V5,
+>     one page since: FEEDBACK moves by under 1 % of its travel in the first and third, the
+>     FX FILTER's OUTPUT sits 6 % low in the second, the fourth shows none of these knobs),
+>     `fx-v5/after/v5-04-routing-eight-others` and `-board`,
+>     `fx-routing-tape-v4/v4-3-routing-ten` and `v4-5-routing-ten-869` (routing views without
+>     quick knobs). The assembled boards (`before-after-*`, `pairs-*`) are not generated by a
+>     test and are untouched.
+>   - Noticed: the hidden `[screenshots]` cases run in an order that changes from run to run
+>     and the voice FILTER rack keeps its last page between them, so `v5-rack-1448-voice-filter`
+>     and `fm-1448-voice` can show another page from one run to the next (not this change:
+>     the same with the old rule put back). 78 more with a live picture differ run to run.
+> - **ANDOR Modular** shows the same rack through its pin and reads the table too: its engine
+>   tests pass against this commit unchanged (`dsp/nodes/FxNodes.cpp` compares `centre` with
+>   the range to choose a logarithmic curve; an absent centre compares as "not above", as -1
+>   did). Its pin has not moved yet.
 
 _30 October 2026: state version 4, the unified expansion (docs/UNIFIED_ANALOG_EXPANSION_PLAN.md).
 Each slot can be CLASSIC, DCO or WIDE. There are now OTA filters, a high-pass, a chorus, Juno

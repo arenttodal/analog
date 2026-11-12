@@ -25,6 +25,10 @@ parameter version hint 28, appended after every existing parameter (the 165 befo
 Each effect's ON (`.on`) is its own bypass; MIX and OUTPUT are inside it (MIX against a dry
 signal delayed by the effect's latency).
 
+A setting's travel is linear unless the table (`dsp/fx/FxParameterTable`) gives it a centre:
+the value at the middle of the knob and of a host's automation lane (frequencies, times,
+ratios). Levels in dB, pans, feedbacks and percentages are linear.
+
 CONVOLUTION's impulse is built on the message thread (`AnalogEngine::updateConvolutionImpulses`:
 at prepare and from a 10 Hz timer, only when IMPULSE, DECAY, SIZE, REVERSE, NORMALIZE or the rate
 changed) and handed to the audio thread through `osp::ModelExchange` (crossfaded over 50 ms).

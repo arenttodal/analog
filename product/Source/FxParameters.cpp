@@ -127,9 +127,12 @@ void addTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                     layout.add (osp::plugin::parameters::make<juce::AudioParameterChoice> (id, title, spec.choices, juce::roundToInt (spec.fallback)));
                 else
                 {
+                    // Skewed only when the table gives a centre. ("No centre" was the value -1
+                    // until 12 Nov 2026, so a range holding -1 was skewed about it: THRESHOLD
+                    // -60..0 dB had its top 6 dB on nearly the whole knob. docs/STATUS.md.)
                     juce::NormalisableRange<float> range (spec.low, spec.high);
-                    if (spec.centre > spec.low && spec.centre < spec.high)
-                        range.setSkewForCentre (spec.centre);
+                    if (spec.centre && *spec.centre > spec.low && *spec.centre < spec.high)
+                        range.setSkewForCentre (*spec.centre);
                     const auto* s = &spec;
                     layout.add (osp::plugin::parameters::make<juce::AudioParameterFloat> (
                         id, title, range, spec.fallback,
