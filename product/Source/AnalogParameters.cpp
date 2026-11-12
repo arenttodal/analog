@@ -107,6 +107,10 @@ namespace
         iRhythmEnabled, iRhythmAudio, iRhythmSync, iRhythmTempo, iRhythmShape, iRhythmAttack, iRhythmRelease, iRhythmSensitivity, iRhythmDepth,
         // Card C's own REGULAR / GRANULAR and grains (the shell's layer B settings; they existed, unread).
         iSourceModeC, iGrainPositionC, iGrainSizeC, iGrainDensityC, iGrainTuneC, iGrainSpreadC,
+        // State version 23: D / AUX.
+        iAuxEnabled, iAuxMode, iAuxLevel, iAuxMute, iAuxSolo, iAuxFilterFollow,
+        iAuxSync, iAuxRate, iAuxModAmount, iAuxModTarget, iAuxSensitivity, iAuxAttack, iAuxRelease,
+        iAuxNoiseColor, iAuxNoiseTone, iAuxNoiseGate, iAuxNoiseAttack, iAuxNoiseRelease, iAuxNoiseMovement, iAuxNoiseWidth,
         count
     };
 
@@ -237,6 +241,11 @@ namespace
             // Card C's GRANULAR (layer 1 in the shell's storage).
             for (const char* name : { "sourceMode", "granular.position", "granular.size", "granular.density", "granular.tune", "granular.spread" })
                 l.add (osp::plugin::InstrumentHost::layerParameterId (1, name));
+            // State version 23: D / AUX.
+            for (const auto* id : { &auxEnabled, &auxMode, &auxLevel, &auxMute, &auxSolo, &auxFilterFollow,
+                                    &auxSync, &auxRate, &auxModAmount, &auxModTarget, &auxSensitivity, &auxAttack, &auxRelease,
+                                    &auxNoiseColor, &auxNoiseTone, &auxNoiseGate, &auxNoiseAttack, &auxNoiseRelease, &auxNoiseMovement, &auxNoiseWidth })
+                l.add (*id);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -971,6 +980,55 @@ void addRhythmTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                                       static_cast<float> (100.0 * d.depth), juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (percentText)));
 }
 
+void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
+{
+    // State version 23 (D / AUX, docs/aux): off in a new instrument and every session from
+    // before. Append-only: IDs, ranges and choice orders frozen once shipped.
+    const Patch::Aux d;
+    auto v37 = [] (const juce::String& name) { return juce::ParameterID { name, 37 }; };
+    using Bool = juce::AudioParameterBool;
+    using Choice = juce::AudioParameterChoice;
+    using Float = juce::AudioParameterFloat;
+    using Attributes = juce::AudioParameterFloatAttributes;
+    auto msText = [] (float ms, int) { return ms < 10.0f ? juce::String (ms, 1) + " ms" : juce::String (juce::roundToInt (ms)) + " ms"; };
+    auto secondsText = [] (float s, int) { return s < 1.0f ? juce::String (juce::roundToInt (1000.0f * s)) + " ms" : juce::String (s, 2) + " s"; };
+    auto unit = [] { return juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f); };
+    auto percentage = [&] (const juce::String& id, const char* name, double value) {
+        layout.add (osp::plugin::parameters::make<Float> (v37 (id), name, unit(), static_cast<float> (100.0 * value), Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+    };
+    layout.add (osp::plugin::parameters::make<Bool> (v37 (auxEnabled), "AUX Power", d.enabled));
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxMode), "AUX Mode", juce::StringArray { "RHYTHM", "NOISE", "KONTAKT" }, static_cast<int> (d.mode)));
+    juce::NormalisableRange<float> level (-48.0f, 6.0f, 0.1f);
+    level.setSkewForCentre (-12.0f);
+    layout.add (osp::plugin::parameters::make<Float> (v37 (auxLevel), "AUX Level", level, static_cast<float> (d.levelDb),
+                                                      Attributes().withLabel ("dB").withStringFromValueFunction ([] (float v, int) {
+                                                          return v <= -47.99f ? juce::String ("-inf dB") : juce::String (v, 1) + " dB";
+                                                      })));
+    layout.add (osp::plugin::parameters::make<Bool> (v37 (auxMute), "AUX Mute", false));
+    layout.add (osp::plugin::parameters::make<Bool> (v37 (auxSolo), "AUX Solo", false));
+    layout.add (osp::plugin::parameters::make<Bool> (v37 (auxFilterFollow), "AUX Filter Follow", d.filterFollow));
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxSync), "AUX Rhythm Timing", juce::StringArray { "SYNC", "FREE" }, d.sync ? 0 : 1));
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxRate), "AUX Rhythm Rate", juce::StringArray { "1/4x", "1/2x", "1x", "2x", "4x" }, 2));
+    percentage (auxModAmount, "AUX Rhythm Mod Amount", d.modAmount);
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxModTarget), "AUX Rhythm Mod Target", juce::StringArray { "FILTER", "AUX FILTER", "AUX LEVEL" }, static_cast<int> (d.modTarget)));
+    percentage (auxSensitivity, "AUX Rhythm Sensitivity", d.sensitivity);
+    juce::NormalisableRange<float> attack (0.5f, 200.0f, 0.1f), release (10.0f, 1000.0f, 1.0f);
+    attack.setSkewForCentre (10.0f);
+    release.setSkewForCentre (150.0f);
+    layout.add (osp::plugin::parameters::make<Float> (v37 (auxAttack), "AUX Rhythm Attack", attack, static_cast<float> (d.attackMs), Attributes().withLabel ("ms").withStringFromValueFunction (msText)));
+    layout.add (osp::plugin::parameters::make<Float> (v37 (auxRelease), "AUX Rhythm Release", release, static_cast<float> (d.releaseMs), Attributes().withLabel ("ms").withStringFromValueFunction (msText)));
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxNoiseColor), "AUX Noise Color", juce::StringArray { "WHITE", "PINK", "BROWN" }, d.noiseColor));
+    percentage (auxNoiseTone, "AUX Noise Tone", d.noiseTone);
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxNoiseGate), "AUX Noise Gate", juce::StringArray { "KEYS", "FREE" }, d.noiseFree ? 1 : 0));
+    juce::NormalisableRange<float> nAttack (0.001f, 2.0f, 0.001f), nRelease (0.005f, 5.0f, 0.001f);
+    nAttack.setSkewForCentre (0.05f);
+    nRelease.setSkewForCentre (0.4f);
+    layout.add (osp::plugin::parameters::make<Float> (v37 (auxNoiseAttack), "AUX Noise Attack", nAttack, static_cast<float> (d.noiseAttack), Attributes().withLabel ("s").withStringFromValueFunction (secondsText)));
+    layout.add (osp::plugin::parameters::make<Float> (v37 (auxNoiseRelease), "AUX Noise Release", nRelease, static_cast<float> (d.noiseRelease), Attributes().withLabel ("s").withStringFromValueFunction (secondsText)));
+    percentage (auxNoiseMovement, "AUX Noise Movement", d.noiseMovement);
+    percentage (auxNoiseWidth, "AUX Noise Width", d.noiseWidth);
+}
+
 int readerIndexOf (const juce::String& id)
 {
     return ids().indexOf (id);
@@ -1389,6 +1447,28 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.grains2.density = v (iGrainDensity2);
     p.grains2.tuneSemitones = v (iGrainTune2);
     p.grains2.spread = 0.01 * v (iGrainSpread2);
+    {
+        // D / AUX (state version 23).
+        auto& a = p.aux;
+        a.enabled = on (iAuxEnabled);
+        a.mode = static_cast<Patch::Aux::Mode> (index (iAuxMode, 3));
+        a.levelDb = v (iAuxLevel);
+        a.filterFollow = on (iAuxFilterFollow);
+        a.sync = index (iAuxSync, 2) == 0;
+        a.rate = auxRates[static_cast<std::size_t> (index (iAuxRate, static_cast<int> (auxRates.size())))];
+        a.modAmount = 0.01 * v (iAuxModAmount);
+        a.modTarget = static_cast<Patch::Aux::ModTarget> (index (iAuxModTarget, 3));
+        a.sensitivity = 0.01 * v (iAuxSensitivity);
+        a.attackMs = v (iAuxAttack);
+        a.releaseMs = v (iAuxRelease);
+        a.noiseColor = index (iAuxNoiseColor, 3);
+        a.noiseTone = 0.01 * v (iAuxNoiseTone);
+        a.noiseFree = index (iAuxNoiseGate, 2) == 1;
+        a.noiseAttack = v (iAuxNoiseAttack);
+        a.noiseRelease = v (iAuxNoiseRelease);
+        a.noiseMovement = 0.01 * v (iAuxNoiseMovement);
+        a.noiseWidth = 0.01 * v (iAuxNoiseWidth);
+    }
     p.granularC = on (iSourceModeC);
     p.grainsC.position = 0.01 * v (iGrainPositionC);
     p.grainsC.sizeSeconds = 0.001 * v (iGrainSizeC);
@@ -1450,10 +1530,13 @@ Patch Reader::readWith (const float* raw) const noexcept
     // mixer goes with OSC 1 (card A's part). p.mute: the whole analog side silent (both
     // oscillators), the legacy fast path.
     const bool soloA = on (iGeneratorSolo), soloB = on (iOrganicSolo), soloC = on (iOsc2Solo);
-    const bool anySolo = soloA || soloB || soloC;
+    // D / AUX's SOLO counts only while D is powered (a powered-off D never silences A / B / C).
+    const bool soloD = on (iAuxEnabled) && on (iAuxSolo);
+    const bool anySolo = soloA || soloB || soloC || soloD;
     p.osc1Heard = anySolo ? soloA : ! on (iMute);
     p.osc2Heard = anySolo ? soloC : ! on (iOsc2Mute);
     o.heard = anySolo ? soloB : ! on (iOrganicMute);
+    p.aux.heard = anySolo ? soloD : ! on (iAuxMute);
     p.mute = ! p.osc1Heard && ! p.osc2Heard;
     o.blend = std::clamp (v (iLayerBlend), 0.0, 1.0);
     auto& m = p.morph;
@@ -1772,6 +1855,31 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iGrainDensity2, p.grains2.density);
     put (iGrainTune2, p.grains2.tuneSemitones);
     put (iGrainSpread2, 100.0 * p.grains2.spread);
+    {
+        const auto& a = p.aux;
+        put (iAuxEnabled, a.enabled ? 1.0 : 0.0);
+        put (iAuxMode, static_cast<int> (a.mode));
+        put (iAuxLevel, a.levelDb);
+        put (iAuxFilterFollow, a.filterFollow ? 1.0 : 0.0);
+        put (iAuxSync, a.sync ? 0.0 : 1.0);
+        int rateIndex = 2;
+        for (std::size_t i = 0; i < auxRates.size(); ++i)
+            if (std::abs (auxRates[i] - a.rate) < 1.0e-6)
+                rateIndex = static_cast<int> (i);
+        put (iAuxRate, rateIndex);
+        put (iAuxModAmount, 100.0 * a.modAmount);
+        put (iAuxModTarget, static_cast<int> (a.modTarget));
+        put (iAuxSensitivity, 100.0 * a.sensitivity);
+        put (iAuxAttack, a.attackMs);
+        put (iAuxRelease, a.releaseMs);
+        put (iAuxNoiseColor, a.noiseColor);
+        put (iAuxNoiseTone, 100.0 * a.noiseTone);
+        put (iAuxNoiseGate, a.noiseFree ? 1.0 : 0.0);
+        put (iAuxNoiseAttack, a.noiseAttack);
+        put (iAuxNoiseRelease, a.noiseRelease);
+        put (iAuxNoiseMovement, 100.0 * a.noiseMovement);
+        put (iAuxNoiseWidth, 100.0 * a.noiseWidth);
+    }
     put (iSourceModeC, p.granularC ? 1.0 : 0.0);
     put (iGrainPositionC, 100.0 * p.grainsC.position);
     put (iGrainSizeC, 1000.0 * p.grainsC.sizeSeconds);

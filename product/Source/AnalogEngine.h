@@ -42,7 +42,9 @@ public:
     int latencySamples() const override
     {
         // (EXPERIMENT: an external instrument that reports latency - the voices wait for it)
-        return synth.latencySamples() + synth.fxEngine().latencySamples() + (hybridType() == HybridType::external ? external.latencySamples() : 0);
+        // (D / AUX: D KONTAKT's latency delays everything before D, in series with C's)
+        return synth.latencySamples() + synth.fxEngine().latencySamples() + (hybridType() == HybridType::external ? external.latencySamples() : 0)
+               + (auxKontaktActive() ? auxKontakt.latencySamples() : 0);
     }
     /** EXPERIMENT: card C's hosted instrument (message thread: load, editor, state). */
     ExternalInstrument& externalInstrument() noexcept { return external; }
@@ -98,6 +100,37 @@ public:
     double rhythmPlayhead() const noexcept { return synth.rhythmPlayhead(); }
     /** Tests: a prepared loop as if card C's recording had just been analysed (message thread). */
     void setRhythmLoopForTest (std::shared_ptr<const rhythm::PreparedLoop> loop);
+    //== D / AUX (docs/aux) =====================================================================
+    /** D RHYTHM's recording: its state for the strip and rack (message thread). */
+    struct AuxRecordingState
+    {
+        enum class Status { none, loading, ready, missing, error };
+        Status status = Status::none;
+        juce::String name;      ///< the file's name (without extension)
+        juce::String message;   ///< what went wrong (missing / error)
+    };
+    /** Message thread: a recording (WAV, AIFF, FLAC) for D RHYTHM. It is copied into
+        `assetFolder` (named by its content, as card C's imports), decoded and analysed for its
+        rhythm on the loader thread, and reaches the audio thread prepared. */
+    void loadAuxRecording (const juce::File& recording, const juce::File& assetFolder);
+    /** Message thread: D RHYTHM without a recording. */
+    void clearAuxRecording();
+    AuxRecordingState auxRecordingState() const;
+    std::shared_ptr<const rhythm::PreparedLoop> auxLoop() const;
+    /** Tests: waits until D's recording is no longer loading. */
+    bool waitForAuxRecording (int timeoutMs) const;
+    /** Tests: a prepared loop as if D's recording had just been analysed (message thread). */
+    void setAuxLoopForTest (std::shared_ptr<const rhythm::PreparedLoop> loop);
+    /** D KONTAKT's hosted instrument (message thread: load, editor, state). One per instance. */
+    ExternalInstrument& auxInstrument() noexcept { return auxKontakt; }
+    const ExternalInstrument& auxInstrument() const noexcept { return auxKontakt; }
+    /** D's telemetry (any thread): its envelope (0..1), its loop's playhead (source seconds;
+        -1 idle), its output peak (0..1), whether its bus runs. */
+    float auxEnvelope() const noexcept { return synth.auxEnvelope(); }
+    double auxPlayhead() const noexcept { return synth.auxPlayheadSeconds(); }
+    float auxPeak() const noexcept { return synth.auxPeak(); }
+    bool auxRunning() const noexcept { return synth.auxActive(); }
+
     /** SATELLITE's live place of card 0..2 (the panel's path display; read only, any thread). */
     Synth::SatelliteView satelliteView (int card) const noexcept { return synth.satelliteView (card); }
     osp::InstrumentEngine::ModView modulationView() const noexcept override;
@@ -226,6 +259,7 @@ private:
         {
             engine->updateConvolutionImpulses();
             engine->external.collectGarbage();   // (EXPERIMENT: retired hosted instances)
+            engine->auxKontakt.collectGarbage(); // (D KONTAKT's)
         }
     } impulseTimer;
     struct ImpulseKey
@@ -330,6 +364,29 @@ private:
     void analyseRhythm (std::shared_ptr<const osp::plugin::LoadedInstrument> source);
     void publishLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation);
     void loadHybrid2 (std::unique_ptr<juce::XmlElement> definition, juce::File assetFolder, std::uint64_t generation);
+
+    // D / AUX: its RHYTHM recording (decoded and analysed on the loader thread, handed over as a
+    // prepared loop, as card C's), its KONTAKT instance and its MIDI lane.
+    mutable std::mutex auxMutex;
+    std::uint64_t auxGeneration = 0;
+    AuxRecordingState auxState;
+    juce::String auxAsset;                                   ///< the stored file's name ("" none)
+    std::shared_ptr<const rhythm::PreparedLoop> auxLatest;   ///< (the strip's display)
+    osp::ModelExchange<LoadedLoop> auxExchange;              ///< (published under auxMutex)
+    const LoadedLoop* auxPlaying = nullptr;                  ///< audio thread
+    void publishAuxLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation, AuxRecordingState state, juce::String asset);
+    void decodeAuxRecording (juce::File stored, juce::String name, juce::String asset, std::uint64_t generation);
+    ExternalInstrument auxKontakt;
+    juce::MidiBuffer auxMidi;                 ///< D KONTAKT's lane, this block (preallocated)
+    std::vector<float> auxExtL, auxExtR;      ///< its stereo bus, this block
+    std::atomic<float>* auxEnabledValue = nullptr;
+    std::atomic<float>* auxModeValue = nullptr;
+    bool auxKontaktActive() const noexcept
+    {
+        return auxEnabledValue != nullptr && auxEnabledValue->load() >= 0.5f && auxModeValue != nullptr
+               && juce::roundToInt (auxModeValue->load()) == static_cast<int> (Patch::Aux::Mode::kontakt)
+               && auxKontakt.state() == ExternalInstrument::State::ready;
+    }
 };
 
 } // namespace andor::analog

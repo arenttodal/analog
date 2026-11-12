@@ -951,6 +951,36 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     for (const auto* id : { &params::subWave, &params::subOctave, &params::subGrit, &params::subLevel, &params::subLowKey, &params::subHighKey,
                             &params::subResponse, &params::subTaperStart, &params::subTaperSlope })
         setups[*id] = [] (ShellProcessor& q) { setValue (q, params::subEnabled, 1.0f); };
+    // D / AUX (docs/aux) acts while it is on: its switches and level on D NOISE (your keys open
+    // its gate); RHYTHM's settings on a test tick loop (100 BPM against the 120 BPM clock), its
+    // envelope's settings with MOD AMOUNT up (the cards' FILTER moved); NOISE's in NOISE.
+    for (const auto* id : { &params::auxEnabled, &params::auxLevel, &params::auxMute, &params::auxSolo, &params::auxFilterFollow })
+    {
+        const juce::String which (*id);
+        setups[*id] = [which] (ShellProcessor& q) {
+            if (which != params::auxEnabled)
+                setValue (q, params::auxEnabled, 1.0f);
+            setValue (q, params::auxMode, 1.0f);
+        };
+    }
+    for (const auto* id : { &params::auxMode, &params::auxSync, &params::auxRate, &params::auxModAmount, &params::auxModTarget, &params::auxSensitivity,
+                            &params::auxAttack, &params::auxRelease })
+    {
+        const juce::String which (*id);
+        setups[*id] = [which] (ShellProcessor& q) {
+            dynamic_cast<AnalogEngine&> (q.productEngine()).setAuxLoopForTest (testTickLoop());
+            setValue (q, params::auxEnabled, 1.0f);
+            setValue (q, params::auxMode, 0.0f);
+            if (which != params::auxMode && which != params::auxSync && which != params::auxRate && which != params::auxModAmount)
+                setValue (q, params::auxModAmount, 80.0f);
+        };
+    }
+    for (const auto* id : { &params::auxNoiseColor, &params::auxNoiseTone, &params::auxNoiseGate, &params::auxNoiseAttack, &params::auxNoiseRelease,
+                            &params::auxNoiseMovement, &params::auxNoiseWidth })
+        setups[*id] = [] (ShellProcessor& q) {
+            setValue (q, params::auxEnabled, 1.0f);
+            setValue (q, params::auxMode, 1.0f);
+        };
     // The cards' sends act in a MAIN + SEND route (Cinematic V6 gate 4), card C heard (its
     // second layer) and SPACE's room on SEND.
     for (const auto* id : { &params::sendA, &params::sendB, &params::sendC })
@@ -6050,7 +6080,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 22);   // (22: EXTERNAL (experiment); 21: RHYTHMIC MORPH; 20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
+        CHECK (xml->getIntAttribute ("productVersion") == 23);   // (23: D / AUX; 22: EXTERNAL (experiment); 21: RHYTHMIC MORPH; 20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8282,7 +8312,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 22);
+    CHECK (xml->getIntAttribute ("productVersion") == 23);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -9096,7 +9126,7 @@ TEST_CASE ("SHAPER DNA: every setting is a host parameter - saved, recalled, rea
     {
         auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 22);
+        CHECK (xml->getIntAttribute ("productVersion") == 23);
     }
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
@@ -9472,7 +9502,7 @@ TEST_CASE ("USER MACROS G1: six parameters at 0, no assignment, nothing saved, t
     p.getStateInformation (session);
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 22);
+    CHECK (xml->getIntAttribute ("productVersion") == 23);
     std::function<bool (const juce::XmlElement&)> hasChild = [&] (const juce::XmlElement& e) {
         for (auto* c : e.getChildIterator())
             if (c->hasTagName ("UserMacros") || hasChild (*c))

@@ -267,6 +267,18 @@ void Synth::reset() noexcept
     loopPlayer.reset();
     rhythmEnv = rhythmGate = 0.0f;
     rhythmRun = false;
+    // D / AUX starts over too (powered: from rest, its noise from its seed, its own clock from 0;
+    // its keys forgotten): a reset gives the same sound again.
+    auxRunning = auxRhythmRun = false;
+    auxGainNow = auxEnvNow = auxModNow = 0.0f;
+    auxFreePpq = 0.0;
+    auxLoop.reset();
+    auxGate.kill();
+    auxFilter.held.fill (0);
+    auxFilter.sustained.fill (false);
+    auxFilter.heldCount = 0;
+    auxFilter.pedal = false;
+    auxFilter.env.kill();
     satLocalRunning = satPendingStart = false;
     satLocalPpq = 0.0;
     satIdle = 0;

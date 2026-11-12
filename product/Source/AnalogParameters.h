@@ -254,8 +254,33 @@ namespace andor::analog::params
     inline const juce::String rhythmRelease = "analog.rhythm.release";
     inline const juce::String rhythmSensitivity = "analog.rhythm.sensitivity";
     inline const juce::String rhythmDepth = "analog.rhythm.depth";
+    // State version 23: D / AUX (docs/aux). Append-only.
+    inline const juce::String auxEnabled = "analog.aux.enabled";
+    inline const juce::String auxMode = "analog.aux.mode";
+    inline const juce::String auxLevel = "analog.aux.level";
+    inline const juce::String auxMute = "analog.aux.mute";
+    inline const juce::String auxSolo = "analog.aux.solo";
+    inline const juce::String auxFilterFollow = "analog.aux.filterFollow";
+    inline const juce::String auxSync = "analog.aux.rhythm.sync";
+    inline const juce::String auxRate = "analog.aux.rhythm.rate";
+    inline const juce::String auxModAmount = "analog.aux.rhythm.modAmount";
+    inline const juce::String auxModTarget = "analog.aux.rhythm.modTarget";
+    inline const juce::String auxSensitivity = "analog.aux.rhythm.sensitivity";
+    inline const juce::String auxAttack = "analog.aux.rhythm.attack";
+    inline const juce::String auxRelease = "analog.aux.rhythm.release";
+    inline const juce::String auxNoiseColor = "analog.aux.noise.color";
+    inline const juce::String auxNoiseTone = "analog.aux.noise.tone";
+    inline const juce::String auxNoiseGate = "analog.aux.noise.gate";
+    inline const juce::String auxNoiseAttack = "analog.aux.noise.attack";
+    inline const juce::String auxNoiseRelease = "analog.aux.noise.release";
+    inline const juce::String auxNoiseMovement = "analog.aux.noise.movement";
+    inline const juce::String auxNoiseWidth = "analog.aux.noise.width";
+    /** RATE's choices (its musical speed against the loop's detected tempo). */
+    inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */
     void addRhythmTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
+    /** Appends D / AUX's parameters (after card C's GRANULAR is read; state version 23). */
+    void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends SATELLITE's parameters (after the USER macros'). */
     void addSatelliteTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout);
     /** Appends card C's second layer's parameters (after SUB's). */

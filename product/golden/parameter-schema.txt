@@ -634,3 +634,23 @@ analog.rhythm.attack v36 float "Rhythm Attack" label="ms" range=0.5000..200.0000
 analog.rhythm.release v36 float "Rhythm Release" label="ms" range=10.0000..1000.0000/1.0000 skew=0.35436 default=120.0000 steps=2147483647 texts=10 ms|150 ms|1000 ms
 analog.rhythm.sensitivity v36 float "Rhythm Sensitivity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.rhythm.depth v36 float "Rhythm Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.aux.enabled v37 bool "AUX Power" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.aux.mode v37 choice "AUX Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=RHYTHM|NOISE|KONTAKT [RHYTHM|NOISE|KONTAKT]
+analog.aux.level v37 float "AUX Level" label="dB" range=-48.0000..6.0000/0.1000 skew=1.70951 default=-6.0000 steps=2147483647 texts=-inf dB|-12.0 dB|6.0 dB
+analog.aux.mute v37 bool "AUX Mute" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.aux.solo v37 bool "AUX Solo" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.aux.filterFollow v37 bool "AUX Filter Follow" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.aux.rhythm.sync v37 choice "AUX Rhythm Timing" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=SYNC|SYNC|FREE [SYNC|FREE]
+analog.aux.rhythm.rate v37 choice "AUX Rhythm Rate" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=2.0000 steps=5 texts=1/4x|1x|4x [1/4x|1/2x|1x|2x|4x]
+analog.aux.rhythm.modAmount v37 float "AUX Rhythm Mod Amount" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.aux.rhythm.modTarget v37 choice "AUX Rhythm Mod Target" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=FILTER|AUX FILTER|AUX LEVEL [FILTER|AUX FILTER|AUX LEVEL]
+analog.aux.rhythm.sensitivity v37 float "AUX Rhythm Sensitivity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.aux.rhythm.attack v37 float "AUX Rhythm Attack" label="ms" range=0.5000..200.0000/0.1000 skew=0.22767 default=5.0000 steps=2147483647 texts=0.5 ms|10 ms|200 ms
+analog.aux.rhythm.release v37 float "AUX Rhythm Release" label="ms" range=10.0000..1000.0000/1.0000 skew=0.35436 default=120.0000 steps=2147483647 texts=10 ms|150 ms|1000 ms
+analog.aux.noise.color v37 choice "AUX Noise Color" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=WHITE|PINK|BROWN [WHITE|PINK|BROWN]
+analog.aux.noise.tone v37 float "AUX Noise Tone" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=75.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.aux.noise.gate v37 choice "AUX Noise Gate" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=KEYS|KEYS|FREE [KEYS|FREE]
+analog.aux.noise.attack v37 float "AUX Noise Attack" label="s" range=0.0010..2.0000/0.0010 skew=0.18690 default=0.0050 steps=2147483647 texts=1 ms|50 ms|2.00 s
+analog.aux.noise.release v37 float "AUX Noise Release" label="s" range=0.0050..5.0000/0.0010 skew=0.27318 default=0.3000 steps=2147483647 texts=5 ms|400 ms|5.00 s
+analog.aux.noise.movement v37 float "AUX Noise Movement" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.aux.noise.width v37 float "AUX Noise Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %

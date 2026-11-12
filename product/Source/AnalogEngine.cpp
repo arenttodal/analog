@@ -24,6 +24,8 @@ void AnalogEngine::attachParameters (juce::AudioProcessorValueTreeState& paramet
     hybridTypeValue = parameters.getRawParameterValue (params::hybridType);
     rhythmEnabledValue = parameters.getRawParameterValue (params::rhythmEnabled);
     rhythmAudioValue = parameters.getRawParameterValue (params::rhythmAudio);
+    auxEnabledValue = parameters.getRawParameterValue (params::auxEnabled);
+    auxModeValue = parameters.getRawParameterValue (params::auxMode);
 }
 
 HybridType AnalogEngine::hybridType() const noexcept
@@ -64,6 +66,11 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     externalR.assign (externalL.size(), 0.0f);
     externalMidi.ensureSize (16384);
     externalClock = 0;
+    // D KONTAKT: its own instance and lane (prepared here, never on the audio thread).
+    auxKontakt.prepare (sampleRate, std::max (1, maximumBlockSize));
+    auxExtL.assign (externalL.size(), 0.0f);
+    auxExtR.assign (externalL.size(), 0.0f);
+    auxMidi.ensureSize (16384);
     prepared = true;
     updateConvolutionImpulses();
     impulseTimer.engine = this;
@@ -131,6 +138,19 @@ void AnalogEngine::saveState (juce::XmlElement& state) const
     // state; one that is missing here is written back exactly as it was read.
     if (auto xml = external.toXml())
         state.addChildElement (xml.release());
+    // State version 23: D / AUX's sources (its parameters are analog.aux.*): its RHYTHM
+    // recording (the stored file) and its KONTAKT instance, each only once there is one.
+    {
+        const std::lock_guard<std::mutex> lock (auxMutex);
+        if (auxAsset.isNotEmpty())
+        {
+            auto* rec = state.createNewChildElement ("AuxRecording");
+            rec->setAttribute ("asset", auxAsset);
+            rec->setAttribute ("name", auxState.name);
+        }
+    }
+    if (auto xml = auxKontakt.toXml())
+        state.createNewChildElement ("AuxKontakt")->addChildElement (xml.release());
     // State version 19: the USER macros' names and assignments, only once there are any (absent:
     // none, as every session and preset from before).
     if (! userMacroState.isDefault())
@@ -209,6 +229,30 @@ void AnalogEngine::restoreState (const juce::XmlElement& state, const juce::File
         external.restore (*ext);
     else
         external.clear();
+    // State version 23: D / AUX's recording and KONTAKT instance (absent: none).
+    if (const auto* rec = state.getChildByName ("AuxRecording"))
+    {
+        const auto asset = rec->getStringAttribute ("asset");
+        const auto name = rec->getStringAttribute ("name");
+        const auto stored = assetFolder.getChildFile ("Imported").getChildFile (asset);
+        std::uint64_t generation = 0;
+        {
+            const std::lock_guard<std::mutex> lock (auxMutex);
+            generation = ++auxGeneration;
+            auxAsset = asset;
+            auxState = { AuxRecordingState::Status::loading, name, {} };
+        }
+        if (asset.isEmpty() || asset.containsAnyOf ("/\\") || ! stored.existsAsFile())
+            publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::missing, name, "The recording is missing: load it again" }, asset);
+        else
+            sourceLoader.addJob ([this, stored, name, asset, generation] { decodeAuxRecording (stored, name, asset, generation); });
+    }
+    else
+        clearAuxRecording();
+    if (const auto* holder = state.getChildByName ("AuxKontakt"); holder != nullptr && holder->getChildByName ("ExternalInstrument") != nullptr)
+        auxKontakt.restore (*holder->getChildByName ("ExternalInstrument"));
+    else
+        auxKontakt.clear();
     // State version 19: the USER macros (absent: none - exactly the state from before).
     setUserMacros (UserMacroState::fromXml (state.getChildByName ("UserMacros")));
     // State version 8: before it, an imported source played whenever it was there; now card C
@@ -539,6 +583,116 @@ void AnalogEngine::setRhythmLoopForTest (std::shared_ptr<const rhythm::PreparedL
     publishLoop (std::move (loop), generation);
 }
 
+//==============================================================================
+// D / AUX: its RHYTHM recording.
+
+void AnalogEngine::loadAuxRecording (const juce::File& recording, const juce::File& assetFolder)
+{
+    std::uint64_t generation = 0;
+    const auto name = recording.getFileNameWithoutExtension();
+    {
+        const std::lock_guard<std::mutex> lock (auxMutex);
+        generation = ++auxGeneration;
+        auxState = { AuxRecordingState::Status::loading, name, {} };
+    }
+    // (copied, decoded and analysed on the loader thread; a newer load makes this one stale)
+    sourceLoader.addJob ([this, recording, assetFolder, name, generation] {
+        const auto asset = import::storeAsset (recording, assetFolder);
+        if (asset.isEmpty())
+        {
+            publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "It could not be copied into the instrument's store" }, {});
+            return;
+        }
+        decodeAuxRecording (assetFolder.getChildFile (asset), name, asset, generation);
+    });
+}
+
+void AnalogEngine::decodeAuxRecording (juce::File stored, juce::String name, juce::String asset, std::uint64_t generation)
+{
+    // Loader thread. WAV, AIFF, FLAC (JUCE's basic formats); up to 60 s of it.
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (stored));
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0 || reader->sampleRate <= 0.0)
+    {
+        publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "It is not a recording this instrument can read (WAV, AIFF or FLAC)" }, asset);
+        return;
+    }
+    const auto frames = static_cast<int> (std::min<juce::int64> (reader->lengthInSamples, static_cast<juce::int64> (reader->sampleRate * 60.0)));
+    juce::AudioBuffer<float> buffer (std::min (2, static_cast<int> (reader->numChannels)), frames);
+    if (! reader->read (&buffer, 0, frames, 0, true, buffer.getNumChannels() > 1))
+    {
+        publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "It could not be read" }, asset);
+        return;
+    }
+    auto loop = rhythm::prepareLoop (buffer.getReadPointer (0), buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr, static_cast<std::size_t> (frames), reader->sampleRate);
+    if (loop == nullptr)
+        publishAuxLoop (nullptr, generation, { AuxRecordingState::Status::error, name, "No rhythm was found in it" }, asset);
+    else
+        publishAuxLoop (std::move (loop), generation, { AuxRecordingState::Status::ready, name, {} }, asset);
+}
+
+void AnalogEngine::publishAuxLoop (std::shared_ptr<const rhythm::PreparedLoop> loop, std::uint64_t generation, AuxRecordingState next, juce::String asset)
+{
+    auto loaded = std::make_shared<LoadedLoop>();
+    loaded->generation = generation;
+    loaded->loop = loop;
+    const std::lock_guard<std::mutex> lock (auxMutex);
+    if (generation != auxGeneration)
+        return;   // (a newer recording since)
+    auxState = std::move (next);
+    // (a failed new load keeps nothing: its asset is kept only if it is the stored file, so a
+    // missing one is written back exactly as it was read)
+    auxAsset = asset;
+    auxLatest = std::move (loop);
+    auxExchange.publish (std::move (loaded));
+    auxExchange.collectGarbage();
+}
+
+void AnalogEngine::clearAuxRecording()
+{
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock (auxMutex);
+        generation = ++auxGeneration;
+    }
+    publishAuxLoop (nullptr, generation, {}, {});
+}
+
+AnalogEngine::AuxRecordingState AnalogEngine::auxRecordingState() const
+{
+    const std::lock_guard<std::mutex> lock (auxMutex);
+    return auxState;
+}
+
+std::shared_ptr<const rhythm::PreparedLoop> AnalogEngine::auxLoop() const
+{
+    const std::lock_guard<std::mutex> lock (auxMutex);
+    return auxLatest;
+}
+
+bool AnalogEngine::waitForAuxRecording (int timeoutMs) const
+{
+    const auto until = juce::Time::getMillisecondCounter() + static_cast<juce::uint32> (timeoutMs);
+    while (juce::Time::getMillisecondCounter() < until)
+    {
+        if (auxRecordingState().status != AuxRecordingState::Status::loading)
+            return true;
+        juce::Thread::sleep (5);
+    }
+    return false;
+}
+
+void AnalogEngine::setAuxLoopForTest (std::shared_ptr<const rhythm::PreparedLoop> loop)
+{
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock (auxMutex);
+        generation = ++auxGeneration;
+    }
+    publishAuxLoop (std::move (loop), generation, { AuxRecordingState::Status::ready, "test", {} }, {});
+}
+
 juce::String AnalogEngine::status (const juce::String& topic) const
 {
     if (topic == "sample")
@@ -585,6 +739,12 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     synth.setRhythmLoop (loop);
     if (loopPlaying != nullptr)
         loopExchange.publishOldestInUse (loopPlaying->generation);
+    // D RHYTHM's prepared loop (its own, as card C's).
+    if (const auto* next = auxExchange.takePending())
+        auxPlaying = next;
+    synth.setAuxLoop (auxPlaying != nullptr ? auxPlaying->loop.get() : nullptr);
+    if (auxPlaying != nullptr)
+        auxExchange.publishOldestInUse (auxPlaying->generation);
     // The loop takes the recording from the keys only while it is heard (AUDIO, BOTH). In MOD
     // card C plays as ever (MORPH has its C) and the loop runs silent on the grid, felt.
     const bool rhythmPlays = loop != nullptr && rhythmEnabledValue != nullptr && rhythmEnabledValue->load() >= 0.5f
@@ -724,6 +884,40 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     }
     else
         synth.setExternal (false, nullptr, nullptr, 0, 0.0f, false, 0.0, 0);
+    // D KONTAKT: its own instance plays the musician's keys (before any arpeggiator), every
+    // channel message normalised to channel 1; it is processed only while D is on in KONTAKT
+    // (otherwise it is told it is inactive and stays silent).
+    const bool auxKontaktMode = patch.aux.enabled && patch.aux.mode == Patch::Aux::Mode::kontakt;
+    if (auxKontaktMode || auxKontakt.state() == ExternalInstrument::State::ready)
+    {
+        auxMidi.clear();
+        if (auxKontaktMode)
+            for (const auto m : played)
+            {
+                if (m.numBytes < 1 || m.numBytes > 3)
+                    continue;
+                const int status = m.data[0];
+                const bool channelMessage = status >= 0x80 && status < 0xf0;
+                if (! channelMessage)
+                    continue;
+                std::uint8_t bytes[3] { static_cast<std::uint8_t> (status & 0xf0), m.numBytes > 1 ? m.data[1] : std::uint8_t (0), m.numBytes > 2 ? m.data[2] : std::uint8_t (0) };
+                auxMidi.addEvent (bytes, m.numBytes, m.samplePosition);
+            }
+        ExternalInstrument::Transport transport;
+        transport.valid = performance.hasPosition;
+        transport.playing = performance.playing;
+        transport.bpm = performance.bpm > 1.0 ? performance.bpm : 120.0;
+        transport.ppq = performance.ppq;
+        transport.numerator = performance.numerator;
+        transport.denominator = performance.denominator;
+        transport.timeInSamples = externalClock;
+        const int length = std::min (total, static_cast<int> (auxExtL.size()));
+        auxKontakt.process (auxMidi, auxExtL.data(), auxExtR.data(), length, transport, auxKontaktMode);
+        const bool live = auxKontaktMode && auxKontakt.state() == ExternalInstrument::State::ready;
+        synth.setAuxExternal (live ? auxExtL.data() : nullptr, live ? auxExtR.data() : nullptr, live ? length : 0, live ? auxKontakt.latencySamples() : 0);
+    }
+    else
+        synth.setAuxExternal (nullptr, nullptr, 0, 0);
     externalClock += total;
     int done = 0;
     auto renderTo = [&] (int samplePosition)
@@ -735,6 +929,14 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             done = at;
         }
     };
+    // D's keys (its NOISE gate, its filter's envelope and key tracking): the musician's, on
+    // channel 1.
+    auto auxKeyFrom = [this] (const juce::MidiMessageMetadata& m) {
+        if (m.numBytes < 1 || m.numBytes > 3 || m.data[0] < 0x80 || m.data[0] >= 0xf0)
+            return;
+        std::uint8_t bytes[3] { static_cast<std::uint8_t> (m.data[0] & 0xf0), m.numBytes > 1 ? m.data[1] : std::uint8_t (0), m.numBytes > 2 ? m.data[2] : std::uint8_t (0) };
+        synth.auxKeyEvent (bytes, m.numBytes);
+    };
     auto p = played.cbegin();
     for (const auto m : midi)
     {
@@ -742,6 +944,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         {
             renderTo ((*p).samplePosition);
             synth.handleSubMidi ((*p).data, (*p).numBytes);
+            auxKeyFrom (*p);
         }
         renderTo (m.samplePosition);
         if (! (externalMode && cardCOnly (m)))
@@ -753,6 +956,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     {
         renderTo ((*p).samplePosition);
         synth.handleSubMidi ((*p).data, (*p).numBytes);
+        auxKeyFrom (*p);
     }
     if (done < total)
         synth.render (left + done, right + done, total - done);
