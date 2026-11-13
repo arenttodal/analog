@@ -401,6 +401,7 @@ namespace
         std::function<juce::String()> notice;   ///< (a refused drop, a failed load)
         bool dropOver = false;
         int headerWidth = 0;                     ///< the mode selector's room (the readout after it)
+        std::function<juce::String()> unheard;   ///< why D is not heard (OFF, MUTED, NOT SOLOED), or empty
         void paint (juce::Graphics& g) override
         {
             const auto b = getLocalBounds().toFloat();
@@ -411,9 +412,25 @@ namespace
             auto inner = b.reduced (12.0f, 6.0f);
             auto top = inner.removeFromTop (22.0f);
             top.removeFromLeft (static_cast<float> (headerWidth) + 10.0f);
+            // Not heard: the reason in the top row, centred on the well (or in the room right of
+            // the mode selector when the well is narrow), never on the picture's own text. The
+            // readout keeps the room right of it.
+            if (const auto why = unheard != nullptr ? unheard() : juce::String(); why.isNotEmpty())
+            {
+                const auto font = fonts::make (11.0f, fonts::Weight::medium, 0.12f);
+                const float width = juce::GlyphArrangement::getStringWidth (font, why) + 4.0f;
+                auto at = juce::Rectangle<float> (width, top.getHeight()).withCentre ({ b.getCentreX(), top.getCentreY() });
+                if (at.getX() < top.getX())
+                    at.setX (top.getX());
+                g.setColour (juce::Colour (0xffd9dcd8).withAlpha (0.6f));
+                g.setFont (font);
+                g.drawText (why, at, juce::Justification::centredLeft, false);
+                top.setLeft (at.getRight() + 14.0f);
+            }
             g.setColour (cream.withAlpha (0.6f));
             g.setFont (fonts::label (10.0f));
-            g.drawText (aux::readout (host), top, juce::Justification::centredRight, true);
+            if (top.getWidth() > 8.0f)
+                g.drawText (aux::readout (host), top, juce::Justification::centredRight, true);
             inner.removeFromTop (3.0f);
             paintAuxPicture (g, inner, host, true, shownPlayheadX);
             paintDropState (g, b, dropOver, notice != nullptr ? notice() : juce::String(), 9.0f);
@@ -452,6 +469,7 @@ namespace
 
             display = std::make_unique<AuxDisplay> (h);
             display->notice = [this] { return currentNotice(); };
+            display->unheard = [this] { return unheardReason(); };
             addAndMakeVisible (*display);
             modeSelector = std::make_unique<ValueSelector> (*h.apvts().getParameter (params::auxMode), juce::String());
             modeSelector->setPlain (true);
@@ -614,17 +632,15 @@ namespace
 
         void paintOverChildren (juce::Graphics& g) override
         {
-            // Not heard (off, muted, or another source soloed): a veil over the well, as a card's
-            // display, its reason at the well's foot.
+            // Not heard (off, muted, or another source soloed): a veil over the well's picture, as a
+            // card's display. The well draws the reason in its top row (AuxDisplay::unheard), so it
+            // never lands on the picture's own text ("DROP A LOOP OR CLICK TO LOAD").
             const auto why = unheardReason();
             if (why.isEmpty())
                 return;
             const auto w = display->getBounds().toFloat();
             g.setColour (juce::Colour (0xff15191a).withAlpha (0.45f));
             g.fillRoundedRectangle (w.withTrimmedTop (30.0f), 9.0f);
-            g.setColour (juce::Colour (0xffd9dcd8).withAlpha (0.6f));
-            g.setFont (fonts::make (11.0f, fonts::Weight::medium, 0.12f));
-            g.drawText (why, w.withTrimmedTop (28.0f), juce::Justification::centred, false);
         }
 
         void mouseDoubleClick (const juce::MouseEvent&) override { setAuxRackOpen (*this, ! auxRackOpen (*this)); }

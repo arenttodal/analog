@@ -445,7 +445,28 @@ TEST_CASE ("AUX: screenshots - the strip in its three modes, its rack, hidden (A
     shoot ("aux-11-soloed", 1448);
     set (p, params::auxSolo, 0.0f);
     set (p, params::auxEnabled, 0.0f);
-    shoot ("aux-07-off", 1448);
+    for (const int w : { 869, 1448, 1810 })
+        shoot ("aux-07-off", w);
+    editor.reset();
+
+    // D off with no loop yet: the reason in the well's top row, clear of the picture's
+    // "DROP A LOOP OR CLICK TO LOAD".
+    ShellProcessor fresh;
+    std::unique_ptr<juce::AudioProcessorEditor> second (fresh.createEditorIfNeeded());
+    auto& ui2 = editorOf (second);
+    ui2.setAuxStripShown (true);
+    set (fresh, params::auxEnabled, 0.0f);
+    for (const int w : { 869, 1448, 1810 })
+    {
+        const float h = ui2.instrumentHeight() * static_cast<float> (w) / osp::plugin::design::width;
+        second->setSize (w, juce::roundToInt (h));
+        refreshStrip (ui2);
+        const auto image = second->createComponentSnapshot (second->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile ("aux-12-off-no-loop-" + juce::String (w) + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    }
 }
 
 TEST_CASE ("AUX: renders - D under a FILTER sweep, through SPACE / ECHO, with card C, and D off nulling (ANALOG_RENDER_DIR)", "[.][renders][aux]")
