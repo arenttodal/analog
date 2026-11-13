@@ -792,6 +792,21 @@ void AnalogEngine::setExternalInput (const ExternalInput& input) noexcept
     liveWrite.store (at + 1, std::memory_order_release);
 }
 
+AnalogEngine::GlobalMorphView AnalogEngine::globalMorphView() const noexcept
+{
+    GlobalMorphView v;
+    v.running = gmRunning.load (std::memory_order_relaxed);
+    v.position = gmPosition.load (std::memory_order_relaxed);
+    v.activity = gmActivity.load (std::memory_order_relaxed);
+    const auto& gm = synth.auxMorphState();
+    for (int b = 0; b < GlobalMorph::bandCount; ++b)
+    {
+        v.bandDb[static_cast<std::size_t> (b)] = gmBands[static_cast<std::size_t> (b)].load (std::memory_order_relaxed);
+        v.bandHz[static_cast<std::size_t> (b)] = static_cast<float> (gm.bandCentreHz (b));   // (fixed after prepare)
+    }
+    return v;
+}
+
 AnalogEngine::LiveInputView AnalogEngine::liveInput() const noexcept
 {
     LiveInputView v;
@@ -972,7 +987,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         const double share = patch.organic.blend <= 0.0 ? 0.0 : std::min (1.0, std::sqrt (2.0) * std::sin (theta));
         const double level = patch.organic.heard && patch.organic.levelDb > -47.99 ? juce::Decibels::decibelsToGain (patch.organic.levelDb) : 0.0;
         synth.setExternal (externalMode && external.state() == ExternalInstrument::State::ready, externalL.data(), externalR.data(), length,
-                           static_cast<float> (level * share), patch.morph.enabled, patch.morph.position, external.latencySamples());
+                           static_cast<float> (level * share), patch.morph.perVoiceOn(), patch.morph.position, external.latencySamples());
     }
     else
         synth.setExternal (false, nullptr, nullptr, 0, 0.0f, false, 0.0, 0);
@@ -1064,6 +1079,14 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             left[i] = 0.5f * (left[i] + scratch[static_cast<std::size_t> (i)]);
     publishGrains();
     publishModulationView();
+    {
+        const auto& gm = synth.auxMorphState();
+        gmRunning.store (synth.auxMorphActive(), std::memory_order_relaxed);
+        gmPosition.store (synth.auxMorphPosition(), std::memory_order_relaxed);
+        gmActivity.store (gm.activity(), std::memory_order_relaxed);
+        for (int b = 0; b < GlobalMorph::bandCount; ++b)
+            gmBands[static_cast<std::size_t> (b)].store (gm.bandGainDb (b), std::memory_order_relaxed);
+    }
 }
 
 void AnalogEngine::setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept

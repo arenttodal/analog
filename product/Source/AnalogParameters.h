@@ -286,6 +286,11 @@ namespace andor::analog::params
         is held, then fades with the AMP's release) or FREE (always playing, on the host's
         grid). Appended; KEYS by default. */
     inline const juce::String auxRhythmGate = "analog.aux.rhythm.gate";
+    /** MORPH TO (Addendum 05): which MORPH the MORPH macro drives - C HYBRID (the per-voice
+        A + B <-> C morph, as ever; the default) or D AUX (the global stage: A/B/C's bus after the
+        FILTER x D, whatever D plays - LIVE INPUT included). One processor at a time; the other's
+        settings stay as they are. Appended. */
+    inline const juce::String morphTarget = "analog.morph.target";
     /** RATE's choices (its musical speed against the loop's detected tempo). */
     inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */

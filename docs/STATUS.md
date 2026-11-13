@@ -68,6 +68,18 @@
 >   - Addendum 04: one fixed strip layout - SOURCE MODE and LEVEL permanent after POWER, the
 >     display after LEVEL, only the mode's knobs changing, RACK and the menu at the right;
 >     KONTAKT NOT LOADED once; OFF never drawn over the display.
+>   - Right-click on a knob opens Assign to Macro in a host (the press reached the knob, not the
+>     halo overlay holding the menu; shared fix, ANDOR OSP too).
+>
+>   Addendum 05 (`feature/aux-live-input`, docs/aux/ADDENDUM_05.md):
+>   - D LIVE INPUT: the DAW's sidechain ("AUX D Live Input", a VST3 auxiliary bus, off by
+>     default; the plugin stays an instrument) as D's source - no MIDI needed, through D's LEVEL,
+>     MUTE / SOLO, the FILTER and the shared effects; level history and input state in the strip
+>     and the rack. ANDOR Analog's own VST3 hosted in-process proves the bus and the audio path.
+>   - MORPH TO (C HYBRID / D) in the MORPH rack replaces the D MORPH knob: with D, the MORPH macro
+>     drives the global GLOBAL IMPRINT stage (0 % the synth, 100 % D, D never layered too); one
+>     processor at a time. Six demos with synthesized stand-in tracks.
+>   - Unverified: Ableton, Logic (AU sidechain, auval), REAPER - owner tests.
 >
 > - Destination-first macro assignment (docs/MACRO_DESTINATION_FIRST.md):
 >   - right-click any eligible control → Assign to Macro (names, checkmarks, range, details,

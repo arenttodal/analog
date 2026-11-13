@@ -715,7 +715,7 @@ TEST_CASE ("realtime: card C's external bus and GLOBAL MORPH (on / off, MORPH sw
     CHECK (allocations.load() == 0);
 }
 
-TEST_CASE ("realtime: D / AUX's bus allocates nothing - its three modes, switches, MUTE, POWER, its filter and latency", "[realtime][aux]")
+TEST_CASE ("realtime: D / AUX's bus allocates nothing - its four modes (LIVE INPUT), switches, MUTE, POWER, its filter, latency and MORPH TO D", "[realtime][aux]")
 {
     Patch p = measurementPatch();
     p.aux.enabled = true;
@@ -742,7 +742,8 @@ TEST_CASE ("realtime: D / AUX's bus allocates nothing - its three modes, switche
         }
         if (block % 50 == 0)
         {
-            p.aux.mode = static_cast<Patch::Aux::Mode> ((block / 50) % 3);
+            p.aux.mode = static_cast<Patch::Aux::Mode> ((block / 50) % 4);   // (LIVE INPUT included)
+            p.aux.morphExclusive = (block / 50) % 3 != 0;                      // (MORPH TO D: D only through the stage)
             p.aux.heard = (block / 50) % 4 != 3;
             p.aux.filterFollow = (block / 100) % 2 == 0;
             p.aux.enabled = block < 350;
@@ -751,6 +752,7 @@ TEST_CASE ("realtime: D / AUX's bus allocates nothing - its three modes, switche
             s->setPatch (p);
         }
         s->setAuxExternal (cl.data(), cr.data(), 512, block > 200 ? 256 : 0);
+        s->setAuxLive (block % 7 == 0 ? nullptr : cl.data(), cr.data(), 512);   // (the sidechain, now and then off)
         s->render (l.data(), r.data(), 512);
     }
     counting = false;

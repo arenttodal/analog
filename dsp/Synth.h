@@ -796,7 +796,7 @@ private:
     // D / AUX's bus.
     void renderAux (int numSamples) noexcept;   ///< its envelope (control rate reads it) before the voices
     void mixAux (float* left, float* right, int numSamples) noexcept;
-    void mixAuxMorph (float* left, float* right, int n, float target) noexcept;   ///< D MORPH's stage
+    void mixAuxMorph (float* left, float* right, int n, float target, bool exclusive) noexcept;   ///< D MORPH's stage
     float auxNoiseSample (int channel, float toneCoefficient) noexcept;
     rhythm::LoopPlayer auxLoop;
     std::vector<float> auxL, auxR, auxDryL, auxDryR, auxLevelBuf, auxTransientBuf, auxEnvBuf, auxDelayL, auxDelayR;
@@ -804,6 +804,7 @@ private:
     GlobalMorph auxMorph;
     std::vector<float> auxMorphL, auxMorphR;
     float auxMorphNow = 0.0f;
+    float auxDryNow = 1.0f;   ///< D's own layer beside the stage (0 while MORPH TO D owns D: glided 10 ms)
     int auxMorphTail = 0;           ///< samples it keeps running at 0 (its own smoothing settles)
     bool auxMorphRunning = false;
     struct AuxExternal

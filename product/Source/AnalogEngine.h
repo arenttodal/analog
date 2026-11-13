@@ -148,6 +148,16 @@ public:
         bool everReceived = false;
     };
     LiveInputView liveInput() const noexcept;
+    /** MORPH TO D's global stage (any thread, telemetry): whether it runs, its position now, D's
+        activity (0 silent .. 1) and its 24 bands' gains (dB) on the synth's bus. */
+    struct GlobalMorphView
+    {
+        bool running = false;
+        float position = 0.0f, activity = 0.0f;
+        std::array<float, GlobalMorph::bandCount> bandDb {};
+        std::array<float, GlobalMorph::bandCount> bandHz {};
+    };
+    GlobalMorphView globalMorphView() const noexcept;
     static constexpr int liveHistory = 96;
     void liveInputHistory (std::array<float, liveHistory>& out) const noexcept;
 
@@ -259,6 +269,10 @@ public:
     static std::vector<float> oscillatorPictureOf (Patch patch, int slot, int points = 256);
 
 private:
+    // MORPH TO D's telemetry (written at each block's end).
+    std::atomic<bool> gmRunning { false };
+    std::atomic<float> gmPosition { 0.0f }, gmActivity { 0.0f };
+    std::array<std::atomic<float>, GlobalMorph::bandCount> gmBands {};
     // D LIVE INPUT: this block's input (the shell's copy) and its telemetry.
     Engine::ExternalInput liveIn;
     std::atomic<bool> liveBusExists { false }, liveBusEnabled { false }, liveEver { false };

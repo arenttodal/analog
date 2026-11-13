@@ -112,6 +112,8 @@ namespace
         iAuxSync, iAuxRate, iAuxModAmount, iAuxModTarget, iAuxSensitivity, iAuxAttack, iAuxRelease,
         iAuxNoiseColor, iAuxNoiseTone, iAuxNoiseGate, iAuxNoiseAttack, iAuxNoiseRelease, iAuxNoiseMovement, iAuxNoiseWidth,
         iAuxPitch, iAuxOctave, iAuxMorph, iAuxRhythmGate,
+        // Addendum 05: MORPH TO.
+        iMorphTarget,
         count
     };
 
@@ -248,6 +250,7 @@ namespace
                                     &auxNoiseColor, &auxNoiseTone, &auxNoiseGate, &auxNoiseAttack, &auxNoiseRelease, &auxNoiseMovement, &auxNoiseWidth,
                                     &auxPitch, &auxOctave, &auxMorph, &auxRhythmGate })
                 l.add (*id);
+            l.add (morphTarget);   // (Addendum 05: MORPH TO)
             return l;
         }();
         jassert (withCards.size() == count);
@@ -320,6 +323,9 @@ const juce::StringArray& engineParameterIds()
             // AUX Addendum 03: D always goes through the FILTER; the old switch stays (an older
             // experimental session recalls without error) but nothing reads it.
             n.add (auxFilterFollow);
+            // Addendum 05: MORPH TO D replaces the AUX rack's D MORPH knob (the MORPH macro drives
+            // the global stage); its parameter stays for older experimental sessions, unread.
+            n.add (auxMorph);
             return n;
         }();
         juce::StringArray l;
@@ -767,8 +773,6 @@ namespace
             // State version 8 (appended): card B's own grains (its POS, SIZE, DENS and SPREAD are
             // ANDOR OSP's layer C destinations).
             { iGrainTune2, "GRAIN TUNE B", O::voice },
-            // D / AUX (appended): D MORPH, the second MORPH stage's position (the instrument's).
-            { iAuxMorph, "D MORPH", O::global },
         };
         return list;
     }
@@ -1049,6 +1053,8 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     percentage (auxMorph, "AUX D Morph", d.morph);
     // D RHYTHM's GATE (KEYS by default: a key starts the loop). Appended.
     layout.add (osp::plugin::parameters::make<Choice> (v37 (auxRhythmGate), "AUX Rhythm Gate", juce::StringArray { "KEYS", "FREE" }, d.rhythmFree ? 1 : 0));
+    // Addendum 05: MORPH TO - C HYBRID (the default: MORPH as ever) or D AUX. Appended.
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (morphTarget), "Morph To", juce::StringArray { "C HYBRID", "D AUX" }, 0));
 }
 
 int readerIndexOf (const juce::String& id)
@@ -1479,7 +1485,7 @@ Patch Reader::readWith (const float* raw) const noexcept
         // (PITCH at its own 0.01 st resolution: a value the host's float snapping leaves a hair
         // off - 12.000000000000002 on some platforms - plays exactly as OCT +1 does)
         a.pitchSemis = std::round (100.0 * v (iAuxPitch)) / 100.0 + 12.0 * std::round (v (iAuxOctave));
-        a.morph = 0.01 * v (iAuxMorph);
+        a.morph = 0.0;   // (the old D MORPH knob: unread - MORPH TO D sets the global stage below)
         a.sync = index (iAuxSync, 2) == 0;
         a.rate = auxRates[static_cast<std::size_t> (index (iAuxRate, static_cast<int> (auxRates.size())))];
         a.modAmount = 0.01 * v (iAuxModAmount);
@@ -1577,6 +1583,16 @@ Patch Reader::readWith (const float* raw) const noexcept
     m.detail = 0.01 * v (iMorphDetail);
     m.levelMatch = on (iMorphLevelMatch);
     m.output = static_cast<MorphOutput> (index (iMorphOutput, 2));
+    // MORPH TO (Addendum 05): the MORPH macro drives one processor. C HYBRID: the per-voice morph,
+    // as ever. D AUX: the global stage (A/B/C's bus x D) at MORPH's position while MORPH is on -
+    // the per-voice morph (and C's own bus morphs) bypassed, their settings untouched. D soloed:
+    // D itself is monitored (the stage at 0), never an ambiguous mixture.
+    if (index (iMorphTarget, 2) == 1)
+    {
+        m.toAux = true;
+        p.aux.morph = m.enabled && ! soloD ? std::clamp (m.position, 0.0, 1.0) : 0.0;
+        p.aux.morphExclusive = m.enabled && ! soloD;
+    }
     return p;
 }
 
@@ -1906,6 +1922,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (iAuxNoiseTone, 100.0 * a.noiseTone);
         put (iAuxNoiseGate, a.noiseFree ? 1.0 : 0.0);
         put (iAuxRhythmGate, a.rhythmFree ? 1.0 : 0.0);
+        put (iMorphTarget, p.morph.toAux ? 1.0 : 0.0);
         put (iAuxNoiseAttack, a.noiseAttack);
         put (iAuxNoiseRelease, a.noiseRelease);
         put (iAuxNoiseMovement, 100.0 * a.noiseMovement);

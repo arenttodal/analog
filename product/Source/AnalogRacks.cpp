@@ -969,9 +969,18 @@ namespace
         {
             juce::String sig;
             for (const auto& id : { params::morphEnabled, params::morphPosition, params::morphMethod, params::morphCarrier, params::morphTexture, params::morphDetail,
-                                    params::morphFormants, params::morphOutput })
+                                    params::morphFormants, params::morphOutput, params::morphTarget, params::auxMode, params::auxEnabled })
                 sig << "|" << juce::String (host.parameterValue (id), 3);
             sig << host.engineStatus ("morph");
+            if (toD())
+                if (auto* e = engine())
+                {
+                    // (the global stage's live band gains: a measurement, refreshed as it moves)
+                    const auto v = e->globalMorphView();
+                    sig << "|" << juce::String (v.position, 2) << "|" << juce::String (v.activity, 2);
+                    for (const float db : v.bandDb)
+                        sig << "," << juce::String (db, 0);
+                }
             if (sig != shown)
             {
                 shown = sig;
@@ -980,8 +989,70 @@ namespace
         }
 
     protected:
+        bool toD() const { return choice (host, params::morphTarget) == 1; }
+        AnalogEngine* engine() const { return dynamic_cast<AnalogEngine*> (&dynamic_cast<andor::shell::ShellProcessor&> (host).productEngine()); }
+
+        /** MORPH TO D: the global stage as it is - GLOBAL IMPRINT, the synth's bus taking D's
+            spectral envelope band by band (each bar a band's gain now, from the engine), D's
+            activity, and why nothing happens when nothing can. */
+        void paintGlobal (juce::Graphics& g, juce::Rectangle<float> area)
+        {
+            const auto cool = juce::Colour (0xff9dbdd0), plum = juce::Colour (0xffc9a3c4);
+            const bool on = plain (host, params::morphEnabled) >= 0.5f;
+            const float p = juce::jlimit (0.0f, 1.0f, 0.01f * plain (host, params::morphPosition));
+            static const char* modes[] { "RHYTHM", "NOISE", "KONTAKT", "LIVE INPUT" };
+            const int auxMode = std::clamp (choice (host, params::auxMode), 0, 3);
+            const auto title = juce::String ("GLOBAL IMPRINT") + middleDot() + "MORPH " + juce::String (juce::roundToInt (100.0f * p)) + " %";
+            gtype::header (g, area, title, {});
+            g.setFont (gtype::meta());
+            g.setColour (plum);
+            g.drawText (juce::String ("A/B/C ") + juce::String::fromUTF8 ("\xe2\x86\x92") + " D " + modes[auxMode], area.reduced (9.0f, 4.0f).withHeight (12.0f),
+                        juce::Justification::centredRight, false);
+            const auto plot = area.reduced (16.0f, 0.0f).withTrimmedTop (28.0f).withTrimmedBottom (32.0f);
+            const auto v = engine() != nullptr ? engine()->globalMorphView() : AnalogEngine::GlobalMorphView();
+            const bool dOn = plain (host, params::auxEnabled) >= 0.5f;
+            juce::String foot;
+            if (! on)
+                foot = "MORPH is off: A/B/C and D play side by side";
+            else if (! dOn)
+                foot = "D is off: the synth plays as it is";
+            else if (v.activity < 0.05f)
+                foot = auxMode == 3 ? "NO INPUT SIGNAL: the synth plays as it is" : "D is silent: the synth plays as it is";
+            else
+                foot = "each bar: a band of the synth's bus, moved towards D now (dB)";
+            // The 24 bands: 0 dB the centre line, up +18, down -36 (the stage's own limits).
+            auto yOf = [&] (float db) { return plot.getCentreY() - plot.getHeight() * 0.5f * juce::jlimit (-1.0f, 1.0f, db / (db >= 0.0f ? 18.0f : 36.0f)); };
+            g.setColour (gtype::grid);
+            g.fillRect (juce::Rectangle<float> (plot.getX(), plot.getCentreY() - 0.5f, plot.getWidth(), 1.0f));
+            const float slot = plot.getWidth() / static_cast<float> (v.bandDb.size());
+            for (std::size_t b = 0; b < v.bandDb.size(); ++b)
+            {
+                const float db = on && dOn ? v.bandDb[b] : 0.0f;
+                const float y = yOf (db), y0 = plot.getCentreY();
+                const auto bar = juce::Rectangle<float> (plot.getX() + slot * static_cast<float> (b) + 0.18f * slot, std::min (y, y0), 0.64f * slot, std::max (1.0f, std::abs (y - y0)));
+                g.setColour (cool.interpolatedWith (plum, juce::jlimit (0.0f, 1.0f, 0.5f + db / 24.0f)).withAlpha (on && dOn ? 0.9f : 0.35f));
+                g.fillRect (bar);
+            }
+            for (const auto& [hz, text] : { std::pair { 100.0f, "100" }, std::pair { 1000.0f, "1k" }, std::pair { 10000.0f, "10k" } })
+            {
+                // (the bands are third-octave from about 70 Hz: place the labels by the nearest band)
+                std::size_t nearest = 0;
+                for (std::size_t b = 0; b < v.bandHz.size(); ++b)
+                    if (std::abs (std::log2 (std::max (1.0f, v.bandHz[b]) / hz)) < std::abs (std::log2 (std::max (1.0f, v.bandHz[nearest]) / hz)))
+                        nearest = b;
+                gtype::small (g, text, { plot.getX() + slot * (static_cast<float> (nearest) + 0.5f) - 14.0f, plot.getBottom() + 3.0f, 28.0f, 12.0f },
+                              juce::Justification::centred, 0.8f);
+            }
+            gtype::foot (g, area, foot);
+        }
+
         void paintGraph (juce::Graphics& g, juce::Rectangle<float> area) override
         {
+            if (toD())
+            {
+                paintGlobal (g, area);
+                return;
+            }
             const auto cool = juce::Colour (0xff9dbdd0), copper = design::colour::macroOnDark (design::colour::Macro::life);
             const bool on = plain (host, params::morphEnabled) >= 0.5f;
             const auto status = host.engineStatus ("morph");
@@ -1083,6 +1154,25 @@ namespace
         juce::String shown;
     };
 
+    /** A fixed method's name in the selector row (MORPH TO D: GLOBAL IMPRINT), read-only. */
+    class MethodLabel final : public juce::Component
+    {
+    public:
+        explicit MethodLabel (juce::String t) : text (std::move (t)) { setTitle (text); }
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (1.0f, 2.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.1f));
+            g.fillRoundedRectangle (r, 5.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.85f));
+            g.setFont (fonts::make (10.0f, fonts::Weight::medium, 0.1f));
+            g.drawText (text, r, juce::Justification::centred, false);
+        }
+
+    private:
+        juce::String text;
+    };
+
     class MorphRack final : public ParameterRack
     {
     public:
@@ -1100,13 +1190,32 @@ namespace
         }
 
     protected:
+        int buildKey() const override { return choice (host, params::morphTarget) * 10 + std::clamp (choice (host, params::auxMode), 0, 3); }
+
         void build (int) override
         {
+            using namespace params;
+            const int key = buildKey();   // (build's argument is the page; MORPH TO and D's mode are the key)
+            static const char* modes[] { "RHYTHM", "NOISE", "KONTAKT", "LIVE INPUT" };
+            const juce::String dName = juce::String::fromUTF8 ("D \xc2\xb7 ") + modes[key % 10];
+            // MORPH TO (Addendum 05): which MORPH the macro drives - card C's per-voice morph, or D's
+            // global stage (whatever D plays). One at a time; the other keeps its settings.
+            selectorSegment (morphTarget, "MORPH TO", { { juce::String::fromUTF8 ("C \xc2\xb7 HYBRID"), "Card C (per voice)", 0.0f }, { dName, "D (global)", 1.0f } }, 280,
+                             "C: the oscillators morph into card C, voice by voice (IMPRINT, FUSE, WEAVE). D: the whole synth (A/B/C after the FILTER) "
+                             "takes on D's spectrum and becomes D at 100 % (GLOBAL IMPRINT) - LIVE INPUT included");
+            if (key / 10 == 1)
+            {
+                // D: GLOBAL IMPRINT, the one method the global stage has (labelled as it is, never
+                // a per-voice method's name); MORPH's position. C's settings stay as they are.
+                selectorComponent (std::make_unique<MethodLabel> ("GLOBAL IMPRINT"), "METHOD", 150);
+                knob (morphPosition, "MORPH", textOf (host, morphPosition))
+                    .slider.setTooltip ("0 %: the synth as it is. 50 %: the synth in D's spectral envelope (a fusion, not a crossfade). 100 %: D alone");
+                return;
+            }
             // METHOD and CARRIER in the selector row; the five knobs that shape the morph; then,
             // a rank lower (its captions and values quieter, after the divider), the setup:
             // what comes out, the level match, card C's root. (MORPH 2.0's controls will take
             // pages - MORPH / IDENTITY / MOTION - once they exist, never a taller rack.)
-            using namespace params;
             selectorSegment (morphMethod, "METHOD", { { "IMPRINT", "Imprint", 0.0f }, { "FUSE", "Fuse", 1.0f }, { "WEAVE", "Weave", 2.0f } }, 246,
                              "IMPRINT: card C's envelope on the oscillators. FUSE: their partials and pitch blended. WEAVE: their partials interleaved");
             selectorSegment (morphCarrier, "CARRIER", { { "OSC 1", "Oscillator 1", 0.0f }, { "OSC 2", "Oscillator 2", 1.0f }, { "BOTH", "Both", 2.0f } }, 216,

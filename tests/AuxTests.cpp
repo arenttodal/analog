@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <functional>
 #include <limits>
 #include <numbers>
@@ -852,4 +853,127 @@ TEST_CASE ("D LIVE INPUT: mono reaches both sides; DC is blocked; a non-finite s
     const float sineStep = static_cast<float> (0.2 * 2.0 * std::numbers::pi * 220.0 / rate) * 1.5f;
     CHECK (largestStep (ramped.left, 0.45, 0.6) <= sineStep);
     CHECK (rmsOf (ramped.left, 0.6, 0.95) < 1.0e-4);   // (muted: silent)
+}
+
+//==============================================================================
+// Addendum 05: MORPH TO D - the global stage with D LIVE INPUT (Patch::Aux::morph, exclusive).
+
+namespace
+{
+    /** A held saw chord on the oscillators with D LIVE INPUT's `input` routed, `seconds` long. */
+    Stereo chordWithLive (const Patch& p, const std::vector<float>& input, double seconds, bool chord = true)
+    {
+        auto s = makeSynth (p);
+        if (chord)
+            for (const int note : { 48, 55, 60 })
+            {
+                const auto e = on (0, note);
+                s->handleMidi (e.bytes, e.size);
+            }
+        return playLive (*s, seconds, &input, nullptr);
+    }
+
+    /** A dark noise (one-pole low-passed at about 400 Hz): D's character, unlike a saw's. */
+    std::vector<float> darkNoise (double seconds, float amplitude)
+    {
+        std::vector<float> x (static_cast<std::size_t> (seconds * rate));
+        osp::Prng rng (21);
+        double low = 0.0;
+        const double k = 1.0 - std::exp (-2.0 * std::numbers::pi * 400.0 / rate);
+        for (auto& v : x)
+        {
+            low += k * (rng.bipolar() - low);
+            v = static_cast<float> (amplitude * 4.0 * low);
+        }
+        return x;
+    }
+
+    Patch morphToLive (double position, bool exclusive = true)
+    {
+        Patch p = measurementPatch();
+        p.tone = 1.0;
+        p.aux.enabled = true;
+        p.aux.mode = Mode::live;
+        p.aux.levelDb = 0.0;
+        p.aux.morph = position;
+        p.aux.morphExclusive = exclusive;
+        return p;
+    }
+}
+
+TEST_CASE ("MORPH TO D LIVE: 0 % is the synth alone (D not layered); 100 % is D alone; 50 % is a spectral fusion, not a crossfade", "[aux][live][morph]")
+{
+    const double seconds = 1.6;
+    const auto input = darkNoise (seconds, 0.3f);
+    // The synth alone (D off) and D alone (no chord, layered).
+    auto off = morphToLive (0.0, false);
+    off.aux.enabled = false;
+    const auto synth = chordWithLive (off, input, seconds);
+    const auto dAlone = chordWithLive (morphToLive (0.0, false), input, seconds, false);
+    // 0 %: the synth exactly - D is not layered beside it.
+    const auto zero = chordWithLive (morphToLive (0.0), input, seconds);
+    CHECK (zero.left == synth.left);
+    // 100 %: D alone (the synth gone): its level and its brightness are D's.
+    const auto full = chordWithLive (morphToLive (1.0), input, seconds);
+    CHECK (rmsOf (full.left, 0.8, 1.5) == Approx (rmsOf (dAlone.left, 0.8, 1.5)).epsilon (0.1));
+    CHECK (brightness (full.left, 0.8, 1.5) == Approx (brightness (dAlone.left, 0.8, 1.5)).epsilon (0.15));
+    // 50 %: the synth in D's spectral envelope - its balance moved towards D's - and not the two
+    // side by side (a crossfade).
+    const auto half = chordWithLive (morphToLive (0.5), input, seconds);
+    const double bSynth = brightness (synth.left, 0.8, 1.5), bD = brightness (dAlone.left, 0.8, 1.5), bHalf = brightness (half.left, 0.8, 1.5);
+    INFO ("brightness: synth " << bSynth << ", D " << bD << ", 50 % " << bHalf);
+    // (the imprint moves the synth's spectral balance well towards D's, whichever way that is)
+    CHECK (std::abs (bHalf - bSynth) > 0.25 * std::abs (bD - bSynth));
+    CHECK ((bHalf - bSynth) * (bD - bSynth) > 0.0);
+    std::vector<float> crossfade (synth.left.size());
+    for (std::size_t i = 0; i < crossfade.size(); ++i)
+        crossfade[i] = 0.7071f * (synth.left[i] + dAlone.left[i]);
+    double diff = 0.0, ref = 0.0;
+    for (auto i = static_cast<std::size_t> (0.8 * rate); i < static_cast<std::size_t> (1.5 * rate); ++i)
+    {
+        diff += (half.left[i] - crossfade[i]) * (half.left[i] - crossfade[i]);
+        ref += crossfade[i] * crossfade[i];
+    }
+    CHECK (std::sqrt (diff / ref) > 0.3);
+    for (const float x : half.left)
+        REQUIRE (std::isfinite (x));
+}
+
+TEST_CASE ("MORPH TO D LIVE: a silent input leaves the synth as it is (no normalisation of nothing); the input starting and stopping never clicks", "[aux][live][morph]")
+{
+    const double seconds = 2.0;
+    auto off = morphToLive (0.0, false);
+    off.aux.enabled = false;
+    const auto silent = std::vector<float> (static_cast<std::size_t> (seconds * rate), 0.0f);
+    const auto synth = chordWithLive (off, silent, seconds);
+    // At 100 % with nothing arriving: the synth (the stage acts only while D sounds).
+    const auto quiet = chordWithLive (morphToLive (1.0), silent, seconds);
+    CHECK (rmsOf (quiet.left, 0.5, 1.9) == Approx (rmsOf (synth.left, 0.5, 1.9)).epsilon (0.05));
+    // The input arriving at 0.6 s and stopping at 1.3 s, at 50 %: no step larger than the
+    // signals' own, nothing non-finite.
+    auto gated = darkNoise (seconds, 0.3f);
+    for (std::size_t i = 0; i < gated.size(); ++i)
+        if (i < static_cast<std::size_t> (0.6 * rate) || i > static_cast<std::size_t> (1.3 * rate))
+            gated[i] = 0.0f;
+    const auto moving = chordWithLive (morphToLive (0.5), gated, seconds);
+    for (const float x : moving.left)
+        REQUIRE (std::isfinite (x));
+    CHECK (largestStep (moving.left, 0.55, 0.7) < 0.25f);
+    CHECK (largestStep (moving.left, 1.25, 1.45) < 0.25f);
+}
+
+TEST_CASE ("MORPH TO D LIVE: CPU - a held chord with the sidechain, layered vs the global stage (prints; not a gate)", "[.][cpu][live]")
+{
+    const double seconds = 10.0;
+    const auto input = darkNoise (seconds, 0.3f);
+    auto timeIt = [&] (const Patch& p) {
+        const auto start = std::chrono::steady_clock::now();
+        (void) chordWithLive (p, input, seconds);
+        return std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+    };
+    auto off = morphToLive (0.0, false);
+    off.aux.enabled = false;
+    const double base = timeIt (off), layered = timeIt (morphToLive (0.0, false)), morph = timeIt (morphToLive (0.5));
+    WARN ("10 s at 48 kHz, 3-note chord: synth alone " << base << " s, + LIVE layered " << layered << " s, + MORPH TO D 50 % " << morph
+          << " s (the stage: " << (morph - layered) / seconds * 100.0 << " % of one core)");
 }

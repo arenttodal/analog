@@ -118,6 +118,11 @@ struct MorphSettings
     double detail = 0.5;          ///< 0..1: how many partials / bands take part
     bool levelMatch = true;
     MorphOutput output = MorphOutput::morphOnly;
+    /** MORPH TO D (Addendum 05): the MORPH macro drives D's global stage (Patch::Aux::morph)
+        instead - every per-voice MORPH path then stands aside (one processor at a time) while
+        these settings stay as they are. */
+    bool toAux = false;
+    bool perVoiceOn() const noexcept { return enabled && ! toAux; }
 };
 enum class VoiceMode { poly, mono };
 
@@ -303,6 +308,10 @@ struct Patch
             D layered as ever; 0..0.5 the imprint deepening while D's dry level gives way; 0.5
             the hybrid at D's band energies; 1 D alone. */
         double morph = 0.0;
+        /** MORPH TO D with MORPH on (Addendum 05): D is heard only through the global stage -
+            never also layered - so 0 % is the synth alone and 100 % D alone. Off: D layered as
+            ever (the stage, if up, beside it). */
+        bool morphExclusive = false;
     };
     Aux aux;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12

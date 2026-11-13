@@ -1,6 +1,8 @@
 # MORPH with D / AUX: the owner's decision
 
-**Status: DECIDED (12 Nov 2026): Option D, fusing into the filtered A/B/C bus, with its own control. Implemented as D MORPH.**
+**Status: DECIDED (12 Nov 2026): Option D, fusing into the filtered A/B/C bus. REVISED (13 Nov 2026, Addendum 05, the owner's choice): its own control became MORPH TO.**
+
+> **Now (Addendum 05, `docs/aux/ADDENDUM_05.md`):** the same global stage, chosen in the MORPH rack's **MORPH TO** (`analog.morph.target`: C HYBRID, the default, or D) and driven by the **MORPH macro** - one processor at a time; the per-voice MORPH stands aside while D is chosen, its settings kept. With MORPH TO D and MORPH on, D is heard **only** through the stage: 0 % is the synth alone, 100 % D alone (not layered beside it). The AUX rack's D MORPH knob is gone; `analog.aux.morph` stays hidden and unread for older experimental sessions, and its modulation destination was removed. The text below describes D MORPH as it was decided on 12 Nov.
 
 - **The stage:** the original per-voice MORPH (A + B → C, the MORPH macro, its rack) is untouched. D MORPH is a second, global stage. Its carrier is everything before D: A/B/C after the FILTER and C's buses. Its character is D, after its AUX FILTER, at its level. It reuses `GlobalMorph`, the tested zero-latency spectral imprint.
 - **The control:** `analog.aux.morph` (D MORPH, 0–100 %, 0 = off by default; version hint 37). It sits in the AUX rack's MORPH group in every mode, is a modulation destination ("D MORPH", global), and can be assigned to USER macros and automated. The MORPH macro never moves it.

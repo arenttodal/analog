@@ -1,0 +1,10 @@
+ANDOR Analog - AUX D LIVE INPUT (Addendum 05) demos, rendered by the hidden test [live05] through the plugin's sidechain bus.
+The external tracks are SYNTHESIZED stand-ins (no real recordings are in the repository); listen for the routing and the morph,
+then try your own tracks in a DAW.
+
+live05-1-layer-guitar.wav: pad chord + plucked-string stand-in on the sidechain, layered - peak -6.6 dBFS, RMS -18.3 dB
+live05-2-filter-sweep.wav: plucked-string stand-in alone, the FILTER macro 100 % -> 8 % -> 100 % - peak -19.2 dBFS, RMS -41.5 dB
+live05-3-vocal-imprint.wav: saw chord -> formant-voice stand-in, MORPH TO D swept 0 -> 100 % - peak -8.0 dBFS, RMS -20.7 dB
+live05-4-bowed-fusion.wav: pad chord with a bowed-string stand-in, MORPH TO D 0 % (2 s), 50 % (4 s), 100 % (2 s) - peak -7.2 dBFS, RMS -20.0 dB
+live05-5-rhythm-layer.wav: pad chord + drum-kit stand-in on the sidechain, layered - peak -3.3 dBFS, RMS -16.9 dB
+live05-6-mode-switch.wav: pad chord; D: LIVE INPUT (drums) 0-2 s, RHYTHM 2-4 s, NOISE 4-6 s, KONTAKT (not loaded) 6-7 s, LIVE INPUT 7-9 s - peak -3.4 dBFS, RMS -17.4 dB

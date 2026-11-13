@@ -483,6 +483,21 @@ TEST_CASE ("AUX: screenshots - the strip in its three modes, its rack, hidden (A
     ui.setRackExpanded (osp::plugin::rack::Kind::aux, true);
     shoot ("aux-16-rack-live", 1448);
     ui.setRackExpanded (osp::plugin::rack::Kind::aux, false);
+    // MORPH TO in the MORPH rack: C (as ever) and D - the global stage's bands measured after a
+    // held chord against D NOISE (always on) at MORPH 50 %.
+    set (p, params::auxMode, 1.0f);
+    set (p, params::auxNoiseGate, 1.0f);
+    set (p, params::morphEnabled, 1.0f);
+    set (p, params::morphPosition, 50.0f);
+    ui.setRackExpanded (osp::plugin::rack::Kind::morph, true);
+    shoot ("aux-17-morph-to-c", 1448);
+    set (p, params::morphTarget, 1.0f);
+    render (p, 1.0, 2.0);
+    shoot ("aux-18-morph-to-d", 1448);
+    set (p, params::auxMode, 3.0f);
+    shoot ("aux-19-morph-to-d-live", 1448);
+    ui.setRackExpanded (osp::plugin::rack::Kind::morph, false);
+    set (p, params::morphTarget, 0.0f);
     editor.reset();
 
     // D off with no loop yet: the reason in the well's top row, clear of the picture's
@@ -720,28 +735,60 @@ TEST_CASE ("AUX 03: a file dropped on empty space (neither a card nor D) loads n
     CHECK (rig.cardC());
 }
 
-TEST_CASE ("AUX D MORPH: its own parameter (0 %: off), a modulation destination, in the AUX rack in every mode", "[analog][aux][morph]")
+TEST_CASE ("MORPH TO (Addendum 05): C by default, MORPH as ever; D - the MORPH macro drives the global stage, the per-voice morph stands aside; D soloed: D itself", "[analog][aux][morph]")
 {
     ShellProcessor p;
-    auto* param = p.parameters.getParameter (params::auxMorph);
-    REQUIRE (param != nullptr);
-    CHECK (param->getDefaultValue() == 0.0f);
-    CHECK (params::engineParameterIds().contains (params::auxMorph));
-    bool offered = false;
+    auto* target = p.parameters.getParameter (params::morphTarget);
+    REQUIRE (target != nullptr);
+    CHECK (target->getDefaultValue() == 0.0f);   // (C HYBRID: every older session as it was)
+    CHECK (params::engineParameterIds().contains (params::morphTarget));
+    // The old D MORPH knob: kept for older experimental sessions, unread, no destination.
+    CHECK_FALSE (params::engineParameterIds().contains (params::auxMorph));
     for (const auto& d : params::modulationDestinations())
-        offered = offered || juce::String (d.id) == params::auxMorph;
-    CHECK (offered);
-    // The MORPH macro is untouched by it, and it by the macro.
-    CHECK (params::auxMorph != params::morphPosition);
-    // D NOISE (always on) with a held chord: D MORPH 0 % vs 100 % differ; 0 % is the layered sound.
+        CHECK (juce::String (d.id) != params::auxMorph);
+    // The reader: one processor at a time.
+    auto patchOf = [&] {
+        andor::analog::params::Reader::Values raw {};
+        andor::analog::params::Reader reader;
+        reader.attach (p.parameters);
+        reader.snapshot (raw);
+        return reader.read (raw);
+    };
+    set (p, params::morphEnabled, 1.0f);
+    set (p, params::morphPosition, 40.0f);
+    {
+        const auto c = patchOf();
+        CHECK_FALSE (c.morph.toAux);
+        CHECK (c.morph.perVoiceOn());
+        CHECK (c.aux.morph == 0.0);
+    }
+    set (p, params::morphTarget, 1.0f);
+    {
+        const auto d = patchOf();
+        CHECK (d.morph.toAux);
+        CHECK_FALSE (d.morph.perVoiceOn());   // (the per-voice morph stands aside...)
+        CHECK (d.morph.enabled);              // (...its own settings untouched)
+        CHECK (d.aux.morph == Catch::Approx (0.4));
+    }
+    set (p, params::morphEnabled, 0.0f);
+    CHECK (patchOf().aux.morph == 0.0);   // (MORPH off: nothing)
+    set (p, params::morphEnabled, 1.0f);
     set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxSolo, 1.0f);
+    CHECK (patchOf().aux.morph == 0.0);   // (D soloed: D itself, not a morph of nothing)
+    set (p, params::auxSolo, 0.0f);
+    // Heard: D NOISE (always on) with a held chord - MORPH TO D at 100 % is not the layered sound;
+    // back to C, the layered sound again (the global stage at 0 % never runs).
+    set (p, params::morphTarget, 0.0f);
+    set (p, params::morphEnabled, 0.0f);
     set (p, params::auxMode, 1.0f);
     set (p, params::auxNoiseGate, 1.0f);
     const auto layered = render (p, 0.6);
-    set (p, params::auxMorph, 100.0f);
-    const auto morphed = render (p, 0.6);
-    CHECK_FALSE (identical (layered, morphed));
-    set (p, params::auxMorph, 0.0f);
+    set (p, params::morphEnabled, 1.0f);
+    set (p, params::morphPosition, 100.0f);
+    set (p, params::morphTarget, 1.0f);
+    CHECK_FALSE (identical (layered, render (p, 0.6)));
+    set (p, params::morphEnabled, 0.0f);
     CHECK (identical (layered, render (p, 0.6)));
 }
 
@@ -1022,7 +1069,9 @@ TEST_CASE ("AUX D MORPH renders: a chord on the cards x D RHYTHM at D MORPH 0 / 
         set (p, params::auxMode, 0.0f);
         set (p, params::auxRhythmGate, 1.0f);   // (GATE FREE: on the grid, no keys needed)
         set (p, params::auxLevel, -3.0f);
-        set (p, params::auxMorph, morph);
+        set (p, params::morphTarget, 1.0f);
+        set (p, params::morphEnabled, 1.0f);
+        set (p, params::morphPosition, morph);
         p.prepareToPlay (rate, block);
         const int total = static_cast<int> (6.0 * rate);
         juce::AudioBuffer<float> audio (2, total), buffer (2, block);
@@ -1033,7 +1082,7 @@ TEST_CASE ("AUX D MORPH renders: a chord on the cards x D RHYTHM at D MORPH 0 / 
                 for (const int note : { 48, 55, 60, 64 })
                     midi.addEvent (juce::MidiMessage::noteOn (1, note, static_cast<juce::uint8> (100)), 0);
             if (sweep)
-                set (p, params::auxMorph, 100.0f * static_cast<float> (pos) / static_cast<float> (total));
+                set (p, params::morphPosition, 100.0f * static_cast<float> (pos) / static_cast<float> (total));
             p.processBlock (buffer, midi);
             const int n = std::min (block, total - pos);
             for (int ch = 0; ch < 2; ++ch)
@@ -1296,3 +1345,274 @@ TEST_CASE ("AUX LIVE INPUT through ANDOR Analog's own VST3 (hosted here): an ins
     CHECK (rms (junked, static_cast<int> (0.2 * rate)) < 1.0e-5);
 }
 #endif
+
+//==============================================================================
+// Addendum 05: the six listening demos (ANALOG_RENDER_DIR). The external tracks are SYNTHESIZED
+// stand-ins - a plucked string, a formant vowel voice, a bowed string, a drum kit - since no real
+// recordings live in the repositories; each reaches ANDOR Analog through its sidechain bus exactly
+// as a DAW track would (processBlock with the input bus enabled).
+namespace
+{
+    struct Biquad
+    {
+        double b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
+        static Biquad bandPass (double hz, double q)
+        {
+            Biquad f;
+            const double w = 2.0 * 3.141592653589793 * hz / rate, alpha = std::sin (w) / (2.0 * q), a0 = 1.0 + alpha;
+            f.b0 = alpha / a0;
+            f.b2 = -alpha / a0;
+            f.a1 = -2.0 * std::cos (w) / a0;
+            f.a2 = (1.0 - alpha) / a0;
+            return f;
+        }
+        double process (double x)
+        {
+            const double y = b0 * x + z1;
+            z1 = b1 * x - a1 * y + z2;
+            z2 = b2 * x - a2 * y;
+            return y;
+        }
+    };
+
+    std::vector<float> pluckedString (double seconds)
+    {
+        // Karplus-Strong strums (E2 A2 D3 G3 B3, a little apart), one every 1.6 s.
+        std::vector<float> x (static_cast<std::size_t> (seconds * rate), 0.0f);
+        juce::Random r (7);
+        const double notes[] { 82.41, 110.0, 146.83, 196.0, 246.94 };
+        for (double at = 0.0; at < seconds; at += 1.6)
+            for (int n = 0; n < 5; ++n)
+            {
+                const auto period = static_cast<std::size_t> (rate / notes[n]);
+                std::vector<double> line (period);
+                for (auto& v : line)
+                    v = r.nextDouble() * 2.0 - 1.0;
+                const auto start = static_cast<std::size_t> ((at + 0.025 * n) * rate);
+                for (std::size_t i = 0, k = 0; start + i < x.size() && i < static_cast<std::size_t> (1.6 * rate); ++i)
+                {
+                    const std::size_t k1 = (k + 1) % period;
+                    const double v = 0.4975 * (line[k] + line[k1]);
+                    line[k] = v;
+                    k = k1;
+                    x[start + i] += static_cast<float> (0.12 * v);
+                }
+            }
+        return x;
+    }
+
+    std::vector<float> vowelVoice (double seconds)
+    {
+        // A glottal pulse train (140 Hz, 5 Hz vibrato) through three formants, the vowel moving
+        // A - E - I - O every 0.8 s (glided).
+        const double formants[4][3] { { 800, 1150, 2900 }, { 400, 2100, 2800 }, { 300, 2300, 3000 }, { 450, 800, 2830 } };
+        std::vector<float> x (static_cast<std::size_t> (seconds * rate));
+        double phase = 0.0;
+        Biquad f[3];
+        for (std::size_t i = 0; i < x.size(); ++i)
+        {
+            const double t = static_cast<double> (i) / rate;
+            if (i % 64 == 0)
+            {
+                const double pos = std::fmod (t / 0.8, 4.0);
+                const int a = static_cast<int> (pos), b = (a + 1) % 4;
+                const double mix = std::clamp ((pos - a - 0.7) / 0.3, 0.0, 1.0);
+                for (int k = 0; k < 3; ++k)
+                {
+                    const auto zf = f[k];
+                    f[k] = Biquad::bandPass (formants[a][k] + mix * (formants[b][k] - formants[a][k]), 8.0);
+                    f[k].z1 = zf.z1;
+                    f[k].z2 = zf.z2;
+                }
+            }
+            phase += (140.0 * (1.0 + 0.012 * std::sin (2.0 * 3.141592653589793 * 5.0 * t))) / rate;
+            const double pulse = phase - std::floor (phase) < 0.08 ? 1.0 : 0.0;
+            if (phase > 1.0)
+                phase -= 1.0;
+            x[i] = static_cast<float> (2.0 * (f[0].process (pulse) + 0.6 * f[1].process (pulse) + 0.3 * f[2].process (pulse)));   // (about the synth's level, as a sending track would be set)
+        }
+        return x;
+    }
+
+    std::vector<float> bowedString (double seconds)
+    {
+        // A bowed G2 (98 Hz): a sawtooth with vibrato and bow noise, slow attack, through a body.
+        std::vector<float> x (static_cast<std::size_t> (seconds * rate));
+        juce::Random r (9);
+        double phase = 0.0;
+        Biquad body[3] { Biquad::bandPass (280.0, 2.0), Biquad::bandPass (1050.0, 2.5), Biquad::bandPass (2600.0, 3.0) };
+        for (std::size_t i = 0; i < x.size(); ++i)
+        {
+            const double t = static_cast<double> (i) / rate;
+            phase += 98.0 * (1.0 + 0.006 * std::sin (2.0 * 3.141592653589793 * 5.5 * t)) / rate;
+            phase -= std::floor (phase);
+            const double s = (2.0 * phase - 1.0) + 0.05 * (r.nextDouble() * 2.0 - 1.0);
+            const double env = std::min (1.0, t / 0.4);
+            x[i] = static_cast<float> (0.7 * env * (body[0].process (s) + body[1].process (s) + 0.5 * body[2].process (s)));
+        }
+        return x;
+    }
+
+    std::vector<float> drumKit (double seconds)
+    {
+        // 110 BPM: kick on 1 and 3, snare on 2 and 4, hats on eighths.
+        std::vector<float> x (static_cast<std::size_t> (seconds * rate), 0.0f);
+        juce::Random r (11);
+        const double eighth = 60.0 / 110.0 / 2.0;
+        for (int e = 0; e * eighth < seconds; ++e)
+        {
+            const auto at = static_cast<std::size_t> (e * eighth * rate);
+            for (std::size_t i = 0; at + i < x.size() && i < static_cast<std::size_t> (0.35 * rate); ++i)
+            {
+                const double t = static_cast<double> (i) / rate;
+                double v = 0.08 * (r.nextDouble() * 2.0 - 1.0) * std::exp (-t / 0.012);   // hat
+                if (e % 4 == 0)
+                    v += 0.7 * std::sin (2.0 * 3.141592653589793 * (50.0 * t + 70.0 * 0.03 * (1.0 - std::exp (-t / 0.03)))) * std::exp (-t / 0.18);   // kick
+                if (e % 4 == 2)
+                    v += (0.35 * (r.nextDouble() * 2.0 - 1.0) + 0.25 * std::sin (2.0 * 3.141592653589793 * 190.0 * t)) * std::exp (-t / 0.07);   // snare
+                x[at + i] += static_cast<float> (v);
+            }
+        }
+        return x;
+    }
+}
+
+TEST_CASE ("AUX LIVE INPUT renders (Addendum 05): six demos through the sidechain - layering, FILTER, vocal imprint, bowed fusion, rhythm, mode switching (ANALOG_RENDER_DIR)", "[.][renders][live05]")
+{
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("ANALOG_RENDER_DIR", {});
+    REQUIRE (dir.isNotEmpty());
+    const juce::File out (dir);
+    out.createDirectory();
+    juce::StringArray notes;
+    // Renders `seconds` with `input` on the sidechain; `chord` held from the start (none: no
+    // MIDI at all); `each` runs before every block (automation).
+    auto renderLive = [&] (const juce::String& name, const juce::String& what, double seconds, const std::vector<float>& input,
+                           std::vector<int> chord, std::function<void (ShellProcessor&)> setup, std::function<void (ShellProcessor&, double)> each) {
+        ShellProcessor p;
+        set (p, params::auxEnabled, 1.0f);
+        set (p, params::auxMode, 3.0f);
+        set (p, params::auxLevel, -3.0f);
+        if (setup)
+            setup (p);
+        auto layout = p.getBusesLayout();
+        layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        REQUIRE (p.setBusesLayout (layout));
+        p.prepareToPlay (rate, block);
+        const int total = static_cast<int> (seconds * rate);
+        juce::AudioBuffer<float> audio (2, total), buffer (2, block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            const int n = std::min (block, total - pos);
+            buffer.setSize (2, n, false, false, true);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < n; ++i)
+                    buffer.setSample (ch, i, static_cast<std::size_t> (pos + i) < input.size() ? input[static_cast<std::size_t> (pos + i)] : 0.0f);
+            juce::MidiBuffer midi;
+            if (pos == 0)
+                for (const int note : chord)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, static_cast<juce::uint8> (96)), 0);
+            if (each)
+                each (p, static_cast<double> (pos) / rate);
+            p.processBlock (buffer, midi);
+            for (int ch = 0; ch < 2; ++ch)
+                audio.copyFrom (ch, pos, buffer, ch, 0, n);
+        }
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < total; ++i)
+                REQUIRE (std::isfinite (audio.getSample (ch, i)));
+        const auto file = out.getChildFile (name + ".wav");
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> stream (file.createOutputStream().release());
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.get(), rate, 2, 16, {}, 0));
+        REQUIRE (writer != nullptr);
+        stream.release();
+        writer->writeFromAudioSampleBuffer (audio, 0, total);
+        const auto line = name + ".wav: " + what + " - peak " + juce::String (juce::Decibels::gainToDecibels (audio.getMagnitude (0, total)), 1) + " dBFS, RMS "
+                          + juce::String (juce::Decibels::gainToDecibels (static_cast<float> (rms (audio))), 1) + " dB";
+        notes.add (line);
+        WARN (line);
+        return audio;
+    };
+    const std::vector<int> pad { 48, 55, 60, 64 };
+    auto padSound = [] (ShellProcessor& p) {
+        set (p, params::tone, 70.0f);   // (the FILTER part open: the pad and D through it)
+    };
+    // 1. Basic layering: the pad and a plucked string together, D layered (MORPH TO C, MORPH off).
+    renderLive ("live05-1-layer-guitar", "pad chord + plucked-string stand-in on the sidechain, layered", 8.0, pluckedString (8.0), pad, padSound, {});
+    // 2. FILTER: the input alone (no MIDI), the FILTER macro swept closed and open again.
+    renderLive ("live05-2-filter-sweep", "plucked-string stand-in alone, the FILTER macro 100 % -> 8 % -> 100 %", 8.0, pluckedString (8.0), {}, {}, [] (ShellProcessor& p, double t) {
+        set (p, params::tone, static_cast<float> (100.0 - 92.0 * std::sin (3.141592653589793 * std::clamp (t / 8.0, 0.0, 1.0))));
+    });
+    // 3. Vocal imprint: a held saw chord morphing towards the voice (MORPH TO D, 0 -> 100 %).
+    renderLive ("live05-3-vocal-imprint", "saw chord -> formant-voice stand-in, MORPH TO D swept 0 -> 100 %", 9.0, vowelVoice (9.0), { 48, 55, 60 },
+                [&] (ShellProcessor& p) {
+                    padSound (p);
+                    set (p, params::morphTarget, 1.0f);
+                    set (p, params::morphEnabled, 1.0f);
+                    set (p, params::morphPosition, 0.0f);
+                },
+                [] (ShellProcessor& p, double t) { set (p, params::morphPosition, static_cast<float> (std::clamp (100.0 * (t - 1.0) / 7.0, 0.0, 100.0))); });
+    // 4. Bowed fusion: the oscillators towards a bowed string - 0 %, 50 % held, then 100 %.
+    renderLive ("live05-4-bowed-fusion", "pad chord with a bowed-string stand-in, MORPH TO D 0 % (2 s), 50 % (4 s), 100 % (2 s)", 8.0, bowedString (8.0), pad,
+                [&] (ShellProcessor& p) {
+                    padSound (p);
+                    set (p, params::morphTarget, 1.0f);
+                    set (p, params::morphEnabled, 1.0f);
+                },
+                [] (ShellProcessor& p, double t) { set (p, params::morphPosition, t < 2.0 ? 0.0f : (t < 6.0 ? 50.0f : 100.0f)); });
+    // 5. Rhythmic audio layered with a sustained pad.
+    renderLive ("live05-5-rhythm-layer", "pad chord + drum-kit stand-in on the sidechain, layered", 8.0, drumKit (8.0), pad, padSound, {});
+    // 6. Source replacement: LIVE INPUT, RHYTHM, NOISE, KONTAKT (none loaded: silent), LIVE INPUT
+    //    again - each mode keeps its own state (RHYTHM's loop stays loaded).
+    const auto loop = [] {
+        std::vector<float> x (static_cast<std::size_t> (4.0 * rate), 0.0f);
+        for (int k = 0; k < 8; ++k)
+            for (std::size_t i = 0; i < static_cast<std::size_t> (0.05 * rate); ++i)
+                x[static_cast<std::size_t> (k * 0.5 * rate) + i] = static_cast<float> (0.5 * std::exp (-static_cast<double> (i) / rate / 0.01));
+        return andor::analog::rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+    }();
+    ShellProcessor* used = nullptr;
+    renderLive ("live05-6-mode-switch", "pad chord; D: LIVE INPUT (drums) 0-2 s, RHYTHM 2-4 s, NOISE 4-6 s, KONTAKT (not loaded) 6-7 s, LIVE INPUT 7-9 s", 9.0,
+                drumKit (9.0), pad,
+                [&] (ShellProcessor& p) {
+                    padSound (p);
+                    engineOf (p).setAuxLoopForTest (loop);
+                    set (p, params::auxRhythmGate, 1.0f);
+                    set (p, params::auxNoiseGate, 1.0f);
+                    used = &p;
+                },
+                [] (ShellProcessor& p, double t) { set (p, params::auxMode, t < 2.0 ? 3.0f : t < 4.0 ? 0.0f : t < 6.0 ? 1.0f : t < 7.0 ? 2.0f : 3.0f); });
+    juce::ignoreUnused (used);
+    const auto notesFile = out.getChildFile ("live05-renders.txt");
+    notesFile.replaceWithText ("ANDOR Analog - AUX D LIVE INPUT (Addendum 05) demos, rendered by the hidden test [live05] through the plugin's sidechain bus.\n"
+                               "The external tracks are SYNTHESIZED stand-ins (no real recordings are in the repository); listen for the routing and the morph,\n"
+                               "then try your own tracks in a DAW.\n\n"
+                               + notes.joinIntoString ("\n") + "\n");
+}
+
+TEST_CASE ("AUX LIVE INPUT: switching D's source keeps every other mode's state - RHYTHM's loop, NOISE's settings - and LIVE INPUT stores no audio", "[analog][aux][live]")
+{
+    ShellProcessor p;
+    const auto loop = [] {
+        std::vector<float> x (static_cast<std::size_t> (2.0 * rate), 0.0f);
+        x[0] = 0.5f;
+        return andor::analog::rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+    }();
+    engineOf (p).setAuxLoopForTest (loop);
+    set (p, params::auxNoiseColor, 2.0f);
+    set (p, params::auxNoiseTone, 31.0f);
+    for (const float mode : { 3.0f, 1.0f, 2.0f, 3.0f, 0.0f })
+        set (p, params::auxMode, mode);
+    CHECK (engineOf (p).auxLoop() == loop);
+    CHECK (juce::roundToInt (p.parameters.getParameter (params::auxNoiseColor)->convertFrom0to1 (p.parameters.getParameter (params::auxNoiseColor)->getValue())) == 2);
+    CHECK (p.parameters.getParameter (params::auxNoiseTone)->convertFrom0to1 (p.parameters.getParameter (params::auxNoiseTone)->getValue()) == Catch::Approx (31.0f).margin (0.1f));
+    // The session with LIVE INPUT: the mode only - no audio, no source track.
+    set (p, params::auxMode, 3.0f);
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    ShellProcessor q;
+    q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    CHECK (juce::roundToInt (q.parameters.getParameter (params::auxMode)->convertFrom0to1 (q.parameters.getParameter (params::auxMode)->getValue())) == 3);
+    CHECK (state.getSize() < 2 * 1024 * 1024);   // (no recorded input in it)
+}

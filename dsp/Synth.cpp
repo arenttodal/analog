@@ -227,6 +227,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     auxMorphR.assign (static_cast<std::size_t> (maxBlock), 0.0f);
     auxMorph.prepare (hostRate, maxBlock);
     auxMorphNow = 0.0f;
+    auxDryNow = 1.0f;
     auxMorphTail = 0;
     auxMorphRunning = false;
     auxLoop.prepare (hostRate);
@@ -291,6 +292,7 @@ void Synth::reset() noexcept
     auxFilter.pedal = false;
     auxFilter.env.kill();
     auxMorphNow = 0.0f;
+    auxDryNow = 1.0f;
     auxMorphTail = 0;
     auxMorphRunning = false;
     satLocalRunning = satPendingStart = false;
@@ -1547,7 +1549,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
                     && ! v.organicOn;
     // MORPH: whenever this note sounds both the oscillators and card C (whatever C plays:
     // the recording, OSC 3, NOISE, an instrument patch's zones), it hears them and fuses them.
-    v.morphOn = p.morph.enabled && v.organicOn && (v.cards & 3) != 0 && (v.cards & 4) != 0;
+    v.morphOn = p.morph.perVoiceOn() && v.organicOn && (v.cards & 3) != 0 && (v.cards & 4) != 0;
     if (! v.classicPair)
     {
         planSlot (v, 1, p, v.dt1);
@@ -3163,6 +3165,7 @@ void Synth::renderAux (int numSamples) noexcept
         auxModNow = 0.0f;
         auxKeyRunning = false;
         auxKeyGain = 0.0f;
+        auxDryNow = a.morphExclusive ? 0.0f : 1.0f;   // (powered under MORPH TO D: D never layered, from the first sample)
     }
     // RHYTHM: the loop (and its envelope) on the host's clock while the transport runs; with no
     // transport at all (a standalone), on its own clock from when it was powered. Powered off:
@@ -3437,7 +3440,7 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
     // D MORPH (Option D): its stage runs only while it is up, gliding down, or settling - at 0
     // from the start nothing here changes (D is added as ever, bit for bit).
     const auto morphTarget = static_cast<float> (std::clamp (a.morph, 0.0, 1.0));
-    const bool morphing = morphTarget > 0.0f || auxMorphNow > 0.0f || auxMorphTail > 0;
+    const bool morphing = morphTarget > 0.0f || auxMorphNow > 0.0f || auxMorphTail > 0 || a.morphExclusive || auxDryNow < 1.0f;
     float g = auxGainNow, peak = 0.0f;
     for (std::size_t i = 0; i < un; ++i)
     {
@@ -3459,7 +3462,7 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
     }
     auxGainNow = g;
     if (morphing)
-        mixAuxMorph (left, right, n, morphTarget);
+        mixAuxMorph (left, right, n, morphTarget, a.morphExclusive);
     auxPeakShown.store (peak, std::memory_order_relaxed);
     if (! a.enabled && auxGainNow <= 0.0f)
     {
@@ -3469,14 +3472,17 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
     }
 }
 
-void Synth::mixAuxMorph (float* left, float* right, int n, float target) noexcept
+void Synth::mixAuxMorph (float* left, float* right, int n, float target, bool exclusive) noexcept
 {
-    // D MORPH (docs/aux/MORPH_DECISION.md, Option D, decided): the second MORPH stage. Its
-    // carrier is everything before D - A/B/C after the FILTER, C's buses - and its character is D
-    // after its own AUX FILTER, at its level. GlobalMorph (the tested zero-latency spectral
-    // imprint): 0 the carrier, 0.5 the hybrid at D's band energies, 1 D. D's dry layer gives way
-    // as the imprint deepens (equal power, gone at 0.5), so 0 is exactly the layered sound.
-    if (! auxMorphRunning)
+    // The global MORPH stage (GlobalMorph: the tested zero-latency spectral imprint). Its carrier
+    // is everything before D - A/B/C after the FILTER, C's buses - and its character is D after
+    // its own AUX FILTER, at its level: 0 the carrier, 0.5 the hybrid at D's band energies, 1 D.
+    // D's own layer beside it: layered (D MORPH, Option D) it gives way as the imprint deepens
+    // (equal power, gone at 0.5), so 0 is exactly the layered sound; EXCLUSIVE (MORPH TO D,
+    // Addendum 05) it is not there at all (glided 10 ms), so 0 is the synth alone and D is heard
+    // only through the stage - never twice.
+    const bool stage = target > 0.0f || auxMorphNow > 0.0f || auxMorphTail > 0;
+    if (stage && ! auxMorphRunning)
     {
         auxMorph.reset();
         auxMorphRunning = true;
@@ -3485,23 +3491,25 @@ void Synth::mixAuxMorph (float* left, float* right, int n, float target) noexcep
     std::copy (left, left + n, auxMorphL.begin());
     std::copy (right, right + n, auxMorphR.begin());
     const float step = static_cast<float> (1.0 / (0.015 * hostRate));   // (GlobalMorph's own 15 ms)
+    const float dryStep = static_cast<float> (1.0 / (0.010 * hostRate));
+    const float dryWant = exclusive ? 0.0f : 1.0f;
     const float from = auxMorphNow;
-    float p = from;
-    for (int i = 0; i < n; ++i)
-        p = p < target ? std::min (target, p + step) : std::max (target, p - step);
     // Only while D sounds: scaled by D's activity (the imprint's own follower; 0 while D is silent,
-    // muted or off), so a quiet D never takes the cards away - they and D stay layered.
+    // muted or off), so a quiet D never takes the synth away - it plays as it is.
     const float active = std::clamp (auxMorph.activity(), 0.0f, 1.0f);
-    auxMorph.process (auxMorphL.data(), auxMorphR.data(), auxL.data(), auxR.data(), n, static_cast<double> (target * active));
-    p = from;
+    if (stage)
+        auxMorph.process (auxMorphL.data(), auxMorphR.data(), auxL.data(), auxR.data(), n, static_cast<double> (target * active));
+    float p = from, dg = auxDryNow;
     for (std::size_t i = 0; i < un; ++i)
     {
         p = p < target ? std::min (target, p + step) : std::max (target, p - step);
-        const float dry = std::cos (std::min (1.0f, 2.0f * p * active) * 1.5707963f);
+        dg = dg < dryWant ? std::min (dryWant, dg + dryStep) : std::max (dryWant, dg - dryStep);
+        const float dry = dg * std::cos (std::min (1.0f, 2.0f * p * active) * 1.5707963f);
         left[i] = auxMorphL[i] + dry * auxL[i];
         right[i] = auxMorphR[i] + dry * auxR[i];
     }
     auxMorphNow = p;
+    auxDryNow = dg;
     // Back at 0: it runs on for 60 ms (GlobalMorph settling to the carrier), then stops.
     if (target <= 0.0f && auxMorphNow <= 0.0f)
     {
@@ -3734,7 +3742,7 @@ void Synth::mixRhythm (float* left, float* right, int numSamples) noexcept
     // MORPH on: A + B and the loop meet in the GLOBAL MORPH (0: A + B, 50 %: A + B in the loop's
     // spectral envelope - its rhythm and colour on the oscillators - 100 %: the loop); switching
     // MORPH crossfades 10 ms. Off: the loop beside the voices, as before, bit for bit.
-    const float morphTarget = current.morph.enabled ? 1.0f : 0.0f;
+    const float morphTarget = current.morph.perVoiceOn() ? 1.0f : 0.0f;
     if (morphTarget <= 0.0f && rhythmMorphNow <= 0.0f)
     {
         rhythmMorphRunning = false;
