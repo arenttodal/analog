@@ -11508,3 +11508,40 @@ TEST_CASE ("MACRO DESTINATION screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screens
     }
 }
 
+
+TEST_CASE ("MACRO DESTINATION: a plain right-click on the knob itself (the press the host gives the knob, not the overlay) opens its menu with Assign to Macro", "[analog][usermacro][macrodest][ui][rightclick]")
+{
+    // The owner's report: right-clicking a knob in the plugin showed no macro options. A host
+    // gives a press to the component under the last mouse move; the overlay claims one only
+    // while a popup modifier is already down when hovering (control-click), so a plain
+    // right-click reached the knob, which has no menu. The overlay now hears its root's presses.
+    MacroDestRig rig;
+    REQUIRE (rig.level != nullptr);
+    juce::PopupMenu shown;
+    int menus = 0;
+    rig.overlay().showMenuForTest = [&] (juce::PopupMenu& m) { shown = m; ++menus; };
+    auto press = [&] (juce::Component& on, juce::ModifierKeys mods) {
+        const auto at = on.getLocalBounds().getCentre().toFloat();
+        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &on, &on,
+                                 juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false);
+    };
+    // A left press on the knob: nothing (the knob turns, as ever).
+    CHECK_FALSE (rig.overlay().rightClickedControl (press (*rig.level, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier))));
+    CHECK (menus == 0);
+    // A right press on the knob (event component: the knob): its menu, Assign to Macro in it.
+    CHECK (rig.overlay().rightClickedControl (press (*rig.level, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier))));
+    REQUIRE (menus == 1);
+    CHECK (MacroDestRig::itemOf (shown, "Assign to Macro") != nullptr);
+    CHECK (MacroDestRig::itemOf (shown, "Macro 1") != nullptr);
+    // Choosing from it assigns, as the menu always did.
+    for (juce::PopupMenu::MenuItemIterator it (shown, true); it.next();)
+        if (it.getItem().text.startsWith ("Macro 1") && it.getItem().action != nullptr)
+        {
+            it.getItem().action();
+            break;
+        }
+    CHECK (engineOfShell (rig.p).userMacros().find (0, params::osc1Level) == 0);
+    // A press on something that is not a ringed control (the editor's own surface): nothing.
+    CHECK_FALSE (rig.overlay().rightClickedControl (press (*rig.editor, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier))));
+    CHECK (menus == 1);
+}
