@@ -105,7 +105,7 @@
 > - **ANDOR Modular** shows the same rack through its pin and reads the table too: its engine
 >   tests pass against this commit unchanged (`dsp/nodes/FxNodes.cpp` compares `centre` with
 >   the range to choose a logarithmic curve; an absent centre compares as "not above", as -1
->   did). Its pin has not moved yet.
+>   did). Its pin moves to this branch's head (Modular's `docs/STATUS.md`).
 
 _30 October 2026: state version 4, the unified expansion (docs/UNIFIED_ANALOG_EXPANSION_PLAN.md).
 Each slot can be CLASSIC, DCO or WIDE. There are now OTA filters, a high-pass, a chorus, Juno
