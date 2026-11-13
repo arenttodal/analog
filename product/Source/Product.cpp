@@ -412,6 +412,9 @@ const ProductInfo& productInfo()
         p.auxStrip = ProductInfo::AuxStrip {};
         p.auxStrip->create = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createAuxStrip (host); };
         p.auxStrip->emptyDropsIgnored = true;   // (Addendum 03: a drop on empty space loads nothing)
+        // Addendum 05: the host's sidechain input, D LIVE INPUT's audio (a VST3 auxiliary bus;
+        // the plugin stays an instrument).
+        p.externalInputName = "AUX D Live Input";
         p.sourceAreaView = { "FX Routing", [] (osp::plugin::InstrumentHost& host) { return andor::analog::createFxRoutingView (host); } };
         p.cardModifiersApplicable = [] (int layer, osp::plugin::InstrumentHost& host) {
             if (layer != 1)

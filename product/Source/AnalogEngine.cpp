@@ -43,6 +43,7 @@ void AnalogEngine::setHybridType (HybridType type)
 
 void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::AudioProcessorValueTreeState& parameters)
 {
+    hostRateForTelemetry = sampleRate > 0.0 ? sampleRate : 48000.0;
     if (state == nullptr)
         attachParameters (parameters);
     reader.attach (parameters);
@@ -758,6 +759,62 @@ juce::String AnalogEngine::status (const juce::String& topic) const
     return recordingPublished.load() ? juce::String() : juce::String ("Card C is silent: load a recording (or choose OSC 3, NOISE or an instrument patch) to morph");
 }
 
+void AnalogEngine::setExternalInput (const ExternalInput& input) noexcept
+{
+    liveIn = input;
+    liveBusExists.store (input.busExists, std::memory_order_relaxed);
+    liveBusEnabled.store (input.busEnabled, std::memory_order_relaxed);
+    liveChannels.store (input.busEnabled ? input.channels : 0, std::memory_order_relaxed);
+    // The display's telemetry: peaks held and falling (about 20 dB a second), the block's RMS,
+    // and one level a block into the short history.
+    float pl = 0.0f, pr = 0.0f;
+    double sum = 0.0;
+    if (input.left != nullptr && input.samples > 0)
+        for (int i = 0; i < input.samples; ++i)
+        {
+            const float l = std::isfinite (input.left[i]) ? input.left[i] : 0.0f;
+            const float r = std::isfinite (input.right[i]) ? input.right[i] : 0.0f;
+            pl = std::max (pl, std::abs (l));
+            pr = std::max (pr, std::abs (r));
+            sum += 0.5 * (static_cast<double> (l) * l + static_cast<double> (r) * r);
+        }
+    const float fall = static_cast<float> (std::pow (10.0, -20.0 / 20.0 * std::max (1, input.samples) / std::max (1.0, hostRateForTelemetry)));
+    liveHeldL = std::max (std::min (1.0f, pl), liveHeldL * fall);
+    liveHeldR = std::max (std::min (1.0f, pr), liveHeldR * fall);
+    livePeakL.store (liveHeldL, std::memory_order_relaxed);
+    livePeakR.store (liveHeldR, std::memory_order_relaxed);
+    const float rms = input.samples > 0 ? static_cast<float> (std::sqrt (sum / input.samples)) : 0.0f;
+    liveRms.store (rms, std::memory_order_relaxed);
+    if (std::max (pl, pr) > 1.0e-4f)
+        liveEver.store (true, std::memory_order_relaxed);
+    const int at = liveWrite.load (std::memory_order_relaxed);
+    liveLevels[static_cast<std::size_t> (at % liveHistory)].store (std::max (pl, pr), std::memory_order_relaxed);
+    liveWrite.store (at + 1, std::memory_order_release);
+}
+
+AnalogEngine::LiveInputView AnalogEngine::liveInput() const noexcept
+{
+    LiveInputView v;
+    v.busExists = liveBusExists.load (std::memory_order_relaxed);
+    v.busEnabled = liveBusEnabled.load (std::memory_order_relaxed);
+    v.channels = liveChannels.load (std::memory_order_relaxed);
+    v.peakLeft = livePeakL.load (std::memory_order_relaxed);
+    v.peakRight = livePeakR.load (std::memory_order_relaxed);
+    v.rms = liveRms.load (std::memory_order_relaxed);
+    v.everReceived = liveEver.load (std::memory_order_relaxed);
+    return v;
+}
+
+void AnalogEngine::liveInputHistory (std::array<float, liveHistory>& out) const noexcept
+{
+    const int end = liveWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < liveHistory; ++i)
+    {
+        const int k = end - liveHistory + i;
+        out[static_cast<std::size_t> (i)] = k >= 0 ? liveLevels[static_cast<std::size_t> (k % liveHistory)].load (std::memory_order_relaxed) : 0.0f;
+    }
+}
+
 void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept
 {
     // The imported sample source: a newly loaded one replaces the old (the synth stops reading
@@ -953,6 +1010,13 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     }
     else
         synth.setAuxExternal (nullptr, nullptr, 0, 0);
+    // D LIVE INPUT: the shell's copy of the host's input for this block (only ever read in
+    // LIVE INPUT; nothing while the host routes nothing).
+    if (patch.aux.mode == Patch::Aux::Mode::live && liveIn.busEnabled && liveIn.left != nullptr)
+        synth.setAuxLive (liveIn.left, liveIn.right, std::min (total, liveIn.samples));
+    else
+        synth.setAuxLive (nullptr, nullptr, 0);
+    liveIn = {};   // (valid for this block only)
     externalClock += total;
     int done = 0;
     auto renderTo = [&] (int samplePosition)

@@ -635,7 +635,7 @@ analog.rhythm.release v36 float "Rhythm Release" label="ms" range=10.0000..1000.
 analog.rhythm.sensitivity v36 float "Rhythm Sensitivity" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.rhythm.depth v36 float "Rhythm Depth" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.aux.enabled v37 bool "AUX Power" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.aux.mode v37 choice "AUX Mode" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=RHYTHM|NOISE|KONTAKT [RHYTHM|NOISE|KONTAKT]
+analog.aux.mode v37 choice "AUX Mode" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=RHYTHM|KONTAKT|LIVE INPUT [RHYTHM|NOISE|KONTAKT|LIVE INPUT]
 analog.aux.level v37 float "AUX Level" label="dB" range=-48.0000..6.0000/0.1000 skew=1.70951 default=-6.0000 steps=2147483647 texts=-inf dB|-12.0 dB|6.0 dB
 analog.aux.mute v37 bool "AUX Mute" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.aux.solo v37 bool "AUX Solo" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On

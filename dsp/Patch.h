@@ -271,7 +271,7 @@ struct Patch
         a sample of it, the instrument as before, bit for bit. */
     struct Aux
     {
-        enum class Mode { rhythm, noise, kontakt };       ///< stable order: append only
+        enum class Mode { rhythm, noise, kontakt, live };   ///< stable order: append only (live: the host's sidechain input)
         enum class ModTarget { filter, auxFilter, auxLevel };
         bool enabled = false;          ///< POWER: its audio and its envelope (MUTE keeps the envelope)
         Mode mode = Mode::rhythm;

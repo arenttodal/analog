@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <numbers>
 
 using namespace testutil;
@@ -748,4 +750,106 @@ TEST_CASE ("D RHYTHM: a recording with no beat grid found is still a loop (whole
     for (std::size_t k = 1; k < s1.size() && 2.0 * (s1[k] - s1.front()) < loopSeconds; ++k, ++checked)
         CHECK (tickNear (sh, sh.front() + 2.0 * (s1[k] - s1.front()), 0.006));
     CHECK (checked >= 2);
+}
+
+//==============================================================================
+// Addendum 05: D LIVE INPUT - the host's sidechain audio as D's source.
+
+namespace
+{
+    /** Renders with `input` as D LIVE's audio (null: no input), block by block as the engine
+        hands it over (setAuxLive before each block). */
+    Stereo playLive (Synth& s, double seconds, const std::vector<float>* inL, const std::vector<float>* inR, int block = 256,
+                     std::function<void (int)> beforeBlock = {})
+    {
+        Stereo out;
+        out.rate = rate;
+        const auto total = static_cast<int> (seconds * rate);
+        out.left.assign (static_cast<std::size_t> (total), 0.0f);
+        out.right.assign (static_cast<std::size_t> (total), 0.0f);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            const int n = std::min (block, total - pos);
+            if (beforeBlock)
+                beforeBlock (pos);
+            if (inL != nullptr)
+                s.setAuxLive (inL->data() + pos, (inR != nullptr ? inR : inL)->data() + pos, n);
+            else
+                s.setAuxLive (nullptr, nullptr, 0);
+            s.render (out.left.data() + pos, out.right.data() + pos, n);
+        }
+        return out;
+    }
+
+    std::vector<float> sineOf (double hz, double seconds, float amplitude, double dc = 0.0)
+    {
+        std::vector<float> x (static_cast<std::size_t> (seconds * rate));
+        for (std::size_t i = 0; i < x.size(); ++i)
+            x[i] = static_cast<float> (dc + amplitude * std::sin (2.0 * std::numbers::pi * hz * static_cast<double> (i) / rate));
+        return x;
+    }
+}
+
+TEST_CASE ("D LIVE INPUT: the host's audio plays with no MIDI held, through D's LEVEL and the FILTER; no input is silence", "[aux][live]")
+{
+    auto p = auxOnly (Mode::live);
+    p.tone = 1.0;   // (the FILTER open)
+    const auto in = sineOf (440.0, 1.2, 0.25f);
+    auto s = makeSynth (p);
+    const auto out = playLive (*s, 1.2, &in, nullptr);
+    const double heard = rmsOf (out.left, 0.4, 1.1);
+    CHECK (heard > 0.25 * 0.707 * 0.5);   // (at 0 dB: the input, through the open FILTER)
+    for (const float x : out.left)
+        REQUIRE (std::isfinite (x));
+    // No input routed (the bus off): silence, never stale data.
+    auto quiet = makeSynth (p);
+    const auto none = playLive (*quiet, 0.6, nullptr, nullptr);
+    CHECK (rmsOf (none.left, 0.0, 0.6) == 0.0);
+    // LEVEL -12 dB: a quarter of the power.
+    auto lower = p;
+    lower.aux.levelDb = -12.0;
+    auto t = makeSynth (lower);
+    const double soft = rmsOf (playLive (*t, 1.2, &in, nullptr).left, 0.4, 1.1);
+    CHECK (20.0 * std::log10 (soft / heard) == Approx (-12.0).margin (0.5));
+    // The FILTER acts on it: closed, the 440 Hz tone falls far below.
+    auto closed = p;
+    closed.tone = 0.05;
+    auto u = makeSynth (closed);
+    CHECK (rmsOf (playLive (*u, 1.2, &in, nullptr).left, 0.4, 1.1) < 0.3 * heard);
+}
+
+TEST_CASE ("D LIVE INPUT: mono reaches both sides; DC is blocked; a non-finite sample is silence; MUTE and power ramp with no click", "[aux][live]")
+{
+    auto p = auxOnly (Mode::live);
+    p.tone = 1.0;
+    // A mono input (left only given: right = left) and 0.3 of DC under it.
+    const auto in = sineOf (220.0, 1.5, 0.2f, 0.3);
+    auto s = makeSynth (p);
+    const auto out = playLive (*s, 1.5, &in, nullptr);
+    CHECK (rmsOf (out.right, 0.5, 1.4) == Approx (rmsOf (out.left, 0.5, 1.4)).epsilon (0.05));
+    double mean = 0.0;
+    for (std::size_t i = static_cast<std::size_t> (0.8 * rate); i < static_cast<std::size_t> (1.4 * rate); ++i)
+        mean += out.left[i];
+    mean /= 0.6 * rate;
+    CHECK (std::abs (mean) < 0.01);   // (the 0.3 of DC is gone)
+    // NaN and infinity in the input: finite output, no runaway.
+    auto bad = sineOf (220.0, 0.6, 0.2f);
+    bad[1000] = std::numeric_limits<float>::quiet_NaN();
+    bad[2000] = std::numeric_limits<float>::infinity();
+    auto t = makeSynth (p);
+    const auto safe = playLive (*t, 0.6, &bad, nullptr);
+    for (const float x : safe.left)
+        REQUIRE (std::isfinite (x));
+    // MUTE at 0.5 s and power off at 1.0 s: ramped (no step larger than the sine's own).
+    auto u = makeSynth (p);
+    const auto steady = sineOf (220.0, 1.5, 0.2f);
+    const auto ramped = playLive (*u, 1.5, &steady, nullptr, 256, [&] (int pos) {
+        auto q = p;
+        q.aux.heard = pos < static_cast<int> (0.5 * rate);
+        q.aux.enabled = pos < static_cast<int> (1.0 * rate);
+        u->setPatch (q);
+    });
+    const float sineStep = static_cast<float> (0.2 * 2.0 * std::numbers::pi * 220.0 / rate) * 1.5f;
+    CHECK (largestStep (ramped.left, 0.45, 0.6) <= sineStep);
+    CHECK (rmsOf (ramped.left, 0.6, 0.95) < 1.0e-4);   // (muted: silent)
 }

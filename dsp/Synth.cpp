@@ -282,6 +282,7 @@ void Synth::reset() noexcept
     auxKeyStart = auxKeyRunning = false;
     auxKeyPpq = 0.0;
     auxKeyGain = 0.0f;
+    auxLive.dcInL = auxLive.dcInR = auxLive.dcOutL = auxLive.dcOutR = 0.0;
     auxLoop.reset();
     auxGate.kill();
     auxFilter.held.fill (0);
@@ -3107,6 +3108,14 @@ void Synth::setAuxExternal (const float* left, const float* right, int length, i
     auxExternal.latency = std::clamp (latency, 0, maxExternalLatency - 1);
 }
 
+void Synth::setAuxLive (const float* left, const float* right, int length) noexcept
+{
+    auxLive.left = left;
+    auxLive.right = right != nullptr ? right : left;
+    auxLive.length = left != nullptr ? std::max (0, length) : 0;
+    auxLive.read = 0;
+}
+
 void Synth::auxKeyEvent (const std::uint8_t* data, int size) noexcept
 {
     // The played keys: D's filter envelope and key tracking (as Kontakt's bus), and D NOISE's
@@ -3336,6 +3345,37 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
                 const float l = auxNoiseSample (0, coefficient), r2 = auxNoiseSample (1, coefficient);
                 auxL[i] = gate * l;
                 auxR[i] = gate * ((1.0f - width) * l + width * r2);
+            }
+            break;
+        }
+        case Patch::Aux::Mode::live:
+        {
+            // LIVE INPUT: the host's audio as it arrives (no MIDI needed), a DC blocker (about
+            // 5 Hz) and nothing else - no gain of its own: its LEVEL, MUTE / SOLO and power, and
+            // the FILTER, as every D source. A non-finite sample is taken as silence.
+            const int from = auxLive.read;
+            auxLive.read += n;
+            const int available = std::clamp (auxLive.length - from, 0, n);
+            const double r = 1.0 - 2.0 * math::pi * 5.0 / hostRate;
+            for (int i = 0; i < n; ++i)
+            {
+                const auto k = static_cast<std::size_t> (i);
+                float l = i < available ? auxLive.left[from + i] : 0.0f;
+                float rr = i < available ? auxLive.right[from + i] : 0.0f;
+                if (! std::isfinite (l))
+                    l = 0.0f;
+                if (! std::isfinite (rr))
+                    rr = 0.0f;
+                auxLive.dcOutL = static_cast<double> (l) - auxLive.dcInL + r * auxLive.dcOutL;
+                auxLive.dcInL = l;
+                auxLive.dcOutR = static_cast<double> (rr) - auxLive.dcInR + r * auxLive.dcOutR;
+                auxLive.dcInR = rr;
+                if (std::abs (auxLive.dcOutL) < 1.0e-20)
+                    auxLive.dcOutL = 0.0;   // (denormals)
+                if (std::abs (auxLive.dcOutR) < 1.0e-20)
+                    auxLive.dcOutR = 0.0;
+                auxL[k] = static_cast<float> (auxLive.dcOutL);
+                auxR[k] = static_cast<float> (auxLive.dcOutR);
             }
             break;
         }

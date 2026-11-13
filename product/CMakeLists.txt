@@ -76,4 +76,11 @@ if(OSP_BUILD_TESTS AND TARGET andor_analog_tests)
     add_dependencies(andor_analog_tests andor_test_instrument_VST3)
     target_compile_definitions(andor_analog_tests PRIVATE
         ANDOR_TEST_INSTRUMENT_VST3="$<GENEX_EVAL:$<TARGET_PROPERTY:andor_test_instrument_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
+    # Addendum 05: ANDOR Analog's own VST3, hosted by the tests through the real VST3 path (its
+    # sidechain bus, the instrument's category, audio in -> D LIVE INPUT -> out).
+    if(TARGET ANDOR_Analog_VST3)
+        add_dependencies(andor_analog_tests ANDOR_Analog_VST3)
+        target_compile_definitions(andor_analog_tests PRIVATE
+            ANDOR_ANALOG_VST3="$<GENEX_EVAL:$<TARGET_PROPERTY:ANDOR_Analog_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
+    endif()
 endif()

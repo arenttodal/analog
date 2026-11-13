@@ -134,6 +134,23 @@ public:
     float auxPeak() const noexcept { return synth.auxPeak(); }
     bool auxRunning() const noexcept { return synth.auxActive(); }
 
+    /** D LIVE INPUT (Addendum 05): the shell's external input, this block (audio thread). */
+    void setExternalInput (const ExternalInput& input) noexcept override;
+    /** What arrives at the input (any thread): whether the host kept the bus and routes to it,
+        its channels, its peaks now (0..1, held and falling) and a short history of its level for
+        the display (the newest last). Telemetry only. */
+    struct LiveInputView
+    {
+        bool busExists = false, busEnabled = false;
+        int channels = 0;
+        float peakLeft = 0.0f, peakRight = 0.0f;
+        float rms = 0.0f;   ///< (both channels, this block)
+        bool everReceived = false;
+    };
+    LiveInputView liveInput() const noexcept;
+    static constexpr int liveHistory = 96;
+    void liveInputHistory (std::array<float, liveHistory>& out) const noexcept;
+
     /** SATELLITE's live place of card 0..2 (the panel's path display; read only, any thread). */
     Synth::SatelliteView satelliteView (int card) const noexcept { return synth.satelliteView (card); }
     osp::InstrumentEngine::ModView modulationView() const noexcept override;
@@ -242,6 +259,16 @@ public:
     static std::vector<float> oscillatorPictureOf (Patch patch, int slot, int points = 256);
 
 private:
+    // D LIVE INPUT: this block's input (the shell's copy) and its telemetry.
+    Engine::ExternalInput liveIn;
+    std::atomic<bool> liveBusExists { false }, liveBusEnabled { false }, liveEver { false };
+    std::atomic<int> liveChannels { 0 };
+    std::atomic<float> livePeakL { 0.0f }, livePeakR { 0.0f }, liveRms { 0.0f };
+    std::array<std::atomic<float>, liveHistory> liveLevels {};
+    std::atomic<int> liveWrite { 0 };
+    float liveHeldL = 0.0f, liveHeldR = 0.0f;
+    double hostRateForTelemetry = 48000.0;
+
     std::atomic<bool> recordingPublished { false };   ///< the shell has a recording on card C (message thread)
 
     // State version 8: card C's sources as handed to the synth (audio thread): the shell's

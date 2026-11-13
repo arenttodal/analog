@@ -1004,7 +1004,7 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
         layout.add (osp::plugin::parameters::make<Float> (v37 (id), name, unit(), static_cast<float> (100.0 * value), Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     };
     layout.add (osp::plugin::parameters::make<Bool> (v37 (auxEnabled), "AUX Power", d.enabled));
-    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxMode), "AUX Mode", juce::StringArray { "RHYTHM", "NOISE", "KONTAKT" }, static_cast<int> (d.mode)));
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxMode), "AUX Mode", juce::StringArray { "RHYTHM", "NOISE", "KONTAKT", "LIVE INPUT" }, static_cast<int> (d.mode)));
     juce::NormalisableRange<float> level (-48.0f, 6.0f, 0.1f);
     level.setSkewForCentre (-12.0f);
     layout.add (osp::plugin::parameters::make<Float> (v37 (auxLevel), "AUX Level", level, static_cast<float> (d.levelDb),
@@ -1473,7 +1473,7 @@ Patch Reader::readWith (const float* raw) const noexcept
         // D / AUX (state version 23).
         auto& a = p.aux;
         a.enabled = on (iAuxEnabled);
-        a.mode = static_cast<Patch::Aux::Mode> (index (iAuxMode, 3));
+        a.mode = static_cast<Patch::Aux::Mode> (index (iAuxMode, 4));   // (LIVE INPUT appended, Addendum 05)
         a.levelDb = v (iAuxLevel);
         a.filterFollow = true;   // (Addendum 03: always through the FILTER; the old switch is unread)
         // (PITCH at its own 0.01 st resolution: a value the host's float snapping leaves a hair

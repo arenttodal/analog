@@ -39,7 +39,8 @@ namespace
         return {};
     }
 
-    int modeOf (InstrumentHost& host) { return std::clamp (juce::roundToInt (host.parameterValue (params::auxMode)), 0, 2); }
+    int modeOf (InstrumentHost& host) { return std::clamp (juce::roundToInt (host.parameterValue (params::auxMode)), 0, 3); }
+    constexpr int liveMode = 3;   ///< LIVE INPUT (Addendum 05): the host's sidechain input
     bool poweredOf (InstrumentHost& host) { return host.parameterValue (params::auxEnabled) >= 0.5f; }
 
     const juce::Colour cream { 0xffe9e4da };
@@ -220,6 +221,58 @@ namespace
             }
             return;
         }
+        if (mode == liveMode)
+        {
+            // LIVE INPUT: the host's sidechain input - its level over the last moments (one bar a
+            // block, mirrored), or why there is none. Telemetry of what arrives, before LEVEL.
+            g.setFont (fonts::label (compact ? 10.0f : 12.0f));
+            const auto view = engine != nullptr ? engine->liveInput() : AnalogEngine::LiveInputView();
+            auto say = [&] (const juce::String& text, const juce::String& hint) {
+                g.setColour (cream.withAlpha (0.6f * alpha));
+                if (compact || hint.isEmpty())
+                    g.drawText (text, area, juce::Justification::centred, true);
+                else
+                {
+                    g.drawText (text, area.withTrimmedBottom (0.5f * area.getHeight()), juce::Justification::centredBottom, true);
+                    g.setColour (cream.withAlpha (0.4f * alpha));
+                    g.setFont (fonts::label (10.0f));
+                    g.drawText (hint, area.withTrimmedTop (0.5f * area.getHeight() + 6.0f), juce::Justification::centredTop, true);
+                }
+            };
+            const juce::String route ("Route an audio track to ANDOR Analog's AUX D sidechain input in your DAW");
+            if (engine == nullptr || ! view.busExists)
+            {
+                say ("LIVE INPUT UNAVAILABLE IN THIS HOST", route);
+                return;
+            }
+            if (! view.busEnabled)
+            {
+                say ("SIDECHAIN INPUT DISABLED", route);
+                return;
+            }
+            std::array<float, AnalogEngine::liveHistory> history {};
+            engine->liveInputHistory (history);
+            float recent = 0.0f;
+            for (std::size_t i = history.size() - 24; i < history.size(); ++i)
+                recent = std::max (recent, history[i]);
+            if (recent >= 1.0e-4f)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.1f));
+                g.drawLine (area.getX(), area.getCentreY(), area.getRight(), area.getCentreY(), 1.0f);
+            }
+            const float w = area.getWidth() / static_cast<float> (history.size());
+            g.setColour (ink.withAlpha (0.75f * alpha));
+            for (std::size_t i = 0; i < history.size(); ++i)
+            {
+                // (a level's square root: quiet material stays visible, a full-scale peak fills it)
+                const float h = std::sqrt (std::clamp (history[i], 0.0f, 1.0f)) * 0.5f * area.getHeight();
+                if (h > 0.5f)
+                    g.fillRect (area.getX() + w * static_cast<float> (i), area.getCentreY() - h, std::max (1.0f, w - 1.0f), 2.0f * h);
+            }
+            if (recent < 1.0e-4f)
+                say ("NO INPUT SIGNAL", {});
+            return;
+        }
         // KONTAKT: its state and name, and its level over time as a bar.
         g.setFont (fonts::label (compact ? 10.0f : 12.0f));
         juce::String text = "KONTAKT NOT LOADED";   // (once: the readout says nothing more; a click loads it)
@@ -255,6 +308,8 @@ namespace
         the reason, nothing changed. */
     juce::String loadAuxFiles (InstrumentHost& host, const juce::StringArray& files)
     {
+        if (modeOf (host) == liveMode)
+            return "LIVE INPUT PLAYS YOUR DAW'S ROUTED AUDIO - NOTHING TO LOAD";   // (no recording, no asset: RHYTHM's loop untouched)
         if (files.size() != 1)
             return "ONE RECORDING AT A TIME";
         if (! isAudioFile (files[0]))
@@ -272,7 +327,9 @@ namespace
     void clickAuxSurface (InstrumentHost& host, juce::Component& near)
     {
         const int mode = modeOf (host);
-        if (mode == 0)
+        if (mode == liveMode)
+            setAuxRackOpen (near, true);   // (no file to choose: the rack shows its input and how to route it)
+        else if (mode == 0)
             aux::chooseRecording (host, near);
         else if (mode == 2)
             if (auto* engine = engineOf (host))
@@ -740,6 +797,7 @@ namespace
                 buildKnobs();   // (only the mode's knobs: every other part stays where it is)
             display->setTooltip (builtMode == 0 ? "Click to load a loop (WAV, AIFF or FLAC), or drop one here: it plays on the host's grid"
                                  : builtMode == 1 ? "NOISE: its settings are in the rack"
+                                 : builtMode == liveMode ? "LIVE INPUT: the audio your DAW routes to ANDOR Analog's AUX D sidechain input (choose the source track in the DAW's sidechain / input routing). Click for the rack"
                                                   : "Click to load Kontakt for D (its own instance; your keys, before the arpeggiator), or to open its window");
             const bool open = auxRackOpen (*this);
             if (rackKey->getToggleState() != open)
@@ -769,6 +827,58 @@ namespace
         int noticeTicks = 0;
         int builtMode = -1;
         friend struct andor::analog::AuxStripView;
+    };
+
+    //==========================================================================
+    /** LIVE INPUT's meter in the rack: the left and right peaks of what arrives (before LEVEL),
+        and its state - DISABLED, NO SIGNAL, MONO / STEREO. */
+    class LiveInputMeter final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+    {
+    public:
+        explicit LiveInputMeter (InstrumentHost& h) : host (h)
+        {
+            setTitle ("D live input level");
+            setTooltip ("Route an audio track to ANDOR Analog's AUX D sidechain input in your DAW (the track's sidechain or input routing). "
+                        "D plays it live, through the FILTER and the effects; no MIDI needed");
+            startTimerHz (30);
+        }
+        void paint (juce::Graphics& g) override
+        {
+            using namespace design;
+            const auto* engine = engineOf (host);
+            const auto v = engine != nullptr ? engine->liveInput() : AnalogEngine::LiveInputView();
+            auto r = getLocalBounds().toFloat().reduced (2.0f, 3.0f);
+            auto bars = r.removeFromLeft (120.0f);
+            const float h = 0.5f * (bars.getHeight() - 3.0f);
+            // (on the rack's plum faceplate: light inks)
+            auto bar = [&] (juce::Rectangle<float> b, float peak) {
+                g.setColour (juce::Colours::white.withAlpha (0.14f));
+                g.fillRoundedRectangle (b, 2.0f);
+                // (-60 .. 0 dB across the bar)
+                const float db = peak > 1.0e-6f ? juce::Decibels::gainToDecibels (peak) : -100.0f;
+                const float fill = std::clamp ((db + 60.0f) / 60.0f, 0.0f, 1.0f);
+                if (fill > 0.0f)
+                {
+                    g.setColour ((db > -1.0f ? juce::Colour (0xffe07a62) : aux::onDark()).withAlpha (0.95f));
+                    g.fillRoundedRectangle (b.withWidth (fill * b.getWidth()), 2.0f);
+                }
+            };
+            bar (bars.removeFromTop (h), v.peakLeft);
+            bars.removeFromTop (3.0f);
+            bar (bars.removeFromTop (h), v.channels > 1 ? v.peakRight : v.peakLeft);
+            r.removeFromLeft (10.0f);
+            g.setColour (cream.withAlpha (0.8f));
+            g.setFont (fonts::label (10.0f));
+            const juce::String state = ! v.busExists    ? "UNAVAILABLE IN THIS HOST"
+                                       : ! v.busEnabled ? "SIDECHAIN DISABLED"
+                                       : std::max (v.peakLeft, v.peakRight) < 1.0e-4f ? "NO INPUT SIGNAL"
+                                       : juce::String (v.channels > 1 ? "STEREO" : "MONO") + dot() + juce::String (juce::Decibels::gainToDecibels (std::max (v.peakLeft, v.peakRight)), 1) + " dB";
+            g.drawText (state, r, juce::Justification::centredLeft, true);
+        }
+
+    private:
+        void timerCallback() override { repaint(); }
+        InstrumentHost& host;
     };
 
     //==========================================================================
@@ -862,7 +972,7 @@ namespace
         void build (int) override
         {
             using namespace params;
-            selectorSegment (auxMode, "MODE", { { "RHYTHM", "Rhythm", 0.0f }, { "NOISE", "Noise", 1.0f }, { "KONTAKT", "Kontakt", 2.0f } }, 246,
+            selectorSegment (auxMode, "MODE", { { "RHYTHM", "Rhythm", 0.0f }, { "NOISE", "Noise", 1.0f }, { "KONTAKT", "Kontakt", 2.0f }, { "LIVE", "Live input", 3.0f } }, 320,
                              "What D plays: a host-synced loop, NOISE, or its own Kontakt");
             const int mode = modeOf (host);
             if (mode == 0)
@@ -895,6 +1005,13 @@ namespace
                 knob (auxNoiseRelease, "RELEASE", textOf (host, auxNoiseRelease));
                 knob (auxNoiseMovement, "MOVEMENT", textOf (host, auxNoiseMovement));
                 knob (auxNoiseWidth, "WIDTH", textOf (host, auxNoiseWidth));
+            }
+            else if (mode == liveMode)
+            {
+                // LIVE INPUT: what arrives (its meters and state) and how to route it; LEVEL. No
+                // timing, pitch or file controls: it is the DAW's audio, live.
+                selectorComponent (std::make_unique<LiveInputMeter> (host), "INPUT", 300);
+                knob (auxLevel, "LEVEL", textOf (host, auxLevel));
             }
             else
             {
@@ -941,7 +1058,7 @@ juce::Colour aux::onDark() { return juce::Colour (0xffc7a6bf); }
 
 juce::String aux::modeName (int mode)
 {
-    return mode == 1 ? "NOISE" : mode == 2 ? "KONTAKT" : "RHYTHM";
+    return mode == 1 ? "NOISE" : mode == 2 ? "KONTAKT" : mode == 3 ? "LIVE INPUT" : "RHYTHM";
 }
 
 juce::String aux::readout (InstrumentHost& host)
@@ -956,6 +1073,20 @@ juce::String aux::readout (InstrumentHost& host)
     }
     if (mode == 2)
         return {};   // (KONTAKT: the picture names it - or says it is not loaded - once)
+    if (mode == liveMode)
+    {
+        // LIVE INPUT: its channels and its level, discreetly (the picture says when there is none).
+        juce::String text ("LIVE INPUT");
+        if (engine != nullptr)
+            if (const auto v = engine->liveInput(); v.busEnabled)
+            {
+                text << dot() << (v.channels > 1 ? "STEREO" : "MONO");
+                const float peak = std::max (v.peakLeft, v.peakRight);
+                if (peak > 1.0e-4f)
+                    text << dot() << juce::String (juce::Decibels::gainToDecibels (peak), 1) << " dB PEAK";
+            }
+        return text;
+    }
     if (engine == nullptr)
         return "RHYTHM";
     const auto state = engine->auxRecordingState();

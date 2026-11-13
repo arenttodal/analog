@@ -273,6 +273,10 @@ public:
     /** D KONTAKT's bus for this block (the hosted instrument's output, its reported latency);
         null: none. Read in order across the block's pieces, as setExternal's. */
     void setAuxExternal (const float* left, const float* right, int length, int latency) noexcept;
+    /** D LIVE INPUT's audio for the block about to render (the host's sidechain input, copied by
+        the shell before the output is written; null: none - D LIVE is silent). Read forward
+        across the block's sub-renders, as D KONTAKT's bus is. */
+    void setAuxLive (const float* left, const float* right, int length) noexcept;
     /** One of the played keys' events (before any arpeggiator, channel 1): D NOISE's gate and
         D's filter envelope and key tracking. */
     void auxKeyEvent (const std::uint8_t* data, int size) noexcept;
@@ -808,6 +812,13 @@ private:
         const float* right = nullptr;
         int length = 0, read = 0, latency = 0;
     } auxExternal;
+    struct AuxLive
+    {
+        const float* left = nullptr;
+        const float* right = nullptr;
+        int length = 0, read = 0;
+        double dcInL = 0.0, dcInR = 0.0, dcOutL = 0.0, dcOutR = 0.0;   ///< (its DC blocker: about 5 Hz)
+    } auxLive;
     struct AuxNoiseChannel
     {
         osp::Prng rng { 1 };

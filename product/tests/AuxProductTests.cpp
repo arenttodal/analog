@@ -449,6 +449,40 @@ TEST_CASE ("AUX: screenshots - the strip in its three modes, its rack, hidden (A
     set (p, params::auxEnabled, 0.0f);
     for (const int w : { 869, 1448, 1810 })
         shoot ("aux-07-off", w);
+    // Addendum 05: LIVE INPUT - the sidechain off, routed and silent, routed with audio; its rack.
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 3.0f);
+    auto feed = [&] (bool enabled, float amplitude) {
+        std::vector<float> l (512), r (512);
+        for (int b = 0; b < 120; ++b)
+        {
+            for (std::size_t i = 0; i < l.size(); ++i)
+            {
+                const double t = (b * 512 + static_cast<double> (i)) / rate;
+                const float env = amplitude * static_cast<float> (0.35 + 0.65 * std::abs (std::sin (2.0 * 3.14159 * 1.7 * t)));
+                l[i] = env * static_cast<float> (std::sin (2.0 * 3.14159 * 220.0 * t));
+                r[i] = 0.8f * l[i];
+            }
+            AnalogEngine::ExternalInput in;
+            in.busExists = true;
+            in.busEnabled = enabled;
+            in.channels = enabled ? 2 : 0;
+            in.left = enabled ? l.data() : nullptr;
+            in.right = enabled ? r.data() : nullptr;
+            in.samples = enabled ? 512 : 0;
+            engineOf (p).setExternalInput (in);
+        }
+    };
+    feed (false, 0.0f);
+    shoot ("aux-13-live-disabled", 1448);
+    feed (true, 0.0f);
+    shoot ("aux-14-live-no-signal", 1448);
+    feed (true, 0.5f);
+    for (const int w : { 869, 1448, 1810 })
+        shoot ("aux-15-live-signal", w);
+    ui.setRackExpanded (osp::plugin::rack::Kind::aux, true);
+    shoot ("aux-16-rack-live", 1448);
+    ui.setRackExpanded (osp::plugin::rack::Kind::aux, false);
     editor.reset();
 
     // D off with no loop yet: the reason in the well's top row, clear of the picture's
@@ -1095,3 +1129,170 @@ TEST_CASE ("AUX D RHYTHM GATE: KEYS by default - silent until a key, then the lo
     CHECK (gate);
     CHECK (rateKnob);
 }
+
+//==============================================================================
+// Addendum 05: D LIVE INPUT - the host's sidechain input.
+
+namespace
+{
+    /** One block through the processor with `input` on the sidechain (the bus enabled when
+        `enabled`), the output's first `n` samples returned. */
+    juce::AudioBuffer<float> sidechainBlocks (juce::AudioProcessor& p, double seconds, const std::function<float (int)>& input, bool enabled,
+                                              float junk = 0.0f)
+    {
+        auto layout = p.getBusesLayout();
+        if (layout.inputBuses.size() > 0)
+            layout.inputBuses.getReference (0) = enabled ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::disabled();
+        p.setBusesLayout (layout);
+        p.prepareToPlay (rate, block);
+        const int total = static_cast<int> (seconds * rate);
+        const int channels = std::max (p.getTotalNumInputChannels(), p.getTotalNumOutputChannels());
+        juce::AudioBuffer<float> out (2, total), buffer (channels, block);
+        juce::MidiBuffer midi;
+        for (int pos = 0; pos < total; pos += block)
+        {
+            const int n = std::min (block, total - pos);
+            buffer.setSize (channels, n, false, false, true);
+            // What the host leaves in the buffer: the sidechain's audio on the input channels
+            // when routed; otherwise whatever was there (junk: never to be heard as input).
+            for (int ch = 0; ch < channels; ++ch)
+                for (int i = 0; i < n; ++i)
+                    buffer.setSample (ch, i, enabled ? input (pos + i) : junk);
+            p.processBlock (buffer, midi);
+            for (int ch = 0; ch < 2; ++ch)
+                out.copyFrom (ch, pos, buffer, ch, 0, n);
+        }
+        return out;
+    }
+}
+
+TEST_CASE ("AUX LIVE INPUT: the plugin keeps one optional sidechain bus (off by default), stays an instrument, and plays it in D with no MIDI", "[analog][aux][live]")
+{
+    ShellProcessor p;
+    // The bus: one input, named for D, off until the host routes to it; stereo output as ever.
+    REQUIRE (p.getBusCount (true) == 1);
+    CHECK (p.getBus (true, 0)->getName() == "AUX D Live Input");
+    CHECK_FALSE (p.getBus (true, 0)->isEnabledByDefault());
+    CHECK (p.getBusCount (false) == 1);
+    CHECK (p.acceptsMidi());
+    CHECK (p.hasExternalInput());
+    // VST3: an auxiliary (sidechain) bus, never the main input - the plugin stays an instrument.
+    auto* vst3 = p.getVST3ClientExtensions();
+    REQUIRE (vst3 != nullptr);
+    CHECK_FALSE (vst3->getPluginHasMainInput());
+    // The layouts it takes: input off, mono or stereo; never a stereo output lost.
+    auto layout = p.getBusesLayout();
+    for (const auto& in : { juce::AudioChannelSet::disabled(), juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo() })
+    {
+        layout.inputBuses.getReference (0) = in;
+        CHECK (p.checkBusesLayoutSupported (layout));
+    }
+    layout.inputBuses.getReference (0) = juce::AudioChannelSet::create5point1();
+    CHECK_FALSE (p.checkBusesLayoutSupported (layout));
+
+    // D on in LIVE INPUT, only D heard: the sidechain's 330 Hz arrives with no note played.
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 3.0f);
+    set (p, params::auxSolo, 1.0f);
+    set (p, params::auxLevel, 0.0f);
+    set (p, params::tone, 100.0f);
+    auto sine = [] (int i) { return 0.3f * static_cast<float> (std::sin (2.0 * 3.141592653589793 * 330.0 * i / rate)); };
+    const auto routed = sidechainBlocks (p, 1.0, sine, true);
+    CHECK (rms (routed, static_cast<int> (0.4 * rate)) > 0.05);
+    auto* engine = &engineOf (p);
+    CHECK (engine->liveInput().busEnabled);
+    CHECK (engine->liveInput().channels == 2);
+    CHECK (engine->liveInput().peakLeft > 0.2f);
+    // The bus off with junk left in the buffer: D hears none of it (the stale output is never input).
+    const auto off = sidechainBlocks (p, 0.6, sine, false, 0.5f);
+    CHECK (rms (off, static_cast<int> (0.2 * rate)) < 1.0e-5);
+    CHECK_FALSE (engine->liveInput().busEnabled);
+    // Another mode: the sidechain is not D's source (RHYTHM with no loop: silent).
+    set (p, params::auxMode, 0.0f);
+    CHECK (rms (sidechainBlocks (p, 0.6, sine, true), static_cast<int> (0.2 * rate)) < 1.0e-5);
+}
+
+TEST_CASE ("AUX LIVE INPUT: a drop is refused (nothing loaded, RHYTHM's loop kept); a click opens the rack; the rack shows the input", "[analog][aux][live][ui]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    ui.setAuxStripShown (true);
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 3.0f);
+    refreshStrip (ui);
+    auto& strip = *ui.auxStripComponent();
+    CHECK (AuxStripView::shownMode (strip) == 3);
+    CHECK (AuxStripView::knobCaptions (strip).isEmpty());   // (no timing / pitch controls for live audio)
+    auto* owner = dynamic_cast<osp::plugin::DropOwner*> (&strip);
+    REQUIRE (owner != nullptr);
+    owner->dropFiles ({ "/tmp/some-loop.wav" }, {});
+    CHECK (juce::roundToInt (p.parameters.getParameter (params::auxMode)->convertFrom0to1 (p.parameters.getParameter (params::auxMode)->getValue())) == 3);
+    CHECK (engineOf (p).auxRecordingState().status == AnalogEngine::AuxRecordingState::Status::none);
+    // A click on the display: the rack (its input and how to route it), never a file chooser.
+    auto* display = AuxStripView::part (strip, "display");
+    REQUIRE (display != nullptr);
+    const auto at = display->getLocalBounds().getCentre().toFloat();
+    display->mouseUp (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, juce::ModifierKeys(), 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, display, display,
+                                        juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false));
+    CHECK (ui.effectsRack().isShown (osp::plugin::rack::Kind::aux));
+}
+
+#ifdef ANDOR_ANALOG_VST3
+TEST_CASE ("AUX LIVE INPUT through ANDOR Analog's own VST3 (hosted here): an instrument with MIDI in, its sidechain bus, audio in -> D -> out", "[analog][aux][live][vst3]")
+{
+    // The real plugin binary through JUCE's VST3 hosting: what a DAW's scan and routing see.
+    // (A DAW - Ableton, Logic, REAPER - is the owner's test; this is the closest proof here.)
+    juce::VST3PluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> types;
+    format.findAllTypesForFile (types, ANDOR_ANALOG_VST3);
+    REQUIRE (types.size() == 1);
+    CHECK (types[0]->isInstrument);
+    juce::String error;
+    auto plugin = format.createInstanceFromDescription (*types[0], rate, block, error);
+    INFO (error);
+    REQUIRE (plugin != nullptr);
+    CHECK (plugin->acceptsMidi());
+    CHECK (plugin->getBusCount (false) == 1);
+    REQUIRE (plugin->getBusCount (true) == 1);
+    CHECK (plugin->getBus (true, 0)->getName() == "AUX D Live Input");
+    auto param = [&] (const juce::String& name) -> juce::AudioProcessorParameter* {
+        for (auto* q : plugin->getParameters())
+            if (q->getName (64) == name)
+                return q;
+        return nullptr;
+    };
+    auto* power = param ("AUX Power");
+    auto* mode = param ("AUX Mode");
+    auto* solo = param ("AUX Solo");
+    REQUIRE (power != nullptr);
+    REQUIRE (mode != nullptr);
+    REQUIRE (solo != nullptr);
+    power->setValueNotifyingHost (1.0f);
+    mode->setValueNotifyingHost (1.0f);   // (LIVE INPUT: the last choice)
+    solo->setValueNotifyingHost (1.0f);
+    auto sine = [] (int i) { return 0.3f * static_cast<float> (std::sin (2.0 * 3.141592653589793 * 330.0 * i / rate)); };
+    const auto routed = sidechainBlocks (*plugin, 1.0, sine, true);
+    CHECK (rms (routed, static_cast<int> (0.4 * rate)) > 0.01);
+    plugin->releaseResources();
+    // The bus off: whatever the host leaves in the buffer is never heard as input - a fresh
+    // instance with junk there plays exactly what one with zeros does (the effects' own tail
+    // from the routed sine above is why a fresh instance is used).
+    auto offWith = [&] (float junk) {
+        auto fresh = format.createInstanceFromDescription (*types[0], rate, block, error);
+        REQUIRE (fresh != nullptr);
+        for (auto* q : fresh->getParameters())
+        {
+            const auto name = q->getName (64);
+            if (name == "AUX Power" || name == "AUX Mode" || name == "AUX Solo")
+                q->setValueNotifyingHost (1.0f);
+        }
+        auto out = sidechainBlocks (*fresh, 0.6, sine, false, junk);
+        fresh->releaseResources();
+        return out;
+    };
+    const auto junked = offWith (0.5f), zeroed = offWith (0.0f);
+    CHECK (identical (junked, zeroed));
+    CHECK (rms (junked, static_cast<int> (0.2 * rate)) < 1.0e-5);
+}
+#endif
