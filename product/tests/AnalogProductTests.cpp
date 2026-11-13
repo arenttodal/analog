@@ -964,7 +964,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         };
     }
     for (const auto* id : { &params::auxMode, &params::auxSync, &params::auxRate, &params::auxModAmount, &params::auxModTarget, &params::auxSensitivity,
-                            &params::auxAttack, &params::auxRelease, &params::auxPitch, &params::auxOctave })
+                            &params::auxAttack, &params::auxRelease, &params::auxPitch, &params::auxOctave, &params::auxRhythmGate })
     {
         const juce::String which (*id);
         setups[*id] = [which] (ShellProcessor& q) {
@@ -972,7 +972,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             setValue (q, params::auxEnabled, 1.0f);
             setValue (q, params::auxMode, 0.0f);
             if (which != params::auxMode && which != params::auxSync && which != params::auxRate && which != params::auxModAmount
-                && which != params::auxPitch && which != params::auxOctave)
+                && which != params::auxPitch && which != params::auxOctave && which != params::auxRhythmGate)
                 setValue (q, params::auxModAmount, 80.0f);
         };
     }

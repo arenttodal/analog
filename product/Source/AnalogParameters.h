@@ -282,6 +282,10 @@ namespace andor::analog::params
     /** D MORPH (docs/aux/MORPH_DECISION.md, Option D): the second, global MORPH stage, A/B/C
         (after the FILTER) x D; 0 %: off (D layered). Its own control, never the MORPH macro. */
     inline const juce::String auxMorph = "analog.aux.morph";
+    /** D RHYTHM's GATE: KEYS (a key starts the loop from its first beat; it plays while a key
+        is held, then fades with the AMP's release) or FREE (always playing, on the host's
+        grid). Appended; KEYS by default. */
+    inline const juce::String auxRhythmGate = "analog.aux.rhythm.gate";
     /** RATE's choices (its musical speed against the loop's detected tempo). */
     inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */

@@ -2,6 +2,7 @@
 // from the main menu, kept with the session and never with a preset, the cards and the sound
 // untouched), its modes, menu and rack, D's recording (loaded on the loader thread, kept in the
 // sample store, missing handled), its MIDI lane and latency, and the screenshots.
+#include "Binding.h"
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
 #include "AuxUI.h"
@@ -534,6 +535,7 @@ TEST_CASE ("AUX: renders - D under a FILTER sweep, through SPACE / ECHO, with ca
         engineOf (p).setAuxLoopForTest (tickLoop);
         set (p, params::auxEnabled, 1.0f);
         set (p, params::auxMode, 0.0f);
+        set (p, params::auxRhythmGate, 1.0f);   // (GATE FREE: on the grid, no keys needed)
         set (p, params::auxSolo, 1.0f);
         set (p, "space", 70.0f);
         set (p, "echo", 60.0f);
@@ -548,6 +550,7 @@ TEST_CASE ("AUX: renders - D under a FILTER sweep, through SPACE / ECHO, with ca
         set (p, params::hybridType, 2.0f);
         set (p, params::auxEnabled, 1.0f);
         set (p, params::auxMode, 0.0f);
+        set (p, params::auxRhythmGate, 1.0f);   // (GATE FREE: on the grid, no keys needed)
         const auto audio = render (p, 6.0, 5.0);
         write ("aux-03-cards-and-d", audio);
         WARN ("A/B/C + D: peak " << peakDb (audio) << " dBFS");
@@ -866,6 +869,7 @@ TEST_CASE ("AUX 03 renders: D RHYTHM at PITCH -12 / 0 / +12, OCT -1 / +1, RATE 2
         engineOf (p).setAuxLoopForTest (loop);
         set (p, params::auxEnabled, 1.0f);
         set (p, params::auxMode, 0.0f);
+        set (p, params::auxRhythmGate, 1.0f);   // (GATE FREE: on the grid, no keys needed)
         set (p, params::auxSolo, 1.0f);
         set (p, params::auxLevel, 0.0f);
         set (p, params::tone, 95.0f);
@@ -956,6 +960,7 @@ TEST_CASE ("AUX D MORPH renders: a chord on the cards x D RHYTHM at D MORPH 0 / 
         engineOf (p).setAuxLoopForTest (loop);
         set (p, params::auxEnabled, 1.0f);
         set (p, params::auxMode, 0.0f);
+        set (p, params::auxRhythmGate, 1.0f);   // (GATE FREE: on the grid, no keys needed)
         set (p, params::auxLevel, -3.0f);
         set (p, params::auxMorph, morph);
         p.prepareToPlay (rate, block);
@@ -992,4 +997,75 @@ TEST_CASE ("AUX D MORPH renders: a chord on the cards x D RHYTHM at D MORPH 0 / 
     renderWith ("dmorph-02-half", 50.0f, false);
     renderWith ("dmorph-03-full", 100.0f, false);
     renderWith ("dmorph-04-sweep", 0.0f, true);
+}
+
+TEST_CASE ("AUX D RHYTHM GATE: KEYS by default - silent until a key, then the loop from its first beat; FREE always plays; RATE and the GATE are in the rack", "[analog][aux][keys]")
+{
+    const auto loop = [] {
+        constexpr double beat = 0.5;
+        std::vector<float> x (static_cast<std::size_t> (8 * beat * rate), 0.0f);
+        for (int k = 0; k < 8; ++k)
+            for (std::size_t i = 0; i < static_cast<std::size_t> (0.04 * rate); ++i)
+                x[static_cast<std::size_t> (k * beat * rate) + i] += static_cast<float> (0.6 * std::exp (-static_cast<double> (i) / rate / 0.01));
+        return andor::analog::rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+    }();
+    auto play = [&] (ShellProcessor& p, double seconds, double keyAt) {
+        p.prepareToPlay (rate, block);
+        const int total = static_cast<int> (seconds * rate), key = keyAt < 0.0 ? -1 : static_cast<int> (keyAt * rate);
+        juce::AudioBuffer<float> out (2, total), buffer (2, block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            juce::MidiBuffer midi;
+            if (key >= pos && key < pos + block)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), key - pos);
+            p.processBlock (buffer, midi);
+            const int n = std::min (block, total - pos);
+            for (int ch = 0; ch < 2; ++ch)
+                out.copyFrom (ch, pos, buffer, ch, 0, n);
+        }
+        return out;
+    };
+    auto setUp = [&] (ShellProcessor& p) {
+        engineOf (p).setAuxLoopForTest (loop);
+        set (p, params::auxEnabled, 1.0f);
+        set (p, params::auxMode, 0.0f);
+        set (p, params::auxSolo, 1.0f);   // (only D heard)
+        set (p, params::auxLevel, 0.0f);
+    };
+    {
+        ShellProcessor p;
+        setUp (p);
+        CHECK (p.parameters.getParameter (params::auxRhythmGate)->getValue() == 0.0f);   // KEYS
+        const auto out = play (p, 1.4, 0.6);
+        const int key = static_cast<int> (0.6 * rate);
+        CHECK (out.getMagnitude (0, 0, key - block) == 0.0f);                       // no key: silent
+        CHECK (out.getMagnitude (0, key, static_cast<int> (0.05 * rate)) > 0.05f);   // the first beat at the key
+    }
+    {
+        ShellProcessor p;
+        setUp (p);
+        set (p, params::auxRhythmGate, 1.0f);   // FREE
+        const auto out = play (p, 0.6, -1.0);
+        CHECK (out.getMagnitude (0, 0, out.getNumSamples()) > 0.05f);   // plays with no key at all
+    }
+    // The rack shows the GATE beside the CLOCK and RATE, in RHYTHM.
+    ShellProcessor p;
+    setUp (p);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto rack = andor::analog::createAuxRack (dynamic_cast<osp::plugin::InstrumentHost&> (p));
+    REQUIRE (rack != nullptr);
+    rack->setSize (1400, 300);
+    bool gate = false, rateKnob = false;
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            const auto tags = osp::plugin::binding::tagsOf (*child);
+            gate = gate || child->getTitle() == "GATE";   // (a segment switch: its caption)
+            rateKnob = rateKnob || tags.contains (params::auxRate);
+            walk (*child);
+        }
+    };
+    walk (*rack);
+    CHECK (gate);
+    CHECK (rateKnob);
 }

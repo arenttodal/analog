@@ -111,7 +111,7 @@ namespace
         iAuxEnabled, iAuxMode, iAuxLevel, iAuxMute, iAuxSolo, iAuxFilterFollow,
         iAuxSync, iAuxRate, iAuxModAmount, iAuxModTarget, iAuxSensitivity, iAuxAttack, iAuxRelease,
         iAuxNoiseColor, iAuxNoiseTone, iAuxNoiseGate, iAuxNoiseAttack, iAuxNoiseRelease, iAuxNoiseMovement, iAuxNoiseWidth,
-        iAuxPitch, iAuxOctave, iAuxMorph,
+        iAuxPitch, iAuxOctave, iAuxMorph, iAuxRhythmGate,
         count
     };
 
@@ -246,7 +246,7 @@ namespace
             for (const auto* id : { &auxEnabled, &auxMode, &auxLevel, &auxMute, &auxSolo, &auxFilterFollow,
                                     &auxSync, &auxRate, &auxModAmount, &auxModTarget, &auxSensitivity, &auxAttack, &auxRelease,
                                     &auxNoiseColor, &auxNoiseTone, &auxNoiseGate, &auxNoiseAttack, &auxNoiseRelease, &auxNoiseMovement, &auxNoiseWidth,
-                                    &auxPitch, &auxOctave, &auxMorph })
+                                    &auxPitch, &auxOctave, &auxMorph, &auxRhythmGate })
                 l.add (*id);
             return l;
         }();
@@ -1047,6 +1047,8 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                                       })));
     // D MORPH (Option D, decided): its own position, 0 % (off) by default. Appended.
     percentage (auxMorph, "AUX D Morph", d.morph);
+    // D RHYTHM's GATE (KEYS by default: a key starts the loop). Appended.
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxRhythmGate), "AUX Rhythm Gate", juce::StringArray { "KEYS", "FREE" }, d.rhythmFree ? 1 : 0));
 }
 
 int readerIndexOf (const juce::String& id)
@@ -1488,6 +1490,7 @@ Patch Reader::readWith (const float* raw) const noexcept
         a.noiseColor = index (iAuxNoiseColor, 3);
         a.noiseTone = 0.01 * v (iAuxNoiseTone);
         a.noiseFree = index (iAuxNoiseGate, 2) == 1;
+        a.rhythmFree = index (iAuxRhythmGate, 2) == 1;
         a.noiseAttack = v (iAuxNoiseAttack);
         a.noiseRelease = v (iAuxNoiseRelease);
         a.noiseMovement = 0.01 * v (iAuxNoiseMovement);
@@ -1902,6 +1905,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (iAuxNoiseColor, a.noiseColor);
         put (iAuxNoiseTone, 100.0 * a.noiseTone);
         put (iAuxNoiseGate, a.noiseFree ? 1.0 : 0.0);
+        put (iAuxRhythmGate, a.rhythmFree ? 1.0 : 0.0);
         put (iAuxNoiseAttack, a.noiseAttack);
         put (iAuxNoiseRelease, a.noiseRelease);
         put (iAuxNoiseMovement, 100.0 * a.noiseMovement);

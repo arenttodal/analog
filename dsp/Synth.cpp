@@ -279,6 +279,9 @@ void Synth::reset() noexcept
     auxGainNow = auxEnvNow = auxModNow = 0.0f;
     auxFreePpq = 0.0;
     auxPitchNow = 0.0;
+    auxKeyStart = auxKeyRunning = false;
+    auxKeyPpq = 0.0;
+    auxKeyGain = 0.0f;
     auxLoop.reset();
     auxGate.kill();
     auxFilter.held.fill (0);
@@ -3112,7 +3115,10 @@ void Synth::auxKeyEvent (const std::uint8_t* data, int size) noexcept
     busKeyEvent (auxFilter, data, size);
     const int after = auxFilter.heldCount;
     if (before == 0 && after > 0)
+    {
         auxGate.noteOn();
+        auxKeyStart = true;   // (D RHYTHM, GATE KEYS: the loop from its first beat)
+    }
     else if (before > 0 && after == 0)
         auxGate.noteOff();
 }
@@ -3146,12 +3152,22 @@ void Synth::renderAux (int numSamples) noexcept
         std::fill (auxDelayR.begin(), auxDelayR.end(), 0.0f);
         auxEnvNow = 0.0f;
         auxModNow = 0.0f;
+        auxKeyRunning = false;
+        auxKeyGain = 0.0f;
     }
     // RHYTHM: the loop (and its envelope) on the host's clock while the transport runs; with no
     // transport at all (a standalone), on its own clock from when it was powered. Powered off:
     // neither (MUTE keeps both: the envelope still modulates).
     auxRhythmRun = auxRunning && a.enabled && auxModePlaying == Patch::Aux::Mode::rhythm && auxLoop.loop() != nullptr
                    && numSamples <= static_cast<int> (auxL.size());
+    const bool byKeys = ! a.rhythmFree;
+    if (! auxRhythmRun || ! byKeys)
+    {
+        // (a key heard while RHYTHM is not playing by the keys starts nothing later on)
+        auxKeyStart = false;
+        auxKeyRunning = false;
+        auxKeyGain = 0.0f;
+    }
     if (! auxRhythmRun)
     {
         auxEnvShown.store (0.0f, std::memory_order_relaxed);
@@ -3160,15 +3176,29 @@ void Synth::renderAux (int numSamples) noexcept
     // Its clock: the host's (SYNC, the transport present); else its own - at 120 BPM with no
     // transport, at the loop's own tempo in FREE. A rhythmic loop is always played by its slices
     // on that clock, so PITCH / OCT never change its tempo or its length (FREE included).
+    // GATE KEYS: its own clock from the key that starts it (0: the loop's first beat), at the
+    // host's tempo (SYNC) or the loop's own (FREE) - the transport neither starts nor stops it.
     const auto* loop = auxLoop.loop();
     const bool rhythmicLoop = loop != nullptr && loop->rhythmic();
     const bool ownTempo = ! a.sync && rhythmicLoop;
-    const bool hostClock = timing.valid && ! ownTempo;
+    const bool hostClock = timing.valid && ! ownTempo && ! byKeys;
     const double bpm = ownTempo ? loop->analysis.bpm : (timing.valid && timing.bpm > 1.0 ? timing.bpm : 120.0);
     const double perSample = bpm / 60.0 / hostRate;
-    const double q0 = hostClock ? ppqAtBlock + static_cast<double> (blockOffset) * perSample : auxFreePpq;
-    const bool running = timing.valid ? timing.playing : true;
-    if (! hostClock && running)
+    const bool held = auxFilter.heldCount > 0;
+    if (byKeys && auxKeyStart)
+    {
+        auxKeyStart = false;
+        auxKeyRunning = true;
+        // (2 ms early: the first slice's own pre-roll, while the gate opens - its attack lands
+        // 2 ms after the key, whole)
+        auxKeyPpq = -0.002 * bpm / 60.0;
+        auxLoop.restart();
+    }
+    const double q0 = byKeys ? auxKeyPpq : (hostClock ? ppqAtBlock + static_cast<double> (blockOffset) * perSample : auxFreePpq);
+    const bool running = byKeys ? auxKeyRunning : (timing.valid ? timing.playing : true);
+    if (byKeys && running)
+        auxKeyPpq += static_cast<double> (numSamples) * perSample;
+    else if (! byKeys && ! hostClock && running)
         auxFreePpq += static_cast<double> (numSamples) * perSample;
     const auto n = static_cast<std::size_t> (numSamples);
     std::fill (auxL.begin(), auxL.begin() + static_cast<std::ptrdiff_t> (n), 0.0f);
@@ -3181,10 +3211,40 @@ void Synth::renderAux (int numSamples) noexcept
         auxPitchNow = pitchTarget;
     rhythm::LoopPlayer::Settings settings;
     settings.sync = a.sync || rhythmicLoop;
-    settings.tempoFactor = std::clamp (a.rate, 0.25, 4.0);
+    // RATE: its speed against the tempo (2x: twice as fast, its slices closer together on the
+    // grid; their pitch untouched). The player's factor stretches the loop over that many
+    // times its beats, so D's RATE is its inverse (card C's HALF / DOUBLE reread the detected
+    // tempo, and keep the player's sense).
+    settings.tempoFactor = 1.0 / std::clamp (a.rate, 0.25, 4.0);
     settings.pitchRatio = std::exp2 (auxPitchNow / 12.0);
     settings.envelopeOnGrid = true;   // (its modulation keeps the loop's own timing, whatever the pitch)
     auxLoop.render (auxL.data(), auxR.data(), 1.0f, auxLevelBuf.data(), auxTransientBuf.data(), numSamples, q0, perSample, running, settings);
+    if (byKeys)
+    {
+        // The keys' gate: open at once (2 ms, over the first slice's pre-roll) while a key is held; released, it falls with the
+        // AMP's release (-60 dB at its time), then the loop stops and the next key starts it
+        // from the top. Its envelope (MOD) follows what is heard.
+        const float open = 1.0f / static_cast<float> (0.002 * hostRate);
+        const float fall = static_cast<float> (std::exp (-6.907755 / (std::max (0.005, current.ampRelease) * hostRate)));
+        float g = auxKeyGain;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            if (held && auxKeyRunning)
+                g = std::min (1.0f, g + open);
+            else
+                g *= fall;
+            auxL[i] *= g;
+            auxR[i] *= g;
+            auxLevelBuf[i] *= g;
+            auxTransientBuf[i] *= g;
+        }
+        if (! held && g < 1.0e-4f)
+        {
+            g = 0.0f;
+            auxKeyRunning = false;
+        }
+        auxKeyGain = g;
+    }
     // Its envelope: the loop's level above SENSITIVITY's threshold, through ATTACK / RELEASE.
     const float threshold = static_cast<float> (0.6 * (1.0 - std::clamp (a.sensitivity, 0.0, 1.0)));
     const float attack = static_cast<float> (1.0 - std::exp (-1.0 / (std::max (0.5, a.attackMs) * 0.001 * hostRate)));

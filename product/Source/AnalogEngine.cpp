@@ -649,7 +649,10 @@ void AnalogEngine::decodeAuxRecording (juce::File stored, juce::String name, juc
         fail ("it could not be read");
         return;
     }
-    auto loop = rhythm::prepareLoop (buffer.getReadPointer (0), buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr, static_cast<std::size_t> (frames), reader->sampleRate);
+    // (a recording dropped into D RHYTHM is a loop: with no pulse found, its grid is assumed, so
+    // its RATE, SYNC and keys still play it as one)
+    auto loop = rhythm::prepareLoop (buffer.getReadPointer (0), buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr, static_cast<std::size_t> (frames), reader->sampleRate,
+                                     true);
     if (loop == nullptr)
         fail ("no audio was found in it");
     else

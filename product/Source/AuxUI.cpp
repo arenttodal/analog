@@ -866,8 +866,10 @@ namespace
             const int mode = modeOf (host);
             if (mode == 0)
             {
+                selectorSegment (auxRhythmGate, "GATE", { { "KEYS", "Keys", 0.0f }, { "FREE", "Free", 1.0f } }, 140,
+                                 "KEYS: a key starts the loop from its first beat; it plays while you hold a key, then fades with the AMP's release. FREE: always playing, on the host's grid");
                 selectorSegment (auxSync, "CLOCK", { { "SYNC", "Sync", 0.0f }, { "FREE", "Free", 1.0f } }, 140,
-                                 "SYNC: on the host's grid (its transport). FREE: its own clock at the loop's tempo");
+                                 "SYNC: the host's tempo (with GATE FREE, its grid too). FREE: the loop's own tempo");
                 steppedKnob (auxRate, "RATE", textOf (host, auxRate));
                 knob (auxPitch, "PITCH", textOf (host, auxPitch));
                 steppedKnob (auxOctave, "OCT", textOf (host, auxOctave));
@@ -963,7 +965,7 @@ juce::String aux::readout (InstrumentHost& host)
     auto text = state.name.toUpperCase();
     if (loop->rhythmic())
         text << dot() << juce::String (loop->analysis.bpm, 1) << " BPM" << dot() << loop->analysis.beats << " BEATS";
-    text << dot() << (host.parameterValue (params::auxSync) >= 0.5f ? "FREE" : "SYNC");
+    text << dot() << (host.parameterValue (params::auxRhythmGate) >= 0.5f ? "FREE" : "KEYS");
     return text;
 }
 

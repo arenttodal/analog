@@ -33,11 +33,20 @@ struct PreparedLoop
     double loopStart = 0.0;           ///< frames: the downbeat
     double loopFrames = 0.0;          ///< frames: one loop (its beats at its tempo)
     std::vector<double> slices;       ///< frames from loopStart, ascending, the first 0
+    /** The grid was assumed, not heard (prepareLoop's assumeLoop): the analysis found no
+        reliable pulse, so the whole recording is taken as a loop of whole bars at the tempo it
+        measured nearest. */
+    bool assumedGrid = false;
     bool rhythmic() const noexcept { return analysis.kind == Kind::rhythmic && analysis.beats > 0 && loopFrames > 0.0; }
 };
 
-/** Prepares a loop (a loader thread: analyses, cuts). Null for no audio. */
-std::shared_ptr<const PreparedLoop> prepareLoop (const float* left, const float* right, std::size_t frames, double rate);
+/** Prepares a loop (a loader thread: analyses, cuts). Null for no audio.
+    `assumeLoop` (D RHYTHM: a recording dropped into a loop slot is a loop): with no reliable
+    pulse found, the whole recording is still cut into a loop - whole bars (a power of two, or
+    a multiple of four beats) at the tempo the analysis measured nearest, from its first frame -
+    so it follows the grid, its RATE and its keys like any loop. Off: such a recording plays
+    FREE (card C RHYTHM, unchanged). */
+std::shared_ptr<const PreparedLoop> prepareLoop (const float* left, const float* right, std::size_t frames, double rate, bool assumeLoop = false);
 
 class LoopPlayer
 {
@@ -59,6 +68,10 @@ public:
 
     void prepare (double hostRate) noexcept;
     void reset() noexcept;
+    /** From the top (D RHYTHM's keys): whatever plays fades out (3 ms) and the next running
+        sample places the loop afresh - its first slice at the clock's position (0: the
+        downbeat), FREE from the recording's start. */
+    void restart() noexcept;
     /** The loop to play (owned by the caller, alive while set). A new one crossfades in. */
     void setLoop (const PreparedLoop* loop) noexcept;
     const PreparedLoop* loop() const noexcept { return current; }

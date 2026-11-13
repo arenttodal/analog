@@ -29,6 +29,7 @@ namespace
         p.aux.mode = mode;
         p.aux.levelDb = 0.0;
         p.aux.noiseFree = true;   // (NOISE: always sounding, unless a test plays it)
+        p.aux.rhythmFree = true;  // (RHYTHM: GATE FREE, on the grid, unless a test plays it)
         return p;
     }
 
@@ -609,4 +610,142 @@ TEST_CASE ("D MORPH: moved up and back to 0, it glides (no click) and then stops
     CHECK (worstStep < 0.6f * peak + 0.05f);   // (noise and a saw: no step beyond their own)
     CHECK_FALSE (s->auxMorphActive());         // (back at 0: the stage stopped)
     CHECK (s->auxMorphPosition() == 0.0f);
+}
+
+//==============================================================================
+// D RHYTHM's GATE (KEYS: a key starts the loop from its first beat), its RATE's direction and
+// a recording with no beat grid.
+
+namespace
+{
+    float peakIn (const std::vector<float>& x, double from, double to)
+    {
+        float m = 0.0f;
+        for (auto i = static_cast<std::size_t> (from * rate); i < std::min (x.size(), static_cast<std::size_t> (to * rate)); ++i)
+            m = std::max (m, std::abs (x[i]));
+        return m;
+    }
+
+    bool tickNear (const std::vector<double>& starts, double at, double margin)
+    {
+        return std::any_of (starts.begin(), starts.end(), [&] (double s) { return std::abs (s - at) <= margin; });
+    }
+}
+
+TEST_CASE ("D RHYTHM GATE KEYS: silent until a key, then the loop from its first beat; released it fades with the AMP's release; the next key starts it from the top", "[aux][rhythm][keys]")
+{
+    auto p = auxOnly (Mode::rhythm);
+    p.tone = 1.0;
+    p.aux.rhythmFree = false;   // (KEYS: the default)
+    p.ampRelease = 0.1;
+    auto s = makeSynth (p);
+    s->setAuxLoop (tickLoop().get());
+    // The host's transport stopped: the keys start it all the same, at the host's tempo (120).
+    osp::HostTiming t;
+    t.valid = true;
+    t.playing = false;
+    t.bpm = 120.0;
+    s->setTransport (t);
+    const auto out = play (*s, 4.4, { on (static_cast<int> (0.7 * rate), 60), off (static_cast<int> (2.0 * rate), 60),
+                                      on (static_cast<int> (3.0 * rate), 64), off (static_cast<int> (3.9 * rate), 64) });
+    // Nothing before the first key.
+    CHECK (peakIn (out.left, 0.0, 0.7) == 0.0f);
+    const auto starts = tickStarts (out.left);
+    INFO ("ticks at " << (starts.empty() ? -1.0 : starts.front()));
+    REQUIRE (starts.size() >= 4);
+    // The first beat at the key (2 ms after it: the slice's pre-roll), then every half second
+    // while it is held.
+    CHECK (starts[0] == Approx (0.702).margin (0.002));
+    CHECK (tickNear (starts, 1.202, 0.003));
+    CHECK (tickNear (starts, 1.702, 0.003));
+    // Released at 2.0 s: -60 dB at 2.1 s, silent well before the next key.
+    CHECK (peakIn (out.left, 2.25, 2.99) < 1.0e-4f);
+    // The next key: from the top again - its first tick is the loop's downbeat (the louder one).
+    CHECK (tickNear (starts, 3.002, 0.002));
+    CHECK (peakIn (out.left, 3.0, 3.03) > 1.3f * peakIn (out.left, 3.5, 3.53));
+    CHECK (peakIn (out.left, 0.7, 0.73) > 1.3f * peakIn (out.left, 1.2, 1.23));
+}
+
+TEST_CASE ("D RHYTHM GATE KEYS: legato - a second key while one is held never restarts the loop", "[aux][rhythm][keys]")
+{
+    auto p = auxOnly (Mode::rhythm);
+    p.tone = 1.0;
+    p.aux.rhythmFree = false;
+    auto s = makeSynth (p);
+    s->setAuxLoop (tickLoop().get());
+    const auto out = play (*s, 2.2, { on (static_cast<int> (0.5 * rate), 60), on (static_cast<int> (0.9 * rate), 64), off (static_cast<int> (1.2 * rate), 60) });
+    const auto starts = tickStarts (out.left);
+    REQUIRE (starts.size() >= 3);
+    CHECK (starts[0] == Approx (0.502).margin (0.002));
+    CHECK_FALSE (tickNear (starts, 0.9, 0.01));   // (no restart at the second key)
+    CHECK (tickNear (starts, 1.002, 0.003));
+    CHECK (tickNear (starts, 1.502, 0.003));      // (one key still held: it plays on)
+}
+
+TEST_CASE ("D RHYTHM RATE: 2x plays the loop twice as fast on the grid, 1/2x half as fast - the ticks' pitch untouched", "[aux][rhythm][rate]")
+{
+    for (const auto& [factor, gap] : { std::pair { 1.0, 0.5 }, std::pair { 2.0, 0.25 }, std::pair { 0.5, 1.0 } })
+    {
+        auto p = auxOnly (Mode::rhythm);   // (GATE FREE: the 120 BPM clock, standalone)
+        p.tone = 1.0;
+        p.aux.rate = factor;
+        auto s = makeSynth (p);
+        s->setAuxLoop (tickLoop().get());
+        const auto out = play (*s, 4.2);
+        const auto starts = tickStarts (out.left);
+        INFO ("RATE " << factor << "x: " << starts.size() << " ticks");
+        REQUIRE (starts.size() >= 4);
+        for (std::size_t k = 1; k < 4; ++k)
+            CHECK (starts[k] - starts[k - 1] == Approx (gap).margin (0.004));
+        CHECK (burstHz (out.left, starts[1], 0.004) == Approx (2000.0).epsilon (0.08));
+    }
+}
+
+TEST_CASE ("D RHYTHM: a recording with no beat grid found is still a loop (whole bars from its start); card C's reading is unchanged", "[aux][rhythm][assumed]")
+{
+    // Ticks at irregular times (no pulse to hear), 4 s long.
+    std::vector<float> x (static_cast<std::size_t> (4.0 * rate), 0.0f);
+    osp::Prng rng (11);
+    for (double at = 0.0; at < 3.9;)
+    {
+        for (std::size_t i = 0; i < static_cast<std::size_t> (0.03 * rate) && static_cast<std::size_t> (at * rate) + i < x.size(); ++i)
+        {
+            const double tt = static_cast<double> (i) / rate;
+            x[static_cast<std::size_t> (at * rate) + i] += static_cast<float> (0.6 * std::exp (-tt / 0.006) * std::sin (2.0 * std::numbers::pi * 2000.0 * tt));
+        }
+        at += 0.13 + 0.34 * rng.nextDouble();
+    }
+    const auto plain = rhythm::prepareLoop (x.data(), x.data(), x.size(), rate);
+    REQUIRE (plain != nullptr);
+    REQUIRE_FALSE (plain->rhythmic());   // (no pulse: card C plays it FREE, as before)
+    const auto assumed = rhythm::prepareLoop (x.data(), x.data(), x.size(), rate, true);
+    REQUIRE (assumed != nullptr);
+    CHECK (assumed->rhythmic());
+    CHECK (assumed->assumedGrid);
+    CHECK (assumed->loopStart == 0.0);
+    CHECK (assumed->loopFrames == Approx (static_cast<double> (x.size())).margin (2.0));
+    const int b = assumed->analysis.beats;
+    CHECK ((b == 1 || b == 2 || b == 4 || (b >= 8 && b % 4 == 0)));
+    CHECK (assumed->analysis.bpm == Approx (60.0 * b / 4.0).epsilon (1.0e-6));
+    // RATE moves it: at 1x it comes round once a loop (4 s of recording on b beats of the
+    // 120 BPM clock); at 1/2x every tick lands twice as late (2x crowds its ticks closer than
+    // this detector can part them).
+    auto render = [&] (double factor, double seconds) {
+        auto p = auxOnly (Mode::rhythm);
+        p.tone = 1.0;
+        p.aux.rate = factor;
+        auto s = makeSynth (p);
+        s->setAuxLoop (assumed.get());
+        return play (*s, seconds).left;
+    };
+    const double loopSeconds = 60.0 * b / 120.0;
+    const auto s1 = tickStarts (render (1.0, loopSeconds + 0.5)), sh = tickStarts (render (0.5, loopSeconds + 0.5));
+    REQUIRE (s1.size() >= 6);
+    REQUIRE (sh.size() >= 3);
+    INFO ("beats " << b << ", loop " << loopSeconds << " s");
+    CHECK (tickNear (s1, s1.front() + loopSeconds, 0.005));
+    int checked = 0;
+    for (std::size_t k = 1; k < s1.size() && 2.0 * (s1[k] - s1.front()) < loopSeconds; ++k, ++checked)
+        CHECK (tickNear (sh, sh.front() + 2.0 * (s1[k] - s1.front()), 0.006));
+    CHECK (checked >= 2);
 }

@@ -6,7 +6,7 @@
 namespace andor::analog::rhythm
 {
 
-std::shared_ptr<const PreparedLoop> prepareLoop (const float* left, const float* right, std::size_t frames, double rate)
+std::shared_ptr<const PreparedLoop> prepareLoop (const float* left, const float* right, std::size_t frames, double rate, bool assumeLoop)
 {
     if (left == nullptr || frames == 0 || ! (rate > 0.0))
         return nullptr;
@@ -25,7 +25,42 @@ std::shared_ptr<const PreparedLoop> prepareLoop (const float* left, const float*
     for (std::size_t i = 0; i < frames; ++i)
         mono[i] = 0.5f * (loop->left[i] + loop->right[i]);
     loop->analysis = analyse (mono.data(), frames, rate);
-    const auto& a = loop->analysis;
+    auto& a = loop->analysis;
+    if (assumeLoop && a.kind == Kind::unsure && a.bpm > 0.0 && a.durationSeconds > 0.0)
+    {
+        // No reliable pulse, but a loop all the same: whole bars at the measured tempo's
+        // nearest fit, the recording's start its downbeat (a loop file begins on its one).
+        int beats = a.beats;
+        if (! a.loopFits)
+        {
+            const double measured = a.durationSeconds * a.bpm / 60.0;
+            double best = 1.0e9;
+            auto consider = [&] (int b) {
+                const double off = std::abs (std::log2 (static_cast<double> (b) / measured));
+                if (off < best)
+                {
+                    best = off;
+                    beats = b;
+                }
+            };
+            for (const int b : { 1, 2, 4, 8, 16, 32, 64, 128 })
+                consider (b);
+            for (int b = 12; b <= 128; b += 4)
+                consider (b);
+        }
+        const double bpm = 60.0 * beats / a.durationSeconds;
+        if (beats > 0 && bpm >= 30.0 && bpm <= 400.0)
+        {
+            a.kind = Kind::rhythmic;
+            a.beats = beats;
+            a.bpm = bpm;
+            a.loopFits = true;
+            a.beatsPerBar = beats % 3 == 0 && beats % 4 != 0 ? 3 : 4;
+            a.bars = static_cast<double> (beats) / a.beatsPerBar;
+            a.downbeatSeconds = 0.0;
+            loop->assumedGrid = true;
+        }
+    }
     if (a.kind == Kind::rhythmic && a.beats > 0)
     {
         loop->loopStart = a.downbeatSeconds * rate;
@@ -69,6 +104,14 @@ void LoopPlayer::reset() noexcept
     wasRunning = false;
     haveLastQ = false;
     shownPlayhead.store (-1.0, std::memory_order_relaxed);
+}
+
+void LoopPlayer::restart() noexcept
+{
+    fadeAll (0.003f);
+    slice = -1;
+    freePos = 0.0;
+    haveLastQ = false;
 }
 
 void LoopPlayer::setLoop (const PreparedLoop* loop) noexcept

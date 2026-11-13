@@ -823,6 +823,11 @@ private:
     int auxDelayAt = 0, auxLatencyNow = 0;
     double auxFreePpq = 0.0;
     double auxPitchNow = 0.0;   ///< RHYTHM's PITCH / OCT now (semitones, glided)
+    // D RHYTHM's GATE KEYS: a key after silence starts the loop on its own clock from 0.
+    bool auxKeyStart = false;   ///< a key after silence, not yet started
+    bool auxKeyRunning = false; ///< playing (held, or fading out with the AMP's release)
+    double auxKeyPpq = 0.0;     ///< its clock since the key (beats)
+    float auxKeyGain = 0.0f;    ///< its gate (0..1)
 public:
     /** D's latency now (samples: D KONTAKT's reported, while it plays; else 0). */
     int auxLatency() const noexcept { return auxLatencyNow; }

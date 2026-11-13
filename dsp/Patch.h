@@ -280,7 +280,11 @@ struct Patch
         bool filterFollow = true;      ///< through the cards' FILTER (the default)
         // RHYTHM
         bool sync = true;              ///< on the host's grid (a loop with a pulse), else FREE
-        double rate = 1.0;             ///< its musical speed: 0.25 / 0.5 / 1 / 2 / 4 x its detected tempo
+        /** GATE: false KEYS (a key after silence starts the loop from its first beat, at the
+            clock's tempo; it plays while a key is held and fades with the AMP's release), true
+            FREE (always playing: on the host's grid while the transport runs). */
+        bool rhythmFree = false;
+        double rate = 1.0;             ///< its musical speed: 0.25 / 0.5 / 1 / 2 / 4 x its detected tempo (2: twice as fast)
         double modAmount = 0.0;        ///< 0..1: its envelope onto modTarget (0: no modulation)
         ModTarget modTarget = ModTarget::filter;
         double sensitivity = 0.5, attackMs = 5.0, releaseMs = 120.0;
