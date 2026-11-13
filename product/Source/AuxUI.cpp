@@ -222,7 +222,7 @@ namespace
         }
         // KONTAKT: its state and name, and its level over time as a bar.
         g.setFont (fonts::label (compact ? 10.0f : 12.0f));
-        juce::String text = "KONTAKT NOT LOADED" + dot() + "CLICK TO LOAD";
+        juce::String text = "KONTAKT NOT LOADED";   // (once: the readout says nothing more; a click loads it)
         if (engine != nullptr)
         {
             const auto& k = engine->auxInstrument();
@@ -234,7 +234,13 @@ namespace
                 case ExternalInstrument::State::empty: break;
             }
         }
+        const bool loaded = engine != nullptr && engine->auxInstrument().state() == ExternalInstrument::State::ready;
         g.setColour (cream.withAlpha (0.7f * alpha));
+        if (! loaded)
+        {
+            g.drawText (text, area, juce::Justification::centred, true);   // (calm: one line, no level bar)
+            return;
+        }
         g.drawText (text, area.withTrimmedBottom (area.getHeight() * 0.35f), juce::Justification::centred, true);
         const auto bar = area.withTop (area.getBottom() - 4.0f).reduced (area.getWidth() * 0.1f, 0.0f);
         g.setColour (juce::Colours::white.withAlpha (0.08f));
@@ -400,8 +406,7 @@ namespace
         }
         std::function<juce::String()> notice;   ///< (a refused drop, a failed load)
         bool dropOver = false;
-        int headerWidth = 0;                     ///< the mode selector's room (the readout after it)
-        std::function<juce::String()> unheard;   ///< why D is not heard (OFF, MUTED, NOT SOLOED), or empty
+        std::function<juce::String()> unheard;   ///< why D is not heard (MUTED, NOT SOLOED), or empty
         void paint (juce::Graphics& g) override
         {
             const auto b = getLocalBounds().toFloat();
@@ -411,21 +416,17 @@ namespace
             g.drawRoundedRectangle (b.reduced (0.5f), 9.0f, 1.0f);
             auto inner = b.reduced (12.0f, 6.0f);
             auto top = inner.removeFromTop (22.0f);
-            top.removeFromLeft (static_cast<float> (headerWidth) + 10.0f);
-            // Not heard: the reason in the top row, centred on the well (or in the room right of
-            // the mode selector when the well is narrow), never on the picture's own text. The
-            // readout keeps the room right of it.
+            // (Addendum 04: the mode is chosen outside the well; its top row holds what D plays,
+            // discreetly at the right, and - muted or another source soloed - why it is not
+            // heard, at the left. OFF is never drawn here: the strip's AUX ON / OFF says it.)
             if (const auto why = unheard != nullptr ? unheard() : juce::String(); why.isNotEmpty())
             {
-                const auto font = fonts::make (11.0f, fonts::Weight::medium, 0.12f);
+                const auto font = fonts::make (10.0f, fonts::Weight::medium, 0.12f);
                 const float width = juce::GlyphArrangement::getStringWidth (font, why) + 4.0f;
-                auto at = juce::Rectangle<float> (width, top.getHeight()).withCentre ({ b.getCentreX(), top.getCentreY() });
-                if (at.getX() < top.getX())
-                    at.setX (top.getX());
                 g.setColour (juce::Colour (0xffd9dcd8).withAlpha (0.6f));
                 g.setFont (font);
-                g.drawText (why, at, juce::Justification::centredLeft, false);
-                top.setLeft (at.getRight() + 14.0f);
+                g.drawText (why, top.withWidth (width), juce::Justification::centredLeft, false);
+                top.removeFromLeft (width + 14.0f);
             }
             g.setColour (cream.withAlpha (0.6f));
             g.setFont (fonts::label (10.0f));
@@ -469,16 +470,22 @@ namespace
 
             display = std::make_unique<AuxDisplay> (h);
             display->notice = [this] { return currentNotice(); };
-            display->unheard = [this] { return unheardReason(); };
+            display->unheard = [this] { const auto why = unheardReason(); return why == "OFF" ? juce::String() : why; };
             addAndMakeVisible (*display);
+            // SOURCE MODE (Addendum 04): a compact ceramic dropdown on the strip itself, right of
+            // the power key - the rack's own list style - never inside the well.
             modeSelector = std::make_unique<ValueSelector> (*h.apvts().getParameter (params::auxMode), juce::String());
-            modeSelector->setPlain (true);
-            modeSelector->setOnDark (true);
-            modeSelector->setAccent (aux::onDark());
+            modeSelector->setRackStyle (ValueSelector::RackStyle::option);
             modeSelector->setTooltip ("What D plays: a RHYTHM loop (host-synced), NOISE (white, pink, brown), or KONTAKT (its own instance, your keys)");
             modeSelector->setTitle ("D mode");
             binding::tag (*modeSelector, params::auxMode);
-            addAndMakeVisible (*modeSelector);   // (over the well, at its top left)
+            addAndMakeVisible (*modeSelector);
+            // LEVEL: permanent, right of the mode, the same place in every mode.
+            level = std::make_unique<MiniKnob> (h.apvts(), params::auxLevel, "LEVEL", textOf (h, params::auxLevel));
+            level->slider.setTooltip ("D's level (before the FILTER and the effects)");
+            level->slider.getProperties().set ("arc", static_cast<juce::int64> (aux::colour().getARGB()));
+            binding::tag (level->slider, params::auxLevel);
+            addAndMakeVisible (*level);
 
             rackKey = std::make_unique<RackKey>();
             rackKey->onClick = [this] { setAuxRackOpen (*this, ! auxRackOpen (*this)); };
@@ -508,6 +515,7 @@ namespace
             if (name == "display") return display.get();
             if (name == "rack") return rackKey.get();
             if (name == "menu") return menu.get();
+            if (name == "LEVEL") return level.get();
             for (const auto& k : knobs)
                 if (k->captionText() == name)
                     return k.get();
@@ -547,8 +555,10 @@ namespace
                 }
         }
 
-        /** The three zones, aligned to the cards above: A's (D, M / S, AUX, power), B's well
-            (exactly B's dark well's place and width), C's (the mode's knobs, RACK, the menu). */
+        /** The three zones, aligned to the cards above (Addendum 04: one fixed layout for every
+            mode). A's: D, M / S, AUX and its state, power, the SOURCE MODE dropdown and LEVEL -
+            never moving. The display: from just after LEVEL to B's dark well's right edge. C's:
+            the mode's own knobs only, then RACK and the menu anchored at the right. */
         void resized() override
         {
             const int h = getHeight();
@@ -572,25 +582,31 @@ namespace
                 cardA = { 0, 0, third, h };
                 cardC = { 2 * third, 0, third, h };
             }
-            // A's zone: the badge where the cards' badges are, M / S beside it, AUX, power.
+            // A's zone: the badge where the cards' badges are, M / S beside it, AUX, power, then
+            // SOURCE MODE (as wide as KONTAKT, whatever is chosen) and LEVEL.
             const int top = (h - 43) / 2;
             badge = { cardA.getX() + 21, top, 47, 43 };
             mute->setBounds (badge.getRight() + 9, top, 27, 21);
             solo->setBounds (badge.getRight() + 9, top + 22, 27, 21);
-            nameArea = { mute->getRight() + 14, top, 64, 43 };
-            power->setBounds (juce::Rectangle<int> (30, 30).withCentre ({ nameArea.getRight() + 18, h / 2 }));
-            // B's zone: the well, at B's well's x and width.
-            const auto well = juce::Rectangle<int> (wellB.getX(), 8, wellB.getWidth(), h - 16);
-            display->setBounds (well);
-            placeModeSelector();
-            // C's zone: the menu at the cards' menu's place, RACK beside it, the knobs before.
+            nameArea = { mute->getRight() + 14, top, 46, 43 };
+            power->setBounds (juce::Rectangle<int> (30, 30).withCentre ({ nameArea.getRight() + 15, h / 2 }));
+            const int levelWidth = 58;
+            const int modeLeft = power->getRight() + 12;
+            const int modeWidth = std::max (60, std::min (104, wellB.getX() - 14 - levelWidth - 6 - modeLeft));
+            modeSelector->setBounds (modeLeft, h / 2 - 13, modeWidth, 27);
+            level->setBounds (modeSelector->getRight() + 6, 4, levelWidth, h - 8);
+            // The well: immediately after LEVEL (no empty gap on the left), its right edge on B's
+            // dark well's right edge (aligned to the cards above); the same in every mode.
+            const int wellLeft = std::min (level->getRight() + 14, wellB.getX());
+            display->setBounds (wellLeft, 8, wellB.getRight() - wellLeft, h - 16);
+            // C's zone: the menu at the cards' menu's place, RACK beside it, the mode's knobs
+            // before them from C's well's left - RHYTHM's four fill it (MOD AMOUNT, a long
+            // caption, a double cell); NOISE's two keep the same cells, from the left.
             menu->setBounds (cardC.getRight() - 51, h / 2 - 18, 30, 36);
             rackKey->setBounds (menu->getX() - 8 - 60, h / 2 - 16, 60, 33);
-            // The knobs: RHYTHM's five fill C's zone (a long caption, MOD AMOUNT, a double cell);
-            // the other modes' keep the same cells, from the left.
             const int knobLeft = wellC.getX(), knobRight = rackKey->getX() - 10;
             auto weight = [] (const juce::String& caption) { return caption.length() > 6 ? 2.0 : 1.0; };
-            const double unit = (knobRight - knobLeft) / 6.0;   // (RATE PITCH OCT MOD-AMOUNT LEVEL: 1 + 1 + 1 + 2 + 1)
+            const double unit = (knobRight - knobLeft) / 5.0;   // (RATE PITCH OCT MOD-AMOUNT: 1 + 1 + 1 + 2)
             double x = knobLeft;
             for (auto& k : knobs)
             {
@@ -689,18 +705,6 @@ namespace
             display->repaint();
         }
 
-        void placeModeSelector()
-        {
-            // Top left of the well, at the cards' wells' inset; as wide as its name, so it never
-            // moves when the mode changes (it is drawn right-aligned in its own bounds).
-            const auto well = display->getBounds();
-            const auto font = type::popupMode (0.55f * 22.0f);
-            const auto text = modeSelector->textOverride != nullptr ? modeSelector->textOverride() : aux::modeName (modeOf (host));
-            const int width = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, text.toUpperCase()) + 0.5f * 22.0f + 3.0f + 2.0f);
-            modeSelector->setBounds (well.getX() + 12, well.getY() + 6, width, 22);
-            display->headerWidth = width;
-        }
-
         void buildKnobs()
         {
             knobs.clear();
@@ -725,7 +729,6 @@ namespace
                 add (params::auxNoiseColor, "COLOR", "WHITE, PINK or BROWN");
                 add (params::auxNoiseTone, "TONE", "Its own low-pass, before the FILTER");
             }
-            add (params::auxLevel, "LEVEL", "D's level (before the FILTER and the effects)");
             resized();
         }
 
@@ -734,10 +737,7 @@ namespace
         void timerCallback() override
         {
             if (modeOf (host) != builtMode)
-            {
-                buildKnobs();
-                placeModeSelector();
-            }
+                buildKnobs();   // (only the mode's knobs: every other part stays where it is)
             display->setTooltip (builtMode == 0 ? "Click to load a loop (WAV, AIFF or FLAC), or drop one here: it plays on the host's grid"
                                  : builtMode == 1 ? "NOISE: its settings are in the rack"
                                                   : "Click to load Kontakt for D (its own instance; your keys, before the arpeggiator), or to open its window");
@@ -759,6 +759,7 @@ namespace
         std::unique_ptr<rackui::PowerKey> power;
         std::unique_ptr<LayerStateButton> mute, solo;
         std::unique_ptr<ValueSelector> modeSelector;
+        std::unique_ptr<MiniKnob> level;   ///< (permanent: not one of the mode's knobs)
         std::unique_ptr<AuxDisplay> display;
         std::unique_ptr<RackKey> rackKey;
         std::unique_ptr<MenuDots> menu;
@@ -954,8 +955,7 @@ juce::String aux::readout (InstrumentHost& host)
         return juce::String (colours[c]) + " NOISE" + dot() + (host.parameterValue (params::auxNoiseGate) >= 0.5f ? "FREE" : "KEYS");
     }
     if (mode == 2)
-        return engine != nullptr && engine->auxInstrument().state() == ExternalInstrument::State::ready ? engine->auxInstrument().displayName().toUpperCase()
-                                                                                                         : "KONTAKT" + dot() + "NOT LOADED";
+        return {};   // (KONTAKT: the picture names it - or says it is not loaded - once)
     if (engine == nullptr)
         return "RHYTHM";
     const auto state = engine->auxRecordingState();

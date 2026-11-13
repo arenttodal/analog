@@ -58,6 +58,17 @@
 >     unchanged.
 >   - A file dropped on empty space loads nothing.
 >
+>   Then (docs/aux/ADDENDUM_04.md):
+>   - D RHYTHM's GATE (`analog.aux.rhythm.gate`, KEYS by default): a key starts the loop from
+>     its first beat, it plays while a key is held and fades with the AMP's release; FREE is
+>     the old always-playing behaviour. RATE now runs the right way (2x = twice as fast), and a
+>     recording with no beat grid found is still taken as a loop (whole bars), so RATE works.
+>   - The window never asks for more height than the screen holds when the arpeggiator or a
+>     rack opens (shared: ANDOR OSP too); it narrows to fit and comes back.
+>   - Addendum 04: one fixed strip layout - SOURCE MODE and LEVEL permanent after POWER, the
+>     display after LEVEL, only the mode's knobs changing, RACK and the menu at the right;
+>     KONTAKT NOT LOADED once; OFF never drawn over the display.
+>
 > - Destination-first macro assignment (docs/MACRO_DESTINATION_FIRST.md):
 >   - right-click any eligible control → Assign to Macro (names, checkmarks, range, details,
 >     removal);

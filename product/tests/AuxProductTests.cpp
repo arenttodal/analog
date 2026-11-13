@@ -221,19 +221,20 @@ TEST_CASE ("AUX strip: the mode's knobs, the C-style mode dropdown, the rack fro
     auto& ui = editorOf (editor);
     ui.setAuxStripShown (true);
     auto& strip = *ui.auxStripComponent();
-    for (const auto& name : { "power", "mute", "solo", "mode", "display", "rack", "menu" })
+    for (const auto& name : { "power", "mute", "solo", "mode", "LEVEL", "display", "rack", "menu" })
         CHECK (AuxStripView::part (strip, name) != nullptr);
-    CHECK (AuxStripView::knobCaptions (strip) == juce::StringArray ({ "RATE", "PITCH", "OCT", "MOD AMOUNT", "LEVEL" }));
+    // (Addendum 04: LEVEL is permanent, not one of the mode's knobs)
+    CHECK (AuxStripView::knobCaptions (strip) == juce::StringArray ({ "RATE", "PITCH", "OCT", "MOD AMOUNT" }));
     CHECK (AuxStripView::part (strip, "route") == nullptr);   // (Addendum 03: no ROUTE, no LOAD)
     CHECK (AuxStripView::part (strip, "load") == nullptr);
     set (p, params::auxMode, 1.0f);
     ui.refreshNow();
     refreshStrip (ui);
     CHECK (AuxStripView::shownMode (strip) == 1);
-    CHECK (AuxStripView::knobCaptions (strip) == juce::StringArray ({ "COLOR", "TONE", "LEVEL" }));
+    CHECK (AuxStripView::knobCaptions (strip) == juce::StringArray ({ "COLOR", "TONE" }));
     set (p, params::auxMode, 2.0f);
     refreshStrip (ui);
-    CHECK (AuxStripView::knobCaptions (strip) == juce::StringArray ({ "LEVEL" }));
+    CHECK (AuxStripView::knobCaptions (strip).isEmpty());   // (KONTAKT: no placeholder knobs)
 
     const float height = ui.instrumentHeight();
     AuxStripView::doubleClick (strip);
@@ -737,7 +738,7 @@ TEST_CASE ("AUX 03 gate 5: an unsupported file dropped on D changes nothing and 
     CHECK_FALSE (rig.cardC());
 }
 
-TEST_CASE ("AUX 03 gates 3-4: the strip's zones align to the cards - B's well exactly; M / S are the cards' keys; RACK beside the menu", "[analog][aux][ui]")
+TEST_CASE ("AUX 03 gates 3-4 / Addendum 04: one fixed strip layout in every mode - SOURCE MODE and LEVEL after power, the display after LEVEL to B's well's right edge, RACK beside the menu", "[analog][aux][ui]")
 {
     ShellProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
@@ -749,8 +750,9 @@ TEST_CASE ("AUX 03 gates 3-4: the strip's zones align to the cards - B's well ex
     auto* well = AuxStripView::part (strip, "display");
     const auto wellB = ui.cardDisplayBounds (2);
     const auto wellD = well->getBounds() + strip.getPosition();
-    CHECK (wellD.getX() == wellB.getX());
-    CHECK (wellD.getWidth() == wellB.getWidth());
+    // (Addendum 04: from just after LEVEL to B's well's right edge, aligned to the cards)
+    CHECK (wellD.getRight() == wellB.getRight());
+    CHECK (wellD.getX() <= wellB.getX());
     // M / S: the cards' own key (osp::plugin::LayerStateButton), the cards' size.
     auto* mute = dynamic_cast<osp::plugin::LayerStateButton*> (AuxStripView::part (strip, "mute"));
     auto* solo = dynamic_cast<osp::plugin::LayerStateButton*> (AuxStripView::part (strip, "solo"));
@@ -776,19 +778,43 @@ TEST_CASE ("AUX 03 gates 3-4: the strip's zones align to the cards - B's well ex
         CHECK (k->getX() >= well->getRight());
         CHECK (k->getRight() <= rack->getX());
     }
-    // The mode selector: top left of the well, the same left edge in every mode.
-    std::vector<int> lefts;
+    // Addendum 04: D, M / S, power, SOURCE MODE, LEVEL, the display, RACK and the menu - every
+    // permanent part - at exactly the same bounds in RHYTHM, NOISE and KONTAKT; only the mode's
+    // knobs change. Left to right: power < SOURCE MODE < LEVEL < the display < the knobs < RACK.
+    const char* permanent[] = { "mute", "solo", "power", "mode", "LEVEL", "display", "rack", "menu" };
+    std::vector<std::vector<juce::Rectangle<int>>> placed;
     for (int mode = 0; mode < 3; ++mode)
     {
         set (p, params::auxMode, static_cast<float> (mode));
         refreshStrip (ui);
+        std::vector<juce::Rectangle<int>> b;
+        for (const auto* name : permanent)
+            b.push_back (AuxStripView::part (strip, name)->getBounds());
+        placed.push_back (b);
+        auto* power = AuxStripView::part (strip, "power");
         auto* selector = AuxStripView::part (strip, "mode");
-        lefts.push_back (selector->getX());
-        CHECK (selector->getX() == well->getX() + 12);
-        CHECK (selector->getY() == well->getY() + 6);
+        auto* level = AuxStripView::part (strip, "LEVEL");
+        INFO ("mode " << mode);
+        CHECK (selector->getX() > power->getRight());
+        CHECK (selector->getX() - power->getRight() <= 16);   // (directly after power)
+        CHECK (level->getX() >= selector->getRight());
+        CHECK (level->getX() - selector->getRight() <= 10);   // (directly after the mode)
+        CHECK (well->getX() >= level->getRight());
+        CHECK (well->getX() - level->getRight() <= 16);       // (the display directly after LEVEL)
+        CHECK_FALSE (selector->getBounds().intersects (well->getBounds()));   // (never inside it)
+        for (const auto& caption : AuxStripView::knobCaptions (strip))
+        {
+            auto* k = AuxStripView::part (strip, caption);
+            CHECK (k->getX() >= well->getRight());
+            CHECK (k->getRight() <= rack->getX());
+        }
     }
-    CHECK (lefts[0] == lefts[1]);
-    CHECK (lefts[1] == lefts[2]);
+    for (std::size_t i = 0; i < std::size (permanent); ++i)
+    {
+        INFO (permanent[i]);
+        CHECK (placed[0][i] == placed[1][i]);
+        CHECK (placed[1][i] == placed[2][i]);
+    }
 }
 
 TEST_CASE ("AUX 03 gate 2: D always goes through the FILTER - the old switch is unread and hidden; ROUTE is gone", "[analog][aux]")
