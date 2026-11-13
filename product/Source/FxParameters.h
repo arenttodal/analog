@@ -5,6 +5,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <optional>
+
 namespace andor::analog::fxparams
 {
 
@@ -19,7 +21,8 @@ struct Spec
     juce::String name;          ///< "mix", "band2.gain"
     juce::String title;         ///< "Mix", "Band 2 Gain"
     enum class Kind { real, choice, toggle } kind = Kind::real;
-    float low = 0.0f, high = 1.0f, fallback = 0.0f, centre = -1.0f;   ///< centre: the skew's mid value (-1: linear)
+    float low = 0.0f, high = 1.0f, fallback = 0.0f;
+    std::optional<float> centre;   ///< the value at mid-travel of a skewed range; none: linear
     juce::String unit;          ///< "%", "dB", "Hz", "ms", "us", "s", "st", "deg", "x", "cents"
     juce::StringArray choices;
     std::function<void (fx::Settings&, int slot, float value)> write;

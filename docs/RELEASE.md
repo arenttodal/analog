@@ -69,6 +69,12 @@ for the runbook.
   offered for automation. The 128 others (ANDOR schema controls ANALOG does not play, and the
   retired v1 LFO and v5 KEY DNA ones) are flagged non-automatable. Test:
   `analog: a DAW may automate exactly the parameters the engine reads`.
+- **FX parameter mapping (12 Nov 2026):** 66 FX library parameters were skewed about -1 by
+  accident (COMPRESSOR THRESHOLD worst); fixed on `claude/wizardly-cray-mcmqmg`
+  (docs/STATUS.md). Sessions and presets are unaffected, but a host's recorded automation of
+  these parameters maps differently, so the fix **must be in the build tagged 1.0.0**:
+  `main` and `claude/release-candidate` do not have it yet. Shipped later, it would change
+  customers' automation. Testers re-record automation of these parameters once.
 - **Still open, owner or human only:** JUCE and Steinberg VST3 licences; Apple Developer ID and
   notarisation; Windows code signing; EULA approval; DAW validation (H1–H11 in the runbook);
   listening sign-off.

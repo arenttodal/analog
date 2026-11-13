@@ -241,6 +241,24 @@ Modulation destinations appended (after §C's 72, same order rule): OSC 1/2 SUB,
 DEPTH, OSC 1/2 SHAPE, OSC 1/2 SPREAD, RING MOD, MORPH, MORPH TEXTURE,
 MORPH ATTACK, MORPH FORMANTS, MORPH DETAIL (all per voice).
 
+## The FX library's 0..1 mapping (12 Nov 2026, before the first release)
+
+"Never re-range" covers a parameter's 0..1 mapping too (its skew): a host stores automation
+in 0..1. One correction was made while no public build existed. The FX library's table marked
+"no centre" with -1, and every range holding -1 was skewed about it by accident (COMPRESSOR
+THRESHOLD: -18 dB at 4e-7 of the travel). `fx::ParameterSpec::centre` is now optional and 34
+settings (66 of `analog.fx.<type>.<n>.*`) are linear, as declared: `output` of every effect;
+`comp`: `threshold`, `makeup`, `fet.input`, `fet.output`, `multi.threshold`,
+`multi.<low|mid|high>Gain`, `multi.<low|mid|high>Offset`; `eq`: `band<1-4>.gain`; `filter`:
+`pan`, `formantShift`; `phaser.feedback`, `flanger.feedback`; `utility`: `gain`, `pan`;
+`retro`: `input`, `tone`, `compress.tilt`.
+
+IDs, order, ranges, defaults, units and version hints (28, 29) are unchanged; the state
+version too (state holds values in their own units: nothing to migrate, tested on the 1.0
+fixtures). Automation of these parameters recorded with a release-candidate build maps
+differently and is recorded again. From the first public build on, the mapping is frozen
+like everything else here (docs/STATUS.md, 12 Nov 2026, has the decision and the evidence).
+
 ## State version 15 (Cinematic V6 gate 2): SUB
 
 Appended after the FX library's parameters (version hint 30). Nothing to migrate: SUB is

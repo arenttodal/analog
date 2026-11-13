@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fx/FxGraph.h"
+#include "FxRackSource.h"
 #include "InstrumentHost.h"
 #include "ParameterRack.h"
 
@@ -20,11 +21,20 @@ namespace andor::analog
     the engine's processor). Opening another effect swaps the module, not the rack's height.
 */
 std::unique_ptr<osp::plugin::rack::Module> createFxRack (osp::plugin::InstrumentHost& host);
+/** The same rack for one named effect of `host`, whatever fxRackShown() says: for an instrument
+    that shows several hosts' effects in one process (each rack bound to its own). The rack
+    reads the instrument through FxRackSource (FxRackSource.h) and nothing else. (A name of its
+    own: createFxRack stays the plain function a product lists among its racks.) */
+std::unique_ptr<osp::plugin::rack::Module> createFxRackFor (osp::plugin::InstrumentHost& host, fx::InstanceId id);
 
-/** Shows `id`'s rack (the original four: their own racks, DRIVE its popover). */
+/** Shows `id`'s rack (the original four: their own racks, DRIVE its popover). ANDOR ANALOG's
+    shell only (FxRackShell.cpp). */
 void openFxRack (andor::shell::ShellEditor& editor, fx::InstanceId id);
-/** The effect the FX rack shows (interface state). */
+/** ANDOR ANALOG: its engine becomes the rack's source (once, when the product is described). */
+void installShellFxRack();
+/** The effect createFxRack (host) shows (interface state), and choosing it. */
 fx::InstanceId fxRackShown();
+void setFxRackShown (fx::InstanceId id);
 
 /** Tests and screenshots: the EQ rack's graphic (if `module` shows one) analyses its spectrum
     now - the timer's step - and returns the output's loudest bin (dB); -1000 without one. */

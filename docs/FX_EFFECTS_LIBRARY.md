@@ -25,6 +25,10 @@ parameter version hint 28, appended after every existing parameter (the 165 befo
 Each effect's ON (`.on`) is its own bypass; MIX and OUTPUT are inside it (MIX against a dry
 signal delayed by the effect's latency).
 
+A setting's travel is linear unless the table (`dsp/fx/FxParameterTable`) gives it a centre:
+the value at the middle of the knob and of a host's automation lane (frequencies, times,
+ratios). Levels in dB, pans, feedbacks and percentages are linear.
+
 CONVOLUTION's impulse is built on the message thread (`AnalogEngine::updateConvolutionImpulses`:
 at prepare and from a 10 Hz timer, only when IMPULSE, DECAY, SIZE, REVERSE, NORMALIZE or the rate
 changed) and handed to the audio thread through `osp::ModelExchange` (crossfaded over 50 ms).
@@ -116,6 +120,18 @@ what plays. The rail carries the preset browser, a save key beside it, the "..."
 
 Meters read the engine's processor (`AnalogEngine::fxProcessor`); before any sound they are empty,
 never synthetic.
+
+### What the rack depends on
+
+`FxRack.cpp` reads the instrument through `osp::plugin::InstrumentHost` (the parameters, by
+`analog.fx.<type>.<n>.<name>`) and `FxRackSource` (FxRackSource.h: the running processor whose
+meters the graph draws, a CONVOLUTION's impulse, the rack's page / preset memory, its heading)
+and nothing else. ANDOR ANALOG's engine is the source behind its shell (`FxRackShell.cpp`,
+which also holds `openFxRack (ShellEditor&)`); a host that implements `FxRackSource` itself
+needs nothing. `createFxRackFor (host, id)` builds the rack of one named effect. The effects'
+settings are defined once, in the engine library (`dsp/fx/FxParameterTable`): the host
+parameters are made from that table, and another instrument that plays these processors
+offers the same settings from it.
 
 ## Quick settings
 
