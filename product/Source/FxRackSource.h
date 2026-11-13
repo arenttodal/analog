@@ -17,7 +17,7 @@ namespace andor::analog
 namespace fx
 {
     class Processor;
-    class Impulse;
+    struct Impulse;   // (a struct: MSVC's names tell the two apart, and a mismatch does not link)
 }
 
 /**
