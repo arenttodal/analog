@@ -6430,7 +6430,7 @@ TEST_CASE ("analog: RETRO - uninserted by default; its rack shows each personali
         CHECK (n.fx.type != fx::Type::retro);
     CHECK (p.parameters.getParameter ("analog.fx.retro.1.mode") != nullptr);
     CHECK (p.parameters.getParameter ("analog.fx.retro.2.seed") != nullptr);
-    CHECK (p.parameters.getRawParameterValue ("analog.fx.retro.1.mix")->load() == Approx (65.0f));
+    CHECK (p.parameters.getRawParameterValue ("analog.fx.retro.1.mix")->load() == Approx (100.0f));   // (fully wet by default)
     CHECK (p.parameters.getRawParameterValue ("analog.fx.retro.1.noise.level")->load() == Approx (-96.0f));   // (noise off)
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
@@ -6440,8 +6440,32 @@ TEST_CASE ("analog: RETRO - uninserted by default; its rack shows each personali
     auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
     REQUIRE (view != nullptr);
     view->setSize (1180, 330);
+    // A slot used before (its MIX and CHARACTER moved): added, it starts as Warm Tape I at 100 %.
+    p.parameters.getParameter ("analog.fx.retro.1.mix")->setValueNotifyingHost (0.3f);
+    p.parameters.getParameter ("analog.fx.retro.1.crackle")->setValueNotifyingHost (0.8f);
     REQUIRE (view->insertNew (fx::Type::retro));
     const fx::InstanceId id { fx::Type::retro, 0 };
+    {
+        const auto& factory = andor::analog::fxpresets::factory (fx::Type::retro);
+        REQUIRE_FALSE (factory.empty());
+        CHECK (factory.front().name == "Warm Tape I");
+        CHECK (andor::analog::fxpresets::matches (p, id, factory.front()));
+        CHECK (p.parameters.getRawParameterValue ("analog.fx.retro.1.mix")->load() == Approx (100.0f));
+        CHECK (p.parameters.getRawParameterValue ("analog.fx.retro.1.crackle")->load() == Approx (0.0f));   // (the slot's old setting gone)
+        // Every RETRO factory preset is fully wet.
+        for (const auto& preset : factory)
+        {
+            INFO (preset.name);
+            bool mix = false;
+            for (const auto& [name, value] : preset.values)
+                if (name == "mix")
+                {
+                    mix = true;
+                    CHECK (value == Approx (100.0f));
+                }
+            CHECK (mix);
+        }
+    }
     view->openEditor (id);
     ui.refreshNow();
     auto* module = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (Kind::fx));

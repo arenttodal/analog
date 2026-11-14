@@ -239,7 +239,7 @@ namespace
             case Type::retro:
                 // V2 (version hint 29): docs/FX_EFFECTS_LIBRARY.md, RETRO. CHARACTER and WEAR are
                 // macros over the detail values (deriveRetro), never written into them.
-                common (o, &Settings::retro, 65.0f);
+                common (o, &Settings::retro, 100.0f);   // (fully wet: the medium is the sound)
                 o.push_back (choice ("mode", "Mode", { "Tape", "Vinyl", "Digital" }, 0, [] (Settings& s, int k, float v) { AT (retro).mode = index (v); }));
                 o.push_back (choice ("tape.model", "Tape Model", { "Cassette", "Studio Reel" }, 0, [] (Settings& s, int k, float v) { AT (retro).tapeModel = index (v); }));
                 o.push_back (choice ("vinyl.rpm", "Vinyl Speed", { juce::String::fromUTF8 ("33\xe2\x85\x93"), "45", "78" }, 0, [] (Settings& s, int k, float v) { AT (retro).rpm = index (v); }));

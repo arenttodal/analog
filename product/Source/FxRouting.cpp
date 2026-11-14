@@ -1,5 +1,6 @@
 #include "FxRouting.h"
 #include "FxIdentity.h"
+#include "FxParameters.h"
 #include "FxPresets.h"
 #include "FxRack.h"
 #include "AnalogEngine.h"
@@ -794,6 +795,17 @@ bool FxRoutingView::insertNew (Type type)
         path.clear(), index = static_cast<int> (g.chain.size());
     if (! fx::insertEffect (g, path, index, fx::Node::effect (*id)) || ! apply (g, juce::String ("Add ") + fx::typeName (type)))
         return false;
+    if (type == Type::retro)
+    {
+        // A RETRO added starts fresh as its first factory preset, Warm Tape I at MIX 100 % -
+        // never a slot's settings left from an earlier use (the owner's default).
+        for (const auto& spec : fxparams::specsOf (type))
+            if (spec.name != "on")
+                if (auto* p = host.apvts().getParameter (fxparams::idOf (*id, spec.name)))
+                    p->setValueNotifyingHost (p->getDefaultValue());
+        if (const auto& presets = fxpresets::factory (type); ! presets.empty())
+            fxpresets::apply (host, *id, presets.front());
+    }
     selected = id;
     showLibrary (false);
     return true;
