@@ -144,6 +144,11 @@ public:
     void setPlayedKey (int note, int velocity) noexcept { modRuntime.setInputNote (note, velocity); }
     /** The newest sounding voice's modulation (the panel's meters), or null. */
     const osp::mod::VoiceState* newestModulation() const noexcept;
+    /** Universal modulation-aware visual feedback: the representative voice's offset for
+        destination `d` as its modulation moves it now (the newest sounding voice, as the
+        modulation display shows it). False: no voice sounds, or no route reaches `d` per voice.
+        Audio thread, after rendering (it reads the voices' own modulation state). */
+    bool representativeOffset (osp::mod::Dest d, double& offset) const noexcept;
 
     /** The arpeggiator's card lanes (the shell's per-card arpeggiator): while on, a note's MIDI
         channel names the cards it sounds on, as 1 + a mask (bit 0 card A: OSC 1 and the

@@ -363,6 +363,12 @@ namespace andor::analog::params
         /** Moves the reader's value `index` by `offset` (normalised, clamped at its ends): what a
             USER macro's assignments add (real-time safe). */
         void moveIndex (Values& raw, int index, double offset) const noexcept;
+        /** The reader's index of product destination k (-1: none); how many values it reads. */
+        int destinationIndexOf (int k) const noexcept
+        {
+            return k >= 0 && k < static_cast<int> (destinationIndex.size()) ? destinationIndex[static_cast<std::size_t> (k)] : -1;
+        }
+        int size() const noexcept { return static_cast<int> (values.size()); }
 
     private:
         float value (int index) const noexcept;

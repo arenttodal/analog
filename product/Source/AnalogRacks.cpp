@@ -81,7 +81,10 @@ namespace filtergraph
 
 namespace
 {
-    float plain (InstrumentHost& h, const juce::String& id) { return h.parameterValue (id); }
+    /** What the rack's pictures draw: the value the DSP plays (modulation included; the
+        representative voice's for a per-voice control) when the engine publishes it, else the
+        stored one - a modulated control moves its picture as turning it by hand would. */
+    float plain (InstrumentHost& h, const juce::String& id) { return InstrumentHost::shownValue (h.apvts(), id); }
     int choice (InstrumentHost& h, const juce::String& id) { return juce::roundToInt (h.parameterValue (id)); }
 
     /** The parameter's own text for a value (its unit added when the text lacks it). */

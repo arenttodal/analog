@@ -15,7 +15,9 @@ using namespace osp::plugin;
 
 namespace
 {
-    float value (InstrumentHost& host, const juce::String& id) { return host.parameterValue (id); }
+    /** What the display draws: the value the DSP plays (SHAPER SMOOTH may be modulated) when the
+        engine publishes it, else the stored one. */
+    float value (InstrumentHost& host, const juce::String& id) { return InstrumentHost::shownValue (host.apvts(), id); }
     juce::RangedAudioParameter& parameter (InstrumentHost& host, const juce::String& id) { return *host.apvts().getParameter (id); }
     bool isBlack (int key) noexcept
     {

@@ -7,6 +7,7 @@
 
 #include "Oscillator.h"
 #include <limits>
+#include <map>
 #include <utility>
 
 namespace andor::analog
@@ -891,6 +892,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // The knobs as they are, the instrument's own controls moved by their routes (global
     // sources: one value for the whole instrument), and ANDOR OSP's macros likewise.
     reader.snapshot (raw);
+    rawStored = raw;                // (what the knobs say: the effective values are compared with it)
     applyUserMacros (raw, total);   // USER MACROS: before the routes (they move the knob's base)
     if (modulated)
     {
@@ -1104,6 +1106,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             left[i] = 0.5f * (left[i] + scratch[static_cast<std::size_t> (i)]);
     publishGrains();
     publishModulationView();
+    publishEffective (total);
     {
         const auto& gm = synth.auxMorphState();
         gmRunning.store (synth.auxMorphActive(), std::memory_order_relaxed);
@@ -1112,6 +1115,54 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         for (int b = 0; b < GlobalMorph::bandCount; ++b)
             gmBands[static_cast<std::size_t> (b)].store (gm.bandGainDb (b), std::memory_order_relaxed);
     }
+}
+
+void AnalogEngine::publishEffective (int numSamples) noexcept
+{
+    // Universal modulation-aware visual feedback. What the voices play per voice: the
+    // representative voice's (the newest sounding) moved values, as moveControl gives them to
+    // it; what the whole instrument plays: `raw` after USER MACROS and the global routes. A
+    // value no different from the knob is not published (the pictures draw the knob then).
+    effective.beginBlock (numSamples, hostRateForTelemetry);
+    const int n = std::min ({ reader.size(), static_cast<int> (raw.size()), osp::EffectiveValues::capacity });
+    voicePublished.fill (false);
+    if (modulated)
+    {
+        double offset = 0.0;
+        for (int k = 0; k < osp::mod::productDestCount(); ++k)
+        {
+            const auto d = osp::mod::productDest (k);
+            if (osp::mod::destInfo (d).owner != osp::mod::Owner::voice || ! synth.representativeOffset (d, offset))
+                continue;
+            const int i = reader.destinationIndexOf (k);
+            if (i < 0 || i >= n)
+                continue;
+            const auto at = static_cast<std::size_t> (i);
+            rawScratch[at] = raw[at];
+            reader.move (rawScratch, k, offset);
+            effective.publish (i, rawScratch[at]);
+            voicePublished[at] = true;
+        }
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        const auto at = static_cast<std::size_t> (i);
+        if (voicePublished[at])
+            continue;
+        if (raw[at] != rawStored[at])
+            effective.publish (i, raw[at]);
+        else
+            effective.clear (i);
+    }
+}
+
+bool AnalogEngine::effectiveValue (const juce::String& parameterId, osp::EffectiveValues::Reading& out) const
+{
+    // (message thread: the reader's index of each ID asked for, found once)
+    auto it = effectiveIndex.find (parameterId);
+    if (it == effectiveIndex.end())
+        it = effectiveIndex.emplace (parameterId, params::readerIndexOf (parameterId)).first;
+    return it->second >= 0 && effective.read (it->second, out);
 }
 
 void AnalogEngine::setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept
@@ -1384,6 +1435,20 @@ HybridType AnalogEngine::layer2Type() const
     return static_cast<HybridType> (std::clamp (juce::roundToInt (type != nullptr ? type->load() : 1.0f), 0, 3));
 }
 
+Patch AnalogEngine::shownPatch (const params::Reader& r) const
+{
+    // The patch the card pictures draw: each value the engine plays now where it publishes one
+    // (modulation, USER macros; the representative voice's per-voice values), else stored.
+    params::Reader::Values values {};
+    r.snapshot (values);
+    const int n = std::min ({ r.size(), static_cast<int> (values.size()), osp::EffectiveValues::capacity });
+    osp::EffectiveValues::Reading v;
+    for (int i = 0; i < n; ++i)
+        if (effective.read (i, v))
+            values[static_cast<std::size_t> (i)] = v.value;
+    return r.read (values);
+}
+
 bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const
 {
     if (layer == 1 && layer2Shown())
@@ -1404,7 +1469,7 @@ bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTree
         }
         params::Reader r;
         r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));
-        auto p = r.read();
+        auto p = shownPatch (r);
         const auto& h = p.hybrid2;
         if (type == HybridType::noise)
         {
@@ -1447,7 +1512,7 @@ bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTree
         // OSC 3 alone (OSC 2's picture with OSC 3's settings), or NOISE's.
         params::Reader r;
         r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));
-        auto p = r.read();
+        auto p = shownPatch (r);
         if (p.hybridType == HybridType::noise)
         {
             cycle = noisePictureOf (p);
@@ -1478,7 +1543,7 @@ bool AnalogEngine::sourcePicture (int layer, const juce::AudioProcessorValueTree
     params::Reader r;
     r.attach (const_cast<juce::AudioProcessorValueTreeState&> (parameters));   // reads only
     // Three engines: each oscillator's card pictures that oscillator alone.
-    cycle = oscillatorPictureOf (r.read(), layer == 2 ? 2 : 1);
+    cycle = oscillatorPictureOf (shownPatch (r), layer == 2 ? 2 : 1);
     return true;
 }
 

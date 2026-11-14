@@ -511,6 +511,20 @@ const osp::mod::VoiceState* Synth::newestModulation() const noexcept
     return newest != nullptr ? &newest->mod : nullptr;
 }
 
+bool Synth::representativeOffset (osp::mod::Dest d, double& offset) const noexcept
+{
+    if (! voiceRoutes || ! modRuntime.compiled.has (d))
+        return false;
+    const Voice* newest = nullptr;
+    for (const auto& v : voices)
+        if (v.active && v.modulated && (newest == nullptr || v.order > newest->order))
+            newest = &v;
+    if (newest == nullptr)
+        return false;
+    offset = offsetOf (*newest, d);
+    return true;
+}
+
 int Synth::collectGrains (int card, LiveGranulator::GrainDot* out, int max) const noexcept
 {
     if (! (card == 1 ? current.granular2 : current.granular))

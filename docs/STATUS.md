@@ -101,6 +101,17 @@
 >     follows, capped at the screen, where the instrument scales inside (both instruments).
 >   - Each card's EQ shows the live spectrum of what plays through it (ANDOR OSP's card EQ
 >     picture), tapped only while it shows (`[card-eq-spectrum]`).
+>   - Universal modulation-aware visual feedback (OSP docs/EFFECTIVE_VALUES.md, with its
+>     inventory): the pictures draw what plays. AnalogEngine publishes every value its block
+>     moved (USER macros, global routes: MOVEMENT, DRIVE, SPACE, ECHO, MIX, every global product
+>     destination) and each per-voice product destination as the newest sounding voice plays
+>     it. Following it: MOVEMENT (both lanes, every mode), DRIVE, ECHO, SPACE, the FILTER rack
+>     (resonance, drive, bias, ...), MORPH, SHAPER DNA, the oscillator cards' waveforms, the
+>     halos' live dot (summed routes, clamps, span trail) and the header MIX node. The knobs
+>     keep their stored values; presets keep the knob. Tests `[effective]` (SHAPER lanes A/B
+>     pixel-identical at a modulated and a hand-set 80 %; OSC 1 WIDTH per voice; two routes
+>     summed and clamped). OPEN: ANDOR OSP's layer destinations (grains, amp ADSR) on cards A
+>     and B; DAW checks UNVERIFIED (OWNER TEST).
 >   - D ARP (docs/aux/D_ARP_FOLLOWER.md): in KONTAKT and keyed NOISE, ARP on / off and FOLLOW
 >     A B C on the strip before RACK and in the AUX rack. D plays one arpeggiator lane - LINK on:
 >     the shared pattern; LINK off: the card chosen, even while that card's own arpeggio is off -

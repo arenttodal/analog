@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "EqSpectrum.h"
 
 #include "AnalogParameters.h"
@@ -99,6 +101,7 @@ public:
     bool arpModulation (osp::mod::Dest dest, double& offset) const noexcept override { return synth.sharedOffset (dest, offset); }
     void setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& played) noexcept override;
     void setAuxNotes (const juce::MidiBuffer* notes) noexcept override { auxNotes = notes; }
+    bool effectiveValue (const juce::String& parameterId, osp::EffectiveValues::Reading& out) const override;
     /** The per-card arpeggiator's lanes: shown A is OSC 1, B OSC 2, C the hybrid (the synth's bits). */
     void setCardRouting (bool on) noexcept override { synth.setCardRouting (on); }
     /** Tests: the synth as it plays (its voices' views). */
@@ -358,6 +361,15 @@ private:
     void moveControl (Patch& patch, int k, double offset) const noexcept override { reader.moveControl (patch, raw, k, offset); }
     void publishModulationView() noexcept;
     params::Reader::Values raw {};
+    // Universal modulation-aware visual feedback: what plays, published after each block -
+    // the global moves (`raw` against its unmoved copy) and the representative voice's own.
+    params::Reader::Values rawStored {}, rawScratch {};
+    std::array<bool, params::Reader::maxValues> voicePublished {};
+    osp::EffectiveValues effective;
+    void publishEffective (int numSamples) noexcept;
+    /** (message thread) The patch the pictures draw: published effective values over stored. */
+    Patch shownPatch (const params::Reader& r) const;
+    mutable std::map<juce::String, int> effectiveIndex;   ///< (message thread: IDs asked for -> the reader's index)
     bool modulated = false;
 
     // USER MACROS: the state (message thread), its compiled table and its hand-over, and the
