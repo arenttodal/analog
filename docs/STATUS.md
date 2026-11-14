@@ -87,6 +87,20 @@
 >     unchanged to the pixel (`[ampenv]`, both instruments).
 >   - ARP and SUB in capitals on the stacked ARP / SUB keys (the owner); ANDOR OSP's single key
 >     (no companion) unchanged.
+>   - ANDOR Learn V1 merged (`feature/andor-learn-v1`) and brought up to date: Quick Start and
+>     MORPH revised (C1 / C2, CORE / USER, ARP and SUB, AUX D; MORPH's lamp, MORPH TO), two new
+>     lessons (Make your own macro; Play your DAW through D), 21 help areas (docs/LEARN_V1.md).
+>   - Card C's second layer: a recording dropped on card C while C2 shows loads into C2 (it
+>     went to C1's recording, out of sight) - `Engine::takeRecording` (`[c2]`).
+>   - A preset loaded with AUX open: card C stays a card and D's knobs stay in C's zone (a state
+>     load now tells the engine its recording is gone; the strip takes C's column from A's and
+>     B's) - `[presetlayout]`.
+>   - RETRO fully wet: MIX 100 % by default and in all 13 factory presets; a RETRO added starts
+>     as Warm Tape I at 100 %. Sessions keep the MIX they stored.
+>   - The window's width is never changed by opening anything (only its corner): the height
+>     follows, capped at the screen, where the instrument scales inside (both instruments).
+>   - Each card's EQ shows the live spectrum of what plays through it (ANDOR OSP's card EQ
+>     picture), tapped only while it shows (`[card-eq-spectrum]`).
 >
 >   Addendum 05 (`feature/aux-live-input`, docs/aux/ADDENDUM_05.md):
 >   - D LIVE INPUT: the DAW's sidechain ("AUX D Live Input", a VST3 auxiliary bus, off by
