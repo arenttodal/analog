@@ -2,6 +2,7 @@
 // factory sounds) and its engine. Started by tools/create_andor_instrument.py from
 // shared/andor-shell/template.
 
+#include "AnalogLearn.h"
 #include "AnalogEngine.h"
 #include "AnalogMaterialsData.h"
 #include "AnalogParameters.h"
@@ -530,6 +531,9 @@ const ProductInfo& productInfo()
             if (host.parameterValue (andor::analog::params::vcaMode) >= 0.5f)
                 host.setParameterValue (andor::analog::params::vcaMode, 0.0f);
         };
+        // ANDOR Learn (docs/LEARN_V1.md): guided lessons and Learn mode, two items in the header
+        // menu. Interface only: no parameter, no state, nothing drawn until asked for.
+        p.learn = andor::analog::learnDescriptor();
         p.stateVersion = 23;   // (23: D / AUX appended, off, and its engine child (its recording, its hosted instrument): absent = none - nothing to migrate; 22: EXPERIMENT - card C's EXTERNAL type appended (indices kept) and its ExternalInstrument engine child: absent = none - nothing to migrate; 21: RHYTHMIC MORPH appended, off; C RHYTHM a 13th route source - nothing to migrate; 20: SATELLITE appended, every card off - nothing to migrate; 19: the USER macros appended, no assignment - nothing to migrate; 18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
