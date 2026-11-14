@@ -11578,3 +11578,104 @@ TEST_CASE ("MACRO DESTINATION: a real right-click (the right button down as the 
         }
     CHECK (engineOfShell (rig.p).userMacros().find (0, params::osc1Level) == 0);
 }
+
+TEST_CASE ("analog: the AMP envelope's picture follows A D S R's modulation (VEL on DECAY), the set shape dashed under it", "[analog][modulation][ampenv]")
+{
+    // The owner: VEL routed to DECAY changed the sound, but the AMP picture kept drawing the
+    // knob's set value. It now draws the shape the newest note plays (the halos' own reading),
+    // with the set shape as a dashed line carrying the handles; with nothing sounding (or nothing
+    // routed) the picture is exactly the set one.
+    using namespace osp::plugin;
+    ShellProcessor p;
+    setValue (p, "sustainLevel", 0.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    editor->setVisible (true);
+    auto& amp = ui.modulationPanel().ampEnvelope();
+    auto pixels = [] (const juce::Image& a, const juce::Image& b) {
+        int differing = 0;
+        for (int y = 0; y < a.getHeight(); ++y)
+            for (int x = 0; x < a.getWidth(); ++x)
+                differing += a.getPixelAt (x, y) != b.getPixelAt (x, y) ? 1 : 0;
+        return differing;
+    };
+    auto snapshot = [&] {
+        ui.refreshNow();
+        return amp.createComponentSnapshot (amp.getLocalBounds(), true, 1.0f);
+    };
+    p.prepareToPlay (rate, block);
+    juce::AudioBuffer<float> buffer (2, block);
+    auto run = [&] (juce::MidiBuffer midi, int blocks) {
+        for (int i = 0; i < blocks; ++i)
+        {
+            p.processBlock (buffer, midi);
+            midi.clear();
+        }
+    };
+    run ({}, 2);
+    const auto set = snapshot();
+    p.addModulationRoute (osp::mod::Source::vel, osp::mod::Dest::ampDecay, 30.0f);
+    run ({}, 2);
+    CHECK (pixels (set, snapshot()) == 0);   // (routed, nothing sounding: the set picture)
+
+    // A note held at velocity 100: DECAY plays longer, and the picture shows it.
+    juce::MidiBuffer on;
+    on.addEvent (juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0);
+    run (on, 4);
+    ui.refreshNow();
+    const float decaySet = p.parameters.getParameter ("decay")->getValue();
+    const float decayLive = ui.modulationOverlay().livePosition ("decay");
+    CHECK (decayLive > decaySet + 0.02f);
+    CHECK (ui.modulationOverlay().livePosition ("attack") == Catch::Approx (p.parameters.getParameter ("attack")->getValue()));
+    const auto playing = snapshot();
+    CHECK (pixels (set, playing) > 50);
+
+    // Released and silent again: the set picture, exactly.
+    juce::MidiBuffer off;
+    off.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+    run (off, static_cast<int> (4.0 * rate / block));
+    CHECK (pixels (set, snapshot()) == 0);
+
+    if (const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR"))
+    {
+        juce::File folder (dir);
+        folder.createDirectory();
+        for (const auto& [name, image] : { std::pair<const char*, const juce::Image*> { "ampenv-set.png", &set }, { "ampenv-vel-decay.png", &playing } })
+        {
+            const auto big = image->rescaled (image->getWidth() * 2, image->getHeight() * 2);
+            juce::FileOutputStream out (folder.getChildFile (name));
+            out.setPosition (0);
+            out.truncate();
+            juce::PNGImageFormat().writeImageToStream (big, out);
+        }
+    }
+}
+
+TEST_CASE ("MACRO DESTINATION: assigning from a control's menu, or dragging a range on its halo, never switches the macro tab", "[analog][usermacro][macrodest][ui][banktab]")
+{
+    // The owner: after Assign to Macro (or touching a halo's range) the panel jumped to USER.
+    // The tab changes only when CORE / USER is clicked; the chosen macro's range still shows on
+    // its halo, with live handles, on whichever tab is shown.
+    MacroDestRig rig;
+    REQUIRE (rig.ui->macroBankShown() == 0);
+    rig.choose (params::osc1Level, "Macro 1");
+    rig.ui->refreshNow();
+    CHECK (rig.ui->macroBankShown() == 0);
+    CHECK (rig.p.macroBank() == 0);
+    CHECK (rig.overlay().macroFocus() == 0);
+    CHECK (rig.overlay().macroHandle (params::osc1Level, 0, 1) != juce::Point<float>());
+    // A range dragged on the halo: still CORE.
+    rig.ui->pressAnywhere (rig.level);   // (focus dropped first: the drag itself chooses the macro)
+    rig.ui->refreshNow();
+    rig.dragEnd (params::osc1Level, 0, 1, 0.85f);
+    rig.ui->refreshNow();
+    CHECK (rig.ui->macroBankShown() == 0);
+    CHECK (engineOfShell (rig.p).userMacros().maps[0][0].map.high == Approx (0.85f).margin (0.01f));
+    // The tabs themselves still switch.
+    rig.ui->showMacroBank (1);
+    CHECK (rig.ui->macroBankShown() == 1);
+    rig.ui->showMacroBank (0);
+    CHECK (rig.ui->macroBankShown() == 0);
+    resetBankPreference (rig.p);
+}

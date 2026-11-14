@@ -76,6 +76,15 @@
 >     opened nothing. Its mouseDown now looks for any destination on a right-click, as its
 >     hitTest does. Checked in the real standalone (menu, Assign to Macro, Macro 1 assigned);
 >     test `[rightclick]` routes the press as JUCE does (fails without the fix).
+>   - The macro tab changes only when CORE / USER is clicked (the owner): Assign to Macro from a
+>     control's menu and dragging a range on a halo no longer switch to USER; the chosen macro's
+>     range and handles show on the halo on either tab (`[banktab]`). Show Macro Assignment
+>     Details still opens USER (it shows the macro's own panel there).
+>   - The AMP envelope's picture follows A D S R's modulation (the owner: VEL on DECAY was heard,
+>     not seen): while a note sounds it draws the shape that note plays - routes and USER macros,
+>     the halos' own reading (`ModulationOverlay::livePosition`) - with the set shape dashed
+>     under it, carrying the handles; nothing sounding or nothing routed: the set picture,
+>     unchanged to the pixel (`[ampenv]`, both instruments).
 >
 >   Addendum 05 (`feature/aux-live-input`, docs/aux/ADDENDUM_05.md):
 >   - D LIVE INPUT: the DAW's sidechain ("AUX D Live Input", a VST3 auxiliary bus, off by
