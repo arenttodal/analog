@@ -86,6 +86,8 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
     const auto internalBlock = static_cast<std::size_t> (maxBlock * oversampling);
     mixL.assign (internalBlock, 0.0f);
     mixR.assign (internalBlock, 0.0f);
+    for (auto& b : eqTapBuffer)
+        b.assign (internalBlock, 0.0f);
     halfL.assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
     halfR.assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
     // EXPERIMENT: card C's external instrument's bus and the GLOBAL MORPH (idle unless used).
@@ -2274,15 +2276,37 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
     {
         const float raw = partB;
         partB = cardC (v, raw);
-        mix = cardA (v, mix - raw) + partB;
+        const float aIn = mix - raw;
+        const float aOut = cardA (v, aIn);
+        mix = aOut + partB;
+        if (eqTappingAny)
+        {
+            tapCard (0, aIn, aOut);
+            tapCard (2, raw, partB);
+        }
     }
     else
+    {
+        const float in = mix;
         mix = cardA (v, mix);   // (both cards' EQ and DAMPEN off: the sum, exactly as before)
+        if (eqTappingAny)
+        {
+            if (legacyCards)
+                tapCard (0, in, mix);   // (an older patch: A's EQ on the whole sum)
+            else
+            {
+                tapCard (0, in - partB, in - partB);   // (nothing on: each card's part passes)
+                tapCard (2, partB, partB);
+            }
+        }
+    }
     v.partB = partB * filterInputGain;
     v.partC = 0.0f;
     if (v.organicOn)
     {
         const float c = cardB (v, organic);
+        if (eqTappingAny)
+            tapCard (1, organic, c);
         mix += c;
         v.partC = c * filterInputGain;
     }
@@ -2383,17 +2407,36 @@ float Synth::sourceSample (Voice& v, float envValue, float& polyMod) noexcept
         float a = o1 * v.gain1;
         if (v.gainNoise > 0.0f)
             a += v.gainNoise * static_cast<float> (v.noise.bipolar());
-        const float b = cardC (v, v.osc2Out * v.gain2);
+        const float bIn = v.osc2Out * v.gain2;
+        const float b = cardC (v, bIn);
         v.partB = b * filterInputGain;
         v.partC = 0.0f;
-        return liveStages (v, (cardA (v, a) + b) * filterInputGain);
+        const float aOut = cardA (v, a);
+        if (eqTappingAny)
+        {
+            tapCard (0, a, aOut);
+            tapCard (2, bIn, b);
+        }
+        return liveStages (v, (aOut + b) * filterInputGain);
     }
     float mix = o1 * v.gain1 + v.osc2Out * v.gain2;
     if (v.gainNoise > 0.0f)
         mix += v.gainNoise * static_cast<float> (v.noise.bipolar());
     v.partB = v.osc2Out * v.gain2 * filterInputGain;
     v.partC = 0.0f;
-    return liveStages (v, cardA (v, mix) * filterInputGain);
+    const float out = cardA (v, mix);
+    if (eqTappingAny)
+    {
+        const float b = v.osc2Out * v.gain2;
+        if (legacyCards)
+            tapCard (0, mix, out);   // (an older patch: A's EQ on the whole sum)
+        else
+        {
+            tapCard (0, mix - b, mix - b);   // (nothing on: each card's part passes)
+            tapCard (2, b, b);
+        }
+    }
+    return liveStages (v, out * filterInputGain);
 }
 
 float Synth::liveStages (Voice& v, float x) noexcept
@@ -2572,6 +2615,7 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             const auto ks = static_cast<std::size_t> (k);
             const float env = v.env.next();
             scratchEnv[ks] = env;
+            eqTapAt = tapBase + done + k;   // (the cards' EQ spectrum, while asked for)
             scratchSource[ks] = sourceSample (v, env, scratchPolyMod[ks]);
             if (modes || sendTaps || satTwinMask != 0)
             {
@@ -4109,6 +4153,16 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     dnaWanted = current.shaperDna.enabled && current.effects.movementMode == osp::MovementMode::shaper && current.movementA.on && router.movementOnMain();
     effects.setShaperHandoff (dnaWanted);
 
+    // The cards' EQ spectrum: tapped this block only for a card whose EQ is on screen.
+    eqTappingAny = false;
+    for (std::size_t l = 0; l < 3; ++l)
+    {
+        const int left = eqTapRequest[l].load (std::memory_order_relaxed);
+        eqTapping[l] = left > 0;
+        eqTappingAny = eqTappingAny || eqTapping[l];
+        if (left > 0)
+            eqTapRequest[l].store (std::max (0, left - numSamples), std::memory_order_relaxed);
+    }
     renderRhythm (numSamples);   // (first: C RHYTHM is this block's, ready for its control periods)
     renderAux (numSamples);      // (D RHYTHM's loop and envelope, likewise)
     int pos = 0;
@@ -4137,6 +4191,27 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         blockOffset += chunk;
         clock += static_cast<std::uint64_t> (chunk);
     }
+
+    // The cards' EQ spectrum: the block's sums into their taps, the sums cleared.
+    if (eqTappingAny)
+        for (std::size_t l = 0; l < 3; ++l)
+            if (eqTapping[l])
+                for (std::size_t side = 0; side < 2; ++side)
+                {
+                    // (down to the host rate: each host sample the mean of its internal ones -
+                    // the analyser's bins as fine as the routing EQUALIZER's)
+                    auto& sum = eqTapBuffer[l * 2 + side];
+                    auto& tap = (*eqTaps)[l * 2 + side];
+                    const float k = 1.0f / static_cast<float> (oversampling);
+                    for (int i = 0; i < numSamples; ++i)
+                    {
+                        float x = 0.0f;
+                        for (int j = 0; j < oversampling; ++j)
+                            x += sum[static_cast<std::size_t> (i * oversampling + j)];
+                        tap.push (k * x, k * x);
+                    }
+                    std::fill (sum.begin(), sum.begin() + total, 0.0f);
+                }
 
     // Down to the host rate.
     if (oversampling == 4)

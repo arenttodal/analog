@@ -10,6 +10,7 @@
 #include "SampleSource.h"
 #include "ZonePlayer.h"
 #include "VoiceEq.h"
+#include "fx/Effects.h"
 #include "OtaFilter.h"
 #include "morph/LiveMorph.h"
 #include "morph/GlobalMorph.h"
@@ -352,6 +353,20 @@ public:
         std::atomic<float> velocity { 0.0f }, baseNote { 0.0f }, envDepth { 0.0f }, env { 0.0f }, envPeak { 0.0f }, modNote { 0.0f }, cutoffNote { 0.0f };
     };
     const FilterTap& filterTap (int slot) const noexcept { return filterTaps[static_cast<std::size_t> (std::clamp (slot, 0, maxVoices - 1))]; }
+    /** The cards' EQ spectrum (telemetry, read only, any thread): the shell's layer (0 card A,
+        1 card C, 2 card B), what goes into its EQ (`output` false) or what comes out - the
+        card's part summed over the sounding voices, at the host rate (eqSpectrumRate).
+        Tapped only while asked for (requestEqSpectrum, about half a second each time): nothing
+        is done for it otherwise, and nothing a voice plays changes. */
+    const fx::SpectrumTap& eqSpectrumTap (int layer, bool output) const noexcept
+    {
+        return (*eqTaps)[static_cast<std::size_t> (std::clamp (layer, 0, 2) * 2 + (output ? 1 : 0))];
+    }
+    void requestEqSpectrum (int layer) noexcept
+    {
+        eqTapRequest[static_cast<std::size_t> (std::clamp (layer, 0, 2))].store (static_cast<int> (0.5 * hostRate), std::memory_order_relaxed);
+    }
+    double eqSpectrumRate() const noexcept { return hostRate; }
     /** The cutoff's range as the filters reach it (MIDI notes: the coefficient table's ends). */
     float cutoffNoteLow() const noexcept { return tableLowNote; }
     float cutoffNoteHigh() const noexcept { return tableHighNote; }
@@ -652,6 +667,21 @@ private:
     std::array<Voice, maxVoices> voices;
 
     std::array<FilterTap, maxVoices> filterTaps;   ///< (telemetry: FilterTap)
+    // The cards' EQ spectrum (telemetry): [layer * 2] in, [layer * 2 + 1] out; the block's sums
+    // (internal rate) while a layer is asked for, pushed once a block.
+    std::unique_ptr<std::array<fx::SpectrumTap, 6>> eqTaps = std::make_unique<std::array<fx::SpectrumTap, 6>>();
+    std::array<std::atomic<int>, 3> eqTapRequest {};
+    std::array<bool, 3> eqTapping {};
+    bool eqTappingAny = false;
+    std::array<std::vector<float>, 6> eqTapBuffer;
+    int eqTapAt = 0;   ///< (the internal sample of the block the voice is at)
+    void tapCard (int layer, float in, float out) noexcept
+    {
+        if (! eqTapping[static_cast<std::size_t> (layer)])
+            return;
+        eqTapBuffer[static_cast<std::size_t> (layer * 2)][static_cast<std::size_t> (eqTapAt)] += in;
+        eqTapBuffer[static_cast<std::size_t> (layer * 2 + 1)][static_cast<std::size_t> (eqTapAt)] += out;
+    }
     std::array<Drift, maxVoices> drift;
     std::uint64_t noteCounter = 0;
     std::uint64_t clock = 0;   ///< host samples rendered since reset

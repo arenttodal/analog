@@ -8210,6 +8210,9 @@ namespace
                                for (int t = 0; t < fx::typeCount; ++t)
                                    g.chain.push_back (fx::Node::effect ({ static_cast<fx::Type> (t), 0 }));
                                REQUIRE (dynamic_cast<AnalogEngine&> (q.productEngine()).setFxRoute (g));
+                               // (RETRO's MIX default is now 100 %; a session from before stores its
+                               // 65 % - every parameter is saved - and sounds as it did)
+                               setValue (q, "analog.fx.retro.1.mix", 65.0f);
                            } });
         return states;
     }
@@ -11702,4 +11705,63 @@ TEST_CASE ("MACRO DESTINATION: assigning from a control's menu, or dragging a ra
     rig.ui->showMacroBank (0);
     CHECK (rig.ui->macroBankShown() == 0);
     resetBankPreference (rig.p);
+}
+
+TEST_CASE ("analog: a card's EQ shows the spectrum of what plays through it (ANDOR OSP's card EQ picture), tapped only while it shows", "[analog][eq][ui][card-eq-spectrum]")
+{
+    ShellProcessor p;
+    auto& engine = dynamic_cast<AnalogEngine&> (p.productEngine());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    editor->setVisible (true);
+    p.prepareToPlay (rate, block);
+    juce::AudioBuffer<float> buffer (2, block);
+    auto run = [&] (juce::MidiBuffer midi, int blocks, bool tick) {
+        for (int i = 0; i < blocks; ++i)
+        {
+            p.processBlock (buffer, midi);
+            midi.clear();
+            if (tick)
+                ui.refreshNow();
+        }
+    };
+    // No card EQ open: nothing is tapped (the synth does no work for it).
+    juce::MidiBuffer on;
+    on.addEvent (juce::MidiMessage::noteOn (1, 48, static_cast<juce::uint8> (100)), 0);
+    run (on, 20, true);
+    for (int layer = 0; layer < 3; ++layer)
+        CHECK (engine.synthForTest().eqSpectrumTap (layer, true).head.load() == 0);
+    // Card A's EQ open: its spectrum fills while the note plays.
+    auto& card = ui.engineCard (0);
+    card.setEqOpen (true);
+    REQUIRE (card.eqEditorComponent() != nullptr);
+    run ({}, 40, true);
+    CHECK (engine.synthForTest().eqSpectrumTap (0, true).head.load() != 0);
+    {
+        float most = 0.0f;
+        const auto& tap = engine.synthForTest().eqSpectrumTap (0, true);
+        for (const auto& x : tap.x)
+            most = std::max (most, std::abs (x.load()));
+        INFO ("tap peak " << most << " spectrum " << engine.layerEqSpectrumPeakDb (0));
+        CHECK (most > 1.0e-3f);
+        CHECK (engine.layerEqSpectrumPeakDb (0) > -60.0f);
+    }
+    const auto playing = card.eqEditorComponent()->createComponentSnapshot (card.eqEditorComponent()->getLocalBounds(), true, 1.0f);
+    // Released and silent: the picture falls back to the floor.
+    juce::MidiBuffer off;
+    off.addEvent (juce::MidiMessage::noteOff (1, 48), 0);
+    run (off, static_cast<int> (5.0 * rate / block), true);
+    CHECK (engine.layerEqSpectrumPeakDb (0) < -90.0f);
+    if (const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR"))
+    {
+        juce::File folder (dir);
+        folder.createDirectory();
+        const auto big = playing.rescaled (playing.getWidth() * 2, playing.getHeight() * 2);
+        juce::FileOutputStream out (folder.getChildFile ("card-eq-spectrum-A.png"));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (big, out);
+    }
+    card.setEqOpen (false);
 }

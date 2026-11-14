@@ -1,4 +1,5 @@
 #include "AnalogEngine.h"
+#include "FxIdentity.h"
 
 #include "InstrumentHost.h"
 #include "fx/Effects.h"
@@ -1267,6 +1268,21 @@ juce::String AnalogEngine::engineSourcePlaceholder (int layer) const
             return "CHOOSE A SOUND\nSOUNDS, OR IMPORT A KONTAKT PATCH";
     }
     return {};
+}
+
+bool AnalogEngine::stepLayerEqSpectrum (int layer)
+{
+    if (layer < 0 || layer > 2)
+        return false;
+    synth.requestEqSpectrum (layer);   // (the taps fill while this is asked for: about half a second)
+    return eqSpectra[static_cast<std::size_t> (layer)].analyse (synth.eqSpectrumTap (layer, false), synth.eqSpectrumTap (layer, true));
+}
+
+void AnalogEngine::paintLayerEqSpectrum (int layer, juce::Graphics& g, juce::Rectangle<float> plot, const std::function<double (float)>& hzForX)
+{
+    if (layer < 0 || layer > 2)
+        return;
+    eqSpectra[static_cast<std::size_t> (layer)].paint (g, plot, hzForX, synth.eqSpectrumRate(), juce::Colour (0xff8d8c86), visualIdentityFor (fx::Type::eq).motifInk);
 }
 
 bool AnalogEngine::takeRecording (int layer, const juce::File& file, const juce::File& storeFolder)

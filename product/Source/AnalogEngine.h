@@ -1,5 +1,7 @@
 #pragma once
 
+#include "EqSpectrum.h"
+
 #include "AnalogParameters.h"
 #include "FxParameters.h"
 #include "ShellEngine.h"
@@ -74,6 +76,12 @@ public:
     /** A recording dropped on card C while its second layer is shown: that layer's (a SAMPLE),
         never the first layer's recording out of sight. */
     bool takeRecording (int layer, const juce::File& file, const juce::File& storeFolder) override;
+    /** Each card's EQ spectrum (ANDOR OSP's card EQ picture): while its EQ editor shows, the
+        synth taps that card's part before and after its EQ (summed over the voices); drawn as
+        the routing EQUALIZER rack draws its own. */
+    bool stepLayerEqSpectrum (int layer) override;
+    void paintLayerEqSpectrum (int layer, juce::Graphics& g, juce::Rectangle<float> plot, const std::function<double (float)>& hzForX) override;
+    float layerEqSpectrumPeakDb (int layer) const noexcept { return eqSpectra[static_cast<std::size_t> (std::clamp (layer, 0, 2))].peakDb(); }
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept override;
     int activeNotes() const noexcept override { return synth.activeVoices(); }
     void setShaperPattern (const osp::ShaperPattern& pattern) noexcept override { shaperPattern = pattern; }
@@ -298,6 +306,7 @@ private:
 
     int oversamplingFactor;
     Synth synth;
+    std::array<EqSpectrum, 3> eqSpectra;   ///< (message thread: the cards' EQ pictures)
     andor::analog::fxparams::Reader fxReader;   ///< the FX library's slots (analog.fx.*)
     struct ImpulseTimer final : juce::Timer
     {
