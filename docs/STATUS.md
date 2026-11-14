@@ -85,6 +85,8 @@
 >     the halos' own reading (`ModulationOverlay::livePosition`) - with the set shape dashed
 >     under it, carrying the handles; nothing sounding or nothing routed: the set picture,
 >     unchanged to the pixel (`[ampenv]`, both instruments).
+>   - ARP and SUB in capitals on the stacked ARP / SUB keys (the owner); ANDOR OSP's single key
+>     (no companion) unchanged.
 >
 >   Addendum 05 (`feature/aux-live-input`, docs/aux/ADDENDUM_05.md):
 >   - D LIVE INPUT: the DAW's sidechain ("AUX D Live Input", a VST3 auxiliary bus, off by
