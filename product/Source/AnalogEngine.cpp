@@ -1255,7 +1255,7 @@ juce::String AnalogEngine::engineSourcePlaceholder (int layer) const
         if (source2State.loading)
             return {};
         if (source2Definition == nullptr)
-            return type == HybridType::sample ? "ADD SAMPLE\nCLICK TO BROWSE" : "CHOOSE A SOUND\nSOUNDS";
+            return type == HybridType::sample ? "ADD SAMPLE\nDROP OR BROWSE" : "CHOOSE A SOUND\nSOUNDS";
         return {};
     }
     if (hybridType() == HybridType::sample && ! recordingPublished.load())
@@ -1267,6 +1267,23 @@ juce::String AnalogEngine::engineSourcePlaceholder (int layer) const
             return "CHOOSE A SOUND\nSOUNDS, OR IMPORT A KONTAKT PATCH";
     }
     return {};
+}
+
+bool AnalogEngine::takeRecording (int layer, const juce::File& file, const juce::File& storeFolder)
+{
+    // Card C shows its second layer: the drop is that layer's. A recording means "play this":
+    // the layer becomes a SAMPLE if it was something else (one host gesture, undoable).
+    if (layer != 1 || ! layer2Shown() || state == nullptr)
+        return false;
+    if (layer2Type() != HybridType::sample)
+        if (auto* type = state->getParameter (params::hybrid2Type))
+        {
+            type->beginChangeGesture();
+            type->setValueNotifyingHost (type->convertTo0to1 (static_cast<float> (HybridType::sample)));
+            type->endChangeGesture();
+        }
+    loadHybrid2File (file, storeFolder.getChildFile ("Imported"));
+    return true;
 }
 
 void AnalogEngine::removeEngineSource (int layer)

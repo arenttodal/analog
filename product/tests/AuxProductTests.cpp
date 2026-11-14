@@ -1616,3 +1616,31 @@ TEST_CASE ("AUX LIVE INPUT: switching D's source keeps every other mode's state 
     CHECK (juce::roundToInt (q.parameters.getParameter (params::auxMode)->convertFrom0to1 (q.parameters.getParameter (params::auxMode)->getValue())) == 3);
     CHECK (state.getSize() < 2 * 1024 * 1024);   // (no recorded input in it)
 }
+
+TEST_CASE ("card C's second layer shown: a recording dropped on card C is C2's, never C1's out of sight", "[analog][drop][c2]")
+{
+    // The owner (Ableton): with card C's tab 2 shown, dropping a sample did nothing visible -
+    // the drop always went to C1's recording. It now goes to the layer shown.
+    DropRig rig;
+    auto& engine = engineOf (rig.p);
+    rig.p.parameters.getParameter (params::hybrid2Enabled)->setValueNotifyingHost (1.0f);
+    rig.p.parameters.getParameter (params::hybrid2Type)->setValueNotifyingHost (
+        rig.p.parameters.getParameter (params::hybrid2Type)->convertTo0to1 (static_cast<float> (andor::analog::HybridType::instrumentPatch)));
+    rig.p.parameters.state.setProperty ("analogHybridLayer", 2, nullptr);
+    rig.ui.refreshNow();
+    REQUIRE (engine.layer2Shown());
+    CHECK (engine.engineSourcePlaceholder (1).contains ("CHOOSE A SOUND"));
+    dropOn (rig.ui, rig.ui.engineCard (1).display(), rig.loopB);
+    // C2 takes it: a SAMPLE now, its recording loading (the same path as its browse key) ...
+    CHECK (engine.layer2Type() == andor::analog::HybridType::sample);
+    CHECK (engine.hybrid2State().loading);
+    // ... and C1 got nothing.
+    CHECK_FALSE (rig.cardC());
+    CHECK (engine.sampleSourceDefinition() == nullptr);
+    // C1 shown again: a drop on card C is C1's, as ever.
+    rig.p.parameters.state.setProperty ("analogHybridLayer", 1, nullptr);
+    rig.ui.refreshNow();
+    REQUIRE_FALSE (engine.layer2Shown());
+    dropOn (rig.ui, rig.ui.engineCard (1).display(), rig.loopA);
+    CHECK (rig.cardC());
+}

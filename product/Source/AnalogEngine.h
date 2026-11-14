@@ -71,6 +71,9 @@ public:
     /** Card C empty (a SAMPLE without a recording, an INSTRUMENT PATCH without a sound): a full
         card with a faint stand-in picture and what to do. */
     juce::String engineSourcePlaceholder (int layer) const override;
+    /** A recording dropped on card C while its second layer is shown: that layer's (a SAMPLE),
+        never the first layer's recording out of sight. */
+    bool takeRecording (int layer, const juce::File& file, const juce::File& storeFolder) override;
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const Performance& performance) noexcept override;
     int activeNotes() const noexcept override { return synth.activeVoices(); }
     void setShaperPattern (const osp::ShaperPattern& pattern) noexcept override { shaperPattern = pattern; }
