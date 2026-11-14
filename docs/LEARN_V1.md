@@ -5,7 +5,7 @@ Guided lessons and a contextual Learn mode, built on the shared `shared/andor-le
 ## What the musician sees
 
 - **Two items in the top-right menu**, after Undo / Redo:
-  - **Learn ANDOR…** opens the topic browser.
+  - **Learn ANDOR…** opens the topic browser (six lessons).
   - **Learn mode** turns inspection on and off.
   - A **Learn** submenu holds **Reset learning progress**. It never resets the sound; that is the existing *Reset settings*.
 - **The invitation.** It appears once, about half a second after the editor first opens on a profile with no Learn file: *Find your sound. Learn the instrument as you play.*
@@ -26,12 +26,31 @@ Nothing is added to the instrument while none of this is shown. The window, card
 
 | ID | Title | Steps | Needs |
 |---|---|---|---|
-| `analog.quickstart` | Quick Start | 4 explanations: Sounds, Three cards, Six macros, Arpeggiator | — |
+| `analog.quickstart` | Quick Start (revision 2) | 5 explanations: Sounds, Three cards (C1 / C2), Six macros (CORE / USER), ARP and SUB, AUX D | — |
 | `analog.arp.basics` | Make a moving pattern | 8 (see below) | the per-card arpeggiator |
-| `analog.morph.basics` | Blend with MORPH | open the MORPH rack, the two sources, move MORPH, the rack | — |
+| `analog.morph.basics` | Blend with MORPH (revision 2) | open the MORPH rack, switch it on (its lamp), the two sources, move MORPH, MORPH TO (C or D), the rack | — |
+| `analog.usermacros.basics` | Make your own macro | open USER, Assign to Macro from a knob's menu, its range on the halo, turn the macro, its panel | USER macros |
+| `analog.aux.live` | Play your DAW through D | AUX D, D on + LIVE INPUT, route a track to the sidechain, D's path, MORPH TO D | the AUX strip |
 | `analog.fx.routing` | See the effect chain | open FX ROUTING, the mixer, open a tile's quick settings, the chain | — |
 
-C2, SUB, MAIN / SEND and independent REIMAGINED are not in Analog 1.x and have no lesson.
+A lesson's revision rises when its steps change; a lesson completed at an older revision is offered again as new in the browser.
+
+**Updated for the instrument as it is now** (merged into `feature/aux-live-input`, 14 Nov 2026):
+- **Completion:** each new task completes only on the musician's gesture plus a checked value:
+  - the MORPH lamp's click and `analog.morph.enabled` = 1;
+  - the CORE / USER tab's click and USER shown;
+  - Assign to Macro chosen from a control's menu and an assignment present;
+  - a USER knob turned and its value changed;
+  - a touch on D's strip with `analog.aux.enabled` = 1 and `analog.aux.mode` = LIVE INPUT.
+- **Choices made in D's source menu:** the menu is a popup the strip never hears, so a choice made there offers Continue.
+- **New shell targets** (opt-in, products without them unchanged):
+  - `arp.companion` (SUB's row);
+  - `macro.N.switch` (a macro's lamp);
+  - `macros.bank`, with the state `macros.bank.user`;
+  - `usermacro.0…5`;
+  - `aux.strip`.
+- **New user events:** `macroBank.changed` and `usermacro.assigned`.
+- **Help:** the help areas are updated (card C, MORPH, Modulation), with three new ones: SUB, CORE / USER and AUX D (21 in all).
 
 The ARP lesson:
 

@@ -166,12 +166,12 @@ namespace
 TEST_CASE ("analog learn: the catalog is valid, idle Learn adds nothing, the menu has its two items", "[learn][analog]")
 {
     Rig rig;
-    CHECK (rig.learn->catalog().lessons.size() == 4);
-    CHECK (rig.learn->catalog().findLesson ("analog.arp.basics") != nullptr);
-    // Never advertised before they ship (C2, SUB, MAIN/SEND, independent REIMAGINED).
-    for (const auto& l : rig.learn->catalog().lessons)
-        for (const char* absent : { "sub", "c2", "send", "reimagined" })
-            CHECK_FALSE (l.id.containsIgnoreCase (absent));
+    CHECK (rig.learn->catalog().lessons.size() == 6);
+    for (const char* id : { "analog.quickstart", "analog.arp.basics", "analog.morph.basics", "analog.usermacros.basics", "analog.aux.live", "analog.fx.routing" })
+    {
+        INFO (id);
+        CHECK (rig.learn->catalog().findLesson (id) != nullptr);
+    }
     CHECK (rig.learnChildren() == 0);
     juce::PopupMenu menu;
     rig.learn->addMenuItems (menu);
@@ -381,11 +381,29 @@ TEST_CASE ("analog learn: MORPH and FX Routing lessons", "[learn][analog]")
     CHECK (runner.status (0) == LessonRunner::StepStatus::done);
     rig.learn->noteAction ("next");
     REQUIRE (runner.stepIndex() == 1);
+    // Its lamp: automation switching MORPH on completes nothing; the musician's click does.
+    {
+        auto* lamp = rig.ui->macroSwitch (0);
+        REQUIRE (lamp != nullptr);
+        auto* lampWatcher = rig.learn->touchWatcher ("macro.0.switch");
+        REQUIRE (lampWatcher != nullptr);
+        CHECK (lampWatcher->watched() == lamp);
+        if (valueOf (p, andor::analog::params::morphEnabled) > 0.5f)
+            automate (p, andor::analog::params::morphEnabled, 0.0f);
+        rig.settle();
+        CHECK (runner.state() == LessonRunner::State::waitingForAction);
+        lamp->toggle();                                   // the lamp's own click (mouseUp toggles),
+        lampWatcher->mouseUp (eventAt (*lamp, {}));       // then its listeners hear it
+        CHECK (valueOf (p, andor::analog::params::morphEnabled) > 0.5f);
+        CHECK (runner.status (1) == LessonRunner::StepStatus::done);
+    }
+    rig.learn->noteAction ("next");
+    REQUIRE (runner.stepIndex() == 2);
     // Card C empty (a SAMPLE with no recording): the note says so instead of loading anything.
     if (! p.isLayerOccupied (ShellProcessor::hybridLayer) && valueOf (p, andor::analog::params::hybridType) < 0.5f)
         CHECK (rig.learn->note()->bodyText().contains ("nothing to play"));
     rig.learn->noteAction ("next");
-    REQUIRE (runner.stepIndex() == 2);
+    REQUIRE (runner.stepIndex() == 3);
     auto* knob = rig.ui->macroKnob (0);
     auto* watcher = rig.learn->touchWatcher ("macro.0");
     REQUIRE (watcher != nullptr);
@@ -400,7 +418,10 @@ TEST_CASE ("analog learn: MORPH and FX Routing lessons", "[learn][analog]")
     rig.settle();
     CHECK (runner.state() == LessonRunner::State::waitingForAction);
     watcher->mouseUp (eventAt (*knob, {}));                                  // and lets go
-    CHECK (runner.status (2) == LessonRunner::StepStatus::done);
+    CHECK (runner.status (3) == LessonRunner::StepStatus::done);
+    rig.learn->noteAction ("next");
+    REQUIRE (runner.stepIndex() == 4);
+    CHECK (rig.learn->note()->bodyText().contains ("MORPH TO"));
     rig.learn->noteAction ("next");
     rig.learn->noteAction ("finish");
     CHECK (rig.learn->store().read().lessons.at ("analog.morph.basics").status == "complete");
@@ -502,7 +523,7 @@ TEST_CASE ("analog learn: the browser lists real lessons and resumes; the invita
     rig.settle();
     auto* browser = rig.learn->browser();
     REQUIRE (browser != nullptr);
-    REQUIRE (browser->rows().size() == 4);
+    REQUIRE (browser->rows().size() == 6);
     for (const auto& row : browser->rows())
         CHECK (row.status == andor::learn::Browser::Row::Status::notStarted);
     // Start the ARP lesson from the browser, leave at step 3, come back to it.
@@ -675,12 +696,144 @@ TEST_CASE ("analog learn: screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots
         shoot ("20-morph-open");
         rig.learn->noteAction ("showme");
         rig.learn->noteAction ("continue");
-        shoot ("21-morph-sources");
+        shoot ("21-morph-switch");
+        rig.learn->noteAction ("skip");
+        shoot ("22-morph-sources");
         rig.learn->noteAction ("next");
-        shoot ("22-morph-move");
+        shoot ("22b-morph-move");
+        rig.learn->noteAction ("skip");
+        shoot ("22c-morph-to");
         rig.learn->noteAction ("close");
-        rig.ui->setArpExpanded (false);
         rig.ui->setRackExpanded (osp::plugin::rack::Kind::morph, false);
-        shoot ("23-off-after");
+        // Quick Start's new steps (ARP and SUB; AUX D).
+        REQUIRE (rig.learn->startLesson ("analog.quickstart"));
+        for (int i = 0; i < 3; ++i)
+            rig.learn->noteAction ("next");
+        shoot ("24-quickstart-arp-sub");
+        rig.learn->noteAction ("next");
+        rig.learn->noteAction ("showme");
+        shoot ("25-quickstart-aux");
+        rig.learn->noteAction ("close");
+        // Make your own macro.
+        rig.p.setMacroBank (0);
+        rig.ui->showMacroBank (0);
+        REQUIRE (rig.learn->startLesson ("analog.usermacros.basics"));
+        shoot ("26-usermacro-tab");
+        rig.ui->macroBankTab()->onChange (1);
+        rig.learn->noteAction ("next");
+        shoot ("27-usermacro-assign");
+        rig.learn->noteAction ("skip");
+        rig.learn->noteAction ("next");
+        shoot ("28-usermacro-move");
+        rig.learn->noteAction ("close");
+        rig.ui->showMacroBank (0);
+        rig.p.setMacroBank (0);
+        // Play your DAW through D.
+        REQUIRE (rig.learn->startLesson ("analog.aux.live"));
+        shoot ("29-aux-strip");
+        rig.learn->noteAction ("next");
+        shoot ("30-aux-live");
+        rig.learn->noteAction ("skip");
+        shoot ("31-aux-route");
+        rig.learn->noteAction ("close");
+        // Learn mode: SUB, USER and D explained.
+        rig.learn->setLearnMode (true);
+        rig.learn->inspect ("arp.companion");
+        shoot ("32-learn-mode-sub");
+        rig.learn->inspect ("macros.bank");
+        shoot ("33-learn-mode-user");
+        rig.learn->inspect ("aux.strip");
+        shoot ("34-learn-mode-aux");
+        rig.learn->setLearnMode (false);
+        rig.ui->setAuxStripShown (false);
+        rig.ui->setArpExpanded (false);
+        shoot ("35-off-after");
     }
+}
+
+TEST_CASE ("analog learn: Make your own macro - USER tab, assign from a control's menu, turn it", "[learn][analog][usermacro]")
+{
+    Rig rig;
+    auto& p = rig.p;
+    p.setMacroBank (0);
+    rig.ui->showMacroBank (0);
+    REQUIRE (rig.learn->startLesson ("analog.usermacros.basics"));
+    auto& runner = rig.runner();
+    rig.settle();
+    // 1. USER: the tab's click.
+    REQUIRE (rig.ui->macroBankTab() != nullptr);
+    rig.ui->macroBankTab()->onChange (1);
+    rig.settle();
+    CHECK (rig.ui->macroBankShown() == 1);
+    CHECK (runner.status (0) == LessonRunner::StepStatus::done);
+    rig.learn->noteAction ("next");
+    REQUIRE (runner.stepIndex() == 1);
+    // 2. Assign to Macro > Macro 1 from OSC 1 LEVEL's menu (the musician's choice).
+    const auto menu = rig.ui->controlContextMenu (andor::analog::params::osc1Level);
+    bool chosen = false;
+    for (juce::PopupMenu::MenuItemIterator it (menu, true); it.next() && ! chosen;)
+        if (it.getItem().text.startsWith ("Macro 1") && it.getItem().action != nullptr)
+        {
+            it.getItem().action();
+            chosen = true;
+        }
+    REQUIRE (chosen);
+    rig.settle();
+    CHECK (runner.status (1) == LessonRunner::StepStatus::done);
+    CHECK (rig.ui->macroBankShown() == 1);
+    rig.learn->noteAction ("next");
+    rig.learn->noteAction ("next");
+    REQUIRE (runner.stepIndex() == 3);
+    // 3. Turn it: automation completes nothing; the musician's turn does.
+    const auto id = andor::analog::params::userMacroId (0);
+    automate (p, id, 40.0f);
+    rig.settle();
+    CHECK (runner.state() == LessonRunner::State::waitingForAction);
+    auto* watcher = rig.learn->touchWatcher ("usermacro.0");
+    REQUIRE (watcher != nullptr);
+    auto* knob = watcher->watched();
+    REQUIRE (knob != nullptr);
+    auto* slider = dynamic_cast<juce::Slider*> (knob);
+    REQUIRE (slider != nullptr);
+    watcher->mouseDown (eventAt (*slider, {}));
+    slider->setValue (slider->getValue() + 0.2 * (slider->getMaximum() - slider->getMinimum()), juce::sendNotificationSync);
+    rig.settle();
+    watcher->mouseUp (eventAt (*slider, {}));
+    CHECK (runner.status (3) == LessonRunner::StepStatus::done);
+    rig.learn->noteAction ("next");
+    rig.learn->noteAction ("finish");
+    CHECK (rig.learn->store().read().lessons.at ("analog.usermacros.basics").status == "complete");
+    rig.learn->noteAction ("close");
+    p.setMacroBank (0);
+}
+
+TEST_CASE ("analog learn: Play your DAW through D - shows D, LIVE INPUT verified on the parameters", "[learn][analog][aux]")
+{
+    using namespace andor::analog;
+    Rig rig;
+    auto& p = rig.p;
+    REQUIRE (rig.learn->startLesson ("analog.aux.live"));
+    auto& runner = rig.runner();
+    rig.settle();
+    CHECK (rig.ui->auxStripShown());   // (the explanation shows D: a view setting)
+    rig.learn->noteAction ("next");
+    REQUIRE (runner.stepIndex() == 1);
+    auto* watcher = rig.learn->touchWatcher ("aux.strip");
+    REQUIRE (watcher != nullptr);
+    REQUIRE (watcher->watched() == rig.ui->auxStripComponent());
+    // Set from automation: nothing completes, but the note offers Continue (the menu's choice
+    // happens in a popup the strip never hears).
+    automate (p, params::auxEnabled, 1.0f);
+    automate (p, params::auxMode, 3.0f);
+    rig.settle();
+    CHECK (runner.state() == LessonRunner::State::waitingForAction);
+    CHECK (runner.canContinue());
+    // A touch on the strip with both set: done.
+    watcher->mouseUp (eventAt (*rig.ui->auxStripComponent(), {}));
+    CHECK (runner.status (1) == LessonRunner::StepStatus::done);
+    for (int i = 0; i < 3; ++i)
+        rig.learn->noteAction ("next");
+    rig.learn->noteAction ("finish");
+    CHECK (rig.learn->store().read().lessons.at ("analog.aux.live").status == "complete");
+    rig.learn->noteAction ("close");
 }
