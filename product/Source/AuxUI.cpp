@@ -628,6 +628,15 @@ namespace
                 wellC = editor->cardDisplayBounds (1) - origin;
                 cardA = editor->engineCard (0).getBounds() - origin;
                 cardC = editor->engineCard (1).getBounds() - origin;
+                // Card C not shown as a card (its empty dock, a moment of a preset load): its
+                // column is A's moved by two card steps (A, B, C at equal widths) - D's zones
+                // never depend on what card C shows.
+                if (wellC.isEmpty() && ! wellA.isEmpty() && ! wellB.isEmpty())
+                {
+                    const int step = wellB.getX() - wellA.getX();
+                    wellC = wellA.translated (2 * step, 0);
+                    cardC = (editor->engineCard (0).getBounds() - origin).translated (2 * step, 0);
+                }
             }
             if (wellB.isEmpty())
             {

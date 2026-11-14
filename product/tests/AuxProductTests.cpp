@@ -1644,3 +1644,49 @@ TEST_CASE ("card C's second layer shown: a recording dropped on card C is C2's, 
     dropOn (rig.ui, rig.ui.engineCard (1).display(), rig.loopA);
     CHECK (rig.cardC());
 }
+
+TEST_CASE ("AUX strip: a preset loaded with AUX shown keeps D's knobs in C's zone, never over LEVEL or the display", "[analog][aux][ui][presetlayout]")
+{
+    // The owner: loading a preset with AUX open stacked RATE / PITCH over LEVEL and a knob
+    // over D's display. Every factory sound, with the strip shown, at 1448 and 869 px.
+    for (const int width : { 1448, 869 })
+    {
+        ShellProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor { p.createEditorIfNeeded() };
+        auto& ui = editorOf (editor);
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * 1086.0f / 1448.0f));
+        ui.setAuxStripShown (true);
+        refreshStrip (ui);
+        auto& strip = *ui.auxStripComponent();
+        int checked = 0;
+        Scratch scratch;
+        const auto recording = writeLoop (scratch.dir, "c1-recording.wav");
+        for (const auto& entry : p.presetList())
+        {
+            INFO (width << " px, " << entry.name);
+            // (as in the owner's session: card C's first layer holding a recording first)
+            p.loadFile (recording, ShellProcessor::hybridLayer);
+            p.waitForLoads (20000);
+            p.pollLoads();
+            refreshStrip (ui);
+            p.openPresetEntry (entry);
+            p.waitForLoads (20000);
+            p.pollLoads();
+            refreshStrip (ui);
+            strip.resized();   // (laid out afresh in this state: as when AUX is opened on this sound)
+            auto* display = AuxStripView::part (strip, "display");
+            REQUIRE (display != nullptr);
+            for (auto* c : strip.getChildren())
+                if (auto* knob = dynamic_cast<osp::plugin::MiniKnob*> (c); knob != nullptr && knob->isVisible() && knob->captionText() != "LEVEL")
+                {
+                    INFO (knob->captionText().toStdString());
+                    CHECK (knob->getX() >= display->getRight());   // (the mode's knobs: after the display)
+                }
+            CHECK (ui.engineCard (1).isVisible());   // (card C stays a card: never the empty dock by mistake)
+            ++checked;
+            if (checked >= 12)
+                break;   // (a dozen sounds of each kind is plenty)
+        }
+        CHECK (checked > 5);
+    }
+}
