@@ -70,6 +70,12 @@
 >     KONTAKT NOT LOADED once; OFF never drawn over the display.
 >   - Right-click on a knob opens Assign to Macro in a host (the press reached the knob, not the
 >     halo overlay holding the menu; shared fix, ANDOR OSP too).
+>   - Right-click, second fix (the owner: still no menu in the Addendum 05 build). Reproduced in
+>     the standalone app with a real right-click: with the right button down the halo overlay
+>     claims the press, but its mouseDown only looked for modulated knobs, so an unassigned knob
+>     opened nothing. Its mouseDown now looks for any destination on a right-click, as its
+>     hitTest does. Checked in the real standalone (menu, Assign to Macro, Macro 1 assigned);
+>     test `[rightclick]` routes the press as JUCE does (fails without the fix).
 >
 >   Addendum 05 (`feature/aux-live-input`, docs/aux/ADDENDUM_05.md):
 >   - D LIVE INPUT: the DAW's sidechain ("AUX D Live Input", a VST3 auxiliary bus, off by

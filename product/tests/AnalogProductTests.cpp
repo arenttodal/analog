@@ -11541,3 +11541,40 @@ TEST_CASE ("MACRO DESTINATION: a plain right-click on the knob itself (the press
     CHECK_FALSE (rig.overlay().rightClickedControl (press (*rig.editor, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier))));
     CHECK (menus == 1);
 }
+
+TEST_CASE ("MACRO DESTINATION: a real right-click (the right button down as the press is routed) reaches the overlay, and an unassigned knob still opens its menu", "[analog][usermacro][macrodest][ui][rightclick]")
+{
+    // The owner's second report, reproduced in the standalone app with a real right-click: with
+    // the right button down, the overlay's hitTest claims the press (any destination counts for
+    // a popup), but its mouseDown then looked only for modulated knobs - an unassigned knob found
+    // nothing and no menu opened. Here the press is routed as JUCE routes it: the component under
+    // the point while the right button is down, then that component's own handler.
+    MacroDestRig rig;
+    REQUIRE (rig.level != nullptr);
+    juce::PopupMenu shown;
+    int menus = 0;
+    auto& overlay = rig.overlay();
+    overlay.showMenuForTest = [&] (juce::PopupMenu& m) { shown = m; ++menus; };
+    const auto saved = juce::ModifierKeys::currentModifiers;
+    juce::ModifierKeys::currentModifiers = juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier);
+    const auto inEditor = rig.editor->getLocalPoint (rig.level, rig.level->getLocalBounds().getCentre());
+    auto* routed = rig.editor->getComponentAt (inEditor);
+    CHECK (routed == &overlay);   // (the overlay claims a right press on a destination)
+    const auto at = overlay.getLocalPoint (rig.editor.get(), inEditor).toFloat();
+    const juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), at, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier),
+                              1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &overlay, &overlay, juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false);
+    overlay.mouseDown (e);
+    juce::ModifierKeys::currentModifiers = saved;
+    REQUIRE (menus == 1);
+    CHECK (MacroDestRig::itemOf (shown, "Assign to Macro") != nullptr);
+    // (its root's listener hears the same press: never a second menu)
+    CHECK_FALSE (overlay.rightClickedControl (e));
+    CHECK (menus == 1);
+    for (juce::PopupMenu::MenuItemIterator it (shown, true); it.next();)
+        if (it.getItem().text.startsWith ("Macro 1") && it.getItem().action != nullptr)
+        {
+            it.getItem().action();
+            break;
+        }
+    CHECK (engineOfShell (rig.p).userMacros().find (0, params::osc1Level) == 0);
+}
