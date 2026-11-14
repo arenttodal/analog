@@ -291,6 +291,12 @@ namespace andor::analog::params
         FILTER x D, whatever D plays - LIVE INPUT included). One processor at a time; the other's
         settings stay as they are. Appended. */
     inline const juce::String morphTarget = "analog.morph.target";
+    /** D ARP (the AUX arpeggiator follower): with D in KONTAKT or NOISE, D plays one lane of the
+        arpeggiator instead of the keys - LINK on: the shared pattern; LINK off: FOLLOW's card
+        (A B C), even while that card's own arpeggio is off. Off by default; FOLLOW kept while
+        off. Appended; read by the shell (ProductInfo::arpFollower). */
+    inline const juce::String auxArp = "analog.aux.arp";
+    inline const juce::String auxArpFollow = "analog.aux.arp.follow";
     /** RATE's choices (its musical speed against the loop's detected tempo). */
     inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */

@@ -1055,6 +1055,11 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     layout.add (osp::plugin::parameters::make<Choice> (v37 (auxRhythmGate), "AUX Rhythm Gate", juce::StringArray { "KEYS", "FREE" }, d.rhythmFree ? 1 : 0));
     // Addendum 05: MORPH TO - C HYBRID (the default: MORPH as ever) or D AUX. Appended.
     layout.add (osp::plugin::parameters::make<Choice> (v37 (morphTarget), "Morph To", juce::StringArray { "C HYBRID", "D AUX" }, 0));
+    // D ARP (the arpeggiator follower): KONTAKT / NOISE play one arpeggiator lane - LINK's
+    // shared pattern, or with LINK off card A, B or C's. Off by default (an older session: off).
+    // The shell's follower reads them (ProductInfo::arpFollower); the engine never does. Appended.
+    layout.add (osp::plugin::parameters::make<Bool> (v37 (auxArp), "AUX Arp", false));
+    layout.add (osp::plugin::parameters::make<Choice> (v37 (auxArpFollow), "AUX Arp Follow", juce::StringArray { "A", "B", "C" }, 0));
 }
 
 int readerIndexOf (const juce::String& id)

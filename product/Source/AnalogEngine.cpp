@@ -6,6 +6,7 @@
 #include "SampleImport.h"
 
 #include "Oscillator.h"
+#include <limits>
 #include <utility>
 
 namespace andor::analog
@@ -838,6 +839,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     if (const auto* next = sourceExchange.takePending())
         sourcePlaying = next;
     const auto* playedThisBlock = std::exchange (playedMidi, nullptr);   // (this callback's only)
+    const auto* auxThisBlock = std::exchange (auxNotes, nullptr);        // (D ARP: likewise)
     // RHYTHMIC MORPH: card C's prepared loop (a newer one replaces it; the old is freed on the
     // message side once nothing reads it).
     if (const auto* next = loopExchange.takePending())
@@ -948,6 +950,8 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     // SUB plays the musician's own keys (before the arpeggiator): those events are merged in
     // at their own samples, a played event first where both land on one sample.
     const auto& played = playedThisBlock != nullptr ? *playedThisBlock : midi;
+    // D's notes: the musician's keys, or (D ARP on) the arpeggiator lane it follows.
+    const auto& auxKeys = auxThisBlock != nullptr ? *auxThisBlock : played;
     // EXPERIMENT: card C EXTERNAL - its MIDI lane (every event whose cards include C: its
     // arpeggiator's lane when it arpeggiates, the held keys when it is passed through) goes to
     // the hosted instrument at its own samples, on channel 1, overlaps and order intact; the
@@ -992,15 +996,16 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     }
     else
         synth.setExternal (false, nullptr, nullptr, 0, 0.0f, false, 0.0, 0);
-    // D KONTAKT: its own instance plays the musician's keys (before any arpeggiator), every
-    // channel message normalised to channel 1; it is processed only while D is on in KONTAKT
-    // (otherwise it is told it is inactive and stays silent).
+    // D KONTAKT: its own instance plays D's notes (the musician's keys before any arpeggiator,
+    // or with D ARP the lane it follows), every channel message normalised to channel 1; it is
+    // processed only while D is on in KONTAKT (otherwise it is told it is inactive and stays
+    // silent).
     const bool auxKontaktMode = patch.aux.enabled && patch.aux.mode == Patch::Aux::Mode::kontakt;
     if (auxKontaktMode || auxKontakt.state() == ExternalInstrument::State::ready)
     {
         auxMidi.clear();
         if (auxKontaktMode)
-            for (const auto m : played)
+            for (const auto m : auxKeys)
             {
                 if (m.numBytes < 1 || m.numBytes > 3)
                     continue;
@@ -1044,35 +1049,54 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             done = at;
         }
     };
-    // D's keys (its NOISE gate, its filter's envelope and key tracking): the musician's, on
-    // channel 1.
+    // D's keys (its NOISE gate, its filter's envelope and key tracking): the musician's, or D
+    // ARP's lane, on channel 1.
     auto auxKeyFrom = [this] (const juce::MidiMessageMetadata& m) {
         if (m.numBytes < 1 || m.numBytes > 3 || m.data[0] < 0x80 || m.data[0] >= 0xf0)
             return;
         std::uint8_t bytes[3] { static_cast<std::uint8_t> (m.data[0] & 0xf0), m.numBytes > 1 ? m.data[1] : std::uint8_t (0), m.numBytes > 2 ? m.data[2] : std::uint8_t (0) };
         synth.auxKeyEvent (bytes, m.numBytes);
     };
+    // SUB's keys and D's (when D ARP gives D its own) at their own samples, before the
+    // engine's event on the same sample; without D ARP, D's are SUB's (exactly as before).
+    const bool auxOwn = auxThisBlock != nullptr;
     auto p = played.cbegin();
+    auto a = auxKeys.cbegin();
+    auto applyKeysTo = [&] (int samplePosition)
+    {
+        auto due = [samplePosition] (int at) { return at <= samplePosition; };
+        for (;;)
+        {
+            const bool pDue = p != played.cend() && due ((*p).samplePosition);
+            const bool aDue = auxOwn && a != auxKeys.cend() && due ((*a).samplePosition);
+            if (pDue && (! aDue || (*p).samplePosition <= (*a).samplePosition))
+            {
+                renderTo ((*p).samplePosition);
+                synth.handleSubMidi ((*p).data, (*p).numBytes);
+                if (! auxOwn)
+                    auxKeyFrom (*p);
+                ++p;
+            }
+            else if (aDue)
+            {
+                renderTo ((*a).samplePosition);
+                auxKeyFrom (*a);
+                ++a;
+            }
+            else
+                break;
+        }
+    };
     for (const auto m : midi)
     {
-        for (; p != played.cend() && (*p).samplePosition <= m.samplePosition; ++p)
-        {
-            renderTo ((*p).samplePosition);
-            synth.handleSubMidi ((*p).data, (*p).numBytes);
-            auxKeyFrom (*p);
-        }
+        applyKeysTo (m.samplePosition);
         renderTo (m.samplePosition);
         if (! (externalMode && cardCOnly (m)))
             synth.handleMidi (m.data, m.numBytes);
         if (externalMode && m.numBytes >= 1 && m.data[0] >= 0x80 && m.data[0] < 0xf0 && (synth.cardsFor ((m.data[0] & 0x0f) + 1) & 4) != 0)
             synth.externalKeyEvent (m.data, m.numBytes);   // (card C's lane: the FILTER's envelope on Kontakt's bus)
     }
-    for (; p != played.cend(); ++p)
-    {
-        renderTo ((*p).samplePosition);
-        synth.handleSubMidi ((*p).data, (*p).numBytes);
-        auxKeyFrom (*p);
-    }
+    applyKeysTo (std::numeric_limits<int>::max());
     if (done < total)
         synth.render (left + done, right + done, total - done);
     if (buffer.getNumChannels() == 1)

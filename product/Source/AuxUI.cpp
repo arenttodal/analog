@@ -425,6 +425,56 @@ namespace
         juce::Rectangle<float> keyArea (juce::Rectangle<float> bounds) const override { return bounds.reduced (1.0f); }
     };
 
+    /** D ARP's keys on the strip: the RACK key's ceramic face, pressed in and its word in D's
+        colour while its parameter holds `value` (ARP: on; A B C: the lane followed). A click
+        sets that value (ARP: toggles), one undoable gesture. `quiet`: drawn dimmer (it does
+        nothing right now - the arpeggiator off, or LINK for the lanes). */
+    class ParamKey final : public juce::Button, public skin::KeyFace
+    {
+    public:
+        ParamKey (InstrumentHost& h, const juce::String& parameterId, float keyValue, const juce::String& word, bool toggles)
+            : juce::Button (word), host (h), id (parameterId), value (keyValue), text (word), toggle (toggles),
+              attachment (*h.apvts().getParameter (parameterId), [this] (float v) { setToggleState (std::abs (v - value) < 0.5f, juce::dontSendNotification); skin::repaintKey (*this); }, &h.undo())
+        {
+            setWantsKeyboardFocus (true);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            attachment.sendInitialUpdate();
+            onClick = [this] { attachment.setValueAsCompleteGesture (toggle && getToggleState() ? 0.0f : value); };
+        }
+        void setQuiet (bool q) { if (quiet != q) { quiet = q; repaint(); } }
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            using namespace design;
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            const bool lit = getToggleState();
+            if (! skin::drawnBySurface())
+                draw::button (g, r, 7.0f, lit || down, over, colour::accent);
+            g.setFont (type::button (12.5f));
+            g.setColour ((lit ? aux::colour().darker (0.25f) : colour::text).withAlpha ((lit ? 1.0f : 0.62f) * (quiet ? 0.45f : 1.0f)));
+            g.drawText (text, r, juce::Justification::centred, false);
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (colour::text.withAlpha (0.35f));
+                g.drawRoundedRectangle (r.expanded (1.0f), 8.0f, 1.0f);
+            }
+        }
+        void buttonStateChanged() override { skin::repaintKey (*this); }
+        skin::KeyRole keyRole() const override { return skin::KeyRole::eq; }
+        skin::KeyState keyState() const override
+        {
+            return getToggleState() || isDown() ? skin::KeyState::pressed : isOver() ? skin::KeyState::hover : skin::KeyState::normal;
+        }
+        juce::Rectangle<float> keyArea (juce::Rectangle<float> bounds) const override { return bounds.reduced (1.0f); }
+
+    private:
+        InstrumentHost& host;
+        juce::String id;
+        float value;
+        juce::String text;
+        bool toggle, quiet = false;
+        juce::ParameterAttachment attachment;
+    };
+
     /** The cards' menu dots (three, vertical: the quietest control). */
     class MenuDots final : public juce::Button
     {
@@ -551,6 +601,21 @@ namespace
             menu->setTooltip ("D's menu: hide the strip, its rack, reset");
             menu->onClick = [this] { showMenu(); };
             addAndMakeVisible (*menu);
+            // D ARP (KONTAKT and keyed NOISE): ARP on / off and FOLLOW A B C, before RACK - the
+            // strip's own ceramic keys.
+            arpKey = std::make_unique<ParamKey> (h, params::auxArp, 1.0f, "ARP", true);
+            arpKey->setTitle ("D ARP");
+            binding::tag (*arpKey, params::auxArp);
+            addChildComponent (*arpKey);
+            for (int lane = 0; lane < 3; ++lane)
+            {
+                const auto letter = juce::String::charToString (static_cast<juce::juce_wchar> ('A' + lane));
+                auto& key = laneKeys[static_cast<std::size_t> (lane)];
+                key = std::make_unique<ParamKey> (h, params::auxArpFollow, static_cast<float> (lane), letter, false);
+                key->setTitle ("D follows " + letter);
+                binding::tag (*key, params::auxArpFollow);
+                addChildComponent (*key);
+            }
             buildKnobs();
             startTimerHz (30);
         }
@@ -573,6 +638,8 @@ namespace
             if (name == "rack") return rackKey.get();
             if (name == "menu") return menu.get();
             if (name == "LEVEL") return level.get();
+            if (name == "arp") return arpKey.get();
+            if (name == "A" || name == "B" || name == "C") return laneKeys[static_cast<std::size_t> (name[0] - 'A')].get();
             for (const auto& k : knobs)
                 if (k->captionText() == name)
                     return k.get();
@@ -670,9 +737,25 @@ namespace
             // caption, a double cell); NOISE's two keep the same cells, from the left.
             menu->setBounds (cardC.getRight() - 51, h / 2 - 18, 30, 36);
             rackKey->setBounds (menu->getX() - 8 - 60, h / 2 - 16, 60, 33);
-            const int knobLeft = wellC.getX(), knobRight = rackKey->getX() - 10;
+            // D ARP's two (KONTAKT, NOISE): right of the knobs, just before RACK - a caption over
+            // each, as the knobs' captions.
+            {
+                // [ARP]  FOLLOW over [A][B][C]: the keys on RACK's centre line, FOLLOW's caption
+                // above its three.
+                constexpr int laneSize = 25, laneGap = 3;
+                int x = rackKey->getX() - 14 - (3 * laneSize + 2 * laneGap);
+                const int laneTop = h / 2 - 16 + 33 - laneSize;   // (bottoms aligned with RACK's)
+                followCaption = { x, laneTop - 15, 3 * laneSize + 2 * laneGap, 13 };
+                for (auto& key : laneKeys)
+                {
+                    key->setBounds (x, laneTop, laneSize, laneSize);
+                    x += laneSize + laneGap;
+                }
+                arpKey->setBounds (followCaption.getX() - 10 - 50, h / 2 - 16, 50, 33);
+            }
+            const int knobLeft = wellC.getX(), knobRight = (arpShown() ? arpKey->getX() : rackKey->getX()) - 10;
             auto weight = [] (const juce::String& caption) { return caption.length() > 6 ? 2.0 : 1.0; };
-            const double unit = (knobRight - knobLeft) / 5.0;   // (RATE PITCH OCT MOD-AMOUNT: 1 + 1 + 1 + 2)
+            const double unit = (knobRight - knobLeft) / (arpShown() ? 2.0 : 5.0);   // (RATE PITCH OCT MOD-AMOUNT: 1 + 1 + 1 + 2; NOISE beside ARP: COLOR TONE)
             double x = knobLeft;
             for (auto& k : knobs)
             {
@@ -710,6 +793,14 @@ namespace
                 g.setFont (fonts::label (10.0f));
                 g.drawText (poweredOf (host) ? juce::String ("ON") : juce::String ("OFF"), n, juce::Justification::topLeft, false);
             }
+            if (arpShown())
+            {
+                // The knobs' caption style; dimmed while FOLLOW means nothing (LINK: the shared
+                // pattern, named instead).
+                g.setFont (fonts::label (10.0f));
+                g.setColour (colour::textSecondary.withMultipliedAlpha (arpMasterOn() && ! linked() ? 1.0f : 0.6f));
+                g.drawText (linked() ? "FOLLOW: LINK" : "FOLLOW", followCaption.expanded (12, 0), juce::Justification::centred, false);
+            }
         }
 
         void paintOverChildren (juce::Graphics& g) override
@@ -742,6 +833,12 @@ namespace
         void refreshNow() { timerCallback(); }
 
     private:
+        /** D ARP's controls are D's in KONTAKT and NOISE only (a loop and live audio are never
+            arpeggiated). */
+        bool arpShown() const noexcept { return builtMode == 1 || builtMode == 2; }
+        bool arpMasterOn() const { return host.parameterValue ("arp.enabled") >= 0.5f; }
+        bool linked() const { return host.parameterValue ("analog.arp.link") >= 0.5f; }
+
         juce::String unheardReason() const
         {
             if (! poweredOf (host))
@@ -795,7 +892,11 @@ namespace
                 add (params::auxNoiseColor, "COLOR", "WHITE, PINK or BROWN");
                 add (params::auxNoiseTone, "TONE", "Its own low-pass, before the FILTER");
             }
+            arpKey->setVisible (arpShown());
+            for (auto& key : laneKeys)
+                key->setVisible (arpShown());
             resized();
+            repaint();
         }
 
         void showMenu() { createMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menu.get())); }
@@ -807,7 +908,30 @@ namespace
             display->setTooltip (builtMode == 0 ? "Click to load a loop (WAV, AIFF or FLAC), or drop one here: it plays on the host's grid"
                                  : builtMode == 1 ? "NOISE: its settings are in the rack"
                                  : builtMode == liveMode ? "LIVE INPUT: the audio your DAW routes to ANDOR Analog's AUX D sidechain input (choose the source track in the DAW's sidechain / input routing). Click for the rack"
-                                                  : "Click to load Kontakt for D (its own instance; your keys, before the arpeggiator), or to open its window");
+                                                  : "Click to load Kontakt for D (its own instance: your keys, or with ARP on a card's arpeggio), or to open its window");
+            {
+                // D ARP: what it does now, in words (and its captions' state).
+                const bool master = arpMasterOn(), link = linked();
+                const auto lane = juce::String::charToString (static_cast<juce::juce_wchar> ('A' + std::clamp (juce::roundToInt (host.parameterValue (params::auxArpFollow)), 0, 2)));
+                arpKey->setTooltip (! master ? "D ARP: turn the arpeggiator on to use it (until then D plays your keys)"
+                                    : "D ARP: D plays " + (link ? juce::String ("LINK's shared arpeggio") : "card " + lane + "'s arpeggio")
+                                          + " instead of your keys (even while that card's own arpeggio is off). Off: your keys");
+                arpKey->setQuiet (! master);
+                for (int k = 0; k < 3; ++k)
+                {
+                    auto& key = *laneKeys[static_cast<std::size_t> (k)];
+                    key.setTooltip (link ? "LINK is on: D follows the shared arpeggio (FOLLOW is kept for when LINK is off)"
+                                         : juce::String ("D plays card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + k))
+                                               + "'s arpeggio: its pattern, rate and octaves - the very notes, at the very samples");
+                    key.setQuiet (! master || link);
+                }
+                const int state = (master ? 1 : 0) | (link ? 2 : 0);
+                if (state != shownArpState)
+                {
+                    shownArpState = state;
+                    repaint();
+                }
+            }
             const bool open = auxRackOpen (*this);
             if (rackKey->getToggleState() != open)
                 rackKey->setToggleState (open, juce::dontSendNotification);
@@ -830,8 +954,11 @@ namespace
         std::unique_ptr<AuxDisplay> display;
         std::unique_ptr<RackKey> rackKey;
         std::unique_ptr<MenuDots> menu;
+        std::unique_ptr<ParamKey> arpKey;
+        std::array<std::unique_ptr<ParamKey>, 3> laneKeys;
         std::vector<std::unique_ptr<MiniKnob>> knobs;
-        juce::Rectangle<int> badge, nameArea;
+        juce::Rectangle<int> badge, nameArea, followCaption;
+        int shownArpState = -1;
         juce::String notice, shownReason = "-";
         int noticeTicks = 0;
         int builtMode = -1;
@@ -1014,6 +1141,7 @@ namespace
                 knob (auxNoiseRelease, "RELEASE", textOf (host, auxNoiseRelease));
                 knob (auxNoiseMovement, "MOVEMENT", textOf (host, auxNoiseMovement));
                 knob (auxNoiseWidth, "WIDTH", textOf (host, auxNoiseWidth));
+                arpGroup();
             }
             else if (mode == liveMode)
             {
@@ -1040,11 +1168,21 @@ namespace
                                    }),
                                    {}, 80);
                 knob (auxLevel, "LEVEL", textOf (host, auxLevel));
+                arpGroup();
             }
             // (Addendum 05: D's MORPH is MORPH TO D in the MORPH rack - the MORPH macro drives it.)
         }
 
     private:
+        /** D ARP (KONTAKT, NOISE): the strip's two, here as well. */
+        void arpGroup()
+        {
+            using namespace params;
+            group ("ARP");
+            listCell (auxArp, "ARP", "ON: D plays a card's arpeggio instead of your keys (the arpeggiator must be on). OFF: your keys");
+            listCell (auxArpFollow, "FOLLOW", "Which card's arpeggio D plays, even while that card's own arpeggio is off (LINK on: the shared arpeggio)");
+        }
+
         std::unique_ptr<juce::Component> makeKey (const juce::String& text, std::function<void()> action)
         {
             auto key = std::make_unique<TextKey> (text);
@@ -1108,7 +1246,9 @@ juce::String aux::readout (InstrumentHost& host)
 void aux::reset (InstrumentHost& host)
 {
     host.undo().beginNewTransaction ("Reset D / AUX");
-    for (const auto& id : params::engineParameterIds())
+    auto ids = params::engineParameterIds();
+    ids.addArray ({ params::auxArp, params::auxArpFollow });   // (D ARP: read by the shell, not the engine)
+    for (const auto& id : ids)
         if (id.startsWith ("analog.aux."))
             if (auto* p = host.apvts().getParameter (id))
             {

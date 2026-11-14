@@ -101,6 +101,17 @@
 >     follows, capped at the screen, where the instrument scales inside (both instruments).
 >   - Each card's EQ shows the live spectrum of what plays through it (ANDOR OSP's card EQ
 >     picture), tapped only while it shows (`[card-eq-spectrum]`).
+>   - D ARP (docs/aux/D_ARP_FOLLOWER.md): in KONTAKT and keyed NOISE, ARP on / off and FOLLOW
+>     A B C on the strip before RACK and in the AUX rack. D plays one arpeggiator lane - LINK on:
+>     the shared pattern; LINK off: the card chosen, even while that card's own arpeggio is off -
+>     the same notes at the same samples as the lane (`[auxarp]`: D's Kontakt and card C's own
+>     instrument compared event for event). A / B / C are given exactly what they were (output
+>     bit-identical with D muted). Off, the arpeggiator off, RHYTHM or LIVE INPUT: the keys as
+>     before. No note hangs on FOLLOW / ARP / LINK / mode / power changes or a state load.
+>     `analog.aux.arp`, `analog.aux.arp.follow` (appended, off by default: older sessions open
+>     with it off). Shared: an opt-in follower at the per-card arpeggiator's delivery
+>     (ProductInfo::arpFollower, Engine::setAuxNotes); ANDOR OSP has no D, so nothing runs
+>     there. Real Kontakt (a spiccato patch) and DAWs: UNVERIFIED (OWNER TEST).
 >
 >   Addendum 05 (`feature/aux-live-input`, docs/aux/ADDENDUM_05.md):
 >   - D LIVE INPUT: the DAW's sidechain ("AUX D Live Input", a VST3 auxiliary bus, off by

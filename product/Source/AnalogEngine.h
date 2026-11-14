@@ -98,6 +98,7 @@ public:
     void setModulation (const osp::mod::Settings& settings, const std::array<int, osp::mod::ccSlots>& controllers) noexcept override;
     bool arpModulation (osp::mod::Dest dest, double& offset) const noexcept override { return synth.sharedOffset (dest, offset); }
     void setPlayedKeys (bool arpeggiating, const juce::MidiBuffer& played) noexcept override;
+    void setAuxNotes (const juce::MidiBuffer* notes) noexcept override { auxNotes = notes; }
     /** The per-card arpeggiator's lanes: shown A is OSC 1, B OSC 2, C the hybrid (the synth's bits). */
     void setCardRouting (bool on) noexcept override { synth.setCardRouting (on); }
     /** Tests: the synth as it plays (its voices' views). */
@@ -344,6 +345,9 @@ private:
     /** Cinematic V6 SUB: the musician's own MIDI for this block (before the arpeggiator), from
         setPlayedKeys(); null: the notes process() is given are the musician's. */
     const juce::MidiBuffer* playedMidi = nullptr;
+    /** D ARP (the shell's arpeggiator follower): the notes D plays this block, set before
+        process(); null: D plays the musician's keys (`playedMidi`), as before. */
+    const juce::MidiBuffer* auxNotes = nullptr;
     osp::InstrumentEngine::GrainSnapshot grains;   ///< written by process(), read by the card
     osp::InstrumentEngine::GrainSnapshot grains2;  ///< card B's (OSC 2's) grains, as `grains`
     osp::InstrumentEngine::GrainSnapshot organicHeads;   ///< ORGANIC's read heads (card B's playheads), as ANDOR OSP's

@@ -53,7 +53,7 @@ juce_add_binary_data(analog_materials
 target_link_libraries(ANDOR_Analog PRIVATE analog_materials)
 
 andor_add_instrument_tests(ANDOR_Analog andor_analog_tests
-    SOURCES tests/AnalogProductTests.cpp tests/AnalogSubPanelTests.cpp tests/ExternalInstrumentTests.cpp tests/AuxProductTests.cpp tests/AnalogLearnTests.cpp
+    SOURCES tests/AnalogProductTests.cpp tests/AnalogSubPanelTests.cpp tests/ExternalInstrumentTests.cpp tests/AuxProductTests.cpp tests/AuxArpTests.cpp tests/AnalogLearnTests.cpp
     GOLDEN golden/parameter-schema.txt)
 
 # The Kontakt experiment's stand-in (tests only, never shipped): a small VST3 instrument the

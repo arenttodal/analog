@@ -416,6 +416,24 @@ TEST_CASE ("AUX: screenshots - the strip in its three modes, its rack, hidden (A
         for (const int w : { 869, 1448, 1810 })
             shoot (juce::String ("aux-0") + juce::String (mode + 1) + "-" + names[mode], w);
     }
+    {
+        // D ARP: the arpeggiator on, LINK off, D following B (KONTAKT and NOISE).
+        set (p, "arp.enabled", 1.0f);
+        set (p, "analog.arp.link", 0.0f);
+        set (p, params::auxArp, 1.0f);
+        set (p, params::auxArpFollow, 1.0f);
+        for (const int mode : { 2, 1 })
+        {
+            set (p, params::auxMode, static_cast<float> (mode));
+            refreshStrip (ui);
+            for (const int w : { 869, 1448 })
+                shoot (juce::String ("aux-18-arp-follow-b-") + (mode == 2 ? "kontakt" : "noise"), w);
+        }
+        set (p, "arp.enabled", 0.0f);
+        set (p, "analog.arp.link", 1.0f);
+        set (p, params::auxArp, 0.0f);
+        set (p, params::auxArpFollow, 0.0f);
+    }
     set (p, params::auxMode, 0.0f);
     refreshStrip (ui);
     ui.setRackExpanded (osp::plugin::rack::Kind::aux, true);
