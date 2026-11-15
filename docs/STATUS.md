@@ -101,6 +101,13 @@
 >     follows, capped at the screen, where the instrument scales inside (both instruments).
 >   - Each card's EQ shows the live spectrum of what plays through it (ANDOR OSP's card EQ
 >     picture), tapped only while it shows (`[card-eq-spectrum]`).
+>   - Vertical-only expansion (the owner's spec; OSP STATUS): racks, the arpeggiator, AUX D
+>     change only the height; the width, scale and every horizontal place stay. A window the
+>     host or the screen keeps shorter scrolls vertically at the same scale - the instrument is
+>     never shrunk or centred with side margins. Geometry tests run for ANDOR Analog too
+>     (FILTER, MORPH, AUX with the arpeggiator and a rack). DAWs: UNVERIFIED (OWNER TEST).
+>   - Quick Start's text: step 3 "The USER tab allows for 6 custom macros"; step 4 (ARP and
+>     SUB) as the owner wrote it.
 >   - Universal modulation-aware visual feedback (OSP docs/EFFECTIVE_VALUES.md, with its
 >     inventory): the pictures draw what plays. AnalogEngine publishes every value its block
 >     moved (USER macros, global routes: MOVEMENT, DRIVE, SPACE, ECHO, MIX, every global product

@@ -56,9 +56,9 @@ namespace
             explain ("cards", "sources", "Three cards",
                      "A and B are oscillators. C plays a recording, noise or an instrument; its C1 / C2 tabs stack a second layer."),
             explain ("macros", "macros", "Six macros",
-                     "MORPH, DRIVE, FILTER, MOVEMENT, SPACE, ECHO: click a name for its settings, double-click for its rack. USER holds six of your own."),
+                     "MORPH, DRIVE, FILTER, MOVEMENT, SPACE, ECHO: click a name for its settings, double-click for its rack. The USER tab allows for 6 custom macros."),
             explain ("arp", "arp.control", "ARP and SUB",
-                     "ARP turns a held chord into a pattern; SUB adds a sub-oscillator under every note. Each light switches; the row opens it."),
+                     "ARP toggles the arpeggiator. SUB toggles a sub oscillator. Open their panels to change the settings, or click the light to turn it on and off."),
             aux,
         };
         return l;

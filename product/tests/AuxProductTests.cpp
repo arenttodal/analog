@@ -1708,3 +1708,98 @@ TEST_CASE ("AUX strip: a preset loaded with AUX shown keeps D's knobs in C's zon
         CHECK (checked > 5);
     }
 }
+
+TEST_CASE ("layout: screenshots - every inline section at one width; above each inserted section, pixel-identical to the base (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][layout]")
+{
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("ANALOG_SCREENSHOT_DIR", {});
+    REQUIRE (dir.isNotEmpty());
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    const int width = 1448;
+    editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / osp::plugin::design::width));
+    auto snap = [&] (const juce::String& name) {
+        refreshStrip (ui);
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile ("layout-" + name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+        std::printf ("%-28s %d x %d\n", name.toRawUTF8(), image.getWidth(), image.getHeight());
+        return image;
+    };
+    // Pixels differing in the rows above `rows` (the part a section inserted lower never touches),
+    // `columns` wide from the left; `box` collects where they are.
+    juce::Rectangle<int> box;
+    auto differingAbove = [&box] (const juce::Image& a, const juce::Image& b, int rows, int columns = 1 << 20) {
+        int n = 0;
+        box = {};
+        for (int y = 0; y < std::min ({ rows, a.getHeight(), b.getHeight() }); ++y)
+            for (int x = 0; x < std::min ({ columns, a.getWidth(), b.getWidth() }); ++x)
+                if (a.getPixelAt (x, y) != b.getPixelAt (x, y))
+                {
+                    ++n;
+                    box = box.isEmpty() ? juce::Rectangle<int> (x, y, 1, 1) : box.getUnion ({ x, y, 1, 1 });
+                }
+        return n;
+    };
+    const auto base = snap ("00-base");
+    const int macrosBottom = ui.getLocalArea (ui.macroKnob (0), ui.macroKnob (0)->getLocalBounds()).getBottom() + 4;
+    const int cardsBottom = ui.getLocalArea (&ui.engineCard (0), ui.engineCard (0).getLocalBounds()).getBottom() + 2;
+    using osp::plugin::rack::Kind;
+    auto rackShot = [&] (Kind kind, const juce::String& name) {
+        ui.setRackExpanded (kind, true);
+        const auto image = snap (name);
+        CHECK (image.getWidth() == base.getWidth());
+        const int differing = differingAbove (base, image, macrosBottom);
+        std::printf ("  above the rack: %d of %d pixels differ, within %s\n", differing, macrosBottom * width, box.toString().toRawUTF8());
+        // Only the opened rack's macro name lights (its "rack open" state): one label's box.
+        CHECK (box.getHeight() <= 24);
+        CHECK (box.getWidth() <= 90);
+        ui.setRackExpanded (kind, false);
+    };
+    rackShot (Kind::space, "01-space");
+    rackShot (Kind::echo, "02-echo");
+    rackShot (Kind::morph, "03-morph");
+    rackShot (Kind::filter, "04-filter");
+    ui.setArpExpanded (true);
+    {
+        const auto image = snap ("05-arp");
+        CHECK (image.getWidth() == base.getWidth());
+        CHECK (differingAbove (base, image, macrosBottom) == 0);
+    }
+    ui.setArpExpanded (false);
+    ui.setAuxStripShown (true);
+    {
+        const auto image = snap ("06-aux");
+        CHECK (image.getWidth() == base.getWidth());
+        CHECK (differingAbove (base, image, cardsBottom) == 0);   // (the strip goes under the cards)
+    }
+    ui.setArpExpanded (true);
+    ui.setRackExpanded (Kind::space, true);
+    {
+        const auto image = snap ("07-aux-arp-space");
+        CHECK (image.getWidth() == base.getWidth());
+        CHECK (differingAbove (base, image, cardsBottom) == 0);
+    }
+    // A host that keeps the shorter window: the same scale, scrolled (top, then the bottom).
+    editor->setSize (width, base.getHeight());
+    {
+        const auto image = snap ("08-host-kept-height-top");
+        CHECK (differingAbove (base, image, cardsBottom - 2, width - 12) == 0);   // (the scroll bar's strip at the right edge aside)
+    }
+    juce::MouseWheelDetails down {};
+    down.deltaY = -1.0f;
+    for (int i = 0; i < 20; ++i)
+        ui.instrumentOverflow().scrollBy (down);
+    snap ("09-host-kept-height-scrolled");
+    ui.setRackExpanded (Kind::space, false);
+    ui.setArpExpanded (false);
+    ui.setAuxStripShown (false);
+    editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / osp::plugin::design::width));
+    const auto after = snap ("10-base-again");
+    CHECK (differingAbove (base, after, base.getHeight()) == 0);
+}
