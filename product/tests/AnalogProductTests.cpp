@@ -912,6 +912,28 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     for (int r = 0; r < osp::mod::maxRoutes; ++r)
         for (const char* name : { "source", "dest", "depth", "enabled", "destExt" })
             setups[osp::plugin::InstrumentHost::modRouteId (r, name)] = route (r, 1);   // LFO 1 -> TONE (destExt: -> MIX)
+    // The MOD WHEEL's VIBRATO: heard while it is on and plays (ALWAYS ON, no DELAY, a quick RISE);
+    // CONTROL tried against ASSIGNED with AMOUNT up; card C as OSC 3 for its source; SUB on for its.
+    {
+        namespace vids = osp::plugin::ids;
+        for (const auto& id : { vids::vibratoEnabled, vids::vibratoDepth, vids::vibratoRate, vids::vibratoDelay, vids::vibratoRise, vids::vibratoControl,
+                                vids::vibratoAmount, vids::vibratoSourceA, vids::vibratoSourceB, vids::vibratoSourceC, params::vibratoSourceSub })
+            setups[id] = [id] (ShellProcessor& q) {
+                setValue (q, vids::vibratoEnabled, id == vids::vibratoEnabled ? 0.0f : 1.0f);
+                setValue (q, vids::vibratoControl, id == vids::vibratoAmount ? 2.0f : 1.0f);
+                setValue (q, vids::vibratoAmount, id == vids::vibratoControl ? 100.0f : 0.0f);
+                setValue (q, vids::vibratoDepth, 60.0f);
+                setValue (q, vids::vibratoRate, 7.0f);
+                if (id != vids::vibratoDelay)
+                    setValue (q, vids::vibratoDelay, 0.0f);
+                if (id != vids::vibratoRise)
+                    setValue (q, vids::vibratoRise, 20.0f);
+                if (id == vids::vibratoSourceC)
+                    setValue (q, params::hybridType, 1.0f);   // (card C as OSC 3)
+                if (id == params::vibratoSourceSub)
+                    setValue (q, params::subEnabled, 1.0f);
+            };
+    }
 
     // Each card's EQ and DAMPEN (ANDOR OSP's): a band's settings act while the EQ and that band
     // are on (a shelf or bell with gain); DAMPEN's while it is on (its corner in its own mode).
