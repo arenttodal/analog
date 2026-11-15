@@ -63,6 +63,21 @@ destinations sit only in the append-only `destExt` list.
   - Analog: OSC 1 without and with vibrato; OSC 2 alone of the pair; card C as OSC 3; a CC 1 wheel ramp; the default patch unchanged.
 - Screenshots: `docs/screenshots/wheels/` (869, 1448 and 1810 px; MOD WHEEL off, ALWAYS ON and ASSIGNED).
 
+## Test results (15 Nov 2026, Linux)
+
+| Suite | Result |
+|---|---|
+| ANDOR Analog DSP (`analog_dsp_tests`) | 320 / 320, plus the vibrato demo case |
+| ANDOR Analog instrument (`andor_analog_tests`) | 237 passed, 2 skipped (the Bukkehorn recordings), 0 failed. Includes the wheels case, VIBRATO in the bindings test, and the 1.0 sessions keeping every parameter's index |
+| ANDOR OSP `osp_tests` | 481 passed; vibrato cases 4 / 4 |
+| ANDOR OSP plugin tests | 4 / 4 shards (169 cases), including the wheels case |
+| Example product | 24 / 24 |
+| Visual regressions (OSP reference, example, Analog) | pass unchanged |
+
+Parameter order: the shared `vibrato.*` are appended after every other parameter of the
+instrument (`InstrumentHost::addVibratoParameters`), so ANDOR Analog's own parameters keep their
+1.0 positions.
+
 ## OWNER TESTS (UNVERIFIED here)
 
 - Listening: whether DEPTH 25 cents at 5.5 Hz with DELAY 250 ms and RISE 400 ms sounds
