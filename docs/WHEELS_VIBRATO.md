@@ -28,6 +28,10 @@ Left as they were:
 
 ## Compatibility
 
+The route `destExt` choice list grew from 9 to 11 choices (append only). Sessions store the
+choice index and recall exactly. Only DAW automation drawn on `destExt` itself, which is rare,
+maps to a different normalised value. The same happened when SYNTH A–C were appended.
+
 Vibrato is off by default. Every older session, preset and factory sound is unchanged sample
 for sample, because off adds exactly 0.0 cents in the same places. These cases are also
 bit-identical:
