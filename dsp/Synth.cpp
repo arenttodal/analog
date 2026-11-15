@@ -179,6 +179,7 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.mirage2.prepare (internalRate);
         v.highPass.prepare (internalRate);
         v.sendHighPass.prepare (internalRate);
+        v.carHighPass.prepare (internalRate);
         for (auto& h : v.satHighPass)
             h.prepare (internalRate);
         v.organic.prepare (internalRate);
@@ -225,13 +226,25 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
     auxDelayL.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
     auxDelayR.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
-    auxMorphL.assign (static_cast<std::size_t> (maxBlock), 0.0f);
-    auxMorphR.assign (static_cast<std::size_t> (maxBlock), 0.0f);
-    auxMorph.prepare (hostRate, maxBlock);
-    auxMorphNow = 0.0f;
-    auxDryNow = 1.0f;
-    auxMorphTail = 0;
-    auxMorphRunning = false;
+    // GLOBAL MORPH 2.0: MORPH TO D's stage and the carrier tap.
+    stage.prepare (hostRate, maxBlock);
+    for (auto* b : { &stageL, &stageR, &stageKL, &stageKR, &stageDL, &stageDR, &carOutL, &carOutR })
+        b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    for (auto* b : { &carMixL, &carMixR })
+        b->assign (internalBlock, 0.0f);
+    for (auto* b : { &carHalfL, &carHalfR })
+        b->assign (static_cast<std::size_t> (maxBlock * 2), 0.0f);
+    for (auto* b : { &carDelayCL, &carDelayCR, &carDelayDL, &carDelayDR })
+        b->assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
+    for (auto* d : { &carStage2L, &carStage2R })
+        d->design (0.08, 96.0);
+    for (auto* d : { &carStage1L, &carStage1R })
+        d->design (0.29, 96.0);
+    stageRunning = carrierTaps = carrierWas = false;
+    stageFresh = busWasSilent = true;
+    stageIn = stageOut = stageExclusive = 0.0f;
+    stageDirect = 1.0f;
+    stageLatencyShown.store (0, std::memory_order_relaxed);
     auxLoop.prepare (hostRate);
     for (auto& h : auxFilter.highPass)
         h.prepare (hostRate);
@@ -293,10 +306,11 @@ void Synth::reset() noexcept
     auxFilter.heldCount = 0;
     auxFilter.pedal = false;
     auxFilter.env.kill();
-    auxMorphNow = 0.0f;
-    auxDryNow = 1.0f;
-    auxMorphTail = 0;
-    auxMorphRunning = false;
+    stageRunning = carrierTaps = carrierWas = false;
+    stageFresh = busWasSilent = true;
+    stageIn = stageOut = stageExclusive = 0.0f;
+    stageDirect = 1.0f;
+    stageLatencyShown.store (0, std::memory_order_relaxed);
     satLocalRunning = satPendingStart = false;
     satLocalPpq = 0.0;
     satIdle = 0;
@@ -324,6 +338,7 @@ void Synth::reset() noexcept
         v.env.kill();
         v.filter.reset();
         v.sendFilter.reset();
+        v.carFilter.reset();
         v.line1.reset();
         v.line2.reset();
         v.osc2Out = 0.0f;
@@ -350,7 +365,7 @@ void Synth::reset() noexcept
         v.phase2 = start.nextDouble();
         v.noise.reseed (osp::Prng::deriveSeed (current.seed, static_cast<std::uint64_t> (v.slot), 0x4e4fu));
     }
-    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R, &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R })
+    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R, &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R, &carStage1L, &carStage1R, &carStage2L, &carStage2R })
         d->reset();
     osp::Macros macros;
     macros.life = macros.reimagined = 0.0;
@@ -763,10 +778,11 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
     {
         v.filter.reset();
         v.sendFilter.reset();
+        v.carFilter.reset();
         v.satTwins = 0;   // (SATELLITE's twins start from rest with it, when next used)
         v.dnaGain = 1.0;
         v.dnaClose = 0.0;
-        v.dnaS1 = v.dnaS2 = v.dnaSendS1 = v.dnaSendS2 = 0.0;
+        v.dnaS1 = v.dnaS2 = v.dnaSendS1 = v.dnaSendS2 = v.dnaCarS1 = v.dnaCarS2 = 0.0;
         v.dnaCoefCountdown = 0;
         v.line1.reset();
         v.line2.reset();
@@ -802,9 +818,11 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.ringNow = static_cast<float> (current.ringMix);
         v.ota.reset();
         v.sendOta.reset();
+        v.carOta.reset();
         v.otaMix = v.otaTarget = current.filterModel == FilterModel::ota ? 1.0f : 0.0f;
         v.highPass.reset();
         v.sendHighPass.reset();
+        v.carHighPass.reset();
         v.eqA.reset();
         v.eqB.reset();
         v.eqC.reset();
@@ -1290,13 +1308,14 @@ void Synth::allSoundOff() noexcept
         v.env.kill();
         v.filter.reset();
         v.sendFilter.reset();
+        v.carFilter.reset();
         v.line1.reset();
         v.line2.reset();
         v.outGain = 0.0f;
         v.stoppedAt = clock;
     }
     // What is still in the decimators and the DC blocker goes too (the effects' tails stay).
-    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R, &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R })
+    for (auto* d : { &stage1L, &stage1R, &stage2L, &stage2R, &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R, &carStage1L, &carStage1R, &carStage2L, &carStage2R })
         d->reset();
     std::fill (mixL.begin(), mixL.end(), 0.0f);
     std::fill (mixR.begin(), mixR.end(), 0.0f);
@@ -1627,6 +1646,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     {
         v.ota.reset();   // (fading in from rest, never from a stale state)
         v.sendOta.reset();
+        v.carOta.reset();
         for (auto& o : v.satOta)
             o.reset();
     }
@@ -1640,6 +1660,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         {
             v.highPass.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.sendHighPass.setMode (variant, std::clamp (p.highPass, 0, 3));
+            v.carHighPass.setMode (variant, std::clamp (p.highPass, 0, 3));
             for (auto& h : v.satHighPass)
                 h.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.highPassTail = std::max (1, static_cast<int> (VoiceHighPass::rampSeconds * internalRate) + controlPeriod * oversampling);
@@ -1648,6 +1669,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         {
             v.highPass.setMode (variant, flat);
             v.sendHighPass.setMode (variant, flat);
+            v.carHighPass.setMode (variant, flat);
             for (auto& h : v.satHighPass)
                 h.setMode (variant, flat);
         }
@@ -2631,7 +2653,7 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             scratchEnv[ks] = env;
             eqTapAt = tapBase + done + k;   // (the cards' EQ spectrum, while asked for)
             scratchSource[ks] = sourceSample (v, env, scratchPolyMod[ks]);
-            if (modes || sendTaps || satTwinMask != 0)
+            if (modes || sendTaps || carrierTaps || satTwinMask != 0)
             {
                 scratchA[ks] = v.lastA;
                 scratchB[ks] = v.lastB;
@@ -2736,6 +2758,32 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                     sendY = sendLadder + v.otaMix * (sendOta - sendLadder);
                 }
             }
+            // GLOBAL MORPH 2.0's carrier tap: the CARRIER's part (OSC 1, OSC 2 or both; card C never)
+            // through the voice's own filter, its twin - what the carrier alone sounds like here.
+            float carY = 0.0f;
+            if (carrierTaps)
+            {
+                const auto carrier = p.morphGlobal.carrier;
+                const float part = carrier == MorphCarrier::osc1 ? scratchA[ks] : (carrier == MorphCarrier::osc2 ? scratchB[ks] : scratchA[ks] + scratchB[ks]);
+                float cin = part * v.driveGain;
+                if (highPassOn)
+                    cin = v.carHighPass.process (cin);
+                if (v.otaMix <= 0.0f && v.otaTarget <= 0.0f)
+                    carY = v.carFilter.process (cin, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                else
+                {
+                    const float gOtaCar = v.otaCutoffOffset != 0.0f ? cutoffG (cutoff + v.otaCutoffOffset) : g;
+                    const auto character = current.otaVoicing == OtaVoicing::jupiter ? OtaCharacter::jupiter : OtaCharacter::juno;
+                    const float ota = v.carOta.process (cin, gOtaCar, v.resonance01, character, current.otaTwoPole) * v.otaMakeUp;
+                    if (v.otaMix >= 1.0f && v.otaTarget >= 1.0f)
+                        carY = ota;
+                    else
+                    {
+                        const float ladder = v.carFilter.process (cin, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                        carY = ladder + v.otaMix * (ota - ladder);
+                    }
+                }
+            }
             // SATELLITE's twins: each moving card's own part (C's, with MORPH, in its carrier's)
             // through the voice's filter, as the voice's own: what that card alone sounds like.
             std::array<float, 3> twinY {};
@@ -2784,12 +2832,18 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             // The sends, filtered as the voice is and shaped by the note's AMP, level and place.
             // Card C's part is both its layers'.
             float tap = sendTaps ? sendY * scratchAmp[ks] * v.outGain * fadeGain : 0.0f;
+            float carTap = carrierTaps ? carY * scratchAmp[ks] * v.outGain * fadeGain : 0.0f;
             if (dnaRun)
-                applyShaperDna (v, out, sendTaps ? &tap : nullptr, at);   // SHAPER DNA: this note's rhythm (its send too)
+                applyShaperDna (v, out, sendTaps ? &tap : nullptr, at, carrierTaps ? &carTap : nullptr);   // SHAPER DNA: this note's rhythm (its send and carrier too)
             if (satMoving == 0)
             {
                 left[at] += out * v.panL;
                 right[at] += out * v.panR;
+                if (carrierTaps)
+                {
+                    carTapL[at] += carTap * v.panL;
+                    carTapR[at] += carTap * v.panR;
+                }
                 if (sendTaps)
                 {
                     tapL[at] += tap * v.panL;
@@ -2818,6 +2872,11 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                     {
                         tapL[at] += tap * gL;
                         tapR[at] += tap * gR;
+                    }
+                    if (carrierTaps)
+                    {
+                        carTapL[at] += carTap * gL;
+                        carTapR[at] += carTap * gR;
                     }
                 }
                 else
@@ -2870,6 +2929,13 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                     }
                     left[at] += rest * restL + l;
                     right[at] += rest * restR + r;
+                    if (carrierTaps)
+                    {
+                        // (the carrier at the voice's rest place: with SATELLITE moving some of
+                        // its cards apart, its image here is the rest's - documented)
+                        carTapL[at] += carTap * restL;
+                        carTapR[at] += carTap * restR;
+                    }
                     if (sendTaps)
                     {
                         tapL[at] += restTap * restL + tl;
@@ -2994,6 +3060,7 @@ void Synth::render (float* left, float* right, int numSamples) noexcept
         renderChunk (left + done, right + done, n);
         done += n;
     }
+    stageFresh = false;
 }
 
 //==============================================================================
@@ -3100,6 +3167,19 @@ void Synth::mixExternal (float* left, float* right, int numSamples) noexcept
             voicesDelayL[static_cast<std::size_t> (voicesDelayAt)] = l;
             voicesDelayR[static_cast<std::size_t> (voicesDelayAt)] = r;
             voicesDelayAt = (voicesDelayAt + 1) % maxExternalLatency;
+        }
+    if (const int lag = external.active ? external.latency : 0; lag > 0 && carrierTaps)
+        for (int i = 0; i < n; ++i)
+        {
+            // (the carrier tap waits with the voices: S and K stay aligned)
+            const auto k = static_cast<std::size_t> (i);
+            const int at = (carDelayCAt - lag + maxExternalLatency) % maxExternalLatency;
+            const float l = carOutL[k], r = carOutR[k];
+            carOutL[k] = carDelayCL[static_cast<std::size_t> (at)];
+            carOutR[k] = carDelayCR[static_cast<std::size_t> (at)];
+            carDelayCL[static_cast<std::size_t> (carDelayCAt)] = l;
+            carDelayCR[static_cast<std::size_t> (carDelayCAt)] = r;
+            carDelayCAt = (carDelayCAt + 1) % maxExternalLatency;
         }
     // C at its level (10 ms ramps: switching it, its level, MORPH on / off - never a click).
     const float step = static_cast<float> (1.0 / (0.010 * hostRate));
@@ -3223,7 +3303,7 @@ void Synth::renderAux (int numSamples) noexcept
         auxModNow = 0.0f;
         auxKeyRunning = false;
         auxKeyGain = 0.0f;
-        auxDryNow = a.morphExclusive ? 0.0f : 1.0f;   // (powered under MORPH TO D: D never layered, from the first sample)
+        stageExclusive = a.morphExclusive ? 1.0f : 0.0f;   // (powered under MORPH TO D: D never layered, from the first sample)
         auxAvailable = 0.0f;
         auxSilentSeconds = 1.0e9;
     }
@@ -3368,6 +3448,7 @@ float Synth::auxNoiseSample (int channel, float lowCoefficient) noexcept
 void Synth::mixAux (float* left, float* right, int numSamples) noexcept
 {
     const auto& a = current.aux;
+    auxToStage = false;
     if (! auxRunning)
         return;   // (never powered: the instrument as before, bit for bit)
     const int n = std::min (numSamples, maxBlock);
@@ -3471,6 +3552,18 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
             auxDelayR[static_cast<std::size_t> (auxDelayAt)] = r;
             auxDelayAt = (auxDelayAt + 1) % maxExternalLatency;
         }
+    if (const int lag = auxModePlaying == Patch::Aux::Mode::kontakt && a.enabled ? auxExternal.latency : 0; lag > 0 && carrierTaps)
+        for (int i = 0; i < n; ++i)
+        {
+            const auto k = static_cast<std::size_t> (i);
+            const int at = (carDelayDAt - lag + maxExternalLatency) % maxExternalLatency;
+            const float l = carOutL[k], r = carOutR[k];
+            carOutL[k] = carDelayDL[static_cast<std::size_t> (at)];
+            carOutR[k] = carDelayDR[static_cast<std::size_t> (at)];
+            carDelayDL[static_cast<std::size_t> (carDelayDAt)] = l;
+            carDelayDR[static_cast<std::size_t> (carDelayDAt)] = r;
+            carDelayDAt = (carDelayDAt + 1) % maxExternalLatency;
+        }
     auxLatencyNow = auxModePlaying == Patch::Aux::Mode::kontakt && a.enabled ? auxExternal.latency : 0;
     // Its FILTER: the cards' (TONE and what moves it, RESONANCE, DRIVE, the model, the high-pass,
     // key tracking, the envelope from the played keys), its stereo bus filter; FOLLOW off
@@ -3500,10 +3593,9 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
     // Its level (and MUTE / SOLO / POWER), ramped (10 ms): never a click.
     const bool levelMod = rhythmMod && a.modTarget == Patch::Aux::ModTarget::auxLevel;
     const auto amount = static_cast<float> (std::clamp (a.modAmount, 0.0, 1.0));
-    // D MORPH (Option D): its stage runs only while it is up, gliding down, or settling - at 0
-    // from the start nothing here changes (D is added as ever, bit for bit).
-    const auto morphTarget = static_cast<float> (std::clamp (a.morph, 0.0, 1.0));
-    const bool morphing = morphTarget > 0.0f || auxMorphNow > 0.0f || auxMorphTail > 0 || a.morphExclusive || auxDryNow < 1.0f;
+    // MORPH TO D (GLOBAL MORPH 2.0): D at its level goes to the global stage (runGlobalStage),
+    // never onto the bus here; MORPH TO C: added as ever, bit for bit.
+    const bool morphing = current.morph.toAux;
     float g = auxGainNow, peak = 0.0f;
     double levelSum = 0.0;
     for (std::size_t i = 0; i < un; ++i)
@@ -3514,7 +3606,7 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
         const float l = g * m * auxL[i], r = g * m * auxR[i];
         if (morphing)
         {
-            auxL[i] = l;   // (D at its level: the morph's character)
+            auxL[i] = l;   // (D at its level: the stage's D)
             auxR[i] = r;
         }
         else
@@ -3555,8 +3647,7 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
         const float up = static_cast<float> (n / (0.002 * hostRate)), down = static_cast<float> (n / (0.300 * hostRate));
         auxAvailable = want > auxAvailable ? std::min (want, auxAvailable + up) : std::max (want, auxAvailable - down);
     }
-    if (morphing)
-        mixAuxMorph (left, right, n, morphTarget, a.morphExclusive);
+    auxToStage = morphing;
     auxPeakShown.store (peak, std::memory_order_relaxed);
     if (! a.enabled && auxGainNow <= 0.0f)
     {
@@ -3653,63 +3744,101 @@ Synth::AuxTelemetry Synth::auxTelemetry() const noexcept
     return t;
 }
 
-void Synth::mixAuxMorph (float* left, float* right, int n, float target, bool exclusive) noexcept
+void Synth::runGlobalStage (float* left, float* right, int numSamples) noexcept
 {
-    // The global MORPH stage (GlobalMorph: the tested zero-latency spectral imprint). Its carrier
-    // is everything before D - A/B/C after the FILTER, C's buses - and its character is D after
-    // its own AUX FILTER, at its level: 0 the carrier, 0.5 the hybrid at D's band energies, 1 D.
-    // D's own layer beside it: layered (D MORPH, Option D) it gives way as the imprint deepens
-    // (equal power, gone at 0.5), so 0 is exactly the layered sound; EXCLUSIVE (MORPH TO D,
-    // Addendum 05) it is not there at all (glided 10 ms), so 0 is the synth alone and D is heard
-    // only through the stage - never twice.
-    const bool stage = target > 0.0f || auxMorphNow > 0.0f || auxMorphTail > 0;
-    if (stage && ! auxMorphRunning)
+    // GLOBAL MORPH 2.0 (docs/GLOBAL_MORPH_2.md). The stage runs whenever MORPH TO D is chosen -
+    // MORPH on or off, D on or off - so its latency is the choice's, never a performance
+    // switch's. S is the bus here (A/B/C after the FILTER, C's buses), K the carrier tap, D
+    // at its level; while MORPH is off or D soloed, D is layered into S (the stage then a pure
+    // delay: 0 % is S). Choosing it fades the bus out and the stage's input in (5 ms: the
+    // stage's latency is a short silence then, as any change of latency); leaving it fades the
+    // stage's output out and the bus in.
+    const auto& a = current.aux;
+    const bool want = current.morph.toAux;
+    const int n = std::min (numSamples, maxBlock);
+    const float ramp = static_cast<float> (1.0 / (0.005 * hostRate));
+    const float glide = static_cast<float> (1.0 / (0.010 * hostRate));
+    // MORPH's position: D's availability applied (a D that cannot sound gives the synth back).
+    const double position = std::clamp (a.morph, 0.0, 1.0) * static_cast<double> (auxAvailable);
+    const auto& m = current.morphGlobal;
+    GlobalSpectralMorph::Controls c;
+    c.method = m.method == MorphMethod::fuse ? GlobalSpectralMorph::Method::fuse
+                                             : (m.method == MorphMethod::weave ? GlobalSpectralMorph::Method::weave : GlobalSpectralMorph::Method::imprint);
+    c.position = position;
+    c.texture = m.texture;
+    c.attack = m.attack;
+    c.formants = m.formants;
+    c.detail = m.detail;
+    c.output = m.output == MorphOutput::layered ? GlobalSpectralMorph::Output::layered : GlobalSpectralMorph::Output::morphOnly;
+    c.levelMatch = m.levelMatch;
+    if (want && ! stageRunning)
     {
-        auxMorph.reset();
-        auxMorphRunning = true;
+        stageRunning = true;
+        stageIn = 0.0f;
+        stageOut = 1.0f;
+        stageExclusive = a.morphExclusive ? 1.0f : 0.0f;
+        if (stageFresh || busWasSilent)
+        {
+            // (chosen with the session, or while nothing plays: nothing to fade from - the stage
+            // at its position from the first sample)
+            stageIn = 1.0f;
+            stageDirect = 0.0f;
+        }
+        stage.setControls (c);
+        stage.reset();   // (from rest)
     }
-    const auto un = static_cast<std::size_t> (n);
-    std::copy (left, left + n, auxMorphL.begin());
-    std::copy (right, right + n, auxMorphR.begin());
-    const float step = static_cast<float> (1.0 / (0.015 * hostRate));   // (GlobalMorph's own 15 ms)
-    const float dryStep = static_cast<float> (1.0 / (0.010 * hostRate));
-    const float dryWant = exclusive ? 0.0f : 1.0f;
-    const float from = auxMorphNow;
-    // Only while D is there (auxAvailable: signal within the last 2 s, held through a loop's
-    // silences): a D that is off, muted or long silent never takes the synth away - it plays as it
-    // is. (The imprint's depth inside the stage follows D's activity itself; the position is not
-    // scaled by it a second time, so 100 % is D exactly whatever D's level.)
-    const float active = auxAvailable;
-    if (stage)
+    stage.setControls (c);
+    const float exclusiveTarget = a.morphExclusive ? 1.0f : 0.0f;
+    float busPeak = 0.0f;
+    for (int i = 0; i < n; ++i)
+        busPeak = std::max (busPeak, std::max (std::abs (left[i]), std::abs (right[i])) + (auxToStage ? std::max (std::abs (auxL[static_cast<std::size_t> (i)]), std::abs (auxR[static_cast<std::size_t> (i)])) : 0.0f));
+    busWasSilent = busPeak <= 0.0f;
+    float in = stageIn, out = stageOut, direct = stageDirect, exclusive = stageExclusive;
+    for (int i = 0; i < n; ++i)
     {
-        tapAux (AuxTapPoint::morphIn, auxL.data(), auxR.data(), n);
+        const auto k = static_cast<std::size_t> (i);
+        in = want ? std::min (1.0f, in + ramp) : in;
+        out = want ? 1.0f : std::max (0.0f, out - ramp);
+        direct = want ? std::max (0.0f, direct - ramp) : std::min (1.0f, direct + ramp);
+        exclusive = exclusive < exclusiveTarget ? std::min (exclusiveTarget, exclusive + glide) : std::max (exclusiveTarget, exclusive - glide);
+        const float dL = auxToStage ? auxL[k] : 0.0f, dR = auxToStage ? auxR[k] : 0.0f;
+        stageL[k] = in * (left[i] + (1.0f - exclusive) * dL);
+        stageR[k] = in * (right[i] + (1.0f - exclusive) * dR);
+        stageKL[k] = carrierTaps ? in * carOutL[k] : 0.0f;
+        stageKR[k] = carrierTaps ? in * carOutR[k] : 0.0f;
+        stageDL[k] = in * exclusive * dL;
+        stageDR[k] = in * exclusive * dR;
+        // (the bus as it is, D layered: what plays while the stage fades in or out)
+        left[i] += dL;
+        right[i] += dR;
+    }
+    if (auxToStage && stageExclusive + exclusive > 0.0f)
+    {
+        tapAux (AuxTapPoint::morphIn, stageDL.data(), stageDR.data(), n);
         auxStageThisBlock = true;
-        auxMorph.process (auxMorphL.data(), auxMorphR.data(), auxL.data(), auxR.data(), n, static_cast<double> (target * active));
     }
-    float p = from, dg = auxDryNow;
-    for (std::size_t i = 0; i < un; ++i)
+    stage.process (stageL.data(), stageR.data(), stageKL.data(), stageKR.data(), stageDL.data(), stageDR.data(), n);
+    float o = stageOut, d = stageDirect;
+    for (int i = 0; i < n; ++i)
     {
-        p = p < target ? std::min (target, p + step) : std::max (target, p - step);
-        dg = dg < dryWant ? std::min (dryWant, dg + dryStep) : std::max (dryWant, dg - dryStep);
-        const float dry = dg * std::cos (std::min (1.0f, 2.0f * p * active) * 1.5707963f);
-        left[i] = auxMorphL[i] + dry * auxL[i];
-        right[i] = auxMorphR[i] + dry * auxR[i];
+        const auto k = static_cast<std::size_t> (i);
+        o = want ? 1.0f : std::max (0.0f, o - ramp);
+        d = want ? std::max (0.0f, d - ramp) : std::min (1.0f, d + ramp);
+        left[i] = d * left[i] + o * stageL[k];
+        right[i] = d * right[i] + o * stageR[k];
     }
-    auxMorphNow = p;
-    auxDryNow = dg;
+    stageIn = in;
+    stageOut = out;
+    stageDirect = direct;
+    stageExclusive = exclusive;
     tapAux (AuxTapPoint::morphOut, left, right, n);
-    // Back at 0: it runs on for 60 ms (GlobalMorph settling to the carrier), then stops.
-    if (target <= 0.0f && auxMorphNow <= 0.0f)
+    stagePositionShown.store (static_cast<float> (position), std::memory_order_relaxed);
+    stageLatencyShown.store (want ? stage.latencySamples() : 0, std::memory_order_relaxed);
+    if (! want && stageOut <= 0.0f && stageDirect >= 1.0f)
     {
-        if (auxMorphTail <= 0 && from > 0.0f)
-            auxMorphTail = static_cast<int> (0.060 * hostRate);
-        else
-            auxMorphTail = std::max (0, auxMorphTail - n);
-        if (auxMorphTail <= 0)
-            auxMorphRunning = false;
+        stageRunning = false;   // (faded out: the bus as before)
+        stageIn = 0.0f;
     }
-    else
-        auxMorphTail = 0;
 }
 
 void Synth::externalKeyEvent (const std::uint8_t* data, int size) noexcept
@@ -4117,7 +4246,7 @@ void Synth::updateShaperDna (int count) noexcept
                 // (stopped: the next hand-over starts every note from open)
                 v.dnaGain = 1.0;
                 v.dnaClose = 0.0;
-                v.dnaS1 = v.dnaS2 = v.dnaSendS1 = v.dnaSendS2 = 0.0;
+                v.dnaS1 = v.dnaS2 = v.dnaSendS1 = v.dnaSendS2 = v.dnaCarS1 = v.dnaCarS2 = 0.0;
                 v.dnaCoefCountdown = 0;
             }
         return;
@@ -4199,7 +4328,7 @@ void Synth::updateShaperDna (int count) noexcept
     }
 }
 
-void Synth::applyShaperDna (Voice& v, float& out, float* send, int at) noexcept
+void Synth::applyShaperDna (Voice& v, float& out, float* send, int at, float* carrier) noexcept
 {
     // The SHAPER's own law, on one note: VOL dips its level, FILTER closes a gentle LP12 (its
     // own state: never shared between notes), BOTH does both, the filter fully and the level
@@ -4237,6 +4366,8 @@ void Synth::applyShaperDna (Voice& v, float& out, float* send, int at) noexcept
         lp (out, v.dnaS1, v.dnaS2);
         if (send != nullptr)
             lp (*send, v.dnaSendS1, v.dnaSendS2);
+        if (carrier != nullptr)
+            lp (*carrier, v.dnaCarS1, v.dnaCarS2);
     }
     else
     {
@@ -4248,11 +4379,18 @@ void Synth::applyShaperDna (Voice& v, float& out, float* send, int at) noexcept
             v.dnaSendS1 = 0.0;
             v.dnaSendS2 = *send;
         }
+        if (carrier != nullptr)
+        {
+            v.dnaCarS1 = 0.0;
+            v.dnaCarS2 = *carrier;
+        }
         v.dnaCoefCountdown = 0;
     }
     out *= static_cast<float> (v.dnaGain);
     if (send != nullptr)
         *send *= static_cast<float> (v.dnaGain);
+    if (carrier != nullptr)
+        *carrier *= static_cast<float> (v.dnaGain);
 }
 
 void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
@@ -4281,10 +4419,38 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         {
             v.sendFilter.reset();   // (the voices' send filters start from rest, as the sends do)
             v.sendOta.reset();
+        v.carOta.reset();
             v.sendHighPass.reset();
+        v.carHighPass.reset();
         }
     }
     sendWas = sendTaps;
+    // GLOBAL MORPH 2.0: the carrier tap runs while MORPH TO D's stage does or is about to.
+    carrierTaps = current.morph.toAux || stageRunning;
+    if (carrierTaps && ! carrierWas)
+    {
+        for (auto* d : { &carStage1L, &carStage1R, &carStage2L, &carStage2R })
+            d->reset();
+        for (auto& v : voices)
+        {
+            v.carFilter.reset();
+            v.carOta.reset();
+            v.carHighPass.reset();
+            v.dnaCarS1 = v.dnaCarS2 = 0.0;
+        }
+        std::fill (carDelayCL.begin(), carDelayCL.end(), 0.0f);
+        std::fill (carDelayCR.begin(), carDelayCR.end(), 0.0f);
+        std::fill (carDelayDL.begin(), carDelayDL.end(), 0.0f);
+        std::fill (carDelayDR.begin(), carDelayDR.end(), 0.0f);
+        carDelayCAt = voicesDelayAt;   // (the same position in their rings as the bus's own delays)
+        carDelayDAt = auxDelayAt;
+    }
+    carrierWas = carrierTaps;
+    if (carrierTaps)
+    {
+        std::fill (carMixL.begin(), carMixL.begin() + total, 0.0f);
+        std::fill (carMixR.begin(), carMixR.begin() + total, 0.0f);
+    }
     tapTotal = std::max (1, total);
     if (sendTaps)
     {
@@ -4323,6 +4489,8 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
         const int from = pos * oversampling, count = chunk * oversampling;
         tapL = sendMixL.data() + from;
         tapR = sendMixR.data() + from;
+        carTapL = carMixL.data() + from;
+        carTapR = carMixR.data() + from;
         tapBase = from;
         updateShaperDna (count);
         updateSatellite (count);
@@ -4381,10 +4549,38 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
             right[i] = stage2R.process (srcR[2 * i], srcR[2 * i + 1]);
         }
     }
+    if (carrierTaps)
+    {
+        // The carrier tap down to the host rate: its own decimators, the same filters as the
+        // mix's, so K stays sample-aligned with the bus it is a part of.
+        if (oversampling == 4)
+            for (int i = 0; i < 2 * numSamples; ++i)
+            {
+                carHalfL[static_cast<std::size_t> (i)] = carStage1L.process (carMixL[static_cast<std::size_t> (2 * i)], carMixL[static_cast<std::size_t> (2 * i + 1)]);
+                carHalfR[static_cast<std::size_t> (i)] = carStage1R.process (carMixR[static_cast<std::size_t> (2 * i)], carMixR[static_cast<std::size_t> (2 * i + 1)]);
+            }
+        const float* cL = oversampling == 4 ? carHalfL.data() : carMixL.data();
+        const float* cR = oversampling == 4 ? carHalfR.data() : carMixR.data();
+        for (int i = 0; i < numSamples; ++i)
+        {
+            carOutL[static_cast<std::size_t> (i)] = oversampling == 1 ? cL[i] : carStage2L.process (cL[2 * i], cL[2 * i + 1]);
+            carOutR[static_cast<std::size_t> (i)] = oversampling == 1 ? cR[i] : carStage2R.process (cR[2 * i], cR[2 * i + 1]);
+        }
+    }
 
     mixRhythm (left, right, numSamples);   // card C's loop joins the voices (AUDIO, BOTH)
     mixExternal (left, right, numSamples);   // EXPERIMENT: card C's external instrument (and GLOBAL MORPH)
     mixAux (left, right, numSamples);        // D / AUX: its own bus, through its FILTER, into the shared stages below
+    if (current.morph.toAux || stageRunning)
+        runGlobalStage (left, right, numSamples);   // MORPH TO D: S, the carrier and D through the global stage (GLOBAL MORPH 2.0)
+    else
+    {
+        // (whether anything plays: a stage chosen next needs a fade only if it does)
+        float busPeak = 0.0f;
+        for (int i = 0; i < numSamples; ++i)
+            busPeak = std::max (busPeak, std::max (std::abs (left[i]), std::abs (right[i])));
+        busWasSilent = busPeak <= 0.0f;
+    }
     if (auxRunning)
         tapAux (AuxTapPoint::fxIn, left, right, numSamples);
 

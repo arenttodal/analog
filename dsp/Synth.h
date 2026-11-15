@@ -14,6 +14,7 @@
 #include "OtaFilter.h"
 #include "morph/LiveMorph.h"
 #include "morph/GlobalMorph.h"
+#include "morph/GlobalSpectralMorph.h"
 #include "LiveGranulator.h"
 #include "Patch.h"
 #include "PolyBlep.h"
@@ -294,10 +295,14 @@ public:
     float auxCutoffHz() const noexcept { return auxRunning && current.aux.filterFollow ? auxFilter.cutoffHz : 0.0f; }
     /** Whether D's bus runs (it does nothing at all while off and faded out). */
     bool auxActive() const noexcept { return auxRunning; }
-    /** D MORPH: whether its stage runs now, and its position (0..1, smoothed). */
-    bool auxMorphActive() const noexcept { return auxMorphRunning; }
-    float auxMorphPosition() const noexcept { return auxMorphNow; }
-    const GlobalMorph& auxMorphState() const noexcept { return auxMorph; }
+    /** MORPH TO D's stage (GLOBAL MORPH 2.0): whether it runs now (it runs whenever MORPH TO D is
+        chosen, MORPH on or off: one latency for the whole choice), the position it was given
+        last (0..1: MORPH x D's availability), its telemetry, and the latency it adds (samples;
+        0 while it does not run - any thread). */
+    bool auxMorphActive() const noexcept { return stageRunning; }
+    float auxMorphPosition() const noexcept { return stagePositionShown.load (std::memory_order_relaxed); }
+    const GlobalSpectralMorph& globalStage() const noexcept { return stage; }
+    int morphStageLatency() const noexcept { return stageLatencyShown.load (std::memory_order_relaxed); }
 
     /** GLOBAL MORPH 2.0 gate 1: D's signal measured along its whole path, each stage's peak and
         RMS over the last host block - the source as rendered, after D's FILTER, after its LEVEL /
@@ -486,6 +491,12 @@ private:
         LadderFilter sendFilter;
         OtaFilter sendOta;
         VoiceHighPass sendHighPass;
+        // GLOBAL MORPH 2.0's carrier tap: the CARRIER's part (OSC 1, OSC 2 or both) through the
+        // voice's filter, as the voice's own (its twin, while MORPH TO D's stage runs).
+        LadderFilter carFilter;
+        OtaFilter carOta;
+        VoiceHighPass carHighPass;
+        double dnaCarS1 = 0.0, dnaCarS2 = 0.0;
         // Each card's EQ and DAMPEN on its own part, before the filter (Patch::eqA ...).
         VoiceEq eqA, eqB;
         VoiceEq eqC;                  ///< state version 8: card B's (OSC 2), the shell's layer C
@@ -793,7 +804,7 @@ private:
     // SHAPER DNA (docs/SHAPER_DNA_V1.md): lane A's SHAPER per note. Nothing here runs while it
     // is off and has faded out, so OFF renders exactly as before.
     void updateShaperDna (int count) noexcept;
-    void applyShaperDna (Voice& v, float& out, float* send, int at) noexcept;
+    void applyShaperDna (Voice& v, float& out, float* send, int at, float* carrier = nullptr) noexcept;
     // SATELLITE: each card's motion (control rate; the voices interpolate across the chunk).
     struct SatelliteCard
     {
@@ -861,17 +872,33 @@ private:
     // D / AUX's bus.
     void renderAux (int numSamples) noexcept;   ///< its envelope (control rate reads it) before the voices
     void mixAux (float* left, float* right, int numSamples) noexcept;
-    void mixAuxMorph (float* left, float* right, int n, float target, bool exclusive) noexcept;   ///< D MORPH's stage
+    /** MORPH TO D's stage on the bus after D (GLOBAL MORPH 2.0): S the bus, K the carrier tap,
+        D at its level (or layered into S while MORPH is off or D soloed). */
+    void runGlobalStage (float* left, float* right, int n) noexcept;
     float auxNoiseSample (int channel, float toneCoefficient) noexcept;
     rhythm::LoopPlayer auxLoop;
     std::vector<float> auxL, auxR, auxDryL, auxDryR, auxLevelBuf, auxTransientBuf, auxEnvBuf, auxDelayL, auxDelayR;
-    // D MORPH: the second MORPH stage (A/B/C x D, GlobalMorph), idle (never processed) at 0.
-    GlobalMorph auxMorph;
-    std::vector<float> auxMorphL, auxMorphR;
-    float auxMorphNow = 0.0f;
-    float auxDryNow = 1.0f;   ///< D's own layer beside the stage (0 while MORPH TO D owns D: glided 10 ms)
-    int auxMorphTail = 0;           ///< samples it keeps running at 0 (its own smoothing settles)
-    bool auxMorphRunning = false;
+    // GLOBAL MORPH 2.0: MORPH TO D's stage and its buses (host rate).
+    GlobalSpectralMorph stage;
+    std::vector<float> stageL, stageR, stageKL, stageKR, stageDL, stageDR;
+    bool stageRunning = false;
+    bool stageFresh = true;        ///< the first render after prepare / reset: a stage chosen with the session starts at once (no fade)
+    bool busWasSilent = true;      ///< the bus (before the stage) was silent in the last render: a stage starting now needs no fade
+    bool auxToStage = false;       ///< this render: D (at its level) is in auxL / auxR for the stage, not on the bus
+    float stageIn = 0.0f;          ///< the stage's input (0..1: faded in as it starts)
+    float stageOut = 0.0f;         ///< its output (faded out as it stops)
+    float stageDirect = 1.0f;      ///< the bus as it is (faded out as the stage starts, in as it stops)
+    float stageExclusive = 0.0f;   ///< D into the morph (1) or layered into S (0): glided 10 ms
+    std::atomic<int> stageLatencyShown { 0 };
+    std::atomic<float> stagePositionShown { 0.0f };
+    // The carrier tap: the voices' CARRIER part at the internal rate, decimated as the mix is, and
+    // delayed wherever the bus is delayed (card C's and D's hosted instruments).
+    std::vector<float> carMixL, carMixR, carHalfL, carHalfR, carOutL, carOutR, carDelayCL, carDelayCR, carDelayDL, carDelayDR;
+    HalfBandDecimator carStage1L, carStage1R, carStage2L, carStage2R;
+    bool carrierTaps = false, carrierWas = false;
+    int carDelayCAt = 0, carDelayDAt = 0;
+    float* carTapL = nullptr;
+    float* carTapR = nullptr;
     struct AuxExternal
     {
         const float* left = nullptr;

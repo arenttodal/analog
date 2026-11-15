@@ -797,15 +797,22 @@ void AnalogEngine::setExternalInput (const ExternalInput& input) noexcept
 
 AnalogEngine::GlobalMorphView AnalogEngine::globalMorphView() const noexcept
 {
+    // (the stage's telemetry is relaxed atomics, written once per analysis frame)
     GlobalMorphView v;
-    v.running = gmRunning.load (std::memory_order_relaxed);
-    v.position = gmPosition.load (std::memory_order_relaxed);
-    v.activity = gmActivity.load (std::memory_order_relaxed);
-    const auto& gm = synth.auxMorphState();
-    for (int b = 0; b < GlobalMorph::bandCount; ++b)
+    const auto& st = synth.globalStage();
+    v.running = synth.auxMorphActive();
+    v.position = synth.auxMorphPosition();
+    v.presence = st.presence();
+    v.transient = st.transient();
+    v.frames = st.frames();
+    for (int b = 0; b < GlobalMorphView::bands; ++b)
     {
-        v.bandDb[static_cast<std::size_t> (b)] = gmBands[static_cast<std::size_t> (b)].load (std::memory_order_relaxed);
-        v.bandHz[static_cast<std::size_t> (b)] = static_cast<float> (gm.bandCentreHz (b));   // (fixed after prepare)
+        const auto k = static_cast<std::size_t> (b);
+        v.carrierDb[k] = st.carrierDb (b);
+        v.destinationDb[k] = st.destinationDb (b);
+        v.resultDb[k] = st.resultDb (b);
+        v.ownership[k] = st.ownership (b);
+        v.bandHz[k] = static_cast<float> (st.displayBandHz (b));
     }
     return v;
 }
@@ -1144,14 +1151,6 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     publishModulationView();
     publishEffective (total);
     synth.publishAuxTelemetry();   // (D's path, measured: GLOBAL MORPH 2.0 gate 1)
-    {
-        const auto& gm = synth.auxMorphState();
-        gmRunning.store (synth.auxMorphActive(), std::memory_order_relaxed);
-        gmPosition.store (synth.auxMorphPosition(), std::memory_order_relaxed);
-        gmActivity.store (gm.activity(), std::memory_order_relaxed);
-        for (int b = 0; b < GlobalMorph::bandCount; ++b)
-            gmBands[static_cast<std::size_t> (b)].store (gm.bandGainDb (b), std::memory_order_relaxed);
-    }
 }
 
 void AnalogEngine::publishEffective (int numSamples) noexcept

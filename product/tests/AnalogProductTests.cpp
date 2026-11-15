@@ -494,6 +494,20 @@ namespace
                     c.tone = 1.0;   // (DETAIL's upper partials heard through an open filter)
             };
 
+        // GLOBAL MORPH 2.0: MORPH TO D's own settings act with MORPH TO D chosen, MORPH on half
+        // way and D sounding (NOISE, free) - the synth's chord and D through the global stage.
+        for (const auto& id : { params::morphGlobalMethod, params::morphGlobalCarrier, params::morphGlobalTexture, params::morphGlobalAttack,
+                                params::morphGlobalFormants, params::morphGlobalDetail, params::morphGlobalLevelMatch, params::morphGlobalOutput })
+            modes[id] = [] (Patch& c) {
+                c.morph.enabled = true;
+                c.morph.position = 0.5;
+                c.morph.toAux = true;
+                c.aux.enabled = true;
+                c.aux.mode = Patch::Aux::Mode::noise;
+                c.aux.noiseFree = true;
+                c.aux.levelDb = -6.0;
+            };
+
         // KEY DNA is GRANULAR's, and its AMOUNT acts while it is on (the test switches it on).
         modes[osp::plugin::InstrumentHost::keyDnaAmountId (0)] = granular;
         return { context, modes };
@@ -6062,6 +6076,78 @@ TEST_CASE ("analog: screenshots of the FILTER (FILTER, VOICE, PAIR) and MORPH ra
     }
 }
 
+TEST_CASE ("analog: GLOBAL MORPH 2.0 screenshots - the MORPH rack for C and for D at matching sizes, D's graph measured, every method (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-gm2]")
+{
+    using osp::plugin::rack::Kind;
+    namespace params = andor::analog::params;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    p.prepareToPlay (48000.0, 512);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    // A chord held and D NOISE (pink, moving) sounding: the stage has measured something to show.
+    setValue (p, params::auxEnabled, 1.0f);
+    setValue (p, params::auxMode, 1.0f);
+    setValue (p, params::auxNoiseGate, 1.0f);
+    setValue (p, params::auxNoiseColor, 1.0f);
+    setValue (p, params::auxNoiseMovement, 50.0f);
+    setValue (p, params::morphEnabled, 1.0f);
+    setValue (p, params::morphPosition, 50.0f);
+    juce::AudioBuffer<float> buffer (2, 512);
+    auto play = [&] (double seconds) {
+        for (int pos = 0; pos < static_cast<int> (seconds * 48000.0); pos += 512)
+        {
+            juce::MidiBuffer midi;
+            if (pos == 0)
+                for (const int note : { 48, 55, 60, 64 })
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, static_cast<juce::uint8> (100)), 0);
+            buffer.clear();
+            p.processBlock (buffer, midi);
+        }
+    };
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        ui.effectsRack().settle();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    ui.setAuxStripShown (true);
+    ui.setRackExpanded (Kind::morph, true);
+    for (const int w : { 869, 1448, 1810 })
+    {
+        width = w;
+        setValue (p, params::morphTarget, 0.0f);
+        shoot ("gm2-" + juce::String (w) + "-c");
+        setValue (p, params::morphTarget, 1.0f);
+        play (0.6);
+        shoot ("gm2-" + juce::String (w) + "-d-imprint");
+    }
+    width = 1448;
+    static const char* names[] { "imprint", "fuse", "weave" };
+    for (int method = 1; method < 3; ++method)
+    {
+        setValue (p, params::morphGlobalMethod, static_cast<float> (method));
+        play (0.6);
+        shoot (juce::String ("gm2-1448-d-") + names[method]);
+    }
+    // D waiting: RHYTHM with no loop, then D off - the state in words, nothing drawn.
+    setValue (p, params::auxMode, 0.0f);
+    play (2.5);
+    shoot ("gm2-1448-d-no-loop");
+    setValue (p, params::auxEnabled, 0.0f);
+    play (0.6);
+    shoot ("gm2-1448-d-off");
+}
+
 namespace
 {
     const juce::XmlElement* findElement (const juce::XmlElement& root, const juce::String& name)
@@ -8156,6 +8242,14 @@ TEST_CASE ("analog: projects saved by 1.0 open with the same settings and the sa
                 // A route's source: the same one (its index; the list grew by C RHYTHM after
                 // 1.0, 13 choices then, 14 now - its normalised value moved, its meaning not).
                 CHECK (juce::roundToInt (now * osp::mod::sourceCount) == juce::roundToInt (was * osp::mod::baseSourceCount));
+            }
+            else if (id.startsWith ("mod.route") && id.endsWith (".dest"))
+            {
+                // A route's destination: the same one (its index; GLOBAL MORPH 2.0 appended D's
+                // TEXTURE / ATTACK / FORMANTS / DETAIL after 1.0 - 4 more choices, its normalised
+                // value moved, its meaning not).
+                const int steps = q.parameters.getParameter (id)->getNumSteps() - 1;
+                CHECK (juce::roundToInt (now * steps) == juce::roundToInt (was * (steps - 4)));
             }
             else if (id == params::hybridType)
             {

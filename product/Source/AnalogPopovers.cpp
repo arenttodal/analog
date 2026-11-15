@@ -1,6 +1,8 @@
 #include "AnalogPopovers.h"
 
+#include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "ShellProcessor.h"
 #include "SubPanel.h"
 #include "Binding.h"
 #include "Design.h"
@@ -434,9 +436,36 @@ namespace
         using namespace params;
         auto p = std::make_unique<AnalogPanel> (h, "MORPH", 520, 0);
         auto* host = &h;
+        // MORPH TO D (GLOBAL MORPH 2.0): the same panel, bound to D's own settings - as the rack
+        // shows them - with D's source and state where C has ROOT. (Chosen in the rack: the
+        // panel follows the choice it is opened with.)
+        const bool toD = h.parameterValue (morphTarget) >= 0.5f;
+        p->row ({});
+        if (toD)
+        {
+            p->captionFrom ([host] {
+                if (auto* shell = dynamic_cast<andor::shell::ShellProcessor*> (host))
+                    if (auto* e = dynamic_cast<AnalogEngine*> (&shell->productEngine()))
+                        return e->auxStatus().label;
+                return juce::String ("MORPH TO D");
+            });
+            p->toggle (morphEnabled, "ON", 0.8f, "MORPH: the synth and D become one sound (at 0 % the synth, at 100 % D, between them the method's blend)");
+            p->segments (morphGlobalMethod, { "IMPRINT", "FUSE", "WEAVE" }, 3.0f,
+                         "On the whole synth (its pitches kept). IMPRINT: D's tone colour. FUSE: both into one. WEAVE: spectrum regions handed to D");
+            p->segments (morphGlobalCarrier, { "OSC 1", "OSC 2", "BOTH" }, 2.4f, "What of the synth morphs into D; the rest plays on and gives way towards 100 %");
+            p->row ({});
+            p->knob (morphPosition, "MORPH");
+            p->knob (morphGlobalTexture, "TEXTURE");
+            p->knob (morphGlobalAttack, "ATTACK");
+            p->knob (morphGlobalFormants, "FORMANTS");
+            p->knob (morphGlobalDetail, "DETAIL");
+            p->row ("OUTPUT");
+            p->segments (morphGlobalOutput, { "MORPH ONLY", "LAYERED" }, 2.6f, "MORPH ONLY: the morph between the synth and D. LAYERED: the two themselves underneath it too");
+            p->toggle (morphGlobalLevelMatch, "LEVEL MATCH", 1.4f, "Glides the loudness between the synth's and D's; 0 % and 100 % stay exactly as they are");
+            return p;
+        }
         // Its state, as it is: ready, being analysed, or why it cannot be (then the sources
         // play as they are: nothing pretends to morph).
-        p->row ({});
         p->captionFrom ([host] {
             const auto status = host->engineStatus ("morph");
             return status.isEmpty() ? juce::String ("LIVE: THE OSCILLATORS AND CARD C, FUSED") : status.toUpperCase();

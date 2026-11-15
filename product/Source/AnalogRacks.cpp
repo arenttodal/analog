@@ -972,7 +972,7 @@ namespace
         {
             juce::String sig;
             for (const auto& id : { params::morphEnabled, params::morphPosition, params::morphMethod, params::morphCarrier, params::morphTexture, params::morphDetail,
-                                    params::morphFormants, params::morphOutput, params::morphTarget, params::auxMode, params::auxEnabled })
+                                    params::morphFormants, params::morphOutput, params::morphTarget, params::auxMode, params::auxEnabled, params::morphGlobalMethod })
                 sig << "|" << juce::String (host.parameterValue (id), 3);
             sig << host.engineStatus ("morph");
             if (toD())
@@ -981,9 +981,7 @@ namespace
                     sig << "|" << e->auxStatus().label;
                     // (the global stage's live band gains: a measurement, refreshed as it moves)
                     const auto v = e->globalMorphView();
-                    sig << "|" << juce::String (v.position, 2) << "|" << juce::String (v.activity, 2);
-                    for (const float db : v.bandDb)
-                        sig << "," << juce::String (db, 0);
+                    sig << "|" << juce::String (v.position, 2) << "|" << juce::String (v.presence, 2) << "|" << v.frames;
                 }
             if (sig != shown)
             {
@@ -996,54 +994,94 @@ namespace
         bool toD() const { return choice (host, params::morphTarget) == 1; }
         AnalogEngine* engine() const { return dynamic_cast<AnalogEngine*> (&dynamic_cast<andor::shell::ShellProcessor&> (host).productEngine()); }
 
-        /** MORPH TO D: the global stage as it is - GLOBAL IMPRINT, the synth's bus taking D's
-            spectral envelope band by band (each bar a band's gain now, from the engine), D's
-            activity, and why nothing happens when nothing can. */
+        /** MORPH TO D (GLOBAL MORPH 2.0): the global stage as it measures it - the last analysis
+            frame's band levels (32 log bands, 60 Hz .. 16 kHz) of the synth's carrier (cool), of D
+            as the morph uses it (rose; FORMANTS applied) and of the morph's result (copper), and
+            for WEAVE each band's owner behind them. Nothing drawn that was not measured: with
+            nothing measured (MORPH off, D unavailable), only the state in words. */
         void paintGlobal (juce::Graphics& g, juce::Rectangle<float> area)
         {
-            const auto cool = juce::Colour (0xff9dbdd0), plum = juce::Colour (0xffc9a3c4);
+            const auto cool = juce::Colour (0xff9dbdd0), plum = juce::Colour (0xffc9a3c4), copper = design::colour::macroOnDark (design::colour::Macro::life);
             const bool on = plain (host, params::morphEnabled) >= 0.5f;
             const float p = juce::jlimit (0.0f, 1.0f, 0.01f * plain (host, params::morphPosition));
             static const char* modes[] { "RHYTHM", "NOISE", "KONTAKT", "LIVE INPUT" };
+            static const char* methods[] { "IMPRINT", "FUSE", "WEAVE" };
             const int auxMode = std::clamp (choice (host, params::auxMode), 0, 3);
-            const auto title = juce::String ("GLOBAL IMPRINT") + middleDot() + "MORPH " + juce::String (juce::roundToInt (100.0f * p)) + " %";
+            const int method = std::clamp (choice (host, params::morphGlobalMethod), 0, 2);
+            const auto title = juce::String (methods[method]) + middleDot() + "MORPH " + juce::String (juce::roundToInt (100.0f * p)) + " %";
             gtype::header (g, area, title, {});
             g.setFont (gtype::meta());
             g.setColour (plum);
-            g.drawText (juce::String ("A/B/C ") + juce::String::fromUTF8 ("\xe2\x86\x92") + " D " + modes[auxMode], area.reduced (9.0f, 4.0f).withHeight (12.0f),
+            g.drawText (juce::String ("A/B/C ") + juce::String::fromUTF8 ("\xe2\x86\x94") + " D " + modes[auxMode], area.reduced (9.0f, 4.0f).withHeight (12.0f),
                         juce::Justification::centredRight, false);
             const auto plot = area.reduced (16.0f, 0.0f).withTrimmedTop (28.0f).withTrimmedBottom (32.0f);
             const auto v = engine() != nullptr ? engine()->globalMorphView() : AnalogEngine::GlobalMorphView();
             const bool dOn = plain (host, params::auxEnabled) >= 0.5f;
             // (GLOBAL MORPH 2.0 gate 1: D's state as measured along its path, or as it
-            // deterministically is - off, muted, waiting for a key or the transport, no input -
-            // never guessed from the imprint's own follower)
+            // deterministically is - never guessed)
             const auto status = engine() != nullptr ? engine()->auxStatus() : AnalogEngine::AuxStatus();
+            const bool measured = v.running && v.frames > 0;
             juce::String foot;
             if (! on)
-                foot = "MORPH is off: A/B/C and D play side by side";
+                foot = "MORPH is off: the synth and D play side by side";
             else if (! dOn)
                 foot = "AUX D is off: the synth plays as it is";
             else if (! status.signal)
                 foot = status.label + ": " + status.why;
             else
-                foot = status.label + middleDot() + "each bar: a band of the synth, moved towards D now (dB)";
-            // The 24 bands: 0 dB the centre line, up +18, down -36 (the stage's own limits).
-            auto yOf = [&] (float db) { return plot.getCentreY() - plot.getHeight() * 0.5f * juce::jlimit (-1.0f, 1.0f, db / (db >= 0.0f ? 18.0f : 36.0f)); };
-            g.setColour (gtype::grid);
-            g.fillRect (juce::Rectangle<float> (plot.getX(), plot.getCentreY() - 0.5f, plot.getWidth(), 1.0f));
-            const float slot = plot.getWidth() / static_cast<float> (v.bandDb.size());
-            for (std::size_t b = 0; b < v.bandDb.size(); ++b)
             {
-                const float db = on && dOn ? v.bandDb[b] : 0.0f;
-                const float y = yOf (db), y0 = plot.getCentreY();
-                const auto bar = juce::Rectangle<float> (plot.getX() + slot * static_cast<float> (b) + 0.18f * slot, std::min (y, y0), 0.64f * slot, std::max (1.0f, std::abs (y - y0)));
-                g.setColour (cool.interpolatedWith (plum, juce::jlimit (0.0f, 1.0f, 0.5f + db / 24.0f)).withAlpha (on && dOn ? 0.9f : 0.35f));
-                g.fillRect (bar);
+                static const char* meaning[] { "the synth (blue) takes D's tone colour (rose): the result (copper)",
+                                               "the synth (blue) and D (rose) reshaped into one: the result (copper)",
+                                               "bands handed to D (rose) or kept by the synth (blue): the result (copper)" };
+                foot = meaning[method];
+            }
+            // Levels: -90 .. -6 dBFS (a band's level in the stage's analysis).
+            auto yOf = [&] (float db) { return plot.getBottom() - plot.getHeight() * juce::jlimit (0.0f, 1.0f, (db + 90.0f) / 84.0f); };
+            const int bands = AnalogEngine::GlobalMorphView::bands;
+            const float slot = plot.getWidth() / static_cast<float> (bands);
+            for (const float db : { -30.0f, -60.0f })
+            {
+                g.setColour (gtype::grid);
+                g.fillRect (juce::Rectangle<float> (plot.getX(), yOf (db) - 0.5f, plot.getWidth(), 1.0f));
+            }
+            if (measured && on)
+            {
+                if (method == 2)
+                    for (int b = 0; b < bands; ++b)
+                    {
+                        // WEAVE: who owns each band now (rose D, blue the synth), behind the curves.
+                        const float own = juce::jlimit (0.0f, 1.0f, v.ownership[static_cast<std::size_t> (b)]);
+                        g.setColour ((own >= 0.5f ? plum : cool).withAlpha (0.10f + 0.30f * std::abs (2.0f * own - 1.0f)));
+                        g.fillRect (juce::Rectangle<float> (plot.getX() + slot * static_cast<float> (b) + 0.5f, plot.getY(), slot - 1.0f, plot.getHeight()));
+                    }
+                auto curve = [&] (const std::array<float, AnalogEngine::GlobalMorphView::bands>& db) {
+                    juce::Path path;
+                    for (int b = 0; b < bands; ++b)
+                    {
+                        const juce::Point<float> at (plot.getX() + slot * (static_cast<float> (b) + 0.5f), yOf (db[static_cast<std::size_t> (b)]));
+                        if (b == 0)
+                            path.startNewSubPath (at);
+                        else
+                            path.lineTo (at);
+                    }
+                    return path;
+                };
+                const auto result = curve (v.resultDb);
+                juce::Path fill (result);
+                fill.lineTo (plot.getX() + slot * (static_cast<float> (bands) - 0.5f), plot.getBottom());
+                fill.lineTo (plot.getX() + slot * 0.5f, plot.getBottom());
+                fill.closeSubPath();
+                g.setColour (copper.withAlpha (0.16f));
+                g.fillPath (fill);
+                g.setColour (cool.withAlpha (0.85f));
+                g.strokePath (curve (v.carrierDb), juce::PathStrokeType (1.2f));
+                g.setColour (plum.withAlpha (status.signal ? 0.9f : 0.35f));
+                g.strokePath (curve (v.destinationDb), juce::PathStrokeType (1.2f));
+                g.setColour (copper);
+                g.strokePath (result, juce::PathStrokeType (1.8f));
             }
             for (const auto& [hz, text] : { std::pair { 100.0f, "100" }, std::pair { 1000.0f, "1k" }, std::pair { 10000.0f, "10k" } })
             {
-                // (the bands are third-octave from about 70 Hz: place the labels by the nearest band)
                 std::size_t nearest = 0;
                 for (std::size_t b = 0; b < v.bandHz.size(); ++b)
                     if (std::abs (std::log2 (std::max (1.0f, v.bandHz[b]) / hz)) < std::abs (std::log2 (std::max (1.0f, v.bandHz[nearest]) / hz)))
@@ -1181,6 +1219,67 @@ namespace
         juce::String text;
     };
 
+    /** MORPH TO D's rack, where C has ROOT: D's source and its state, measured (AnalogEngine::
+        auxStatus): RHYTHM / SIGNAL ACTIVE, WAITING FOR MIDI, NO INPUT... Read only, quiet. */
+    class AuxStatusCell final : public juce::Component
+    {
+    public:
+        explicit AuxStatusCell (InstrumentHost& h) : host (h)
+        {
+            setInterceptsMouseClicks (false, false);
+            refresh();
+        }
+        void refresh()
+        {
+            AnalogEngine::AuxStatus s;
+            if (auto* p = dynamic_cast<andor::shell::ShellProcessor*> (&host))
+                if (auto* e = dynamic_cast<AnalogEngine*> (&p->productEngine()))
+                    s = e->auxStatus();
+            const auto parts = juce::StringArray::fromTokens (s.label, juce::String::fromUTF8 ("\xc2\xb7"), {});
+            const auto source = parts.size() > 1 ? parts[1].trim() : juce::String ("D");
+            const auto state = parts.size() > 2 ? parts[2].trim() : juce::String();
+            if (source != shownSource || state != shownState || s.signal != signal)
+            {
+                shownSource = source;
+                shownState = state;
+                signal = s.signal;
+                setTitle ("D " + source + " " + state);
+                repaint();
+            }
+        }
+        void paint (juce::Graphics& g) override
+        {
+            auto r = getLocalBounds().toFloat().reduced (2.0f, 6.0f);
+            // (light on the copper faceplate, as the rack's own captions and values)
+            const auto ink = juce::Colour (0xfff6efe6);
+            g.setColour (ink.withAlpha (0.72f));
+            g.setFont (ParameterRack::selectorCaptionFont());
+            g.drawText ("D SOURCE", r.removeFromTop (14.0f), juce::Justification::centred, false);
+            r.removeFromTop (8.0f);
+            g.setColour (ink.withAlpha (0.95f));
+            g.setFont (fonts::make (11.0f, fonts::Weight::medium, 0.06f));
+            g.drawText (shownSource, r.removeFromTop (16.0f), juce::Justification::centred, false);
+            // A small light: lit while D has signal (or is between a loop's hits).
+            const auto dot = juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ r.getCentreX(), r.getY() + 9.0f });
+            g.setColour (signal ? juce::Colour (0xfff2c7e6) : ink.withAlpha (0.25f));
+            g.fillEllipse (dot);
+            if (signal)
+            {
+                g.setColour (juce::Colour (0xfff2c7e6).withAlpha (0.35f));
+                g.drawEllipse (dot.expanded (2.0f), 1.0f);
+            }
+            r.removeFromTop (18.0f);
+            g.setColour (ink.withAlpha (0.72f));
+            g.setFont (fonts::make (9.5f, fonts::Weight::medium, 0.08f));
+            g.drawFittedText (shownState, r.toNearestInt(), juce::Justification::centredTop, 2, 0.9f);
+        }
+
+    private:
+        InstrumentHost& host;
+        juce::String shownSource, shownState;
+        bool signal = false;
+    };
+
     class MorphRack final : public ParameterRack
     {
     public:
@@ -1197,8 +1296,16 @@ namespace
             setAccent (identity.motifInk);
         }
 
+        void refresh() override
+        {
+            ParameterRack::refresh();
+            if (auxStatusCell != nullptr)
+                auxStatusCell->refresh();
+        }
+
     protected:
         int buildKey() const override { return choice (host, params::morphTarget) * 10 + std::clamp (choice (host, params::auxMode), 0, 3); }
+        AuxStatusCell* auxStatusCell = nullptr;
 
         void build (int) override
         {
@@ -1213,13 +1320,34 @@ namespace
                              "takes on D's spectrum and becomes D at 100 % (GLOBAL IMPRINT) - LIVE INPUT included");
             if (key / 10 == 1)
             {
-                // D: GLOBAL IMPRINT, the one method the global stage has (labelled as it is, never
-                // a per-voice method's name); MORPH's position. C's settings stay as they are.
-                selectorComponent (std::make_unique<MethodLabel> ("GLOBAL IMPRINT"), "METHOD", 150);
+                // D (GLOBAL MORPH 2.0): C's controls in C's places, bound to D's own settings
+                // (analog.morph.global.*; MORPH's position shared) - the global stage's methods,
+                // never C's per-voice ones under the same names. Where C has ROOT, D's source and
+                // its state (no control: nothing to set there).
+                selectorSegment (morphGlobalMethod, "METHOD", { { "IMPRINT", "Imprint", 0.0f }, { "FUSE", "Fuse", 1.0f }, { "WEAVE", "Weave", 2.0f } }, 246,
+                                 "On the whole synth (chords and all, its pitches kept). IMPRINT: the synth takes on D's tone colour. "
+                                 "FUSE: both reshaped into one new sound. WEAVE: parts of the spectrum handed to D, region by region");
+                selectorSegment (morphGlobalCarrier, "CARRIER", { { "OSC 1", "Oscillator 1", 0.0f }, { "OSC 2", "Oscillator 2", 1.0f }, { "BOTH", "Both", 2.0f } }, 216,
+                                 "What of the synth morphs into D: oscillator 1, oscillator 2, or both. The rest plays on as it is, and gives way to D towards 100 %");
                 knob (morphPosition, "MORPH", textOf (host, morphPosition))
-                    .slider.setTooltip ("0 %: the synth as it is. 50 %: the synth in D's spectral envelope (a fusion, not a crossfade). 100 %: D alone");
+                    .slider.setTooltip ("0 %: the synth as it is. 100 %: D alone. Between them: the method's blend of the two, not a crossfade");
+                knob (morphGlobalTexture, "TEXTURE", textOf (host, morphGlobalTexture))
+                    .slider.setTooltip ("How much breath, bow noise, tape and drum noise the morph keeps: low cleaner, high grainier");
+                knob (morphGlobalAttack, "ATTACK", textOf (host, morphGlobalAttack))
+                    .slider.setTooltip ("How much of D's own attack comes through - its hits and onsets - not an envelope time");
+                knob (morphGlobalFormants, "FORMANTS", textOf (host, morphGlobalFormants))
+                    .slider.setTooltip ("Moves D's tone colour up or down (its formants), never its pitch");
+                knob (morphGlobalDetail, "DETAIL", textOf (host, morphGlobalDetail))
+                    .slider.setTooltip ("Low: broad, smooth shaping. High: finer detail of each source");
+                group ({}, true);
+                switchCell (morphGlobalOutput, "OUTPUT", { { "MORPH ONLY", "Morph only", 0.0f }, { "LAYERED", "Layered", 1.0f } },
+                            "MORPH ONLY: the morph between the synth and D. LAYERED: the two themselves underneath it as well (the same ends)");
+                switchCell (morphGlobalLevelMatch, "LEVEL MATCH", { { "ON", "On", 1.0f }, { "OFF", "Off", 0.0f } },
+                            "Glides the loudness between the synth's and D's as MORPH moves; 0 % and 100 % stay exactly as they are");
+                auxStatusCell = &dynamic_cast<AuxStatusCell&> (customCell (std::make_unique<AuxStatusCell> (host)));
                 return;
             }
+            auxStatusCell = nullptr;
             // METHOD and CARRIER in the selector row; the five knobs that shape the morph; then,
             // a rank lower (its captions and values quieter, after the divider), the setup:
             // what comes out, the level match, card C's root. (MORPH 2.0's controls will take

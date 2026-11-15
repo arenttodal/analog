@@ -9,8 +9,16 @@
 >   the position was scaled by D's level. Each of the four modes is now D exactly at 100 % and
 >   the synth exactly at 0 %.
 > - Owner's decisions on D's CARRIER, OUTPUT (LAYERED) and LEVEL MATCH are recorded.
-> - Next: gate 2 onward (the STFT stage `GlobalSpectralMorph`, standalone and tested, is wired
->   in next).
+> - Gates 2–10 implemented (docs/GLOBAL_MORPH_2.md):
+>   - MORPH TO D runs a new global STFT stage: IMPRINT, FUSE and WEAVE, with TEXTURE, ATTACK,
+>     FORMANTS, DETAIL, CARRIER (per-voice carrier tap), OUTPUT and LEVEL MATCH, all on D's own
+>     `analog.morph.global.*` parameters (MORPH's position stays shared).
+>   - Exact ends after the stage's reported latency (1024 samples at 44.1 / 48 kHz), and only
+>     while MORPH TO D is chosen.
+>   - The rack has C's layout with D's source and state in ROOT's place. The graph draws only
+>     measured data. The MORPH popover follows MORPH TO.
+>   - Renders are in docs/demos/gm2/examples; screenshots in docs/screenshots/gm2.
+>   - Listening, real recordings and DAW behaviour are OWNER TESTS.
 
 > **11 Nov 2026, feature branches (not in the 1.0.0 release candidate):**
 > - SHAPER DNA V1 (`feature/shaper-dna-v1`; docs/SHAPER_DNA_V1.md);

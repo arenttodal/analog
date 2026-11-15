@@ -297,6 +297,16 @@ namespace andor::analog::params
         off. Appended; read by the shell (ProductInfo::arpFollower). */
     inline const juce::String auxArp = "analog.aux.arp";
     inline const juce::String auxArpFollow = "analog.aux.arp.follow";
+    // GLOBAL MORPH 2.0 (docs/GLOBAL_MORPH_2.md): MORPH TO D's own settings, independent of card C's
+    // (analog.morph.*); MORPH's position stays shared (analog.morph.position).
+    inline const juce::String morphGlobalMethod = "analog.morph.global.method";
+    inline const juce::String morphGlobalCarrier = "analog.morph.global.carrier";
+    inline const juce::String morphGlobalTexture = "analog.morph.global.texture";
+    inline const juce::String morphGlobalAttack = "analog.morph.global.attack";
+    inline const juce::String morphGlobalFormants = "analog.morph.global.formants";
+    inline const juce::String morphGlobalDetail = "analog.morph.global.detail";
+    inline const juce::String morphGlobalLevelMatch = "analog.morph.global.levelMatch";
+    inline const juce::String morphGlobalOutput = "analog.morph.global.output";
     /** RATE's choices (its musical speed against the loop's detected tempo). */
     inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */

@@ -661,3 +661,11 @@ analog.aux.rhythm.gate v37 choice "AUX Rhythm Gate" label="" range=0.0000..1.000
 analog.morph.target v37 choice "Morph To" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=C HYBRID|C HYBRID|D AUX [C HYBRID|D AUX]
 analog.aux.arp v37 bool "AUX Arp" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.aux.arp.follow v37 choice "AUX Arp Follow" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=A|B|C [A|B|C]
+analog.morph.global.method v38 choice "D Morph Method" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=0.0000 steps=3 texts=Imprint|Fuse|Weave [Imprint|Fuse|Weave]
+analog.morph.global.carrier v38 choice "D Morph Carrier" label="" range=0.0000..2.0000/1.0000 skew=1.00000 default=2.0000 steps=3 texts=Osc 1|Osc 2|Both [Osc 1|Osc 2|Both]
+analog.morph.global.texture v38 float "D Morph Texture" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.global.attack v38 float "D Morph Attack" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.global.formants v38 float "D Morph Formants" label="st" range=-12.0000..12.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=-12.0 st|0.0 st|+12.0 st
+analog.morph.global.detail v38 float "D Morph Detail" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=50.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.morph.global.levelMatch v38 bool "D Morph Level Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
+analog.morph.global.output v38 choice "D Morph Output" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Morph Only|Morph Only|Layered [Morph Only|Layered]

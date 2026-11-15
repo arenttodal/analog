@@ -1,0 +1,52 @@
+gm2-A-analog-cello-1-dry-synth.wav: pad chord x a bowed-cello stand-in (LIVE INPUT) - RMS -18.7 dB, peak -6.7 dBFS
+gm2-A-analog-cello-2-dry-d.wav: pad chord x a bowed-cello stand-in (LIVE INPUT) - RMS -8.0 dB, peak -1.1 dBFS
+gm2-A-analog-cello-3-crossfade-50.wav: pad chord x a bowed-cello stand-in (LIVE INPUT) - RMS -10.7 dB, peak -1.7 dBFS
+gm2-A-analog-cello-4-imprint-50.wav: pad chord x a bowed-cello stand-in (LIVE INPUT) - RMS -13.4 dB, peak -2.8 dBFS
+gm2-A-analog-cello-5-fuse-50.wav: pad chord x a bowed-cello stand-in (LIVE INPUT) - RMS -13.5 dB, peak -1.9 dBFS
+gm2-A-analog-cello-6-weave-50.wav: pad chord x a bowed-cello stand-in (LIVE INPUT) - RMS -13.3 dB, peak -3.6 dBFS
+gm2-B-analog-spiccato-1-dry-synth.wav: pad chord x spiccato-string stand-in (LIVE INPUT) - RMS -18.7 dB, peak -6.7 dBFS
+gm2-B-analog-spiccato-2-dry-d.wav: pad chord x spiccato-string stand-in (LIVE INPUT) - RMS -13.3 dB, peak -0.9 dBFS
+gm2-B-analog-spiccato-3-crossfade-50.wav: pad chord x spiccato-string stand-in (LIVE INPUT) - RMS -15.2 dB, peak -1.6 dBFS
+gm2-B-analog-spiccato-4-imprint-50.wav: pad chord x spiccato-string stand-in (LIVE INPUT) - RMS -15.9 dB, peak -2.1 dBFS
+gm2-B-analog-spiccato-5-fuse-50.wav: pad chord x spiccato-string stand-in (LIVE INPUT) - RMS -16.1 dB, peak -1.7 dBFS
+gm2-B-analog-spiccato-6-weave-50.wav: pad chord x spiccato-string stand-in (LIVE INPUT) - RMS -15.6 dB, peak -0.3 dBFS
+gm2-C-analog-clock-1-dry-synth.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS) - RMS -18.7 dB, peak -6.7 dBFS
+gm2-C-analog-clock-2-dry-d.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS) - RMS -35.8 dB, peak -8.3 dBFS
+gm2-C-analog-clock-3-crossfade-50.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS) - RMS -21.6 dB, peak -8.2 dBFS
+gm2-C-analog-clock-4-imprint-50.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS) - RMS -27.2 dB, peak -8.3 dBFS
+gm2-C-analog-clock-5-fuse-50.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS) - RMS -27.6 dB, peak -5.6 dBFS
+gm2-C-analog-clock-6-weave-50.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS) - RMS -27.2 dB, peak -10.7 dBFS
+gm2-D-analog-voice-1-dry-synth.wav: pad chord x a sung-vowel stand-in (LIVE INPUT) - RMS -18.7 dB, peak -6.7 dBFS
+gm2-D-analog-voice-2-dry-d.wav: pad chord x a sung-vowel stand-in (LIVE INPUT) - RMS -16.6 dB, peak -6.6 dBFS
+gm2-D-analog-voice-3-crossfade-50.wav: pad chord x a sung-vowel stand-in (LIVE INPUT) - RMS -17.2 dB, peak -5.3 dBFS
+gm2-D-analog-voice-4-imprint-50.wav: pad chord x a sung-vowel stand-in (LIVE INPUT) - RMS -17.6 dB, peak -5.1 dBFS
+gm2-D-analog-voice-5-fuse-50.wav: pad chord x a sung-vowel stand-in (LIVE INPUT) - RMS -18.0 dB, peak -6.0 dBFS
+gm2-D-analog-voice-6-weave-50.wav: pad chord x a sung-vowel stand-in (LIVE INPUT) - RMS -17.8 dB, peak -6.3 dBFS
+gm2-E-analog-noise-1-dry-synth.wav: pad chord x D NOISE (pink, moving) - RMS -18.7 dB, peak -6.7 dBFS
+gm2-E-analog-noise-2-dry-d.wav: pad chord x D NOISE (pink, moving) - RMS -22.9 dB, peak -9.9 dBFS
+gm2-E-analog-noise-3-crossfade-50.wav: pad chord x D NOISE (pink, moving) - RMS -20.3 dB, peak -7.9 dBFS
+gm2-E-analog-noise-4-imprint-50.wav: pad chord x D NOISE (pink, moving) - RMS -21.0 dB, peak -7.9 dBFS
+gm2-E-analog-noise-5-fuse-50.wav: pad chord x D NOISE (pink, moving) - RMS -20.8 dB, peak -7.1 dBFS
+gm2-E-analog-noise-6-weave-50.wav: pad chord x D NOISE (pink, moving) - RMS -21.0 dB, peak -7.4 dBFS
+gm2-F-weave-complex-1-dry-synth.wav: a wide chord x the bowed stand-in (two complex sources) - RMS -16.6 dB, peak -3.9 dBFS
+gm2-F-weave-complex-2-dry-d.wav: a wide chord x the bowed stand-in (two complex sources) - RMS -8.0 dB, peak -1.1 dBFS
+gm2-F-weave-complex-3-crossfade-50.wav: a wide chord x the bowed stand-in (two complex sources) - RMS -10.4 dB, peak -0.7 dBFS
+gm2-F-weave-complex-4-imprint-50.wav: a wide chord x the bowed stand-in (two complex sources) - RMS -12.5 dB, peak -1.3 dBFS
+gm2-F-weave-complex-5-fuse-50.wav: a wide chord x the bowed stand-in (two complex sources) - RMS -12.6 dB, peak -1.3 dBFS
+gm2-F-weave-complex-6-weave-50.wav: a wide chord x the bowed stand-in (two complex sources) - RMS -12.3 dB, peak -2.7 dBFS
+gm2-controls-C-clock-imprint-attack-0.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS)
+gm2-controls-C-clock-imprint-attack-100.wav: pad chord x a ticking clock (D RHYTHM, GATE KEYS)
+gm2-controls-E-noise-fuse-texture-0.wav: pad chord x D NOISE (pink, moving)
+gm2-controls-E-noise-fuse-texture-100.wav: pad chord x D NOISE (pink, moving)
+gm2-controls-E-noise-imprint-detail-0.wav: pad chord x D NOISE (pink, moving)
+gm2-controls-E-noise-imprint-detail-100.wav: pad chord x D NOISE (pink, moving)
+gm2-controls-D-voice-imprint-formants-minus12.wav: pad chord x a sung-vowel stand-in (LIVE INPUT)
+gm2-controls-D-voice-imprint-formants-plus12.wav: pad chord x a sung-vowel stand-in (LIVE INPUT)
+gm2-controls-A-cello-fuse-layered.wav: pad chord x a bowed-cello stand-in (LIVE INPUT)
+gm2-controls-A-cello-fuse-levelmatch-off.wav: pad chord x a bowed-cello stand-in (LIVE INPUT)
+gm2-controls-A-cello-imprint-carrier-osc1.wav: pad chord x a bowed-cello stand-in (LIVE INPUT)
+gm2-controls-A-cello-imprint-carrier-osc2.wav: pad chord x a bowed-cello stand-in (LIVE INPUT)
+gm2-controls-A-cello-imprint-carrier-both.wav: pad chord x a bowed-cello stand-in (LIVE INPUT)
+gm2-sweep-cello-imprint.wav: MORPH swept 0 -> 100 % over 8 s, the pad x the bowed stand-in
+gm2-sweep-cello-fuse.wav: MORPH swept 0 -> 100 % over 8 s, the pad x the bowed stand-in
+gm2-sweep-cello-weave.wav: MORPH swept 0 -> 100 % over 8 s, the pad x the bowed stand-in

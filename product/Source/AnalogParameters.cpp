@@ -114,6 +114,9 @@ namespace
         iAuxPitch, iAuxOctave, iAuxMorph, iAuxRhythmGate,
         // Addendum 05: MORPH TO.
         iMorphTarget,
+        // GLOBAL MORPH 2.0: MORPH TO D's own settings.
+        iMorphGlobalMethod, iMorphGlobalCarrier, iMorphGlobalTexture, iMorphGlobalAttack, iMorphGlobalFormants, iMorphGlobalDetail,
+        iMorphGlobalLevelMatch, iMorphGlobalOutput,
         count
     };
 
@@ -251,6 +254,10 @@ namespace
                                     &auxPitch, &auxOctave, &auxMorph, &auxRhythmGate })
                 l.add (*id);
             l.add (morphTarget);   // (Addendum 05: MORPH TO)
+            // GLOBAL MORPH 2.0.
+            for (const auto* id : { &morphGlobalMethod, &morphGlobalCarrier, &morphGlobalTexture, &morphGlobalAttack, &morphGlobalFormants,
+                                    &morphGlobalDetail, &morphGlobalLevelMatch, &morphGlobalOutput })
+                l.add (*id);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -714,6 +721,10 @@ namespace
             case iMorphAttack: p.morph.attack = 0.01 * v; break;
             case iMorphFormants: p.morph.formants = v; break;
             case iMorphDetail: p.morph.detail = 0.01 * v; break;
+            case iMorphGlobalTexture: p.morphGlobal.texture = 0.01 * v; break;
+            case iMorphGlobalAttack: p.morphGlobal.attack = 0.01 * v; break;
+            case iMorphGlobalFormants: p.morphGlobal.formants = v; break;
+            case iMorphGlobalDetail: p.morphGlobal.detail = 0.01 * v; break;
             default: break;
         }
     }
@@ -773,6 +784,9 @@ namespace
             // State version 8 (appended): card B's own grains (its POS, SIZE, DENS and SPREAD are
             // ANDOR OSP's layer C destinations).
             { iGrainTune2, "GRAIN TUNE B", O::voice },
+            // GLOBAL MORPH 2.0 (appended): MORPH TO D's stage is one, global.
+            { iMorphGlobalTexture, "D MORPH TEXTURE", O::global }, { iMorphGlobalAttack, "D MORPH ATTACK", O::global },
+            { iMorphGlobalFormants, "D MORPH FORMANTS", O::global }, { iMorphGlobalDetail, "D MORPH DETAIL", O::global },
         };
         return list;
     }
@@ -1060,6 +1074,27 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // The shell's follower reads them (ProductInfo::arpFollower); the engine never does. Appended.
     layout.add (osp::plugin::parameters::make<Bool> (v37 (auxArp), "AUX Arp", false));
     layout.add (osp::plugin::parameters::make<Choice> (v37 (auxArpFollow), "AUX Arp Follow", juce::StringArray { "A", "B", "C" }, 0));
+    // GLOBAL MORPH 2.0: MORPH TO D's own settings, independent of card C's. Their defaults are
+    // what an older session gets (IMPRINT, the carrier BOTH, neutral shaping, MORPH ONLY,
+    // LEVEL MATCH on). Appended.
+    {
+        auto v38 = [] (const juce::String& name) { return juce::ParameterID { name, 38 }; };
+        const GlobalMorphSettings g;
+        layout.add (osp::plugin::parameters::make<Choice> (v38 (morphGlobalMethod), "D Morph Method", juce::StringArray { "Imprint", "Fuse", "Weave" }, static_cast<int> (g.method)));
+        layout.add (osp::plugin::parameters::make<Choice> (v38 (morphGlobalCarrier), "D Morph Carrier", juce::StringArray { "Osc 1", "Osc 2", "Both" }, static_cast<int> (g.carrier)));
+        auto percent = [&] (const juce::String& id, const char* name, double value) {
+            layout.add (osp::plugin::parameters::make<Float> (v38 (id), name, juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), static_cast<float> (100.0 * value),
+                                                              Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+        };
+        percent (morphGlobalTexture, "D Morph Texture", g.texture);
+        percent (morphGlobalAttack, "D Morph Attack", g.attack);
+        layout.add (osp::plugin::parameters::make<Float> (v38 (morphGlobalFormants), "D Morph Formants", juce::NormalisableRange<float> (-12.0f, 12.0f, 0.1f),
+                                                          static_cast<float> (g.formants),
+                                                          Attributes().withLabel ("st").withStringFromValueFunction ([] (float v, int) { return signedText (v, "st", 1); })));
+        percent (morphGlobalDetail, "D Morph Detail", g.detail);
+        layout.add (osp::plugin::parameters::make<Bool> (v38 (morphGlobalLevelMatch), "D Morph Level Match", g.levelMatch));
+        layout.add (osp::plugin::parameters::make<Choice> (v38 (morphGlobalOutput), "D Morph Output", juce::StringArray { "Morph Only", "Layered" }, static_cast<int> (g.output)));
+    }
 }
 
 int readerIndexOf (const juce::String& id)
@@ -1588,6 +1623,16 @@ Patch Reader::readWith (const float* raw) const noexcept
     m.detail = 0.01 * v (iMorphDetail);
     m.levelMatch = on (iMorphLevelMatch);
     m.output = static_cast<MorphOutput> (index (iMorphOutput, 2));
+    // GLOBAL MORPH 2.0: MORPH TO D's own.
+    auto& g = p.morphGlobal;
+    g.method = static_cast<MorphMethod> (index (iMorphGlobalMethod, 3));
+    g.carrier = static_cast<MorphCarrier> (index (iMorphGlobalCarrier, 3));
+    g.texture = 0.01 * v (iMorphGlobalTexture);
+    g.attack = 0.01 * v (iMorphGlobalAttack);
+    g.formants = v (iMorphGlobalFormants);
+    g.detail = 0.01 * v (iMorphGlobalDetail);
+    g.levelMatch = on (iMorphGlobalLevelMatch);
+    g.output = static_cast<MorphOutput> (index (iMorphGlobalOutput, 2));
     // MORPH TO (Addendum 05): the MORPH macro drives one processor. C HYBRID: the per-voice morph,
     // as ever. D AUX: the global stage (A/B/C's bus x D) at MORPH's position while MORPH is on -
     // the per-voice morph (and C's own bus morphs) bypassed, their settings untouched. D soloed:
@@ -1992,6 +2037,17 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iMorphDetail, 100.0 * mo.detail);
     put (iMorphLevelMatch, mo.levelMatch ? 1.0 : 0.0);
     put (iMorphOutput, static_cast<int> (mo.output));
+    {
+        const auto& g = p.morphGlobal;
+        put (iMorphGlobalMethod, static_cast<int> (g.method));
+        put (iMorphGlobalCarrier, static_cast<int> (g.carrier));
+        put (iMorphGlobalTexture, 100.0 * g.texture);
+        put (iMorphGlobalAttack, 100.0 * g.attack);
+        put (iMorphGlobalFormants, g.formants);
+        put (iMorphGlobalDetail, 100.0 * g.detail);
+        put (iMorphGlobalLevelMatch, g.levelMatch ? 1.0 : 0.0);
+        put (iMorphGlobalOutput, static_cast<int> (g.output));
+    }
     // State version 8.
     put (iOsc1Fine, p.osc1FineCents);
     put (iHybridType, static_cast<int> (p.hybridType));

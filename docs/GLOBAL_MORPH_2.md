@@ -146,3 +146,127 @@ old stage failed).
 - **LEVEL MATCH = ON on D: smooth between exact ends.** 0 % and 100 % are the sources exactly;
   between them the loudness glides between the synth's and D's measured levels (in dB, bounded
   ±12 dB, ~300 ms windows, nothing below −60 dBFS ever lifted). OFF: the morph's natural level.
+
+## Gate 2 — signal ownership, endpoints, latency
+
+- **The stage.** `dsp/morph/GlobalSpectralMorph` replaces the old zero-latency band imprint for
+  MORPH TO D (GlobalMorph stays for card C's external instrument and C RHYTHM, untouched). One
+  global stereo instance (`Synth::stage`), never per voice.
+- **Buses.** `Synth::runGlobalStage`, right after `mixAux`, before chorus / KALEIDOSCOPE / the FX
+  router:
+  - **S** = the bus as it is there (A/B/C after the FILTER, card C's buses);
+  - **K** = the carrier tap (below);
+  - **D** = D after its FILTER and LEVEL / MUTE / SOLO / power — handed to the stage instead of
+    the bus (`auxToStage`), so it is never also layered. While MORPH is off or D soloed, D is
+    layered into S and the stage is a pure delay (0 %: S + D, bit-exact apart from float
+    rounding, −140 dB).
+- **Carrier tap (owner's decision: morph the carrier).** Each voice runs a twin of its filter
+  (ladder / OTA / high-pass, the send path's pattern) on the CARRIER's part — OSC 1 (card A's part),
+  OSC 2 (card B's) or both; card C never — then the voice's AMP, level, steal fade, SHAPER DNA and
+  pan. The internal-rate sum is decimated by its own half-band pair (the mix's filters) and delayed
+  wherever the bus is delayed (card C's and D's hosted instruments), so K is a sample-aligned part
+  of S. The rest (S − K) never morphs and fades out towards 100 % (cos law). Known limit: with
+  SATELLITE moving some of a voice's cards apart, the carrier is placed at the voice's rest
+  position, not each moving card's.
+- **Latency.** N samples (1024 at 44.1 / 48 kHz ≈ 21–23 ms; 2048 at 96 kHz ≈ 21 ms), reported
+  to the host (`AnalogEngine::latencySamples` + `Synth::morphStageLatency`) **whenever MORPH TO D
+  is chosen** — MORPH on or off, so the MORPH switch and the macro never change it; MORPH TO C
+  reports nothing (old sessions: unchanged, no added latency). Choosing D fades the bus out over
+  5 ms and the stage's input in (a ~16 ms gap while the stage fills — a setup change, like any
+  host latency change); leaving it fades the stage out and the bus in. A stage chosen with the
+  session, or while nothing sounds, starts at once (no fade).
+- **Endpoints (DSP tests, AuxTests):** 0 % = the synth and 100 % = D, bit-exact after the
+  latency, MORPH ONLY and LAYERED, LEVEL MATCH on and off. In the full instrument (product tests)
+  the same holds with MOVEMENT / SPACE / ECHO / DRIVE at 0: effects that move in time run on the
+  clock, so audio reaching them 1024 samples later meets their modulation at another phase
+  (−42 dB of difference with the defaults) — inherent in any latency placed before a moving
+  effect.
+
+## Gates 3–7 — controls, methods, output, silence
+
+- **Parameters** (`analog.morph.global.*`, version hint 38, appended): METHOD (IMPRINT), CARRIER
+  (BOTH), TEXTURE 50 %, ATTACK 50 %, FORMANTS 0 st (±12), DETAIL 50 %, LEVEL MATCH on, OUTPUT
+  MORPH ONLY — independent of card C's; MORPH's position stays shared (`analog.morph.position`).
+  Older sessions read these defaults. TEXTURE / ATTACK / FORMANTS / DETAIL are modulation and
+  macro destinations ("D MORPH …", global; 91 of 96 product destinations used). Route
+  destinations saved by 1.0 keep their meaning (their normalised value moves; the fixtures test
+  checks the index).
+- **Rack.** Same MORPH rack, same geometry: MORPH TO, METHOD, CARRIER, the five knobs, OUTPUT and
+  LEVEL MATCH bound to D's parameters; where C has ROOT, a read-only cell with D's source and
+  state (OSP: an opt-in `ParameterRack::customCell`, unused by ANDOR OSP). The MORPH macro's
+  popover follows MORPH TO the same way.
+- **Methods / controls:** as described in `GlobalSpectralMorph.h`; every one measured in
+  `tests/GlobalSpectralMorphTests.cpp` (14 cases) and in the instrument ("every control moves the
+  sound", "every destination moves the sound").
+- **Silence.** D's analysis holds 1.5 s past its last frame above −70 dBFS (a loop between hits is
+  still D), then decays over ~300 ms (the morph core returns to the carrier). Availability (gate 1)
+  decides whether the stage morphs at all.
+
+## Gate 8 — the graph
+
+MORPH TO D's graph draws the stage's last analysis frame (32 log bands, 60 Hz – 16 kHz): the
+carrier (blue), D as the morph uses it (rose, FORMANTS applied), the result (copper, filled), and
+for WEAVE each band's owner behind them. With nothing measured it shows only D's state in words.
+
+## Gate 9 — CPU, latency, real-time safety, regression
+
+Measured here (Linux, one core, single runs: ±1–2 % noise). The whole instrument with D NOISE
+sounding and a chord held, MORPH TO C vs MORPH TO D (FUSE 50 %, the costliest core):
+
+| Rate | 1 voice | 4 voices | 8 voices | 16 voices | Latency added |
+|---|---|---|---|---|---|
+| 44.1 kHz | 5.6 → 9.1 % | 12.6 → 17.9 % | 21.5 → 20.2 % | 16.5 → 22.2 % | 1024 samples, 23.2 ms |
+| 48 kHz | 3.8 → 7.5 % | 9.8 → 12.0 % | 18.0 → 20.3 % | 18.7 → 20.9 % | 1024 samples, 21.3 ms |
+| 96 kHz | 10.5 → 13.7 % | 22.8 → 26.4 % | 45.3 → 45.6 % | 33.1 → 36.3 % | 2048 samples, 21.3 ms |
+
+The stage alone: 1.9 % (44.1 / 48 kHz) and 6.3 % (96 kHz) of one core (DSP benchmark). One
+instance, whatever the polyphony; the carrier tap adds one twin filter per sounding voice.
+- Real time: `[realtime][gm2]` — 600 blocks of processing with every method, control changes
+  and NaN input, zero heap allocations. The STFT, windows, rings and work buffers are sized in
+  `prepare()`; the stage's telemetry is relaxed atomics.
+- Regression (all executed here): analog_dsp_tests 317 / 317; andor_analog_tests 236 passed,
+  2 skipped (the Bukkehorn recordings, not in the repository), 0 failed — including the 1.0
+  session fixtures (same settings, same sound), the parameter schema golden (+8 lines), every
+  control and every modulation destination moving the sound, MORPH TO C unchanged, D's AUX
+  tests, D ARP, LIVE INPUT and Learn. OSP: its own suites (osp_plugin_tests, 4 shards; the
+  example product) after the opt-in `customCell`.
+
+## Gate 10 — audio and listening
+
+Renders in `docs/demos/gm2/examples` (FLAC, 48 kHz, through the whole instrument; the list
+with levels: `gm2-renders.txt`). No recordings of a cello, a voice, spiccato strings or a clock
+are in the repository: D's sources are synthesised stand-ins played through D's real paths.
+- A: a pad chord × a bowed-cello stand-in (LIVE INPUT): a sawtooth with vibrato, three body
+  resonances and bow noise.
+- B: × a spiccato stand-in (LIVE INPUT): short strokes, eighths at 120 BPM.
+- C: × a ticking clock (D RHYTHM, GATE KEYS).
+- D: × a sung-vowel stand-in (LIVE INPUT): a glottal pulse through moving formants a–e–i–o.
+- E: × D NOISE (pink, moving).
+- F: WEAVE on two complex sources: a wide chord × the bowed stand-in.
+
+Each has the synth alone, D alone, an equal-power crossfade (offline) and IMPRINT, FUSE and
+WEAVE at 50 %. Then the extremes of ATTACK (clock), TEXTURE and DETAIL (noise), FORMANTS
+(voice), OUTPUT LAYERED, LEVEL MATCH off and CARRIER OSC 1 / OSC 2 / BOTH (cello), and a
+0 → 100 % sweep per method.
+
+Measured on the renders (mean |difference| of 48-band long-term spectral shape, level removed):
+
+| Example | IMPRINT vs crossfade | FUSE vs crossfade | WEAVE vs crossfade | IMPRINT–FUSE / IMPRINT–WEAVE / FUSE–WEAVE |
+|---|---|---|---|---|
+| A cello | 7.1 dB | 3.8 dB | 3.4 dB | 5.4 / 8.0 / 5.4 |
+| B spiccato | 5.0 | 2.9 | 3.1 | 4.3 / 6.7 / 4.8 |
+| C clock | 8.6 | 10.1 | 7.4 | 13.5 / 10.2 / 10.4 |
+| D voice | 4.4 | 2.5 | 5.3 | 4.7 / 6.5 / 6.2 |
+| E noise | 8.7 | **1.5** | 2.9 | 9.9 / 9.1 / **2.9** |
+| F complex | 5.3 | 3.2 | 4.3 | 4.3 / 7.5 / 5.6 |
+
+No render clips (the method renders peak between −0.3 and −10.7 dBFS); none has a non-finite sample.
+
+**Not yet established (OWNER TEST):**
+- Whether each method is musically valuable and clearly distinct by ear. The numbers above
+  only say the spectra differ. With noise as D, FUSE's long-term spectrum is close to a
+  crossfade's (1.5 dB) and to WEAVE's (2.9 dB); its difference there lies in fine structure
+  a long-term spectrum does not show. Whether it is heard is for the listening test.
+- Real recordings of a cello, voice, spiccato and clock (the stand-ins are not those).
+- A real DAW (latency compensation when switching MORPH TO, automation, offline bounce):
+  UNVERIFIED here. Kontakt as D: UNVERIFIED (the test VST3 instrument stands in).

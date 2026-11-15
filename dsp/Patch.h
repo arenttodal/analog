@@ -124,6 +124,19 @@ struct MorphSettings
     bool toAux = false;
     bool perVoiceOn() const noexcept { return enabled && ! toAux; }
 };
+/** GLOBAL MORPH 2.0 (docs/GLOBAL_MORPH_2.md): MORPH TO D's own settings - independent of card
+    C's (MorphSettings), MORPH's position shared. Their defaults are what an older session gets. */
+struct GlobalMorphSettings
+{
+    MorphMethod method = MorphMethod::imprint;
+    MorphCarrier carrier = MorphCarrier::both;
+    double texture = 0.5;
+    double attack = 0.5;
+    double formants = 0.0;        ///< semitones -12..12
+    double detail = 0.5;
+    bool levelMatch = true;
+    MorphOutput output = MorphOutput::morphOnly;
+};
 enum class VoiceMode { poly, mono };
 
 /** The first version's own LFO divisions (analog.lfo.division, slowest first), kept to read
@@ -388,6 +401,7 @@ struct Patch
     bool chorusNoise = false;
     OrganicSettings organic;
     MorphSettings morph;
+    GlobalMorphSettings morphGlobal;   ///< MORPH TO D's stage (GLOBAL MORPH 2.0)
     /** Each card's EQ and DAMPEN (ANDOR OSP's layerA/B.eq.* and .dampen.*), on that card's
         own part of each voice, before the filter: A the oscillators and the noise, B ORGANIC
         (and MORPH's result). Off by default: a patch without them sounds exactly as before.

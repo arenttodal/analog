@@ -47,8 +47,9 @@ public:
     {
         // (EXPERIMENT: an external instrument that reports latency - the voices wait for it)
         // (D / AUX: D KONTAKT's latency delays everything before D, in series with C's)
+        // (GLOBAL MORPH 2.0: MORPH TO D's stage, while it is the choice)
         return synth.latencySamples() + synth.fxEngine().latencySamples() + (hybridType() == HybridType::external ? external.latencySamples() : 0)
-               + (auxKontaktActive() ? auxKontakt.latencySamples() : 0);
+               + (auxKontaktActive() ? auxKontakt.latencySamples() : 0) + synth.morphStageLatency();
     }
     /** EXPERIMENT: card C's hosted instrument (message thread: load, editor, state). */
     ExternalInstrument& externalInstrument() noexcept { return external; }
@@ -167,10 +168,16 @@ public:
         activity (0 silent .. 1) and its 24 bands' gains (dB) on the synth's bus. */
     struct GlobalMorphView
     {
+        static constexpr int bands = GlobalSpectralMorph::displayBands;
         bool running = false;
-        float position = 0.0f, activity = 0.0f;
-        std::array<float, GlobalMorph::bandCount> bandDb {};
-        std::array<float, GlobalMorph::bandCount> bandHz {};
+        float position = 0.0f;     ///< the stage's position (MORPH x D's availability)
+        float presence = 0.0f;     ///< D's held presence in the analysis (0 gone .. 1)
+        float transient = 0.0f;    ///< D's onset strength now (ATTACK's measure)
+        int frames = 0;            ///< analysis frames so far (a reader sees it move)
+        /** The last frame's levels (dB re full scale) in 32 log bands, 60 Hz .. 16 kHz: the
+            carrier, D as the morph uses it (FORMANTS applied) and the morph's result; WEAVE's
+            ownership per band (0 the synth .. 1 D; -1 for the other methods). */
+        std::array<float, bands> carrierDb {}, destinationDb {}, resultDb {}, ownership {}, bandHz {};
     };
     GlobalMorphView globalMorphView() const noexcept;
     /** D's path measured stage by stage over the last block, and why it sounds or not (Synth::AuxTelemetry). */
@@ -296,9 +303,6 @@ public:
 
 private:
     // MORPH TO D's telemetry (written at each block's end).
-    std::atomic<bool> gmRunning { false };
-    std::atomic<float> gmPosition { 0.0f }, gmActivity { 0.0f };
-    std::array<std::atomic<float>, GlobalMorph::bandCount> gmBands {};
     // D LIVE INPUT: this block's input (the shell's copy) and its telemetry.
     Engine::ExternalInput liveIn;
     std::atomic<bool> liveBusExists { false }, liveBusEnabled { false }, liveEver { false };

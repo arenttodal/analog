@@ -801,13 +801,33 @@ TEST_CASE ("MORPH TO (Addendum 05): C by default, MORPH as ever; D - the MORPH m
     set (p, params::morphEnabled, 0.0f);
     set (p, params::auxMode, 1.0f);
     set (p, params::auxNoiseGate, 1.0f);
+    for (const char* id : { "motion", "space", "echo", "drive" })
+        set (p, id, 0.0f);   // (effects that move in time run on the clock: a later sound meets them elsewhere)
     const auto layered = render (p, 0.6);
     set (p, params::morphEnabled, 1.0f);
     set (p, params::morphPosition, 100.0f);
     set (p, params::morphTarget, 1.0f);
     CHECK_FALSE (identical (layered, render (p, 0.6)));
     set (p, params::morphEnabled, 0.0f);
-    CHECK (identical (layered, render (p, 0.6)));
+    // MORPH off, MORPH TO D still chosen (GLOBAL MORPH 2.0): the layered sound exactly, as late
+    // as the stage (its latency belongs to the choice, never to the MORPH switch).
+    {
+        const auto late = render (p, 0.6);
+        const int lag = engineOf (p).synthForTest().morphStageLatency();
+        CHECK (lag == 1024);
+        double diff = 0.0, ref = 0.0;
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i + lag < late.getNumSamples(); ++i)
+            {
+                diff += std::pow (late.getSample (ch, i + lag) - layered.getSample (ch, i), 2.0);
+                ref += std::pow (layered.getSample (ch, i), 2.0);
+            }
+        // (the same sound to float rounding: D summed into the bus at another point)
+        CHECK (10.0 * std::log10 (diff / ref + 1.0e-30) < -120.0);
+    }
+    set (p, params::morphTarget, 0.0f);
+    CHECK (identical (layered, render (p, 0.6)));   // (MORPH TO C: no stage, no latency, bit for bit)
+    CHECK (engineOf (p).synthForTest().morphStageLatency() == 0);
 }
 
 TEST_CASE ("AUX 03 gate 5: an unsupported file dropped on D changes nothing and says why; a failed load keeps the loop in use", "[analog][aux][drop]")
