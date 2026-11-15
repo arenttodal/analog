@@ -106,6 +106,12 @@
 >     host or the screen keeps shorter scrolls vertically at the same scale - the instrument is
 >     never shrunk or centred with side margins. Geometry tests run for ANDOR Analog too
 >     (FILTER, MORPH, AUX with the arpeggiator and a rack). DAWs: UNVERIFIED (OWNER TEST).
+>     Refined: the window always grows first. Scrolling appears only once a host has kept the
+>     window short after being asked twice, or when the screen itself is too short; a host
+>     reporting the old size mid-resize is waited for, not taken as a refusal. SPACE + ARP +
+>     AUX opened together grow the window to the full instrument (shell test
+>     `[window][geometry][host]`, run with ANDOR Analog); the layout screenshots' refused state
+>     goes through the same negotiation.
 >   - Quick Start's text: step 3 "The USER tab allows for 6 custom macros"; step 4 (ARP and
 >     SUB) as the owner wrote it.
 >   - Universal modulation-aware visual feedback (OSP docs/EFFECTIVE_VALUES.md, with its

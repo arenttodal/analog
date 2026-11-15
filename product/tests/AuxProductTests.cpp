@@ -1785,17 +1785,43 @@ TEST_CASE ("layout: screenshots - every inline section at one width; above each 
         CHECK (image.getWidth() == base.getWidth());
         CHECK (differingAbove (base, image, cardsBottom) == 0);
     }
-    // A host that keeps the shorter window: the same scale, scrolled (top, then the bottom).
-    editor->setSize (width, base.getHeight());
+    // A host that keeps the shorter window: the window is asked for its full height again
+    // (the negotiation), the host keeps it short once more, and only then it scrolls - at the
+    // same scale (top, then the bottom).
+    struct RefusingHost final : juce::Component
     {
-        const auto image = snap ("08-host-kept-height-top");
-        CHECK (differingAbove (base, image, cardsBottom - 2, width - 12) == 0);   // (the scroll bar's strip at the right edge aside)
+        RefusingHost (juce::Component& e, int kept) : editor (e), height (kept) { addAndMakeVisible (editor); }
+        ~RefusingHost() override { removeChildComponent (&editor); }
+        void childBoundsChanged (juce::Component*) override
+        {
+            if (! answering && editor.getHeight() != height)
+            {
+                const juce::ScopedValueSetter<bool> inside (answering, true);
+                editor.setSize (editor.getWidth(), height);   // (the old size, every time)
+            }
+        }
+        juce::Component& editor;
+        int height;
+        bool answering = false;
+    };
+    {
+        RefusingHost host (*editor, base.getHeight());
+        editor->setSize (width, base.getHeight());
+        CHECK_FALSE (ui.instrumentOverflow().overflowing());   // (not yet: still negotiating)
+        ui.instrumentOverflow().settleNow();                   // (asked again, kept short again)
+        CHECK_FALSE (ui.instrumentOverflow().overflowing());
+        ui.instrumentOverflow().settleNow();                   // (the host's answer stands)
+        CHECK (ui.instrumentOverflow().overflowing());
+        {
+            const auto image = snap ("08-host-kept-height-top");
+            CHECK (differingAbove (base, image, cardsBottom - 2, width - 12) == 0);   // (the scroll bar's strip at the right edge aside)
+        }
+        juce::MouseWheelDetails down {};
+        down.deltaY = -1.0f;
+        for (int i = 0; i < 20; ++i)
+            ui.instrumentOverflow().scrollBy (down);
+        snap ("09-host-kept-height-scrolled");
     }
-    juce::MouseWheelDetails down {};
-    down.deltaY = -1.0f;
-    for (int i = 0; i < 20; ++i)
-        ui.instrumentOverflow().scrollBy (down);
-    snap ("09-host-kept-height-scrolled");
     ui.setRackExpanded (Kind::space, false);
     ui.setArpExpanded (false);
     ui.setAuxStripShown (false);
