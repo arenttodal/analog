@@ -1,5 +1,17 @@
 # ANDOR ANALOG — status
 
+> **15 Nov 2026, GLOBAL MORPH 2.0 (`feature/aux-live-input`; docs/GLOBAL_MORPH_2.md):**
+> - Gate 0 audit and gate 1 (D input reliability) done. D's path is measured stage by stage
+>   (source, FILTER, LEVEL, MORPH in / out, FX in; `Synth::AuxTelemetry`), and every source
+>   mode reaches the stage. The "D is silent" message is replaced by D's real state (WAITING
+>   FOR MIDI / TRANSPORT, NO INPUT, MUTED, OFF, SIGNAL ACTIVE).
+> - Fixed: MORPH TO D at 100 % was not D. The synth came back between a loop's hits, because
+>   the position was scaled by D's level. Each of the four modes is now D exactly at 100 % and
+>   the synth exactly at 0 %.
+> - Owner's decisions on D's CARRIER, OUTPUT (LAYERED) and LEVEL MATCH are recorded.
+> - Next: gate 2 onward (the STFT stage `GlobalSpectralMorph`, standalone and tested, is wired
+>   in next).
+
 > **11 Nov 2026, feature branches (not in the 1.0.0 release candidate):**
 > - SHAPER DNA V1 (`feature/shaper-dna-v1`; docs/SHAPER_DNA_V1.md);
 > - USER MACROS V1.1 gates 1–4 with the CORE / USER folder tabs (`feature/user-macros-v1`,

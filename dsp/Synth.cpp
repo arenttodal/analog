@@ -3224,6 +3224,8 @@ void Synth::renderAux (int numSamples) noexcept
         auxKeyRunning = false;
         auxKeyGain = 0.0f;
         auxDryNow = a.morphExclusive ? 0.0f : 1.0f;   // (powered under MORPH TO D: D never layered, from the first sample)
+        auxAvailable = 0.0f;
+        auxSilentSeconds = 1.0e9;
     }
     // RHYTHM: the loop (and its envelope) on the host's clock while the transport runs; with no
     // transport at all (a standalone), on its own clock from when it was powered. Powered off:
@@ -3266,6 +3268,7 @@ void Synth::renderAux (int numSamples) noexcept
     }
     const double q0 = byKeys ? auxKeyPpq : (hostClock ? ppqAtBlock + static_cast<double> (blockOffset) * perSample : auxFreePpq);
     const bool running = byKeys ? auxKeyRunning : (timing.valid ? timing.playing : true);
+    auxRhythmClock = timing.valid ? timing.playing : true;   // (FREE's clock: the stage's availability)
     if (byKeys && running)
         auxKeyPpq += static_cast<double> (numSamples) * perSample;
     else if (! byKeys && ! hostClock && running)
@@ -3454,6 +3457,7 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
             break;
         }
     }
+    tapAux (AuxTapPoint::source, auxL.data(), auxR.data(), n);
     // KONTAKT reports latency: everything before D waits for it (the voices, C's buses), so all
     // meet; the reported latency is C's plus D's.
     if (const int lag = auxModePlaying == Patch::Aux::Mode::kontakt && a.enabled ? auxExternal.latency : 0; lag > 0)
@@ -3492,6 +3496,7 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
                 auxR[i] = auxFilterMix * auxR[i] + (1.0f - auxFilterMix) * auxDryR[i];
             }
     }
+    tapAux (AuxTapPoint::filter, auxL.data(), auxR.data(), n);
     // Its level (and MUTE / SOLO / POWER), ramped (10 ms): never a click.
     const bool levelMod = rhythmMod && a.modTarget == Patch::Aux::ModTarget::auxLevel;
     const auto amount = static_cast<float> (std::clamp (a.modAmount, 0.0, 1.0));
@@ -3500,6 +3505,7 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
     const auto morphTarget = static_cast<float> (std::clamp (a.morph, 0.0, 1.0));
     const bool morphing = morphTarget > 0.0f || auxMorphNow > 0.0f || auxMorphTail > 0 || a.morphExclusive || auxDryNow < 1.0f;
     float g = auxGainNow, peak = 0.0f;
+    double levelSum = 0.0;
     for (std::size_t i = 0; i < un; ++i)
     {
         const float want = switching ? 0.0f : target;
@@ -3517,8 +3523,38 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
             right[i] += r;
         }
         peak = std::max (peak, std::max (std::abs (l), std::abs (r)));
+        levelSum += 0.5 * (static_cast<double> (l) * l + static_cast<double> (r) * r);
+    }
+    {
+        const auto k = static_cast<std::size_t> (AuxTapPoint::level);
+        auxTapPeak[k] = std::max (auxTapPeak[k], peak);
+        auxTapSum[k] += levelSum;
+        auxTapSamples[k] += n;
     }
     auxGainNow = g;
+    // D's availability for the global stage (GLOBAL MORPH 2.0 gate 1): decided by what D is set
+    // to play, never by its level from moment to moment. D is there while it is on and heard and
+    // its source can sound: RHYTHM with a loop, played by the keys or on a running clock (a
+    // stopped host transport: not there); NOISE always; KONTAKT with its instrument ready. A loop
+    // between its hits, a key not yet played: still D (100 % is D itself, its silences included;
+    // the rack says why it is quiet). LIVE INPUT is the one source no setting can vouch for: it
+    // is there while the sidechain has had signal within the last 2 s - a singer's pause gives
+    // the synth back, and the morph returns within a few ms of the voice. Only an unavailable D
+    // gives the stage back to the synth (300 ms).
+    {
+        auxSilentSeconds = peak > 1.0e-4f ? 0.0 : auxSilentSeconds + static_cast<double> (n) / hostRate;
+        bool ready = true;
+        switch (a.mode)
+        {
+            case Patch::Aux::Mode::rhythm: ready = auxLoop.loop() != nullptr && (! a.rhythmFree || auxRhythmClock); break;
+            case Patch::Aux::Mode::kontakt: ready = auxExternal.left != nullptr; break;
+            case Patch::Aux::Mode::live: ready = auxLive.left != nullptr && auxSilentSeconds < 2.0; break;
+            case Patch::Aux::Mode::noise: break;
+        }
+        const float want = a.enabled && a.heard && a.mode == auxModePlaying && ready ? 1.0f : 0.0f;
+        const float up = static_cast<float> (n / (0.002 * hostRate)), down = static_cast<float> (n / (0.300 * hostRate));
+        auxAvailable = want > auxAvailable ? std::min (want, auxAvailable + up) : std::max (want, auxAvailable - down);
+    }
     if (morphing)
         mixAuxMorph (left, right, n, morphTarget, a.morphExclusive);
     auxPeakShown.store (peak, std::memory_order_relaxed);
@@ -3528,6 +3564,93 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
         auxLatencyNow = 0;
         auxPeakShown.store (0.0f, std::memory_order_relaxed);
     }
+}
+
+void Synth::tapAux (AuxTapPoint point, const float* l, const float* r, int n) noexcept
+{
+    const auto k = static_cast<std::size_t> (point);
+    float peak = auxTapPeak[k];
+    double sum = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        peak = std::max (peak, std::max (std::abs (l[i]), std::abs (r[i])));
+        sum += 0.5 * (static_cast<double> (l[i]) * l[i] + static_cast<double> (r[i]) * r[i]);
+    }
+    auxTapPeak[k] = peak;
+    auxTapSum[k] += sum;
+    auxTapSamples[k] += n;
+}
+
+void Synth::publishAuxTelemetry() noexcept
+{
+    const auto& a = current.aux;
+    int samples = 0;
+    for (std::size_t k = 0; k < auxTapCount; ++k)
+    {
+        auxTapPeakShown[k].store (auxTapPeak[k], std::memory_order_relaxed);
+        auxTapRmsShown[k].store (auxTapSamples[k] > 0 ? static_cast<float> (std::sqrt (auxTapSum[k] / auxTapSamples[k])) : 0.0f, std::memory_order_relaxed);
+        samples = std::max (samples, auxTapSamples[k]);
+    }
+    // Signal at D's level (after power, MUTE / SOLO and LEVEL): above -60 dBFS. A quiet moment
+    // within 2 s of signal is a loop between its hits, not a silent D.
+    constexpr float signalFloor = 0.001f;
+    const bool signal = auxTapPeak[static_cast<std::size_t> (AuxTapPoint::level)] > signalFloor;
+    auxSinceSignal = signal ? 0.0 : auxSinceSignal + static_cast<double> (samples) / hostRate;
+    const bool sourceSignal = auxTapPeak[static_cast<std::size_t> (AuxTapPoint::source)] > signalFloor;
+    AuxState state = AuxState::active;
+    if (! a.enabled || ! auxRunning)
+        state = AuxState::off;
+    else if (! a.heard)
+        state = AuxState::muted;
+    else if (signal)
+        state = AuxState::active;
+    else if (auxSinceSignal < 2.0)
+        state = AuxState::betweenHits;
+    else
+        switch (a.mode)
+        {
+            case Patch::Aux::Mode::rhythm:
+                if (auxLoop.loop() == nullptr)
+                    state = AuxState::noSource;
+                else if (! a.rhythmFree && ! auxKeyRunning)
+                    state = AuxState::waitingForKeys;
+                else if (a.rhythmFree && timing.valid && ! timing.playing)
+                    state = AuxState::waitingForTransport;
+                else
+                    state = AuxState::silent;
+                break;
+            case Patch::Aux::Mode::noise:
+                state = ! a.noiseFree && ! auxGate.isActive() ? AuxState::waitingForKeys : AuxState::silent;
+                break;
+            case Patch::Aux::Mode::kontakt:
+                state = auxExternal.length <= 0 ? AuxState::noSource : (auxFilter.heldCount == 0 && ! sourceSignal ? AuxState::waitingForKeys : AuxState::silent);
+                break;
+            case Patch::Aux::Mode::live:
+                state = AuxState::noLiveInput;
+                break;
+        }
+    auxStateShown.store (static_cast<int> (state), std::memory_order_relaxed);
+    auxStageShown.store (auxStageThisBlock, std::memory_order_relaxed);
+    auxModeShown.store (static_cast<int> (a.mode), std::memory_order_relaxed);
+    auxAvailableShown.store (auxRunning ? auxAvailable : 0.0f, std::memory_order_relaxed);
+    auxTelemetryBlocks.store (auxTelemetryBlocks.load (std::memory_order_relaxed) + 1, std::memory_order_release);
+    auxTapPeak.fill (0.0f);
+    auxTapSum.fill (0.0);
+    auxTapSamples.fill (0);
+    auxStageThisBlock = false;
+}
+
+Synth::AuxTelemetry Synth::auxTelemetry() const noexcept
+{
+    AuxTelemetry t;
+    t.blocks = auxTelemetryBlocks.load (std::memory_order_acquire);
+    for (std::size_t k = 0; k < auxTapCount; ++k)
+        t.taps[k] = { auxTapPeakShown[k].load (std::memory_order_relaxed), auxTapRmsShown[k].load (std::memory_order_relaxed) };
+    t.state = static_cast<AuxState> (auxStateShown.load (std::memory_order_relaxed));
+    t.stageRunning = auxStageShown.load (std::memory_order_relaxed);
+    t.mode = auxModeShown.load (std::memory_order_relaxed);
+    t.available = auxAvailableShown.load (std::memory_order_relaxed);
+    return t;
 }
 
 void Synth::mixAuxMorph (float* left, float* right, int n, float target, bool exclusive) noexcept
@@ -3552,11 +3675,17 @@ void Synth::mixAuxMorph (float* left, float* right, int n, float target, bool ex
     const float dryStep = static_cast<float> (1.0 / (0.010 * hostRate));
     const float dryWant = exclusive ? 0.0f : 1.0f;
     const float from = auxMorphNow;
-    // Only while D sounds: scaled by D's activity (the imprint's own follower; 0 while D is silent,
-    // muted or off), so a quiet D never takes the synth away - it plays as it is.
-    const float active = std::clamp (auxMorph.activity(), 0.0f, 1.0f);
+    // Only while D is there (auxAvailable: signal within the last 2 s, held through a loop's
+    // silences): a D that is off, muted or long silent never takes the synth away - it plays as it
+    // is. (The imprint's depth inside the stage follows D's activity itself; the position is not
+    // scaled by it a second time, so 100 % is D exactly whatever D's level.)
+    const float active = auxAvailable;
     if (stage)
+    {
+        tapAux (AuxTapPoint::morphIn, auxL.data(), auxR.data(), n);
+        auxStageThisBlock = true;
         auxMorph.process (auxMorphL.data(), auxMorphR.data(), auxL.data(), auxR.data(), n, static_cast<double> (target * active));
+    }
     float p = from, dg = auxDryNow;
     for (std::size_t i = 0; i < un; ++i)
     {
@@ -3568,6 +3697,7 @@ void Synth::mixAuxMorph (float* left, float* right, int n, float target, bool ex
     }
     auxMorphNow = p;
     auxDryNow = dg;
+    tapAux (AuxTapPoint::morphOut, left, right, n);
     // Back at 0: it runs on for 60 ms (GlobalMorph settling to the carrier), then stops.
     if (target <= 0.0f && auxMorphNow <= 0.0f)
     {
@@ -4255,6 +4385,8 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     mixRhythm (left, right, numSamples);   // card C's loop joins the voices (AUDIO, BOTH)
     mixExternal (left, right, numSamples);   // EXPERIMENT: card C's external instrument (and GLOBAL MORPH)
     mixAux (left, right, numSamples);        // D / AUX: its own bus, through its FILTER, into the shared stages below
+    if (auxRunning)
+        tapAux (AuxTapPoint::fxIn, left, right, numSamples);
 
     // The chorus (state version 4; off: the buffers untouched), on the voices' sum.
     chorus.setMode (current.chorusMode);

@@ -173,6 +173,17 @@ public:
         std::array<float, GlobalMorph::bandCount> bandHz {};
     };
     GlobalMorphView globalMorphView() const noexcept;
+    /** D's path measured stage by stage over the last block, and why it sounds or not (Synth::AuxTelemetry). */
+    Synth::AuxTelemetry auxTelemetry() const noexcept { return synth.auxTelemetry(); }
+    /** D's state in words for MORPH TO D (message thread): `label` short and upper case (D ·
+        RHYTHM · SIGNAL ACTIVE), `why` one line - what is measured or deterministically so, and
+        what to do about it. `signal`: D has signal now or between a loop's hits. */
+    struct AuxStatus
+    {
+        juce::String label, why;
+        bool signal = false;
+    };
+    AuxStatus auxStatus() const;
     static constexpr int liveHistory = 96;
     void liveInputHistory (std::array<float, liveHistory>& out) const noexcept;
 

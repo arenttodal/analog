@@ -978,6 +978,7 @@ namespace
             if (toD())
                 if (auto* e = engine())
                 {
+                    sig << "|" << e->auxStatus().label;
                     // (the global stage's live band gains: a measurement, refreshed as it moves)
                     const auto v = e->globalMorphView();
                     sig << "|" << juce::String (v.position, 2) << "|" << juce::String (v.activity, 2);
@@ -1014,15 +1015,19 @@ namespace
             const auto plot = area.reduced (16.0f, 0.0f).withTrimmedTop (28.0f).withTrimmedBottom (32.0f);
             const auto v = engine() != nullptr ? engine()->globalMorphView() : AnalogEngine::GlobalMorphView();
             const bool dOn = plain (host, params::auxEnabled) >= 0.5f;
+            // (GLOBAL MORPH 2.0 gate 1: D's state as measured along its path, or as it
+            // deterministically is - off, muted, waiting for a key or the transport, no input -
+            // never guessed from the imprint's own follower)
+            const auto status = engine() != nullptr ? engine()->auxStatus() : AnalogEngine::AuxStatus();
             juce::String foot;
             if (! on)
                 foot = "MORPH is off: A/B/C and D play side by side";
             else if (! dOn)
-                foot = "D is off: the synth plays as it is";
-            else if (v.activity < 0.05f)
-                foot = auxMode == 3 ? "NO INPUT SIGNAL: the synth plays as it is" : "D is silent: the synth plays as it is";
+                foot = "AUX D is off: the synth plays as it is";
+            else if (! status.signal)
+                foot = status.label + ": " + status.why;
             else
-                foot = "each bar: a band of the synth's bus, moved towards D now (dB)";
+                foot = status.label + middleDot() + "each bar: a band of the synth, moved towards D now (dB)";
             // The 24 bands: 0 dB the centre line, up +18, down -36 (the stage's own limits).
             auto yOf = [&] (float db) { return plot.getCentreY() - plot.getHeight() * 0.5f * juce::jlimit (-1.0f, 1.0f, db / (db >= 0.0f ? 18.0f : 36.0f)); };
             g.setColour (gtype::grid);

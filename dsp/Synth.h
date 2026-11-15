@@ -299,6 +299,36 @@ public:
     float auxMorphPosition() const noexcept { return auxMorphNow; }
     const GlobalMorph& auxMorphState() const noexcept { return auxMorph; }
 
+    /** GLOBAL MORPH 2.0 gate 1: D's signal measured along its whole path, each stage's peak and
+        RMS over the last host block - the source as rendered, after D's FILTER, after its LEVEL /
+        MUTE / SOLO / power (D at its level), what the global MORPH stage received as D, the
+        stage's output (the synth with D through it), and the FX's input (the bus after D). Taps
+        that saw nothing this block read 0. */
+    enum class AuxTapPoint { source, filter, level, morphIn, morphOut, fxIn, count };
+    /** Why D sounds or does not, measured or deterministic (never guessed): off, muted, nothing to
+        play (no loop, no instrument), waiting for a key (RHYTHM GATE KEYS, keyed NOISE, KONTAKT),
+        waiting for the transport (RHYTHM on the host's clock, stopped), no live input, a quiet
+        moment of a signal heard within the last 2 s (a loop between its hits), signal now, or a
+        source that should sound and measures silent. */
+    enum class AuxState { off, muted, noSource, waitingForKeys, waitingForTransport, noLiveInput, betweenHits, active, silent };
+    struct AuxTap
+    {
+        float peak = 0.0f, rms = 0.0f;
+    };
+    struct AuxTelemetry
+    {
+        std::array<AuxTap, static_cast<std::size_t> (AuxTapPoint::count)> taps {};
+        AuxState state = AuxState::off;
+        bool stageRunning = false;   ///< the global MORPH stage processed D this block
+        int mode = 0;                ///< D's source mode (Patch::Aux::Mode) this block
+        float available = 0.0f;      ///< D there for the global stage (0..1): what MORPH TO D morphs with
+        int blocks = 0;              ///< published blocks (a reader sees it move)
+    };
+    /** Audio thread, once per host block after its renders: publishes the block's measurements. */
+    void publishAuxTelemetry() noexcept;
+    /** Any thread: the last published block's. */
+    AuxTelemetry auxTelemetry() const noexcept;
+
     /** Tests: RHYTHM's loop's filter cutoff now (Hz), 0 while it is not filtered. */
     float rhythmCutoffHz() const noexcept { return rhythmFilter.running ? rhythmFilter.cutoffHz : 0.0f; }
     const GlobalMorph& globalMorphState() const noexcept { return globalMorph; }
@@ -880,6 +910,21 @@ public:
     int auxLatency() const noexcept { return auxLatencyNow; }
 private:
     std::atomic<float> auxEnvShown { 0.0f }, auxPeakShown { 0.0f };
+    // D's taps (publishAuxTelemetry): accumulated across a host block's renders, then published.
+    static constexpr std::size_t auxTapCount = static_cast<std::size_t> (AuxTapPoint::count);
+    std::array<float, auxTapCount> auxTapPeak {};
+    std::array<double, auxTapCount> auxTapSum {};
+    std::array<int, auxTapCount> auxTapSamples {};
+    std::array<std::atomic<float>, auxTapCount> auxTapPeakShown {}, auxTapRmsShown {};
+    std::atomic<int> auxStateShown { 0 }, auxTelemetryBlocks { 0 }, auxModeShown { 0 };
+    std::atomic<float> auxAvailableShown { 0.0f };
+    std::atomic<bool> auxStageShown { false };
+    bool auxStageThisBlock = false;
+    double auxSinceSignal = 1.0e9;   ///< seconds since D's level tap last measured signal
+    bool auxRhythmClock = true;        ///< RHYTHM FREE's clock runs (no transport, or it plays)
+    double auxSilentSeconds = 1.0e9;   ///< D at its level silent for this long (LIVE INPUT's availability)
+    float auxAvailable = 0.0f;         ///< D there for the global stage (0..1, ramped): see mixAux
+    void tapAux (AuxTapPoint point, const float* l, const float* r, int n) noexcept;
     void updateExternalFilter() noexcept;   ///< control rate: the cards' filter settings
     void configureBusFilter (ExternalFilter& f) noexcept;
     void filterExternal (int n) noexcept;   ///< the bus (externalL / R) through it

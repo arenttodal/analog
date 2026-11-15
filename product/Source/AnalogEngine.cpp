@@ -810,6 +810,42 @@ AnalogEngine::GlobalMorphView AnalogEngine::globalMorphView() const noexcept
     return v;
 }
 
+AnalogEngine::AuxStatus AnalogEngine::auxStatus() const
+{
+    using State = Synth::AuxState;
+    const auto t = synth.auxTelemetry();
+    static const char* modes[] { "RHYTHM", "NOISE", "KONTAKT", "LIVE INPUT" };
+    const bool kontakt = t.mode == static_cast<int> (Patch::Aux::Mode::kontakt);
+    const juce::String mode = modes[std::clamp (t.mode, 0, 3)];
+    const auto dot = juce::String::fromUTF8 (" \xc2\xb7 ");
+    AuxStatus s;
+    auto say = [&] (const juce::String& what, const juce::String& why) {
+        s.label = "D" + dot + mode + dot + what;
+        s.why = why;
+    };
+    switch (t.state)
+    {
+        case State::off: say ("OFF", "AUX D is off: the synth plays as it is"); break;
+        case State::muted: say ("MUTED", "D is muted (or another layer is soloed): the synth plays as it is"); break;
+        case State::noSource:
+            say (kontakt ? "NO INSTRUMENT" : "NO LOOP",
+                 kontakt ? "Load an instrument into D: the synth plays as it is" : "Drop a recording on D: the synth plays as it is");
+            break;
+        case State::waitingForKeys: say ("WAITING FOR MIDI", "D is played by the keys: play a note to hear it"); break;
+        case State::waitingForTransport: say ("WAITING FOR TRANSPORT", "D's loop runs with the host: start playback to hear it"); break;
+        case State::noLiveInput:
+        {
+            const auto live = liveInput();
+            say ("NO INPUT", live.busExists && live.busEnabled ? "Nothing arrives on the sidechain input" : "Route audio to the sidechain input in the host");
+            break;
+        }
+        case State::betweenHits:
+        case State::active: say ("SIGNAL ACTIVE", {}); s.signal = true; break;
+        case State::silent: say ("SILENT", "D plays but measures silent at its output"); break;
+    }
+    return s;
+}
+
 AnalogEngine::LiveInputView AnalogEngine::liveInput() const noexcept
 {
     LiveInputView v;
@@ -1107,6 +1143,7 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     publishGrains();
     publishModulationView();
     publishEffective (total);
+    synth.publishAuxTelemetry();   // (D's path, measured: GLOBAL MORPH 2.0 gate 1)
     {
         const auto& gm = synth.auxMorphState();
         gmRunning.store (synth.auxMorphActive(), std::memory_order_relaxed);
