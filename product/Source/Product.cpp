@@ -6,6 +6,7 @@
 #include "AnalogEngine.h"
 #include "AnalogMaterialsData.h"
 #include "AnalogParameters.h"
+#include "AndorParameters.h"
 #include "AnalogWellOverlays.h"
 #include "AnalogPopovers.h"
 #include "AnalogRacks.h"
@@ -376,6 +377,12 @@ const ProductInfo& productInfo()
         p.crossCloseKeys = true;   // (the ARPEGGIATOR closes with the racks' X)
         // MORPH's own on / off beside its name (off on a new instance; a preset or a session keeps its own).
         p.macroSwitches = { { 0, andor::analog::params::morphEnabled, "Enable / bypass Morph." } };
+        // The MOD WHEEL's VIBRATO: the oscillators, card C pitched, and SUB (ANALOG's own, off by
+        // default). Noise, D and live input are never pitched by it.
+        p.vibratoSources = { { "OSC 1", osp::plugin::ids::vibratoSourceA },
+                             { "OSC 2", osp::plugin::ids::vibratoSourceB },
+                             { "C", osp::plugin::ids::vibratoSourceC },
+                             { "SUB", andor::analog::params::vibratoSourceSub } };
         // LINK, REVERSE, LOOP and FOLLOW belong to a recording (or an imported patch): card C as
         // a SAMPLE or INSTRUMENT PATCH only.
         p.cardModifiersShown = [] (int layer, osp::plugin::InstrumentHost& host) {

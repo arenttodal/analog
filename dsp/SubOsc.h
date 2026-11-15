@@ -2,6 +2,8 @@
 
 #include "Envelope.h"
 
+#include "engine/Vibrato.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -62,6 +64,8 @@ public:
     static constexpr int maxVoices = 8;
     /** Every voice's filter cutoff recomputed this often (samples). */
     static constexpr int filterInterval = 16;
+    /** VIBRATO's control period (samples). */
+    static constexpr int vibratoInterval = 32;
 
     void prepare (double sampleRate) noexcept;
     void reset() noexcept;
@@ -69,6 +73,17 @@ public:
     void setBendRange (double semitones) noexcept { bendRange = semitones; }
     /** The pitch wheel without MIDI (the instrument's on-screen wheel), -1..1 of the bend range. */
     void setBend (float wheel) noexcept { bendSemitones = bendRange * static_cast<double> (std::clamp (wheel, -1.0f, 1.0f)); }
+    /** The MOD WHEEL's VIBRATO (shared, Vibrato.h) when SUB takes part (its source 3): each of
+        its voices its own, from its key's start; the wheel 0..1 and the routes' offsets to
+        VIBRATO DEPTH (cents) and AMOUNT. Off (or not a source): nothing changes. */
+    void setVibrato (const osp::vibrato::Settings& settings, float wheel, double depthOffsetCents = 0.0, double amountOffset = 0.0) noexcept
+    {
+        vibrato = settings;
+        vibratoWheel = wheel;
+        vibratoDepthOffset = depthOffsetCents;
+        vibratoAmountOffset = amountOffset;
+    }
+    bool vibratoOn() const noexcept { return vibrato.enabled && vibrato.sources[3]; }
     const SubSettings& settingsNow() const noexcept { return settings; }
     /** The instrument's filter as SUB follows it (control rate, audio thread). */
     void setFilterFollow (const SubFilterFollow& f) noexcept;
@@ -105,6 +120,7 @@ private:
         float filterEnvNow = 0.0f;
         float g = 0.0f, cutoffHz = 0.0f, s1 = 0.0f, s2 = 0.0f, s3 = 0.0f, s4 = 0.0f;
         int filterCountdown = 0;
+        osp::vibrato::Voice vibrato;   ///< (its key's own vibrato)
     };
     void updateCutoff (Voice& v) noexcept;
     void applyFilterTimes() noexcept;   ///< every voice's filter envelope: the rate and times
@@ -121,6 +137,9 @@ private:
 
     SubSettings settings;
     double rate = 48000.0, bendRange = 2.0, bendSemitones = 0.0;
+    osp::vibrato::Settings vibrato;
+    float vibratoWheel = 0.0f;
+    double vibratoDepthOffset = 0.0, vibratoAmountOffset = 0.0;
     std::array<Voice, maxVoices> voices {};
     std::array<std::uint8_t, 128> held {};       ///< how many times each key is down (repeated notes)
     std::array<bool, 128> sustained {};          ///< released while the pedal was down

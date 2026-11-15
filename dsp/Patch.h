@@ -7,6 +7,7 @@
 #include "engine/ReimaginedModes.h"
 #include "engine/SatelliteMotion.h"
 #include "engine/Shaping.h"
+#include "engine/Vibrato.h"
 #include "fx/FxSettings.h"
 #include "ShaperDna.h"
 #include "SubOsc.h"
@@ -351,6 +352,10 @@ struct Patch
     VoiceMode voiceMode = VoiceMode::poly;
     double glideSeconds = 0.0;
     double bendRangeSemitones = 2.0;
+    /** The MOD WHEEL's VIBRATO (ANDOR OSP's, shared: osp::vibrato), per voice. Its sources:
+        0 OSC 1, 1 OSC 2, 2 card C pitched (oscillator, sample, instrument patch), 3 SUB. Off
+        by default: every patch from before plays exactly as it did. */
+    osp::vibrato::Settings vibrato;
     double tuneSemitones = 0.0;   ///< the generator's TUNE
     double fineTuneCents = 0.0;
     double panPercent = 0.0;      ///< -100..100

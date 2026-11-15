@@ -3,6 +3,7 @@
 
 #include "AnalogMath.h"
 #include "InstrumentHost.h"
+#include "AndorParameters.h"
 
 #include "engine/Shaping.h"
 
@@ -117,6 +118,9 @@ namespace
         // GLOBAL MORPH 2.0: MORPH TO D's own settings.
         iMorphGlobalMethod, iMorphGlobalCarrier, iMorphGlobalTexture, iMorphGlobalAttack, iMorphGlobalFormants, iMorphGlobalDetail,
         iMorphGlobalLevelMatch, iMorphGlobalOutput,
+        // The MOD WHEEL's VIBRATO (ANDOR OSP's shared vibrato.*; SUB ANALOG's own).
+        iVibratoEnabled, iVibratoDepth, iVibratoRate, iVibratoDelay, iVibratoRise, iVibratoControl, iVibratoAmount,
+        iVibratoSourceA, iVibratoSourceB, iVibratoSourceC, iVibratoSourceSub,
         count
     };
 
@@ -257,6 +261,12 @@ namespace
             // GLOBAL MORPH 2.0.
             for (const auto* id : { &morphGlobalMethod, &morphGlobalCarrier, &morphGlobalTexture, &morphGlobalAttack, &morphGlobalFormants,
                                     &morphGlobalDetail, &morphGlobalLevelMatch, &morphGlobalOutput })
+                l.add (*id);
+            // The MOD WHEEL's VIBRATO.
+            for (const auto* id : { &osp::plugin::ids::vibratoEnabled, &osp::plugin::ids::vibratoDepth, &osp::plugin::ids::vibratoRate,
+                                    &osp::plugin::ids::vibratoDelay, &osp::plugin::ids::vibratoRise, &osp::plugin::ids::vibratoControl,
+                                    &osp::plugin::ids::vibratoAmount, &osp::plugin::ids::vibratoSourceA, &osp::plugin::ids::vibratoSourceB,
+                                    &osp::plugin::ids::vibratoSourceC, &vibratoSourceSub })
                 l.add (*id);
             return l;
         }();
@@ -1095,6 +1105,9 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
         layout.add (osp::plugin::parameters::make<Bool> (v38 (morphGlobalLevelMatch), "D Morph Level Match", g.levelMatch));
         layout.add (osp::plugin::parameters::make<Choice> (v38 (morphGlobalOutput), "D Morph Output", juce::StringArray { "Morph Only", "Layered" }, static_cast<int> (g.output)));
     }
+    // The MOD WHEEL's VIBRATO on SUB (ANALOG's own source beside ANDOR OSP's shared three):
+    // off by default. Appended.
+    layout.add (osp::plugin::parameters::make<Bool> (juce::ParameterID { vibratoSourceSub, 39 }, "Vibrato Source Sub", false));
 }
 
 int readerIndexOf (const juce::String& id)
@@ -1633,6 +1646,18 @@ Patch Reader::readWith (const float* raw) const noexcept
     g.detail = 0.01 * v (iMorphGlobalDetail);
     g.levelMatch = on (iMorphGlobalLevelMatch);
     g.output = static_cast<MorphOutput> (index (iMorphGlobalOutput, 2));
+    // The MOD WHEEL's VIBRATO (per voice; SUB's own source).
+    {
+        auto& vb = p.vibrato;
+        vb.enabled = on (iVibratoEnabled);
+        vb.depthCents = v (iVibratoDepth);
+        vb.rateHz = v (iVibratoRate);
+        vb.delaySeconds = 0.001 * v (iVibratoDelay);
+        vb.riseSeconds = 0.001 * v (iVibratoRise);
+        vb.control = static_cast<osp::vibrato::Control> (index (iVibratoControl, 3));
+        vb.amount = 0.01 * v (iVibratoAmount);
+        vb.sources = { on (iVibratoSourceA), on (iVibratoSourceB), on (iVibratoSourceC), on (iVibratoSourceSub) };
+    }
     // MORPH TO (Addendum 05): the MORPH macro drives one processor. C HYBRID: the per-voice morph,
     // as ever. D AUX: the global stage (A/B/C's bus x D) at MORPH's position while MORPH is on -
     // the per-voice morph (and C's own bus morphs) bypassed, their settings untouched. D soloed:
@@ -2047,6 +2072,20 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (iMorphGlobalDetail, 100.0 * g.detail);
         put (iMorphGlobalLevelMatch, g.levelMatch ? 1.0 : 0.0);
         put (iMorphGlobalOutput, static_cast<int> (g.output));
+    }
+    {
+        const auto& vb = p.vibrato;
+        put (iVibratoEnabled, vb.enabled ? 1.0 : 0.0);
+        put (iVibratoDepth, vb.depthCents);
+        put (iVibratoRate, vb.rateHz);
+        put (iVibratoDelay, 1000.0 * vb.delaySeconds);
+        put (iVibratoRise, 1000.0 * vb.riseSeconds);
+        put (iVibratoControl, static_cast<int> (vb.control));
+        put (iVibratoAmount, 100.0 * vb.amount);
+        put (iVibratoSourceA, vb.sources[0] ? 1.0 : 0.0);
+        put (iVibratoSourceB, vb.sources[1] ? 1.0 : 0.0);
+        put (iVibratoSourceC, vb.sources[2] ? 1.0 : 0.0);
+        put (iVibratoSourceSub, vb.sources[3] ? 1.0 : 0.0);
     }
     // State version 8.
     put (iOsc1Fine, p.osc1FineCents);

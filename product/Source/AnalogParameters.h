@@ -307,6 +307,8 @@ namespace andor::analog::params
     inline const juce::String morphGlobalDetail = "analog.morph.global.detail";
     inline const juce::String morphGlobalLevelMatch = "analog.morph.global.levelMatch";
     inline const juce::String morphGlobalOutput = "analog.morph.global.output";
+    /** The MOD WHEEL's VIBRATO on SUB (ANALOG's own source; ANDOR OSP's vibrato.* the rest). */
+    inline const juce::String vibratoSourceSub = "analog.vibrato.sourceSub";
     /** RATE's choices (its musical speed against the loop's detected tempo). */
     inline const std::array<double, 5> auxRates { 0.25, 0.5, 1.0, 2.0, 4.0 };
     /** Appends RHYTHMIC MORPH's parameters (after SATELLITE's). */

@@ -969,6 +969,8 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.amp.noteOn();
         v.env.noteOn();
         v.ageSeconds = 0.0;   // (LFO DELAY counts from here)
+        v.vibrato.start();    // (and VIBRATO's DELAY and RISE)
+        v.vibratoSemitones = 0.0;
         v.releaseWhenPlayedOut = false;
     }
     v.active = true;
@@ -1469,12 +1471,16 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     // a crystal; what is left is the divider's and the waveshaper's own small spread).
     const double tolerance1 = p.osc1Model == OscModel::dco ? 0.2 : 1.0, wander1 = p.osc1Model == OscModel::dco ? 0.1 : 1.0;
     const double tolerance2 = p.osc2Model == OscModel::dco ? 0.2 : 1.0, wander2 = p.osc2Model == OscModel::dco ? 0.1 : 1.0;
-    const double note1 = common + 12.0 * p.osc1Octave + p.osc1Coarse + a * (0.10 * tolerance1 * d.pitch1 + 0.03 * wander1 * d.wander) + lfoD * p.lfoPitch1
+    // VIBRATO: on the sources it was given (0 OSC 1, 1 OSC 2, 2 card C); nothing elsewhere.
+    const double vibrato1 = p.vibrato.sources[0] ? v.vibratoSemitones : 0.0;
+    const double vibrato2 = p.vibrato.sources[1] ? v.vibratoSemitones : 0.0;
+    const double vibratoC = p.vibrato.sources[2] ? v.vibratoSemitones : 0.0;
+    const double note1 = vibrato1 + common + 12.0 * p.osc1Octave + p.osc1Coarse + a * (0.10 * tolerance1 * d.pitch1 + 0.03 * wander1 * d.wander) + lfoD * p.lfoPitch1
                          + p.osc1FineCents / 100.0   // (state version 8: OSC 1's own DETUNE; 0 adds nothing)
                          // (card A's mode's read speed moves OSC 1 while its own source is the oscillator)
                          + (v.modeEngine != nullptr ? 12.0 * std::log2 (std::max (1.0e-3, v.modeFactor)) * (1.0 - v.grainMix) : 0.0);
     const double base2 = p.osc2KeyTrack ? common : 60.0 + v.unisonOffset + performed;
-    const double note2 = base2 + 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2 - 0.03 * wander2 * d.wander)
+    const double note2 = vibrato2 + base2 + 12.0 * p.osc2Octave + p.osc2Coarse + p.osc2FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2 - 0.03 * wander2 * d.wander)
                          + lfoD * p.lfoPitch2 - (p.osc2LowFrequency ? 12.0 * lowFrequencyOctaves : 0.0)
                          // (card B's mode's read speed moves OSC 2 while its own source is the oscillator)
                          + (v.modeEngine2 != nullptr ? 12.0 * std::log2 (std::max (1.0e-3, v.modeFactor2)) * (1.0 - v.grainMix2) : 0.0);
@@ -1518,7 +1524,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     // ORGANIC: the note's pitch with its own TUNE (not the oscillators' card's) against the
     // recording's root (or the override).
     // (State version 8: card C's own OCT and DETUNE move the notes it is played with.)
-    const double hybridPitch = 12.0 * p.hybridOctave + p.hybridFineCents / 100.0;
+    const double hybridPitch = 12.0 * p.hybridOctave + p.hybridFineCents / 100.0 + vibratoC;
     v.morphSourceHz = math::noteToHz (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch);
     if (v.organic.playing())
         v.organicStep = v.organic.stepFor (common - p.tuneSemitones + p.organic.tuneSemitones + hybridPitch, static_cast<double> (p.organic.rootOverride));
@@ -1539,7 +1545,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.hybridGen = generating ? p.hybridType : HybridType::sample;
     if (p.hybridType == HybridType::oscillator)
     {
-        const double note3 = common + 12.0 * p.osc3Octave + p.osc3Coarse + p.osc3FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2);
+        const double note3 = vibratoC + common + 12.0 * p.osc3Octave + p.osc3Coarse + p.osc3FineCents / 100.0 + a * (0.10 * tolerance2 * d.pitch2);
         v.dt3 = std::clamp (math::noteToHz (note3) / internalRate, 1.0e-9, 0.45);
         v.width3 = static_cast<float> (std::clamp (p.osc3Width + 0.04 * a * d.width2 + lfoD * p.lfoWidth3, 0.02, 0.98));
         planSlot (v, 3, p, v.dt3);
@@ -1962,6 +1968,16 @@ void Synth::controlUpdate() noexcept
     // beat while it plays (SYNC, FREE), else free.
     modRuntime.advanceGlobal (controlPeriod, hostRate);
     lfoValue = static_cast<float> (modRuntime.globalLfo[0].value);
+    {
+        // SUB's VIBRATO (when it is a source): its own voices, the routes as the shared stages hear them.
+        double depthOffset = 0.0, amountOffset = 0.0;
+        if (p.vibrato.enabled && p.vibrato.sources[3])
+        {
+            sharedOffset (osp::mod::Dest::vibratoDepth, depthOffset);
+            sharedOffset (osp::mod::Dest::vibratoAmount, amountOffset);
+        }
+        subOsc.setVibrato (p.vibrato, modRuntime.modWheelNow, depthOffset, amountOffset);
+    }
 
     // MOVEMENT DRIFT's shared part: the whole instrument wanders a little together.
     sharedDriftCents = 0.0;
@@ -2013,6 +2029,16 @@ void Synth::controlUpdate() noexcept
         if (p.lfo.scope == osp::mod::Scope::poly)
             v.mod.values[0] = lfoNow;
         applyVoiceModulation (v);
+        // VIBRATO (the MOD WHEEL's, per note): its routes to DEPTH and AMOUNT this note's own.
+        if (p.vibrato.enabled)
+        {
+            const auto& compiled = modRuntime.compiled;
+            const double depthOffset = compiled.has (osp::mod::Dest::vibratoDepth) ? offsetOf (v, osp::mod::Dest::vibratoDepth) : 0.0;
+            const double amountOffset = compiled.has (osp::mod::Dest::vibratoAmount) ? offsetOf (v, osp::mod::Dest::vibratoAmount) : 0.0;
+            v.vibratoSemitones = v.vibrato.advance (p.vibrato, seconds, static_cast<double> (modRuntime.modWheelNow), depthOffset, amountOffset) / 100.0;
+        }
+        else
+            v.vibratoSemitones = 0.0;
         updateVoiceControl (v, lfoNow, depth);
     }
 

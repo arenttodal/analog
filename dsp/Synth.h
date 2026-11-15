@@ -505,6 +505,8 @@ private:
         bool dampenFresh = true;      ///< a new note: its damping lands at once
         int highPassTail = 0;         ///< samples the high-pass keeps running after it was switched off
         double ageSeconds = 0.0;      ///< since the note (re)started: LFO DELAY / RISE
+        osp::vibrato::Voice vibrato;  ///< the MOD WHEEL's VIBRATO, this note's own
+        double vibratoSemitones = 0.0;   ///< its pitch offset now
         // ORGANIC: the recording this note plays beside the oscillators (into the same mixer).
         OrganicVoice organic;
         /** Card C GRANULAR: its recording as ANDOR OSP's grains instead of read through. */

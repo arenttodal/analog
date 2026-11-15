@@ -1,5 +1,17 @@
 # ANDOR ANALOG — status
 
+> **15 Nov 2026, PITCH / MOD wheel popovers and VIBRATO (`feature/aux-live-input`;
+> docs/WHEELS_VIBRATO.md):**
+> - The captions under the wheels open their settings (PITCH BEND: RANGE; MOD WHEEL:
+>   VIBRATO). The MOD caption is no longer clipped, and a drag from it still makes a cable.
+> - VIBRATO is per voice, on OSC 1, OSC 2 and card C pitched, with SUB as an optional source
+>   (off by default). It is never post-FX.
+> - CONTROL is MOD WHEEL / ALWAYS ON / ASSIGNED; ASSIGNED uses AMOUNT, 0 % by default (owner's
+>   decision). VIBRATO DEPTH and AMOUNT are modulation and USER macro destinations.
+> - It is off by default and bit-identical when off; factory presets are unchanged.
+> - Demos are in docs/demos/wheels and screenshots in docs/screenshots/wheels. Listening and
+>   DAW checks are OWNER TESTS.
+
 > **15 Nov 2026, GLOBAL MORPH 2.0 (`feature/aux-live-input`; docs/GLOBAL_MORPH_2.md):**
 > - Gate 0 audit and gate 1 (D input reliability) done. D's path is measured stage by stage
 >   (source, FILTER, LEVEL, MORPH in / out, FX in; `Synth::AuxTelemetry`), and every source

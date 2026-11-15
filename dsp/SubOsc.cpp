@@ -103,6 +103,8 @@ void SubOsc::startKey (int key, float velocity) noexcept
             if (chosen == nullptr || v.age < chosen->age)
                 chosen = &v;
     const bool fresh = chosen->key < 0;
+    if (chosen->key != key)
+        chosen->vibrato.start();   // (a new key: its vibrato from the start, DELAY then RISE)
     chosen->key = key;
     chosen->releasing = false;
     chosen->killed = false;
@@ -353,6 +355,14 @@ void SubOsc::render (float* left, float* right, int n) noexcept
         hp1x = hp1y = hp2x = hp2y = toneState = 0.0f;
         return;
     }
+    const bool vibratoNow = vibratoOn();
+    if (vibratoNow && n > vibratoInterval)
+    {
+        // VIBRATO moves each voice's pitch at control rate (32 samples), as the cards' voices.
+        for (int done = 0; done < n; done += vibratoInterval)
+            render (left + done, right + done, std::min (vibratoInterval, n - done));
+        return;
+    }
     const float level = std::max (1.0e-6f, dbToGain (settings.levelDb));
     const double grit = std::clamp (settings.grit, 0.0, 1.0);
     const float drive = static_cast<float> (1.0 + 7.0 * grit);
@@ -360,7 +370,9 @@ void SubOsc::render (float* left, float* right, int n) noexcept
     for (std::size_t i = 0; i < voices.size(); ++i)
         if (voices[i].key >= 0)
         {
-            const double note = static_cast<double> (voices[i].key) + 12.0 * settings.octave + bendSemitones;
+            double note = static_cast<double> (voices[i].key) + 12.0 * settings.octave + bendSemitones;
+            if (vibratoNow)
+                note += voices[i].vibrato.advance (vibrato, static_cast<double> (n) / rate, static_cast<double> (vibratoWheel), vibratoDepthOffset, vibratoAmountOffset) / 100.0;
             increments[i] = std::min (0.45, 440.0 * std::exp2 ((note - 69.0) / 12.0) / rate);
         }
     for (int s = 0; s < n; ++s)

@@ -11859,3 +11859,158 @@ TEST_CASE ("analog: a card's EQ shows the spectrum of what plays through it (AND
     }
     card.setEqOpen (false);
 }
+
+TEST_CASE ("analog: the wheels' captions open PITCH BEND and MOD WHEEL; VIBRATO plays, routes and recalls", "[analog][wheels][vibrato]")
+{
+    namespace ids = osp::plugin::ids;
+    using Editor = andor::shell::ShellEditor;
+    ShellProcessor p;
+    p.prepareToPlay (48000.0, 512);
+    std::unique_ptr<juce::AudioProcessorEditor> base (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<Editor&> (*base);
+    ui.refreshNow();
+    auto event = [] (juce::Component& c, juce::Point<float> at, juce::Point<float> down, bool dragged) {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, {}, juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f,
+                                 0.0f, &c, &c, now, down, now, 1, dragged);
+    };
+    auto click = [&] (osp::plugin::Wheel& w) {
+        const auto at = w.captionArea().getCentre();
+        w.mouseDown (event (w, at, at, false));
+        w.mouseUp (event (w, at, at, false));
+    };
+    auto& pitch = ui.pitchBendWheel();
+    auto& modw = ui.modulationWheel();
+    // Both captions whole (MOD's socket inside its component), both doors.
+    for (auto* w : { &pitch, &modw })
+    {
+        CHECK (w->captionArea().getX() >= 0.0f);
+        CHECK (w->captionArea().getRight() <= static_cast<float> (w->getWidth()));
+        CHECK (w->onCaptionClick != nullptr);
+        CHECK (w->isEnabled());   // (the engine reads both wheels)
+    }
+    click (pitch);
+    CHECK (ui.openPopupIndex() == Editor::pitchWheelPopup);
+    click (modw);
+    CHECK (ui.openPopupIndex() == Editor::modWheelPopup);
+    // MOD WHEEL's SOURCES: ANALOG's own - OSC 1, OSC 2, C and SUB; every control live (bound).
+    juce::StringArray toggles;
+    int dimmed = 0;
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* b = dynamic_cast<juce::ToggleButton*> (child))
+                toggles.add (b->getButtonText());
+            if (! child->isEnabled())
+                ++dimmed;
+            walk (*child);
+        }
+    };
+    REQUIRE (ui.openPopupPanel() != nullptr);
+    walk (*ui.openPopupPanel());
+    CHECK (toggles == juce::StringArray { "OSC 1", "OSC 2", "C", "SUB" });
+    CHECK (dimmed == 0);
+    ui.closePopup();
+    CHECK (ui.openPopupIndex() == -1);
+    // Advanced: no BEND (RANGE lives in PITCH BEND).
+    ui.openPopup (Editor::advancedPopup);
+    bool bend = false;
+    std::function<void (juce::Component&)> findBend = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* k = dynamic_cast<osp::plugin::MiniKnob*> (child); k != nullptr && k->captionText() == "BEND")
+                bend = true;
+            findBend (*child);
+        }
+    };
+    if (ui.openPopupPanel() != nullptr)
+        findBend (*ui.openPopupPanel());
+    CHECK_FALSE (bend);
+    ui.closePopup();
+
+    // Sound: off is every older sound; ALWAYS ON, MOD WHEEL (CC 1), ASSIGNED with a route.
+    const std::vector<Note> held { { 0, 57, 100 } };
+    const auto plain = renderShell (p, 1.4, held, false);
+    setValue (p, ids::vibratoControl, 0.0f);   // (MOD WHEEL, the wheel down)
+    setValue (p, ids::vibratoEnabled, 1.0f);
+    CHECK (identical (plain, renderShell (p, 1.4, held, false)));
+    setValue (p, ids::vibratoControl, 1.0f);   // ALWAYS ON
+    const auto always = renderShell (p, 1.4, held, false);
+    CHECK (differenceRms (plain, always) > 1.0e-4);
+    setValue (p, ids::vibratoControl, 0.0f);
+    renderModWheel = 127;
+    CHECK (differenceRms (plain, renderShell (p, 1.4, held, false)) > 1.0e-4);
+    renderModWheel = -1;
+    setValue (p, ids::vibratoControl, 2.0f);   // ASSIGNED, AMOUNT 0: silent until routed
+    CHECK (identical (plain, renderShell (p, 1.4, held, false)));
+    setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "source"), static_cast<float> (osp::mod::sourceIndex (osp::mod::Source::vel) + 1));   // VEL
+    setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "destExt"), static_cast<float> (osp::mod::extendedChoiceOf (osp::mod::Dest::vibratoAmount)));
+    setValue (p, osp::plugin::InstrumentHost::modRouteId (0, "depth"), 100.0f);
+    REQUIRE (p.modulationRoutes().size() == 1);
+    CHECK (p.modulationRoutes().front().route.dest == osp::mod::Dest::vibratoAmount);
+    CHECK (differenceRms (plain, renderShell (p, 1.4, held, false)) > 1.0e-4);
+    // The route list names them; a USER macro may take DEPTH and AMOUNT (right-click: Assign to Macro).
+    CHECK (osp::plugin::InstrumentHost::modExtendedDestinationNames().contains ("VIBRATO DEPTH"));
+    CHECK (osp::plugin::InstrumentHost::modExtendedDestinationNames().contains ("VIBRATO AMOUNT"));
+    if (const auto* macros = p.userMacros(); macros != nullptr && macros->eligible != nullptr)
+    {
+        CHECK (macros->eligible (p, ids::vibratoDepth));
+        CHECK (macros->eligible (p, ids::vibratoAmount));
+    }
+
+    // Recall: the session keeps every VIBRATO setting (and SUB's own source).
+    setValue (p, ids::vibratoDepth, 40.0f);
+    setValue (p, andor::analog::params::vibratoSourceSub, 1.0f);
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    ShellProcessor q;
+    q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    CHECK (q.parameters.getRawParameterValue (ids::vibratoDepth)->load() == Approx (40.0f));
+    CHECK (q.parameters.getRawParameterValue (ids::vibratoControl)->load() == Approx (2.0f));
+    CHECK (q.parameters.getRawParameterValue (andor::analog::params::vibratoSourceSub)->load() == Approx (1.0f));
+}
+
+TEST_CASE ("analog: the wheels' popovers screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-wheels]")
+{
+    namespace ids = osp::plugin::ids;
+    using Editor = andor::shell::ShellEditor;
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    p.prepareToPlay (48000.0, 512);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<Editor&> (*editor);
+    int width = 1448;
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / 1448.0f));
+        ui.refreshNow();
+        if (auto* panel = ui.openPopupPanel())
+            panel->settleNow();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    shoot ("wheels-closed");
+    for (const int w : { 869, 1448, 1810 })
+    {
+        width = w;
+        ui.openPopup (Editor::pitchWheelPopup);
+        shoot ("wheels-" + juce::String (w) + "-pitch-bend");
+        ui.openPopup (Editor::modWheelPopup);
+        shoot ("wheels-" + juce::String (w) + "-mod-wheel-off");
+    }
+    width = 1448;
+    setValue (p, ids::vibratoEnabled, 1.0f);
+    setValue (p, ids::vibratoControl, 1.0f);
+    ui.openPopup (Editor::modWheelPopup);
+    shoot ("wheels-1448-mod-wheel-always-on");
+    setValue (p, ids::vibratoControl, 2.0f);
+    ui.openPopup (Editor::modWheelPopup);
+    shoot ("wheels-1448-mod-wheel-assigned");
+    ui.closePopup();
+}

@@ -87,6 +87,7 @@ if(OSP_BUILD_TESTS)
         tests/FxRetroTests.cpp
         tests/ReimaginedCardTests.cpp
         tests/SubTests.cpp
+        tests/VibratoTests.cpp
         tests/HybridLayerTests.cpp
         tests/MainSendTests.cpp
         tests/RealtimeTests.cpp
