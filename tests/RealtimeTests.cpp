@@ -7,6 +7,7 @@
 #include "FactoryPatches.h"
 #include "fx/Effects.h"
 #include "fx/FxProcessor.h"
+#include "morph/GlobalSpectralMorph.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <memory>
 #include <cstdlib>
+#include <limits>
 #include <new>
 
 namespace
@@ -754,6 +756,35 @@ TEST_CASE ("realtime: D / AUX's bus allocates nothing - its four modes (LIVE INP
         s->setAuxExternal (cl.data(), cr.data(), 512, block > 200 ? 256 : 0);
         s->setAuxLive (block % 7 == 0 ? nullptr : cl.data(), cr.data(), 512);   // (the sidechain, now and then off)
         s->render (l.data(), r.data(), 512);
+    }
+    counting = false;
+    CHECK (allocations.load() == 0);
+}
+
+TEST_CASE ("realtime: GLOBAL MORPH 2.0's stage never allocates while processing (every method, control changes, NaN input)", "[realtime][gm2]")
+{
+    andor::analog::GlobalSpectralMorph stage;
+    stage.prepare (48000.0, 512);
+    std::vector<float> l (512), r (512), kl (512), kr (512), dl (512), dr (512);
+    allocations = 0;
+    counting = true;
+    for (int block = 0; block < 600; ++block)
+    {
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            const auto t = static_cast<double> (block * 512 + static_cast<int> (i));
+            l[i] = r[i] = kl[i] = kr[i] = static_cast<float> (0.3 * std::sin (0.02 * t));
+            dl[i] = dr[i] = block % 50 == 7 && i == 3 ? std::numeric_limits<float>::quiet_NaN() : static_cast<float> (0.3 * std::sin (0.071 * t));
+        }
+        andor::analog::GlobalSpectralMorph::Controls c;
+        c.method = static_cast<andor::analog::GlobalSpectralMorph::Method> (block / 100 % 3);
+        c.position = 0.5 + 0.5 * std::sin (block * 0.05);
+        c.detail = block % 200 / 200.0;
+        c.formants = -12.0 + block % 25;
+        c.output = block % 300 < 150 ? andor::analog::GlobalSpectralMorph::Output::morphOnly : andor::analog::GlobalSpectralMorph::Output::layered;
+        c.levelMatch = block % 2 == 0;
+        stage.setControls (c);
+        stage.process (l.data(), r.data(), kl.data(), kr.data(), dl.data(), dr.data(), 512);
     }
     counting = false;
     CHECK (allocations.load() == 0);
