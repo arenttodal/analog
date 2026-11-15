@@ -1,5 +1,8 @@
 # ANDOR Learn in ANDOR Analog (V1)
 
+> Superseded by Learn 2.0 (docs/LEARN_2.md, 15 Nov 2026): one Learn menu entry, no Skip, exact
+> green outlines, readiness checks and example sounds. Kept as the record of V1.
+
 Guided lessons and a contextual Learn mode, built on the shared `shared/andor-learn` module in `external/osp`. Its authoring guide is `external/osp/shared/andor-learn/README.md`.
 
 ## What the musician sees

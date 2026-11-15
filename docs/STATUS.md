@@ -114,6 +114,17 @@
 >     goes through the same negotiation.
 >   - Quick Start's text: step 3 "The USER tab allows for 6 custom macros"; step 4 (ARP and
 >     SUB) as the owner wrote it.
+>   - ANDOR Learn 2.0 (docs/LEARN_2.md): one Learn menu entry (Tutorials..., Toggle Info, Reset
+>     Tutorials...); a compact browser (START HERE, LESSONS, Resume · Step n of N, checks); no
+>     Skip anywhere; a green outline on the exact control of every step (MORPH TO's C / D
+>     segment, PLAYS A / B, EDIT B, OSC 1 LEVEL, USER Macro 1, AUX's source dropdown, one FX
+>     block); notes placed beside it, clear of the panel it is in. All six lessons and the 21
+>     Info texts rewritten (the owner's copy). Lessons check the real sound before listening:
+>     card C / D playable, muted, at zero, a loop or Kontakt loaded, sidechain audio actually
+>     arriving; what is missing is named, outlined and offered as a fix or an example sound.
+>     Three bundled example sounds (oscillators and noise only), loaded only when chosen, the
+>     sound before them kept for Restore Previous Sound. 23 Learn tests; screenshots of every
+>     step at 1448 and 869 px. A DAW run-through by hand: OWNER TEST.
 >   - Universal modulation-aware visual feedback (OSP docs/EFFECTIVE_VALUES.md, with its
 >     inventory): the pictures draw what plays. AnalogEngine publishes every value its block
 >     moved (USER macros, global routes: MOVEMENT, DRIVE, SPACE, ECHO, MIX, every global product

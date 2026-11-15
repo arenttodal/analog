@@ -1,8 +1,12 @@
 #include "AnalogLearn.h"
 
+#include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "AuxUI.h"
+#include "Binding.h"
 #include "FxRouting.h"
 #include "LearnTargetRegistry.h"
+#include "RackControls.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
 
@@ -25,40 +29,120 @@ namespace
         return s;
     }
 
-    Step task (const char* id, const char* target, const char* title, const char* body, Completion completion, bool revealOnEnter = true)
+    Step task (const char* id, const char* target, const char* title, const char* body, Completion completion, const char* done = "")
     {
         auto s = explain (id, target, title, body);
         s.completion = std::move (completion);
-        s.revealOnEnter = revealOnEnter;
+        s.doneText = u8 (done);
         return s;
     }
 
-    // The per-card arpeggiator's parameters (the shell's ids::arpCard / arpCardSetting with
-    // Analog's namespace): the visible cards' letters, whatever their storage layers.
+    Requirement need (const char* id, Condition holds, const char* title, const char* body, const char* target = "", const char* fix = "", bool example = true)
+    {
+        Requirement r;
+        r.id = id;
+        r.holds = std::move (holds);
+        r.title = u8 (title);
+        r.body = u8 (body);
+        r.targetId = target;
+        r.fixLabel = u8 (fix);
+        r.offerExample = example;
+        return r;
+    }
+
+    // The per-card arpeggiator's parameters (the shell's, with Analog's namespace).
     const juce::String cardA = "analog.arp.cardA", cardB = "analog.arp.cardB", link = "analog.arp.link";
     const juce::String cardBPattern = "analog.arp.cardB.pattern", cardBRate = "analog.arp.cardB.rate";
+    const juce::String arpOn = "arp.enabled";
+
+    //==========================================================================================
+    // What a lesson needs before its sound can be heard (checked on the real state).
+
+    Requirement oscillatorsHeard()
+    {
+        return need ("ab.audible", Condition::state ("analog.ab.audible"), "The oscillators are silent",
+                     "OSC 1 and OSC 2 are both off, muted or turned all the way down. Raise OSC 1's LEVEL, or load the example sound.",
+                     "osc.A.level");
+    }
+
+    std::vector<Requirement> hybridReady()
+    {
+        return {
+            need ("c.heard", Condition::state ("analog.c.heard"), "OSC C is muted",
+                  "OSC C is muted, or another card is soloed. Click M on OSC C (or the other card's S) to hear it.", "card.C.mute"),
+            need ("c.level", Condition::state ("analog.c.levelUp"), "OSC C is silent", "OSC C's LEVEL is all the way down. Turn it up to hear OSC C.",
+                  "card.C.level"),
+            need ("c.loaded", Condition::state ("analog.c.playable"), "A sound is needed",
+                  "OSC C has nothing loaded to play. Choose OSCILLATOR or NOISE from its source dropdown, load a sound into it, or load the example sound.",
+                  "card.C.source", "Choose Source"),
+        };
+    }
+
+    std::vector<Requirement> auxReady()
+    {
+        return {
+            need ("d.on", Condition::equals (params::auxEnabled, 1.0f), "AUX D is off", "Switch AUX D on with its power key to hear it.", "aux.power", "Show AUX"),
+            need ("d.heard", Condition::state ("analog.d.heard"), "AUX D is muted",
+                  "AUX D is muted, or a card is soloed. Click M on AUX D (or the other card's S) to hear it.", "aux.mute", "Show AUX"),
+            need ("d.level", Condition::state ("analog.d.levelUp"), "AUX D is silent", "AUX D's LEVEL is all the way down. Turn it up to hear D.", "aux.level",
+                  "Show AUX"),
+            need ("d.playable", Condition::state ("analog.d.playable"), "A sound is needed",
+                  "AUX D has nothing to play: no RHYTHM loop, no Kontakt instrument loaded, or no audio arriving at LIVE INPUT. Choose NOISE, load a source, or load the example sound.",
+                  "aux.mode", "Choose Source"),
+        };
+    }
+
+    Requirement morphRackOpen()
+    {
+        return need ("morph.rack", Condition::state ("rack.morph.open"), "Open the MORPH rack",
+                     "The control for this step is inside the MORPH rack. Open the rack to continue.", "morph.label", "Open Rack", false);
+    }
+
+    Requirement morphToC()
+    {
+        return need ("morph.toC", Condition::equals (params::morphTarget, 0.0f), u8 ("Choose C \xc2\xb7 HYBRID first").toRawUTF8(),
+                     u8 ("This control belongs to OSC C's MORPH. Choose C \xc2\xb7 HYBRID under MORPH TO first.").toRawUTF8(), "morph.destination.C", "Open Rack",
+                     false);
+    }
+
+    template <typename... More>
+    std::vector<Requirement> join (std::vector<Requirement> a, More... more)
+    {
+        (a.insert (a.end(), more.begin(), more.end()), ...);
+        return a;
+    }
+
+    //==========================================================================================
+    // The lessons (docs/LEARN_2.md): manual-style, one action per step, the exact control.
 
     Lesson quickStart()
     {
         Lesson l;
         l.id = "analog.quickstart";
         l.title = "Quick Start";
-        l.group = "Getting started";
-        l.revision = 2;   // (2: C1 / C2, USER macros, SUB, AUX D)
+        l.description = "The main parts of ANDOR Analog";
+        l.group = "Quick Start";
+        l.revision = 3;   // (3: Learn 2.0 - seven steps, exact targets)
         l.minutes = 2;
+        l.completionText = u8 ("You\xe2\x80\x99ve seen the main parts of Analog. Choose another lesson to try a feature in more detail.");
         auto aux = explain ("aux", "aux.strip", "AUX D",
-                            "A fourth source beside the cards: a rhythm loop, noise, a Kontakt instrument, or your DAW's audio (LIVE INPUT).");
-        aux.revealOnEnter = false;   // (showing D changes the window: only Show me does)
-        aux.unavailableBody = u8 ("D is hidden. Show me shows it, or choose Show AUX D from the menu at the top right.");
+                            "AUX D is an optional fourth sound source. It can play rhythmic loops, noise, Kontakt instruments or audio sent from your DAW.");
+        aux.revealOnEnter = false;   // (showing D changes the window: only its key does)
+        aux.revealLabel = "Show AUX";
+        aux.unavailableBody = "AUX D is hidden. Show AUX shows it below the oscillator cards.";
         l.steps = {
-            explain ("sounds", "header.preset", "Sounds",
-                     "Every sound starts here. The arrows step through the sounds; click the name to choose one. SAVE keeps your own."),
-            explain ("cards", "sources", "Three cards",
-                     "A and B are oscillators. C plays a recording, noise or an instrument; its C1 / C2 tabs stack a second layer."),
-            explain ("macros", "macros", "Six macros",
-                     "MORPH, DRIVE, FILTER, MOVEMENT, SPACE, ECHO: click a name for its settings, double-click for its rack. The USER tab allows for 6 custom macros."),
-            explain ("arp", "arp.control", "ARP and SUB",
-                     "ARP toggles the arpeggiator. SUB toggles a sub oscillator. Open their panels to change the settings, or click the light to turn it on and off."),
+            explain ("sounds", "header.preset", "Select a sound",
+                     "Click the preset name to browse sounds. Use the arrows on either side to move through them. SAVE stores your changes as a user preset."),
+            explain ("cards", "cards.AB", "Oscillators A and B",
+                     "OSC 1 and OSC 2 generate the main pitched sound. Each has its own tuning, octave and volume controls."),
+            explain ("hybrid", "card.C.source", "The hybrid oscillator",
+                     "OSC C can play another oscillator, a recording, noise or an instrument patch. Select its source type from the dropdown in the dark display."),
+            explain ("macros", "macros.bank", "CORE and USER controls",
+                     "The CORE knobs control the main sound: MORPH, DRIVE, FILTER, MOVEMENT, ECHO and SPACE. USER contains six macros you can assign yourself."),
+            explain ("arp", "arp.opener", "Arpeggiator",
+                     "ARP plays the notes you hold as a repeating sequence. Click ARP beside the keyboard to open its controls."),
+            explain ("sub", "arp.companion", "Sub-oscillator",
+                     "SUB adds lower notes beneath the main sound. Open SUB beside the keyboard to adjust its pitch and level."),
             aux,
         };
         return l;
@@ -68,39 +152,63 @@ namespace
     {
         Lesson l;
         l.id = "analog.arp.basics";
-        l.title = "Make a moving pattern";
+        l.title = "Make an arpeggio";
+        l.description = "Turn held notes into a repeating pattern";
         l.group = "Arpeggiator";
         l.capability = "analog.arp.cardRouting";
+        l.revision = 2;   // (2: Learn 2.0 - PLAYS A and B as two steps, EDIT B, exact targets)
         l.minutes = 3;
-        l.steps = {
-            task ("open", "arp.control", "Open the arpeggiator",
-                  "It turns a held chord into a sequence. Click the ARP card (not its light) to open its controls.",
-                  Completion::action ({ "arp.panel.opened" }, Condition::state ("arp.panel.open"))
-                      .withAlreadyDone (Condition::state ("arp.panel.open"), "Already open"),
-                  false),
-            task ("enable", "arp.enable", "Switch it on", "Click the light to turn the arpeggiator on. Play a chord whenever you like.",
-                  Completion::action ({ "arp.enabled.changed" }, Condition::equals ("arp.enabled", 1.0f))
-                      .withAlreadyDone (Condition::equals ("arp.enabled", 1.0f), "Already on"),
-                  false),
-            task ("pattern", "arp.pattern", "Change the pattern", "The same notes can move in different orders. Pick another pattern from the list.",
-                  Completion::action ({ "arp.pattern.changed" }, Condition::changed ("arp.pattern"))),
-            task ("rate", "arp.rate", "Try another rate", "Turn RATE and hear how the pulse changes.",
-                  Completion::action ({ "arp.rate.changed" }, Condition::changed ("arp.rate"))),
-            task ("cards", "arp.cards", "Choose the cards",
-                  "PLAYS sets which cards follow the pattern. Turn A off and B on: OSC 1 holds the chord, OSC 2 arpeggiates.",
-                  Completion::action ({ "arp.card.toggled" }, Condition::all ({ Condition::equals (cardA, 0.0f), Condition::equals (cardB, 1.0f) }))
-                      .withAlreadyDone (Condition::all ({ Condition::equals (cardA, 0.0f), Condition::equals (cardB, 1.0f) }), "Already set")),
-            task ("unlink", "arp.link", "Unlink the cards", "Turn LINK off so each card can have a pattern of its own.",
-                  Completion::action ({ "arp.link.changed" }, Condition::equals (link, 0.0f))
-                      .withAlreadyDone (Condition::equals (link, 0.0f), "Already unlinked")),
-            task ("card-b", "arp.card.B.edit", "Give B its own rhythm", "EDIT B shows OSC 2's own pattern and rate. Change either one.",
-                  Completion::action ({ "arp.pattern.changed", "arp.rate.changed" },
-                                      Condition::any ({ Condition::changed (cardBPattern), Condition::changed (cardBRate) }))),
-            explain ("finish", "arp.panel", "An independent layer",
-                     "OSC 2 now moves on its own while OSC 1 holds. Your sound stays as you left it."),
-        };
-        l.steps[6].unavailableBody = u8 ("Turn LINK off, then choose EDIT B to see OSC 2's own pattern and rate.");
-        l.steps[2].unavailableBody = l.steps[3].unavailableBody = u8 ("Open the ARP panel (Show me) to see it.");
+        l.exampleId = "analog.example.arp";
+        l.completionText = "OSC 1 is sustaining the chord while OSC 2 plays its own arpeggio. You can use the same controls to give OSC C a different pattern.";
+        auto open = task ("open", "arp.opener", "Open the arpeggiator", "Click ARP beside the keyboard to open the arpeggiator controls.",
+                          Completion::action ({ "arp.panel.opened" }, Condition::state ("arp.panel.open"))
+                              .withAlreadyDone (Condition::state ("arp.panel.open"), "The arpeggiator is already open."),
+                          "The arpeggiator controls are open.");
+        open.revealOnEnter = false;   // (opening it is the task)
+        auto enable = task ("enable", "arp.on", "Turn on ARP",
+                            "Switch ARP on, then hold a chord on your MIDI keyboard. The notes will play one after another instead of sounding together.",
+                            Completion::action ({ "arp.enabled.changed" }, Condition::equals (arpOn, 1.0f))
+                                .withAlreadyDone (Condition::equals (arpOn, 1.0f), "ARP is already on."),
+                            "ARP is on. Hold a chord to hear the pattern.");
+        enable.requirements = { oscillatorsHeard() };
+        auto pattern = task ("pattern", "arp.pattern", "Select a pattern",
+                             "PATTERN sets the order of the notes. Choose UP to play from the lowest note to the highest, or select another pattern to hear the difference.",
+                             Completion::action ({ "arp.pattern.changed" }, Condition::always()), "The pattern is set.");
+        auto rate = task ("rate", "arp.rate", "Change the rate", "RATE sets how quickly the notes repeat. Try 1/8 and 1/16 to hear the difference.",
+                          Completion::action ({ "arp.rate.changed" }, Condition::changed ("arp.rate")), "The notes now repeat at the new rate.");
+        pattern.unavailableBody = rate.unavailableBody = "The arpeggiator controls are closed. Open them to continue.";
+        pattern.revealLabel = rate.revealLabel = "Open ARP";
+        auto playsA = task ("plays-a", "arp.plays.A", "Keep OSC 1 sustained",
+                            "Under PLAYS, turn off A. OSC 1 will now hold the notes you play instead of following the arpeggiator.",
+                            Completion::action ({ "arp.card.toggled" }, Condition::equals (cardA, 0.0f))
+                                .withAlreadyDone (Condition::equals (cardA, 0.0f), "A is already off: OSC 1 holds the notes."),
+                            "OSC 1 now plays sustained notes.");
+        auto playsB = task ("plays-b", "arp.plays.B", "Arpeggiate OSC 2",
+                            "Turn on B under PLAYS. OSC 2 will follow the arpeggio while OSC 1 continues to sustain the chord.",
+                            Completion::action ({ "arp.card.toggled" }, Condition::equals (cardB, 1.0f))
+                                .withAlreadyDone (Condition::equals (cardB, 1.0f), "B is already on: OSC 2 follows the arpeggio."),
+                            "OSC 2 now follows the arpeggio.");
+        auto unlink = task ("unlink", "arp.link", "Give each oscillator its own pattern",
+                            "Turn LINK off. You can now set a different pattern, rate and octave range for each oscillator.",
+                            Completion::action ({ "arp.link.changed" }, Condition::equals (link, 0.0f))
+                                .withAlreadyDone (Condition::equals (link, 0.0f), "LINK is already off."),
+                            "Each oscillator can now have its own pattern.");
+        auto linkOff = need ("link.off", Condition::equals (link, 0.0f), "Turn LINK off first",
+                             "EDIT appears once LINK is off. Turn LINK off to give OSC 2 settings of its own.", "arp.link", "", false);
+        auto editB = task ("edit-b", "arp.edit.B", "Edit OSC 2", "Under EDIT, select B. The pattern and timing controls now belong to OSC 2.",
+                           Completion::action ({ "arp.edit.selected" }, Condition::state ("arp.edit.B"))
+                               .withAlreadyDone (Condition::state ("arp.edit.B"), "B is already selected under EDIT."),
+                           "The pattern and timing controls now belong to OSC 2.");
+        editB.requirements = { linkOff };
+        auto patternB = task ("pattern-b", "arp.card.B.pattern", "Change OSC 2's pattern",
+                              "Choose another PATTERN or turn RATE. Only OSC 2's arpeggio will change; OSC 1 will continue holding the chord.",
+                              Completion::action ({ "arp.pattern.changed", "arp.rate.changed" },
+                                                  Condition::any ({ Condition::changed (cardBPattern), Condition::changed (cardBRate) })),
+                              "OSC 2 now plays its own arpeggio.");
+        patternB.keepClear = { "arp.card.B.rate" };
+        patternB.requirements = { linkOff, need ("edit.b", Condition::state ("arp.edit.B"), "Select B under EDIT",
+                                                 "These controls belong to OSC 2 while B is selected under EDIT.", "arp.edit.B", "", false) };
+        l.steps = { open, enable, pattern, rate, playsA, playsB, unlink, editB, patternB };
         return l;
     }
 
@@ -108,30 +216,76 @@ namespace
     {
         Lesson l;
         l.id = "analog.morph.basics";
-        l.title = "Blend with MORPH";
-        l.group = "Sound sources";
+        l.title = "Understand MORPH";
+        l.description = "Blend oscillators with recorded and live sounds";
+        l.group = "MORPH";
         l.capability = "analog.morph";
-        l.revision = 2;   // (2: its on / off lamp, MORPH TO)
-        l.minutes = 2;
-        l.steps = {
-            task ("open", "analog.morph.name", "Open MORPH", "MORPH fuses the oscillators with card C. Double-click its name to open the MORPH rack.",
-                  Completion::action ({ "rack.toggled" }, Condition::state ("rack.morph.open"))
-                      .withAlreadyDone (Condition::state ("rack.morph.open"), "Already open"),
-                  false),
-            task ("switch", "macro.0.switch", "Switch it on", "The small lamp beside MORPH's name switches it on. While it is off, the knob rests.",
-                  Completion::action ({ "macro.0.switch.touched" }, Condition::equals (params::morphEnabled, 1.0f))
-                      .withAlreadyDone (Condition::equals (params::morphEnabled, 1.0f), "Already on")),
-            explain ("sources", "sources", "Two sources", "At 0 % you hear A and B; at 100 %, card C. In between, MORPH fuses them into one sound."),
-            task ("move", "analog.morph.knob", "Move MORPH", "Turn the MORPH knob and listen as the sound travels between the sources.",
-                  Completion::action ({ "macro.0.touched" }, Condition::changed (params::morphPosition))),
-            explain ("target", "rack.morph", "MORPH TO",
-                     "MORPH TO chooses what it blends into: card C, or D, the AUX source, even your DAW's audio with LIVE INPUT."),
-            explain ("shape", "rack.morph", "Shape the blend", "The rack sets how the two sources fuse. Your sound stays as you left it."),
-        };
-        // Card C with nothing to play: say so, never load anything.
-        l.steps[2].variantWhen = Condition::state ("analog.hybrid.silent");
-        l.steps[2].variantBody = u8 ("Card C has nothing to play yet: load a sound into it (ADD SAMPLE) to hear MORPH reach it.");
-        l.steps[4].unavailableBody = l.steps[5].unavailableBody = u8 ("The MORPH rack is closed. Show me opens it again.");
+        l.revision = 3;   // (3: Learn 2.0 - prepared sound, ARP off, MORPH TO C and D, TEXTURE, METHOD)
+        l.minutes = 4;
+        l.exampleId = "analog.example.morph";
+        l.completionText = "MORPH can combine the analog oscillators with OSC C or AUX D. Use MORPH TO to choose the destination, then adjust the main knob to control the blend.";
+        auto prepare = explain ("prepare", "", "Choose a playable sound",
+                                "MORPH needs two sounds to work with. Use your current patch if its sources are ready, or load the example sound.");
+        prepare.preparation = true;
+        prepare.requirements = join (std::vector<Requirement> { oscillatorsHeard() }, hybridReady(), auxReady());
+        auto arpOff = task ("arp-off", "arp.on", "Turn off the arpeggiator",
+                            "Turn ARP off for this lesson. A sustained chord makes changes in the sound easier to hear.",
+                            Completion::action ({ "arp.enabled.changed" }, Condition::equals (arpOn, 0.0f))
+                                .withAlreadyDone (Condition::equals (arpOn, 0.0f), "ARP is already off."),
+                            "ARP is off. Hold a chord to hear the sound sustain.");
+        auto open = task ("open", "morph.label", "Open the MORPH rack", "Double-click MORPH above the main knob to open its detailed controls.",
+                          Completion::action ({ "rack.toggled" }, Condition::state ("rack.morph.open"))
+                              .withAlreadyDone (Condition::state ("rack.morph.open"), "The MORPH rack is already open."),
+                          "The MORPH rack is open.");
+        open.revealOnEnter = false;   // (opening it is the task)
+        auto enable = task ("enable", "morph.enable", "Enable MORPH", "The small switch beside MORPH turns the effect on. Make sure it is enabled.",
+                            Completion::action ({ "morph.enable.touched" }, Condition::equals (params::morphEnabled, 1.0f))
+                                .withAlreadyDone (Condition::equals (params::morphEnabled, 1.0f), "MORPH is already enabled."),
+                            "MORPH is on.");
+        auto toC = task ("to-c", "morph.destination.C", "Select OSC C",
+                         u8 ("MORPH TO selects the sound you blend into. Choose C \xc2\xb7 HYBRID to use OSC C.").toRawUTF8(),
+                         Completion::action ({ "morph.destination.touched" }, Condition::equals (params::morphTarget, 0.0f))
+                             .withAlreadyDone (Condition::equals (params::morphTarget, 0.0f), u8 ("C \xc2\xb7 HYBRID is already selected.")),
+                         "MORPH now blends toward OSC C.");
+        toC.requirements = join (std::vector<Requirement> { morphRackOpen() }, hybridReady());
+        toC.revealLabel = "Open Rack";
+        auto hearC = task ("hear-c", "morph.amount", "Hear the two sources",
+                           "At 0 %, MORPH favours the analog oscillators. At 100 %, it reaches OSC C. Play a sustained chord and turn the MORPH knob slowly between them.",
+                           Completion::action ({ "macro.0.touched" }, Condition::changed (params::morphPosition)),
+                           "You moved the sound between the oscillators and OSC C.");
+        hearC.requirements = join (std::vector<Requirement> { oscillatorsHeard() }, hybridReady(),
+                                   std::vector<Requirement> {
+                                       need ("morph.on", Condition::equals (params::morphEnabled, 1.0f), "MORPH is off",
+                                             "Switch MORPH on with the small switch beside its name to hear the blend.", "morph.enable", "", false),
+                                       need ("toC.selected", Condition::equals (params::morphTarget, 0.0f), u8 ("Choose C \xc2\xb7 HYBRID").toRawUTF8(),
+                                             u8 ("Choose C \xc2\xb7 HYBRID under MORPH TO to blend toward OSC C.").toRawUTF8(), "morph.destination.C", "Open Rack",
+                                             false) });
+        auto texture = task ("texture", "morph.texture", "Adjust the texture",
+                             "TEXTURE controls how much of the source's noise and fine detail contributes to the blend. Turn it while listening to the sound.",
+                             Completion::action ({ "morph.texture.touched" }, Condition::changed (params::morphTexture)),
+                             "TEXTURE changed how much fine detail comes through.");
+        texture.requirements = { morphRackOpen(), morphToC() };
+        texture.revealLabel = "Open Rack";
+        auto method = task ("method", "morph.method", "Understand the methods",
+                            "IMPRINT transfers spectral character, FUSE combines spectral information, and WEAVE distributes different frequency regions between sources. Try each method to hear how they differ.",
+                            Completion::action ({ "morph.method.touched" }, Condition::changed (params::morphMethod)), "You changed the method.");
+        method.requirements = { morphRackOpen(), morphToC() };
+        method.revealLabel = "Open Rack";
+        auto toD = task ("to-d", "morph.destination.D", "Select AUX D",
+                         "MORPH can also use AUX D. Choose D under MORPH TO (it names D's source, such as D \xc2\xb7 NOISE) to blend the synth with the sound coming from D.",
+                         Completion::action ({ "morph.destination.touched" }, Condition::equals (params::morphTarget, 1.0f))
+                             .withAlreadyDone (Condition::equals (params::morphTarget, 1.0f), "D is already selected."),
+                         "MORPH now blends toward AUX D.");
+        toD.requirements = join (std::vector<Requirement> { morphRackOpen() }, auxReady());
+        toD.revealLabel = "Open Rack";
+        auto hearD = task ("hear-d", "morph.amount", "Hear the AUX source",
+                           "Hold a chord and move MORPH again. At the D end, you hear the AUX source; between the endpoints, the global MORPH processor combines their spectral characteristics.",
+                           Completion::action ({ "macro.0.touched" }, Condition::changed (params::morphPosition)),
+                           "You moved the synth toward AUX D.");
+        hearD.requirements = join (auxReady(), std::vector<Requirement> {
+                                                   need ("toD.selected", Condition::equals (params::morphTarget, 1.0f), "Choose D under MORPH TO",
+                                                         "Choose the D segment under MORPH TO to blend toward AUX D.", "morph.destination.D", "Open Rack", false) });
+        l.steps = { prepare, arpOff, open, enable, toC, hearC, texture, method, toD, hearD };
         return l;
     }
 
@@ -139,33 +293,49 @@ namespace
     {
         Lesson l;
         l.id = "analog.usermacros.basics";
-        l.title = "Make your own macro";
+        l.title = "Create a macro";
+        l.description = "Control several settings with one knob";
         l.group = "Macros";
         l.capability = "analog.userMacros";
-        l.minutes = 2;
-        juce::StringArray touched;
-        std::vector<Condition> moved;
-        for (int m = 0; m < 6; ++m)
-        {
-            touched.add ("usermacro." + juce::String (m) + ".touched");
-            moved.push_back (Condition::changed (params::userMacroId (m)));
-        }
-        l.steps = {
-            task ("tab", "macros.bank", "Open USER", "The small CORE | USER tab above the macros holds six macros of your own. Click USER.",
-                  Completion::action ({ "macroBank.changed" }, Condition::state ("macros.bank.user"))
-                      .withAlreadyDone (Condition::state ("macros.bank.user"), "Already open"),
-                  false),
-            task ("assign", "source.card.A", "Give it a control",
-                  "Right-click a knob (OSC 1's LEVEL, say) and choose Assign to Macro, then Macro 1.",
-                  Completion::action ({ "usermacro.assigned" }, Condition::state ("analog.userMacros.assigned"))),
-            explain ("range", "source.card.A", "Its range",
-                     "The ring round the knob is the macro's range: drag either end to set where the macro takes it. The tab stays where you put it."),
-            task ("move", "macros", "Turn your macro", "Turn Macro 1 and hear the control follow. One macro can move many controls at once.",
-                  Completion::action (touched, Condition::any (moved))),
-            explain ("finish", "macros.bank", "Yours to keep",
-                     "Click a USER macro's name to see everything it moves. Right-click a control for its range or Remove from Macro."),
-        };
-        l.steps[3].unavailableBody = u8 ("Open the USER tab (Show me) to see your macros.");
+        l.revision = 2;   // (2: Learn 2.0 - OSC 1 LEVEL, Macro 1, its range, verified)
+        l.minutes = 3;
+        l.exampleId = "analog.example.simple";
+        l.completionText = "Macro 1 now controls OSC 1 LEVEL. You can assign several parameters to the same macro, each with its own range.";
+        auto user = task ("user", "macros.bank", "Open USER macros",
+                          "Click USER above the main macro knobs. This bank contains six controls you can assign to parameters throughout Analog.",
+                          Completion::action ({ "macroBank.changed" }, Condition::state ("macros.bank.user"))
+                              .withAlreadyDone (Condition::state ("macros.bank.user"), "The USER bank is already open."),
+                          "The USER bank is open.");
+        user.revealOnEnter = false;
+        auto menu = task ("menu", "osc.A.level", "Choose a parameter", "Find the LEVEL knob on OSC 1. Right-click it to open the parameter menu.",
+                          Completion::action ({ "control.menu.opened" }, Condition::always()).forParameter (params::osc1Level));
+        menu.advanceWhenDone = true;   // (its menu is open now: the next step speaks to it)
+        menu.requirements = { need ("osc1.heard", Condition::state ("analog.osc1.heard"), "OSC 1 is off",
+                                    "OSC 1 is switched off or muted, so its LEVEL can't be heard. Switch it on (or clear M on its card), or load the example sound.",
+                                    "osc.A.level") };
+        auto assign = task ("assign", "osc.A.level", "Assign Macro 1",
+                            "Choose Assign to Macro, then Macro 1. The LEVEL knob is now controlled by Macro 1.",
+                            Completion::action ({ "usermacro.assigned" }, Condition::state ("analog.usermacro.1.osc1Level"))
+                                .withAlreadyDone (Condition::state ("analog.usermacro.1.osc1Level"), "OSC 1 LEVEL is already assigned to Macro 1."),
+                            "Macro 1 now controls OSC 1 LEVEL.");
+        assign.outlineTarget = false;   // (the instruction is about the menu: the note sits by the knob)
+        assign.unavailableBody = "Right-click the LEVEL knob on OSC 1 again to open its menu.";
+        auto range = task ("range", "osc.A.level", "Set the range",
+                           "The coloured arc shows the range Macro 1 can move this parameter through. Drag either end of the arc to change that range.",
+                           Completion::action ({ "usermacro.range.changed" }, Condition::always()).forParameter (params::osc1Level),
+                           "The range is set.");
+        range.requirements = { need ("assigned", Condition::state ("analog.usermacro.1.osc1Level"), "Assign Macro 1 first",
+                                     "Right-click OSC 1 LEVEL and choose Assign to Macro, then Macro 1.", "osc.A.level", "", false) };
+        auto turn = task ("turn", "usermacro.0", "Turn Macro 1",
+                          "Turn Macro 1 in the USER bank. Watch the modulation indicator around OSC 1 LEVEL and listen as its volume changes.",
+                          Completion::action ({ "usermacro.0.touched" }, Condition::changed (params::userMacroId (0))), "Macro 1 moved OSC 1 LEVEL.");
+        turn.keepClear = { "osc.A.level" };
+        turn.requirements = { need ("user.shown", Condition::state ("macros.bank.user"), "Open the USER bank",
+                                    "Macro 1 is in the USER bank. Click USER above the main knobs.", "macros.bank", "", false) };
+        auto review = explain ("review", "usermacro.0.label", "Review the assignment",
+                               "Click the macro name to review its assignments. You can add more parameters or remove the assignment from the original knob's right-click menu.");
+        review.revealLabel = "Open USER";
+        l.steps = { user, menu, assign, range, turn, review };
         return l;
     }
 
@@ -173,27 +343,59 @@ namespace
     {
         Lesson l;
         l.id = "analog.aux.live";
-        l.title = "Play your DAW through D";
-        l.group = "Sound sources";
+        l.title = "Use external audio";
+        l.description = "Route another DAW track through AUX D";
+        l.group = "AUX D";
         l.capability = "analog.aux";
+        l.revision = 2;   // (2: Learn 2.0 - LIVE INPUT verified on real incoming audio)
         l.minutes = 3;
-        auto strip = explain ("strip", "aux.strip", "AUX D",
-                              "D is a fourth source beside the cards: a rhythm loop, noise, a Kontakt instrument, or your DAW's audio.");
-        strip.unavailableBody = u8 ("D is hidden. Show me shows it, or choose Show AUX D from the menu at the top right.");
-        l.steps = {
-            strip,
-            task ("live", "aux.strip", "Choose LIVE INPUT", "Switch D on with its power key, then choose LIVE INPUT from its source menu.",
-                  Completion::action ({ "aux.strip.touched" }, Condition::all ({ Condition::equals (params::auxMode, 3.0f), Condition::equals (params::auxEnabled, 1.0f) }))
-                      .withAlreadyDone (Condition::all ({ Condition::equals (params::auxMode, 3.0f), Condition::equals (params::auxEnabled, 1.0f) }), "Set")),
-            explain ("route", "aux.strip", "Route a track",
-                     "In your DAW, send a track to this plugin's sidechain input, AUX D Live Input. D's display moves when audio arrives."),
-            explain ("shape", "aux.strip", "Shape it here",
-                     "D plays with no keys held, through its LEVEL, the FILTER macro and the effects, like any card."),
-            explain ("morph", "analog.morph.name", "Morph into it",
-                     "In the MORPH rack, MORPH TO D blends the synth into what D plays. Your DAW's audio becomes the target."),
-        };
-        for (std::size_t i = 1; i < l.steps.size() - 1; ++i)
-            l.steps[i].unavailableBody = strip.unavailableBody;
+        l.completionText = "Your DAW track is now part of Analog through AUX D. You can mix it with the oscillators, filter it, process it with effects or use it as a MORPH destination.";
+        auto shown = need ("aux.shown", Condition::state ("analog.aux.shown"), "Show AUX D", "AUX D is hidden. Show AUX shows it below the oscillator cards.",
+                           "aux.strip", "Show AUX", false);
+        auto inputOn = need ("input.available", Condition::state ("analog.d.input.available"), "No incoming audio",
+                             "Analog isn't receiving audio through its sidechain input. Check the routing in your DAW and play the source track.");
+        inputOn.offerExample = false;
+        auto signal = need ("input.signal", Condition::state ("analog.d.signal"), "No incoming audio",
+                            "The sidechain is connected, but no audio is arriving. Play the source track in your DAW; the AUX display moves when it arrives.",
+                            "aux.display", "", false);
+        auto liveSelected = need ("live.selected", Condition::equals (params::auxMode, 3.0f), "Choose LIVE INPUT",
+                                  "Choose LIVE INPUT from AUX D's source dropdown first.", "aux.mode", "Show AUX", false);
+        auto show = explain ("show", "aux.strip", "Show AUX D",
+                             "AUX D is the fourth sound source below the oscillator cards. If it is hidden, choose Show AUX from the main menu.");
+        show.revealOnEnter = false;
+        show.revealLabel = "Show AUX";
+        show.requirements = { shown };
+        auto live = task ("live", "aux.mode", "Select LIVE INPUT",
+                          "Use the source dropdown on AUX D and choose LIVE INPUT. This mode receives audio from another track through your DAW's sidechain routing.",
+                          Completion::action ({ "aux.mode.touched" }, Condition::equals (params::auxMode, 3.0f))
+                              .viaMenu()   // (a dropdown: its choice comes after the click)
+                              .withAlreadyDone (Condition::equals (params::auxMode, 3.0f), "LIVE INPUT is already selected."),
+                          "AUX D is set to LIVE INPUT.");
+        live.requirements = { shown };
+        auto power = task ("power", "aux.power", "Turn on AUX D", "Switch AUX D on. Its LEVEL knob controls the incoming audio volume.",
+                           Completion::action ({ "aux.power.touched" }, Condition::equals (params::auxEnabled, 1.0f))
+                               .withAlreadyDone (Condition::equals (params::auxEnabled, 1.0f), "AUX D is already on."),
+                           "AUX D is on.");
+        power.requirements = { shown };
+        auto route = explain ("route", "aux.display", "Route audio from your DAW",
+                              "In your DAW, send an audio track to ANDOR Analog's sidechain input. The AUX display will show incoming signal when the connection is working.");
+        route.requirements = { shown, liveSelected };
+        auto verify = explain ("verify", "aux.display", "Verify the incoming signal",
+                               "Play the source track in your DAW. Look for movement in the AUX display, then raise AUX LEVEL if necessary.");
+        verify.keepClear = { "aux.level" };
+        verify.requirements = { shown, liveSelected, inputOn, signal };
+        auto shape = task ("shape", "macro.2.knob", "Shape the audio",
+                           "The incoming audio passes through Analog's FILTER and global effects. Turn FILTER while the source plays to hear it change.",
+                           Completion::action ({ "macro.2.touched" }, Condition::changed (params::tone)), "FILTER is shaping the incoming audio.");
+        shape.requirements = { liveSelected, inputOn, signal };
+        auto morph = task ("morph", "morph.destination.D", "Use the audio in MORPH",
+                           "Open the MORPH rack and choose D under MORPH TO. You can now combine your synthesizer sound with the audio arriving from the DAW.",
+                           Completion::action ({ "morph.destination.touched" }, Condition::equals (params::morphTarget, 1.0f))
+                               .withAlreadyDone (Condition::equals (params::morphTarget, 1.0f), "D is already selected under MORPH TO."),
+                           "MORPH now blends toward the audio from your DAW.");
+        morph.requirements = { liveSelected, inputOn, signal, morphRackOpen() };
+        morph.revealLabel = "Open Rack";
+        l.steps = { show, live, power, route, verify, shape, morph };
         return l;
     }
 
@@ -201,27 +403,52 @@ namespace
     {
         Lesson l;
         l.id = "analog.fx.routing";
-        l.title = "See the effect chain";
-        l.group = "Effects";
+        l.title = "Explore FX Routing";
+        l.description = "See and change the effect chain";
+        l.group = "FX Routing";
         l.capability = "analog.fxRouting";
+        l.revision = 2;   // (2: Learn 2.0 - a specific tile, its rack, a reorder)
         l.minutes = 2;
-        l.steps = {
-            task ("open", "routing.button", "Open FX ROUTING", "The branching icon beside SAVE shows how your sound flows through the effects. Click it.",
-                  Completion::action ({ "sourceView.toggled" }, Condition::state ("sourceView.open"))
-                      .withAlreadyDone (Condition::state ("sourceView.open"), "Already open"),
-                  false),
-            explain ("mixer", "routing.mixer", "The cards' mixer", "On the left: each card's level and the path it takes into the chain."),
-            task ("tile", "routing.chain", "Open an effect", "Click an effect tile for its quick settings. Nothing changes until you turn something.",
-                  Completion::action ({ "routing.board.touched" }, Condition::state ("routing.quick.open"))
-                      .withAlreadyDone (Condition::state ("routing.quick.open"), "Already open")),
-            explain ("finish", "routing.chain", "Your chain",
-                     "Double-click a tile for its full rack; the gear holds Restore original. The icon again brings the cards back."),
-        };
-        for (auto& s : l.steps)
-            if (s.id != "open")
-                s.unavailableBody = u8 ("FX ROUTING is closed. Show me opens it again.");
+        l.completionText = "FX Routing controls the order and signal flow of your effects. Use it to change how the same sound is processed without rebuilding the instrument.";
+        auto open = task ("open", "routing.button", "Open FX Routing", "Click the routing icon near the preset controls to open the effect chain.",
+                          Completion::action ({ "sourceView.toggled" }, Condition::state ("sourceView.open"))
+                              .withAlreadyDone (Condition::state ("sourceView.open"), "FX Routing is already open."),
+                          "The effect chain is showing.");
+        open.revealOnEnter = false;
+        auto routingOpen = need ("routing.open", Condition::state ("sourceView.open"), "Open FX Routing",
+                                 "Click the routing icon near the preset controls to show the effect chain again.", "routing.button", "", false);
+        auto mixer = explain ("mixer", "routing.mixer", "Understand the mixer",
+                              "The mixer on the left shows how the sound sources enter the effects. Adjusting a source level changes how much audio it contributes.");
+        mixer.requirements = { routingOpen };
+        auto select = task ("select", "routing.tile", "Select an effect",
+                            "Click an effect block to open its quick settings. The block represents one processor in the signal path.",
+                            Completion::action ({ "routing.board.touched" }, Condition::state ("routing.quick.open"))
+                                .withAlreadyDone (Condition::state ("routing.quick.open"), "An effect's quick settings are already open."),
+                            "Its quick settings are open.");
+        select.requirements = { routingOpen };
+        auto rack = task ("rack", "routing.tile", "Open the full rack",
+                          "Double-click the effect block to open its full rack. This gives you the detailed controls for that processor.",
+                          Completion::action ({ "routing.board.touched" }, Condition::state ("rack.any.open"))
+                              .withAlreadyDone (Condition::state ("rack.any.open"), "A rack is already open."),
+                          "Its full rack is open.");
+        rack.requirements = { routingOpen };
+        auto move = task ("move", "routing.tile", "Change the chain",
+                          "Drag an effect block to change its position in the chain. The order matters because each processor receives the output of the one before it.",
+                          Completion::action ({ "routing.board.touched" }, Condition::changed ("analog.fx.order")), "The effect is in its new place.");
+        move.requirements = { routingOpen, need ("reorderable", Condition::state ("analog.fx.reorderable"), "Choose MAIN or SEND",
+                                                "The OVERVIEW tab shows both chains in miniature. Choose MAIN or SEND to move an effect.", "routing.board", "", false) };
+        auto back = task ("back", "routing.button", "Return to the instrument",
+                          "Click the routing icon again to return to the oscillator cards. Your effect settings and routing remain active.",
+                          Completion::action ({ "sourceView.toggled" }, Condition::isNot (Condition::state ("sourceView.open"))),
+                          "The oscillator cards are back.");
+        for (auto* s : { &mixer, &select, &rack, &move })
+            s->unavailableBody = "FX Routing is closed. Open it to continue.";
+        l.steps = { open, mixer, select, rack, move, back };
         return l;
     }
+
+    //==========================================================================================
+    // Info: what each region is for, in a sentence or three.
 
     std::vector<HelpTopic> help()
     {
@@ -229,43 +456,176 @@ namespace
             return HelpTopic { target, u8 (title), u8 (body), lesson };
         };
         return {
-            h ("header.preset", "Sounds", "Factory sounds and your own. The arrows step through them; click the name to choose. SAVE keeps yours.",
+            h ("header.preset", "Presets",
+               "Choose a sound from the preset name at the top. The arrows move between presets. Use SAVE to store your edited sound as a user preset.",
                "analog.quickstart"),
-            h ("source.card.A", "OSC 1", "Card A, the first oscillator: detune, tune, octave and level. Its heading opens its settings in the dark well."),
-            h ("source.card.B", "OSC 2", "Card B, the second oscillator, with its own tune, octave and level. The arpeggiator can play it alone.",
+            h ("source.card.A", "OSC 1 \xe2\x80\x94 Analog oscillator",
+               "OSC 1 generates the first analog sound source. DETUNE, TUNE and OCT adjust its pitch; LEVEL controls its volume. Open the oscillator settings to change its waveform and model."),
+            h ("source.card.B", "OSC 2 \xe2\x80\x94 Analog oscillator",
+               "OSC 2 is a second independent analog sound source. It can be tuned differently from OSC 1 and can follow its own arpeggiator pattern.",
                "analog.arp.basics"),
-            h ("source.card.C", "Hybrid C",
-               "Card C plays a recording, noise, an oscillator, an instrument patch or an external instrument. Its C1 / C2 tabs stack a second layer.",
+            h ("source.card.C", "OSC C \xe2\x80\x94 Hybrid source",
+               "OSC C can use an oscillator, a recording, noise or an instrument patch. Choose its source type from the dropdown. C1 and C2 allow two layers where supported.",
                "analog.morph.basics"),
-            h ("macro.0", "MORPH", "Blends the oscillators into card C (or D, with MORPH TO). Its lamp switches it on; double-click the name for its rack.",
+            h ("macro.0", "MORPH",
+               "MORPH combines the synthesizer with OSC C or AUX D. Open the rack and use MORPH TO to choose the destination. The main knob controls how far the sound moves toward it.",
                "analog.morph.basics"),
-            h ("macro.1", "DRIVE", "Saturation of the whole sound: tube, tape or crunch. Click the name for its settings."),
-            h ("macro.2", "FILTER", "The four-pole filter's cutoff. Its settings and rack hold resonance and the filter envelope (attack to release)."),
-            h ("macro.3", "MOVEMENT", "Drift, tape, chorus, pulse or a rhythmic shaper. Double-click the name for its rack."),
-            h ("macro.4", "SPACE", "The room the sound plays in, from a small room to an endless hall. Double-click the name for its rack."),
-            h ("macro.5", "ECHO", "Repeats from a tape echo or a bucket-brigade delay. Double-click the name for its rack."),
-            h ("macros.bank", "CORE and USER", "CORE: the six macros above. USER: six of your own; right-click any knob, Assign to Macro.",
+            h ("macro.1", "DRIVE",
+               "DRIVE adds saturation and harmonic distortion. Turn the knob to change the amount. Open the rack to choose the processing character and adjust its tone."),
+            h ("macro.2", "FILTER",
+               "FILTER shapes the frequency content of the sound. Lower the cutoff to remove high frequencies; raise it to let them through. Open the rack for resonance and other filter settings."),
+            h ("macro.3", "MOVEMENT",
+               "MOVEMENT adds changing motion to the sound, including drift, pulses, tape movement and rhythmic shaping. Open its rack to choose a mode and adjust its timing and depth."),
+            h ("macro.4", "SPACE",
+               "SPACE adds reverberation. It can make the sound feel as though it is playing in a room, hall or larger environment. Open the rack to adjust the reverb."),
+            h ("macro.5", "ECHO",
+               "ECHO repeats the sound after a chosen delay. TIME controls the space between repeats, while FEEDBACK controls how long they continue. Open the rack for more settings."),
+            h ("macros.bank", "CORE and USER macros",
+               "CORE contains the six main sound controls. USER contains six assignable macros. Right-click a parameter to assign it to one of the USER macros.",
                "analog.usermacros.basics"),
-            h ("mod.panel", "Modulation", "LFOs, envelopes, velocity and note. Drag a tab onto a control, or right-click a control to assign."),
-            h ("keyboard", "Keyboard", "Play here or from MIDI. The wheels beside it bend the pitch and add modulation."),
-            h ("arp.control", "Arpeggiator", "The light turns it on; the rest of the row opens its pattern, rate and the cards that follow it.",
+            h ("mod.panel", "Modulation",
+               "Modulation changes a parameter automatically over time or in response to playing. Use LFOs, envelopes, velocity and other sources to control the selected parameter."),
+            h ("keyboard", "Keyboard",
+               "Play notes here or from an external MIDI keyboard. The pitch wheel bends notes, while the modulation wheel controls its assigned modulation."),
+            h ("arp.control", "Arpeggiator",
+               "The arpeggiator plays held MIDI notes in a repeating pattern. Switch ARP on to enable it, or open its panel to choose the pattern, rate and participating oscillators.",
                "analog.arp.basics"),
-            h ("arp.companion", "SUB", "A sub-oscillator under every note, an octave or two down. Its light switches it; the row opens its keys and level."),
-            h ("arp.panel", "Arpeggiator settings", "Pattern, rate and octaves. PLAYS picks the cards that follow; with LINK off each card has its own.",
+            h ("arp.companion", "Sub-oscillator",
+               "SUB adds a lower oscillator beneath the notes you play. Open its controls to adjust its octave, level and other available settings."),
+            h ("arp.panel", "Arpeggiator controls",
+               "PATTERN sets the note order. RATE sets the speed. PLAYS selects which oscillators follow the pattern. Turn LINK off to give the oscillators independent patterns.",
                "analog.arp.basics"),
-            h ("aux.strip", "AUX D", "A fourth source: a rhythm loop, noise, a Kontakt instrument, or your DAW's audio (LIVE INPUT). RACK opens its controls.",
+            h ("aux.strip", "AUX D \xe2\x80\x94 Additional source",
+               "AUX D adds a fourth sound source. Select RHYTHM, NOISE, KONTAKT or LIVE INPUT. Its LEVEL knob controls the source volume, and RACK opens the detailed controls.",
                "analog.aux.live"),
-            h ("advanced", "Advanced", "Tuning, bend range, voices, glide, how touch changes the sound, and MPE."),
-            h ("routing.button", "FX Routing", "Shows the effect chain in the cards' place. Opening it never changes the sound.", "analog.fx.routing"),
-            h ("routing.board", "Effect chain", "Your sound flows left to right through these tiles. Click one for quick settings; drag one to reorder.",
+            h ("advanced", "Advanced settings",
+               "Advanced contains instrument-wide settings such as voice count, tuning, pitch-bend range, glide and supported MIDI expression options."),
+            h ("routing.button", "FX Routing",
+               "FX Routing shows how the sound sources connect to the effects. Open it to inspect or change the order and signal flow of the processors.",
                "analog.fx.routing"),
-            h ("rack.area", "Rack", "The full controls of the macro you opened. Its X closes it; the sound stays as set."),
+            h ("routing.board", "Effect chain",
+               "Audio passes through the effect blocks in the order shown. Select a block for its quick settings, double-click for its rack, or drag it to change its position.",
+               "analog.fx.routing"),
+            h ("rack.area", "Effect rack",
+               "A rack contains the detailed settings for one processor. Close it with X when finished. Closing the rack does not turn the effect off."),
         };
     }
+
+    //==========================================================================================
+    // The example sounds: the product's own material only (oscillators and noise: no recording,
+    // no Kontakt, no sidechain), every other parameter at its default, nothing else carried over.
+
+    std::unique_ptr<juce::XmlElement> exampleXml (osp::plugin::InstrumentHost& host, const std::map<juce::String, float>& values)
+    {
+        auto tree = host.apvts().copyState();
+        for (auto* p : host.apvts().processor.getParameters())
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
+            {
+                const auto it = values.find (ranged->getParameterID());
+                const float value = it != values.end() ? it->second : ranged->convertFrom0to1 (ranged->getDefaultValue());
+                auto child = tree.getChildWithProperty ("id", ranged->getParameterID());
+                if (child.isValid())
+                    child.setProperty ("value", ranged->convertFrom0to1 (ranged->convertTo0to1 (value)), nullptr);
+            }
+        // (Modulation links, macro assignments and other trees are the musician's own work: they
+        // stay in the sound kept for Restore, not in the example.)
+        for (int i = tree.getNumChildren(); --i >= 0;)
+            if (! tree.getChild (i).hasType ("PARAM"))
+                tree.removeChild (i, nullptr);
+        const auto& info = andor::shell::productInfo();
+        auto xml = std::make_unique<juce::XmlElement> (info.stateType);
+        xml->setAttribute ("schemaVersion", 1);
+        xml->setAttribute ("product", info.slug);
+        xml->setAttribute ("productVersion", info.stateVersion);
+        if (auto params = tree.createXml())
+            xml->addChildElement (params.release());
+        return xml;
+    }
+
+    std::unique_ptr<juce::XmlElement> exampleState (const juce::String& id, osp::plugin::InstrumentHost& host)
+    {
+        using namespace params;
+        if (id == "analog.example.morph")
+        {
+            // A + B audible; C a third OSCILLATOR an octave up (a clearly different colour); D
+            // keyed NOISE (pink); MORPH on, toward C, starting at 0 % (the analog source first);
+            // ARP off.
+            return exampleXml (host, { { osc1Enabled, 1.0f },
+                                       { osc2Enabled, 1.0f },
+                                       { hybridType, 1.0f },
+                                       { osc3Octave, 1.0f },
+                                       { auxEnabled, 1.0f },
+                                       { auxMode, 1.0f },
+                                       { auxNoiseColor, 1.0f },
+                                       { auxNoiseGate, 0.0f },
+                                       { morphEnabled, 1.0f },
+                                       { morphTarget, 0.0f },
+                                       { morphPosition, 0.0f },
+                                       { arpOn, 0.0f } });
+        }
+        if (id == "analog.example.arp")
+        {
+            // Two audible oscillators an octave apart (A low, B high): the arpeggiator off, UP at
+            // 1/8 waiting; A and B both following it, LINK on - so each step changes one thing.
+            return exampleXml (host, { { osc1Enabled, 1.0f },
+                                       { osc2Enabled, 1.0f },
+                                       { osc2Octave, 1.0f },
+                                       { arpOn, 0.0f },
+                                       { cardA, 1.0f },
+                                       { cardB, 1.0f },
+                                       { link, 1.0f },
+                                       { morphEnabled, 0.0f } });
+        }
+        if (id == "analog.example.simple")
+            return exampleXml (host, { { osc1Enabled, 1.0f }, { osc2Enabled, 1.0f }, { morphEnabled, 0.0f }, { arpOn, 0.0f } });
+        return nullptr;
+    }
+
+    //==========================================================================================
 
     FxRoutingView* routingView (andor::shell::ShellEditor& editor)
     {
         return dynamic_cast<FxRoutingView*> (editor.sourceViewComponent());
+    }
+
+    AnalogEngine* engineOf (andor::shell::ShellProcessor& shell)
+    {
+        return dynamic_cast<AnalogEngine*> (&shell.productEngine());
+    }
+
+    float plain (andor::shell::ShellProcessor& shell, const juce::String& id)
+    {
+        auto* p = shell.parameters.getParameter (id);
+        return p != nullptr ? p->convertFrom0to1 (p->getValue()) : 0.0f;
+    }
+
+    /** The storage layer whose card is shown as `letter` (A B C). */
+    int storageOf (const juce::String& letter)
+    {
+        for (int l = 0; l < 3; ++l)
+            if (osp::plugin::InstrumentHost::shownLayerName (l) == letter)
+                return l;
+        return 0;
+    }
+
+    /** A card is heard: not muted, and not left out by another card's (or D's) solo. */
+    bool cardHeard (andor::shell::ShellProcessor& shell, const juce::String& letter)
+    {
+        using osp::plugin::InstrumentHost;
+        const int l = storageOf (letter);
+        bool anySolo = plain (shell, params::auxSolo) >= 0.5f;
+        for (int k = 0; k < 3; ++k)
+            anySolo = anySolo || plain (shell, InstrumentHost::layerParameterId (k, "solo")) >= 0.5f;
+        const bool soloed = plain (shell, InstrumentHost::layerParameterId (l, "solo")) >= 0.5f;
+        if (plain (shell, InstrumentHost::layerParameterId (l, "mute")) >= 0.5f && ! soloed)
+            return false;
+        return ! anySolo || soloed;
+    }
+
+    bool parameterAtFloor (andor::shell::ShellProcessor& shell, const juce::String& id)
+    {
+        auto* p = shell.parameters.getParameter (id);
+        return p == nullptr || p->getValue() <= 1.0e-3f;
     }
 } // namespace
 
@@ -283,6 +643,7 @@ andor::shell::LearnDescriptor learnDescriptor()
 {
     andor::shell::LearnDescriptor d;
     d.catalog = [] { return learnCatalog(); };
+    d.exampleState = [] (const juce::String& id, osp::plugin::InstrumentHost& host) { return exampleState (id, host); };
     d.hasCapability = [] (const juce::String& capability, osp::plugin::InstrumentHost& host) {
         if (capability == "analog.arp.cardRouting")
             return host.cardArpeggiator();
@@ -297,16 +658,89 @@ andor::shell::LearnDescriptor learnDescriptor()
     };
     d.registerTargets = [] (TargetRegistry& targets, andor::shell::ShellEditor& editor) {
         using osp::plugin::rack::Kind;
+        namespace binding = osp::plugin::binding;
         auto* e = &editor;
-        // MORPH's name (its double-click opens the rack; Show me opens it).
-        targets.add ({ "analog.morph.name", [e] { return static_cast<juce::Component*> (e->macroLabel (0)); }, {}, [e] {
-                          e->setRackExpanded (Kind::morph, true);
-                          return e->effectsRack().isShown (Kind::morph);
+        auto* shell = dynamic_cast<andor::shell::ShellProcessor*> (e->getAudioProcessor());
+        auto* registry = &targets;
+        auto openMorph = [e] {
+            e->setRackExpanded (Kind::morph, true);
+            return e->effectsRack().isShown (Kind::morph);
+        };
+        // A control found by the parameter it edits, inside `root` (visible only).
+        auto controlIn = [] (std::function<juce::Component*()> root, juce::String id) {
+            return [root, id]() -> juce::Component* {
+                auto* r = root();
+                return r != nullptr ? binding::findControl (*r, id) : nullptr;
+            };
+        };
+        auto content = [e] { return &e->instrumentContent(); };
+        auto rack = [e] { return static_cast<juce::Component*> (&e->effectsRack()); };
+
+        // The cards: A and B together; OSC 1's LEVEL; card C's source type, M and LEVEL.
+        targets.add ({ "cards.AB", content, [e] (juce::Component&) {
+                          juce::Rectangle<int> all;
+                          for (int l = 0; l < 3; ++l)
+                          {
+                              const auto letter = osp::plugin::InstrumentHost::shownLayerName (l);
+                              auto& card = e->engineCard (l);
+                              if ((letter == "A" || letter == "B") && card.isVisible())
+                              {
+                                  const auto r = e->instrumentContent().getLocalArea (&card, card.getLocalBounds());
+                                  all = all.isEmpty() ? r : all.getUnion (r);
+                              }
+                          }
+                          return e->sourceViewShown() ? juce::Rectangle<int>() : all;
                       } });
-        // MORPH's knob alone (nothing to open: the knob is always there; touches on it are the
-        // shell's macro.0 watcher's).
+        targets.add ({ "osc.A.level", controlIn (content, params::osc1Level) });
+        targets.add ({ "card.C.source", controlIn (content, params::hybridType) });
+        targets.add ({ "card.C.mute", controlIn (content, osp::plugin::InstrumentHost::layerParameterId (andor::shell::ShellProcessor::hybridLayer, "mute")) });
+        targets.add ({ "card.C.level", controlIn (content, osp::plugin::InstrumentHost::layerParameterId (andor::shell::ShellProcessor::hybridLayer, "level")) });
+
+        // MORPH: its name (double-click: the rack), its lamp, its knob; in the rack MORPH TO (and
+        // its C and D segments), TEXTURE and METHOD - each the exact control.
+        targets.add ({ "analog.morph.name", [e] { return static_cast<juce::Component*> (e->macroLabel (0)); }, {}, openMorph });
+        targets.add ({ "morph.label", [e] { return static_cast<juce::Component*> (e->macroLabel (0)); }, {}, openMorph });
+        targets.add ({ "morph.enable", [e] { return static_cast<juce::Component*> (e->macroSwitch (0)); }, {}, {}, {}, false, true });
         targets.add ({ "analog.morph.knob", [e] { return static_cast<juce::Component*> (e->macroKnob (0)); } });
-        // FX ROUTING: the board (touches on it are the musician's), its mixer and its chain.
+        targets.add ({ "morph.amount", [e] { return static_cast<juce::Component*> (e->macroKnob (0)); } });
+        auto morphTo = controlIn (rack, params::morphTarget);
+        targets.add ({ "morph.destination", morphTo, {}, openMorph, {}, false, true });
+        for (int segment = 0; segment < 2; ++segment)
+            targets.add ({ segment == 0 ? "morph.destination.C" : "morph.destination.D", morphTo, [segment] (juce::Component& c) {
+                              auto* s = dynamic_cast<osp::plugin::rackui::SegmentedSwitch*> (&c);
+                              return s != nullptr ? s->segmentBounds (segment).getSmallestIntegerContainer() : c.getLocalBounds();
+                          },
+                           openMorph });
+        targets.add ({ "morph.texture", controlIn (rack, params::morphTexture), {}, openMorph, {}, false, true });
+        targets.add ({ "morph.method", controlIn (rack, params::morphMethod), {}, openMorph, {}, false, true });
+
+        // AUX D's strip: its source dropdown, power, M, LEVEL and display (Show AUX reveals them).
+        auto strip = [registry]() -> juce::Component* {
+            const auto* t = registry->find ("aux.strip");
+            return t != nullptr ? t->component() : nullptr;
+        };
+        auto showAux = [e] {
+            e->setAuxStripShown (true);
+            return e->auxStripShown();
+        };
+        auto part = [strip] (const char* name) {
+            return [strip, n = juce::String (name)]() -> juce::Component* {
+                auto* s = strip();
+                return s != nullptr ? AuxStripView::part (*s, n) : nullptr;
+            };
+        };
+        if (shell != nullptr && shell->hasAuxStrip())
+        {
+            targets.add ({ "aux.mode", part ("mode"), {}, showAux, {}, false, true });
+            targets.add ({ "aux.power", part ("power"), {}, showAux, {}, false, true });
+            targets.add ({ "aux.mute", part ("mute"), {}, showAux });
+            targets.add ({ "aux.level", part ("LEVEL"), {}, showAux, {}, false, true });
+            targets.add ({ "aux.display", part ("display"), {}, showAux });
+        }
+        targets.addState ("analog.aux.shown", [e] { return e->auxStripShown(); });
+
+        // FX ROUTING: the board (touches on it are the musician's), its mixer, its chain, and the
+        // one effect block a step means (the selected one, else the first).
         auto routing = [e] { return e->sourceViewShown() ? e->sourceViewComponent() : nullptr; };
         auto openRouting = [e] {
             e->setSourceViewShown (true);
@@ -323,29 +757,147 @@ andor::shell::LearnDescriptor learnDescriptor()
                           return v != nullptr ? v->chainBounds() : juce::Rectangle<int>();
                       },
                        openRouting });
+        targets.add ({ "routing.tile", routing, [e] (juce::Component&) {
+                          auto* v = routingView (*e);
+                          if (v == nullptr || v->tiles().empty())
+                              return juce::Rectangle<int>();
+                          if (const auto chosen = v->selection())
+                              for (const auto& t : v->tiles())
+                                  if (t.id == *chosen)
+                                      return t.bounds;
+                          return v->tiles().front().bounds;
+                      },
+                       openRouting });
         targets.addState ("routing.quick.open", [e] {
             auto* v = routingView (*e);
             return v != nullptr && e->sourceViewShown() && v->quickShown().has_value();
         });
-        // Any USER macro moves something (an assignment made).
-        targets.addState ("analog.userMacros.assigned", [e] {
-            auto* host = dynamic_cast<andor::shell::ShellProcessor*> (e->getAudioProcessor());
-            const auto* u = host != nullptr ? host->userMacros() : nullptr;
+        targets.addState ("analog.fx.reorderable", [e] {
+            auto* v = routingView (*e);
+            return v != nullptr && v->tab() != 2 && v->tiles().size() >= 2;
+        });
+        // The chain's order, as one number (a lesson compares it as it compares a parameter: only
+        // the musician's drag between touches counts).
+        targets.addValue ("analog.fx.order", [shell] {
+            auto* engine = shell != nullptr ? engineOf (*shell) : nullptr;
+            if (engine == nullptr)
+                return 0.0f;
+            juce::String s;
+            std::function<void (const std::vector<fx::Node>&)> walk = [&] (const std::vector<fx::Node>& chain) {
+                for (const auto& n : chain)
+                {
+                    if (n.kind == fx::Node::Kind::effect)
+                        s << static_cast<int> (n.fx.type) << '.' << n.fx.slot << ',';
+                    else
+                        for (const auto& lane : n.lanes)
+                        {
+                            s << '(';
+                            walk (lane);
+                            s << ')';
+                        }
+                }
+            };
+            const auto g = engine->fxRoute();
+            walk (g.chain);
+            s << '|';
+            walk (g.send);
+            return static_cast<float> (s.hashCode() & 0xffffff);   // (24 bits: exact in a float)
+        });
+
+        // What a lesson's sound needs, read from the real state.
+        if (shell == nullptr)
+            return;
+        targets.addState ("analog.ab.audible", [shell] {
+            const bool a = plain (*shell, params::osc1Enabled) >= 0.5f && ! parameterAtFloor (*shell, params::osc1Level) && cardHeard (*shell, "A");
+            const bool b = plain (*shell, params::osc2Enabled) >= 0.5f && ! parameterAtFloor (*shell, params::osc2Level) && cardHeard (*shell, "B");
+            return a || b;
+        });
+        targets.addState ("analog.osc1.heard", [shell] { return plain (*shell, params::osc1Enabled) >= 0.5f && cardHeard (*shell, "A"); });
+        targets.addState ("analog.c.heard", [shell] { return cardHeard (*shell, "C"); });
+        targets.addState ("analog.c.levelUp", [shell] {
+            return ! parameterAtFloor (*shell, osp::plugin::InstrumentHost::layerParameterId (andor::shell::ShellProcessor::hybridLayer, "level"));
+        });
+        targets.addState ("analog.c.playable", [shell] {
+            // An oscillator and noise always play; a recording or a patch needs one loaded; the
+            // hosted instrument must be running. ("A file chosen" is not enough: it must be ready.)
+            const auto type = static_cast<HybridType> (std::clamp (juce::roundToInt (plain (*shell, params::hybridType)), 0, 4));
+            switch (type)
+            {
+                case HybridType::oscillator:
+                case HybridType::noise:
+                    return true;
+                case HybridType::sample:
+                case HybridType::instrumentPatch:
+                {
+                    // (Its card shows a placeholder - ADD SAMPLE - while nothing is loaded.)
+                    osp::plugin::InstrumentHost::GeneratedSource g;
+                    return ! (shell->generatedSource (andor::shell::ShellProcessor::hybridLayer, g) && g.placeholder.isNotEmpty());
+                }
+                case HybridType::external:
+                {
+                    auto* engine = engineOf (*shell);
+                    return engine != nullptr && engine->externalInstrument().state() == ExternalInstrument::State::ready;
+                }
+            }
+            return false;
+        });
+        targets.addState ("analog.hybrid.silent", [shell] {
+            const int t = juce::roundToInt (plain (*shell, params::hybridType));
+            osp::plugin::InstrumentHost::GeneratedSource g;
+            return (t == 0 || t == 3) && shell->generatedSource (andor::shell::ShellProcessor::hybridLayer, g) && g.placeholder.isNotEmpty();
+        });
+        targets.addState ("analog.d.heard", [shell] {
+            bool anySolo = false;
+            for (int k = 0; k < 3; ++k)
+                anySolo = anySolo || plain (*shell, osp::plugin::InstrumentHost::layerParameterId (k, "solo")) >= 0.5f;
+            const bool soloed = plain (*shell, params::auxSolo) >= 0.5f;
+            if (plain (*shell, params::auxMute) >= 0.5f && ! soloed)
+                return false;
+            return ! anySolo || soloed;
+        });
+        targets.addState ("analog.d.levelUp", [shell] { return ! parameterAtFloor (*shell, params::auxLevel); });
+        auto signal = [shell] {
+            auto* engine = engineOf (*shell);
+            if (engine == nullptr)
+                return false;
+            const auto in = engine->liveInput();
+            return in.busExists && in.busEnabled && std::max ({ in.peakLeft, in.peakRight, in.rms }) > 0.003f;
+        };
+        targets.addState ("analog.d.input.available", [shell] {
+            auto* engine = engineOf (*shell);
+            if (engine == nullptr)
+                return false;
+            const auto in = engine->liveInput();
+            return in.busExists && in.busEnabled;
+        });
+        targets.addState ("analog.d.signal", signal);
+        targets.addState ("analog.d.playable", [shell, signal] {
+            auto* engine = engineOf (*shell);
+            if (engine == nullptr)
+                return false;
+            switch (std::clamp (juce::roundToInt (plain (*shell, params::auxMode)), 0, 3))
+            {
+                case 0: return engine->auxRecordingState().status == AnalogEngine::AuxRecordingState::Status::ready;   // RHYTHM: a loop
+                case 1: return true;                                                                                       // NOISE
+                case 2: return engine->auxInstrument().state() == ExternalInstrument::State::ready;                        // KONTAKT
+                case 3: return signal();                                                                                   // LIVE INPUT: audio arriving
+                default: break;
+            }
+            return false;
+        });
+        // USER macros: Macro 1 moves OSC 1 LEVEL (that exact assignment, not merely any).
+        targets.addState ("analog.usermacro.1.osc1Level", [shell] {
+            const auto* u = shell->userMacros();
+            return u != nullptr && u->targets != nullptr && u->targets (*shell, 0).contains (params::osc1Level);
+        });
+        targets.addState ("analog.userMacros.assigned", [shell] {
+            const auto* u = shell->userMacros();
             if (u == nullptr || u->activeCount == nullptr)
                 return false;
             for (int m = 0; m < 6; ++m)
-                if (u->activeCount (*host, m) > 0)
+                if (u->activeCount (*shell, m) > 0)
                     return true;
             return false;
-        });
-        // Card C has nothing to play (a SAMPLE or INSTRUMENT PATCH with nothing loaded).
-        targets.addState ("analog.hybrid.silent", [e] {
-            auto* host = dynamic_cast<andor::shell::ShellProcessor*> (e->getAudioProcessor());
-            if (host == nullptr)
-                return false;
-            const auto* type = host->parameters.getParameter (params::hybridType);
-            const int t = type != nullptr ? juce::roundToInt (type->convertFrom0to1 (type->getValue())) : 0;
-            return (t == 0 || t == 3) && ! host->isLayerOccupied (andor::shell::ShellProcessor::hybridLayer);
         });
     };
     return d;
