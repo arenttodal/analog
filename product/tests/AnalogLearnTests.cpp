@@ -705,10 +705,16 @@ TEST_CASE ("analog learn: screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots
         shoot ("22c-morph-to");
         rig.learn->noteAction ("close");
         rig.ui->setRackExpanded (osp::plugin::rack::Kind::morph, false);
-        // Quick Start's new steps (ARP and SUB; AUX D).
+        // Quick Start, a new player's first lesson (offered by the invitation), step by step -
+        // from the instrument as it first opens (no panel left open by the lessons before).
+        rig.ui->setArpExpanded (false);
         REQUIRE (rig.learn->startLesson ("analog.quickstart"));
-        for (int i = 0; i < 3; ++i)
-            rig.learn->noteAction ("next");
+        shoot ("23a-quickstart-step1");
+        rig.learn->noteAction ("next");
+        shoot ("23b-quickstart-step2");
+        rig.learn->noteAction ("next");
+        shoot ("23c-quickstart-step3");
+        rig.learn->noteAction ("next");
         shoot ("24-quickstart-arp-sub");
         rig.learn->noteAction ("next");
         rig.learn->noteAction ("showme");
