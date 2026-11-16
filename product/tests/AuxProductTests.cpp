@@ -7,6 +7,8 @@
 #include "AnalogParameters.h"
 #include "AuxUI.h"
 #include "CeramicSkin.h"
+#include "Design.h"
+#include "KeyboardUtilityActions.h"
 #include "DropOwner.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
@@ -186,6 +188,93 @@ TEST_CASE ("AUX strip: hiding it never mutes D or changes its sound", "[analog][
     CHECK (rms (shown) > 1.0e-3);
     CHECK (identical (shown, hidden));
     CHECK (p.parameters.getParameter (params::auxEnabled)->getValue() >= 0.5f);
+}
+
+TEST_CASE ("keyboard utility keys: D, SETTINGS and INFO fill Advanced's old place beneath ARP and SUB; D only shows or hides the strip", "[analog][aux][ui][utility-keys]")
+{
+    using UA = osp::plugin::KeyboardUtilityActions::Action;
+    namespace layout = osp::plugin::design::layout;
+    ShellProcessor p;
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 1.0f);   // NOISE
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    ui.setAuxStripShown (false);
+    ui.refreshNow();
+    auto& keys = ui.keyboardActions();
+
+    // Geometry: three 31-unit square keys, 6 apart, exactly filling the old 105 x 31 area; in
+    // the order D, SETTINGS, INFO; clear of ARP / SUB above.
+    REQUIRE (keys.has (UA::aux));
+    REQUIRE (keys.has (UA::settings));
+    REQUIRE (keys.has (UA::info));
+    auto* d = keys.button (UA::aux);
+    auto* settings = keys.button (UA::settings);
+    auto* info = keys.button (UA::info);
+    const auto area = layout::advanced.expanded (static_cast<float> (osp::plugin::KeyboardUtilityActions::margin));
+    CHECK (std::abs (static_cast<float> (keys.getX()) - area.getX()) <= 1.0f);
+    CHECK (std::abs (static_cast<float> (keys.getWidth()) - area.getWidth()) <= 1.0f);
+    const int m = osp::plugin::KeyboardUtilityActions::margin;
+    for (auto* k : { d, settings, info })
+    {
+        CHECK (k->getWidth() == 31);
+        CHECK (k->getHeight() == 31);
+        CHECK (k->getWantsKeyboardFocus());
+    }
+    CHECK (d->getX() == m);
+    CHECK (settings->getX() - d->getRight() == 6);
+    CHECK (info->getX() - settings->getRight() == 6);
+    CHECK (info->getRight() == keys.getWidth() - m);
+    CHECK_FALSE (keys.getBoundsInParent().reduced (m).intersects (ui.arpControl().getBoundsInParent()));
+    CHECK (&ui.advancedComponent() == settings);
+    CHECK (d->getTitle() == "AUX D");
+    CHECK (d->getTooltip() == "Show AUX D");
+    CHECK (settings->getTooltip() == "Advanced Settings");
+    CHECK (info->getTooltip() == "Show Info");
+
+    // D: the strip appears and goes; D's power, mode, every parameter and the sound stay.
+    std::map<juce::String, float> before;
+    for (auto* param : p.getParameters())
+        if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (param))
+            before[withId->paramID] = param->getValue();
+    auto values = [&p] {
+        std::map<juce::String, float> v;
+        for (auto* param : p.getParameters())
+            if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (param))
+                v[withId->paramID] = param->getValue();
+        return v;
+    };
+    const auto hiddenSound = render (p, 0.4);
+    REQUIRE (d->onClick != nullptr);
+    d->onClick();
+    ui.refreshNow();
+    CHECK (ui.auxStripShown());
+    CHECK (ui.auxStripComponent() != nullptr);
+    CHECK (ui.auxStripComponent()->isVisible());
+    CHECK (keys.isActive (UA::aux));
+    CHECK (d->getTooltip() == "Hide AUX D");
+    const auto shownSound = render (p, 0.4);
+    CHECK (rms (shownSound) > 1.0e-3);
+    CHECK (identical (hiddenSound, shownSound));
+    CHECK (values() == before);
+    d->onClick();
+    ui.refreshNow();
+    CHECK_FALSE (ui.auxStripShown());
+    CHECK_FALSE (keys.isActive (UA::aux));
+    CHECK (d->getTooltip() == "Show AUX D");
+    CHECK (values() == before);
+    CHECK (identical (hiddenSound, render (p, 0.4)));
+
+    // SETTINGS: the existing Advanced popover, anchored to the key; pressed while open; closed again.
+    settings->onClick();
+    ui.refreshNow();
+    REQUIRE (ui.openPopupIndex() == andor::shell::ShellEditor::advancedPopup);
+    CHECK (keys.isActive (UA::settings));
+    settings->onClick();
+    ui.refreshNow();
+    CHECK (ui.openPopupIndex() != andor::shell::ShellEditor::advancedPopup);
+    CHECK_FALSE (keys.isActive (UA::settings));
+    CHECK (values() == before);
 }
 
 TEST_CASE ("AUX strip: its visibility is kept with the session, never with a preset", "[analog][aux][ui]")

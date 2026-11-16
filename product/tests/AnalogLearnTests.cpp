@@ -286,7 +286,7 @@ namespace
     }
 } // namespace
 
-TEST_CASE ("analog learn: the catalog is valid; idle Learn adds nothing; ONE Learn menu entry (Tutorials, Toggle Info, Reset Tutorials)", "[learn][analog]")
+TEST_CASE ("analog learn: the catalog is valid; idle Learn adds nothing; ONE Learn menu entry (Tutorials, Reset Tutorials)", "[learn][analog]")
 {
     Rig rig;
     CHECK (rig.learnChildren() == 0);
@@ -300,20 +300,19 @@ TEST_CASE ("analog learn: the catalog is valid; idle Learn adds nothing; ONE Lea
     CHECK (top.contains ("Learn"));
     const auto all = menuTexts (menu, true);
     CHECK (all.contains (juce::String::fromUTF8 ("Tutorials\xe2\x80\xa6")));
-    CHECK (all.contains ("Toggle Info"));
     CHECK (all.contains (juce::String::fromUTF8 ("Reset Tutorials\xe2\x80\xa6")));
-    for (const auto& gone : { "Learn mode", "Learn ANDOR\xe2\x80\xa6", "Reset learning progress" })
+    // (Info is the INFO key's, beneath ARP and SUB: no menu item for it any more)
+    for (const auto& gone : { "Learn mode", "Learn ANDOR\xe2\x80\xa6", "Reset learning progress", "Toggle Info" })
         CHECK_FALSE (all.contains (juce::String::fromUTF8 (gone)));
-    // Toggle Info shows its tick while Info is on.
-    rig.learn->setLearnMode (true);
-    juce::PopupMenu on;
-    rig.learn->addMenuItems (on);
-    bool ticked = false;
-    for (juce::PopupMenu::MenuItemIterator it (on, true); it.next();)
-        if (it.getItem().text == "Toggle Info")
-            ticked = it.getItem().isTicked;
-    CHECK (ticked);
-    rig.learn->setLearnMode (false);
+    // The main menu: no Show/Hide AUX and no Advanced settings either (D and SETTINGS have them).
+    juce::PopupMenu main;
+    rig.ui->showMenuForTest = [&] (juce::PopupMenu& m) { main = m; };
+    rig.ui->openMainMenu();
+    rig.ui->showMenuForTest = nullptr;
+    const auto mainTexts = menuTexts (main, true);
+    CHECK (mainTexts.contains ("Learn"));
+    for (const auto& gone : { "Show AUX", "Hide AUX", "Show AUX D", "Hide AUX D", "Advanced settings", "Advanced Settings", "Toggle Info" })
+        CHECK_FALSE (mainTexts.contains (gone));
 }
 
 TEST_CASE ("analog learn: no lesson step ever shows Skip; every key is a short label (never a sentence)", "[learn][analog]")
@@ -567,6 +566,9 @@ TEST_CASE ("analog learn: MORPH preparation matrix - every unsuitable state says
     const std::vector<Case> cases {
         { "empty C, D off", [] (ShellProcessor& p) { automate (p, params::hybridType, 0.0f); automate (p, params::auxEnabled, 0.0f); }, "c.loaded" },
         { "valid C (OSC), D off", [] (ShellProcessor& p) { automate (p, params::hybridType, 1.0f); automate (p, params::auxEnabled, 0.0f); }, "d.on" },
+        { "valid C (OSC), D off and hidden", [] (ShellProcessor& p) { automate (p, params::hybridType, 1.0f); automate (p, params::auxEnabled, 0.0f); }, "aux.shown" },
+        { "valid C (OSC), D ready but hidden", [] (ShellProcessor& p) {
+              automate (p, params::hybridType, 1.0f); automate (p, params::auxEnabled, 1.0f); automate (p, params::auxMode, 1.0f); }, "" },
         { "C muted", [] (ShellProcessor& p) { automate (p, params::hybridType, 1.0f); automate (p, "layerB.mute", 1.0f); }, "c.heard" },
         { "C level at zero", [] (ShellProcessor& p) {
               automate (p, params::hybridType, 1.0f);
@@ -593,6 +595,8 @@ TEST_CASE ("analog learn: MORPH preparation matrix - every unsuitable state says
         {
             Rig rig;
             c.setUp (rig.p);
+            // (AUX D's strip showing, except where the case is about it being hidden)
+            rig.ui->setAuxStripShown (juce::String (c.missing) != "aux.shown" && ! juce::String (c.name).endsWith ("hidden"));
             rig.settle();
             REQUIRE (rig.learn->startLesson ("analog.morph.basics"));
             rig.settle();
@@ -613,7 +617,7 @@ TEST_CASE ("analog learn: MORPH preparation matrix - every unsuitable state says
             // Keeping the current sound: the step that listens to it blocks with the same message,
             // its fix outlined and offered (never a silent demonstration marked done).
             rig.learn->noteAction ("current");
-            const bool aux = juce::String (c.missing).startsWith ("d.");
+            const bool aux = juce::String (c.missing).startsWith ("d.") || juce::String (c.missing) == "aux.shown";
             rig.ui->setRackExpanded (osp::plugin::rack::Kind::morph, true);
             REQUIRE (rig.learn->startLesson ("analog.morph.basics", aux ? 8 : 5));   // (MORPH TO D / hearing C)
             rig.settle();
@@ -625,6 +629,40 @@ TEST_CASE ("analog learn: MORPH preparation matrix - every unsuitable state says
             CHECK_FALSE (keys.contains ("next"));
             CHECK_FALSE (keys.contains ("continue"));
         }
+    }
+    // AUX D hidden at MORPH TO D: "Show AUX D" on the D key; its fix only shows the strip (D's
+    // power, sound and every parameter stay as they were); then the real problem, if any, on
+    // its own control (D off: the power key).
+    {
+        Rig rig;
+        automate (rig.p, params::hybridType, 1.0f);
+        automate (rig.p, params::auxEnabled, 0.0f);
+        rig.ui->setAuxStripShown (false);
+        rig.ui->setRackExpanded (osp::plugin::rack::Kind::morph, true);
+        rig.settle();
+        REQUIRE (rig.learn->startLesson ("analog.morph.basics", 8));
+        rig.settle();
+        auto& runner = rig.runner();
+        REQUIRE (runner.state() == LessonRunner::State::blocked);
+        REQUIRE (runner.unmetRequirement() != nullptr);
+        CHECK (runner.unmetRequirement()->id == "aux.shown");
+        CHECK (rig.learn->note()->titleText() == "Show AUX D");
+        CHECK (rig.learn->note()->bodyText() == "Click D below ARP and SUB to show the AUX controls. You can then check which sound D is using.");
+        auto* dKey = rig.ui->keyboardActions().button (osp::plugin::KeyboardUtilityActions::Action::aux);
+        REQUIRE (dKey != nullptr);
+        CHECK (rig.outline() == rig.contentArea (*dKey, dKey->getLocalBounds()));
+        const auto before = allValues (rig.p);
+        REQUIRE (rig.keys().contains ("fix"));
+        rig.learn->noteAction ("fix");
+        rig.settle();
+        CHECK (rig.ui->auxStripShown());
+        CHECK (allValues (rig.p) == before);
+        REQUIRE (runner.unmetRequirement() != nullptr);
+        CHECK (runner.unmetRequirement()->id == "d.on");
+        auto* power = andor::analog::AuxStripView::part (*rig.ui->auxStripComponent(), "power");
+        REQUIRE (power != nullptr);
+        CHECK (rig.outline() == rig.contentArea (*power, power->getLocalBounds()));
+        rig.learn->noteAction ("close");
     }
     // MORPH off: hearing the blend waits for the switch, pointing at it.
     {
@@ -736,13 +774,21 @@ TEST_CASE ("analog learn: Use external audio - LIVE INPUT verified on real incom
     REQUIRE (rig.learn->startLesson ("analog.aux.live"));
     auto& runner = rig.runner();
     rig.settle();
-    // 1. D hidden: Show AUX (its fix), then Next.
-    CHECK (runner.state() == LessonRunner::State::blocked);
-    CHECK (rig.keys().contains ("fix"));
-    rig.learn->noteAction ("fix");
+    // 1. D hidden: the D key beneath ARP and SUB outlined; the step never shows D by itself,
+    // only the musician's click on D does (and completes it).
+    using UA = osp::plugin::KeyboardUtilityActions::Action;
+    auto* dKey = rig.ui->keyboardActions().button (UA::aux);
+    REQUIRE (dKey != nullptr);
+    CHECK (runner.step()->targetId == "keyboard.auxToggle");
+    CHECK (runner.step()->title == "Show AUX D");
+    CHECK (rig.learn->note()->bodyText().startsWith ("Click D beneath the ARP/SUB controls to show AUX D."));
+    CHECK (runner.state() == LessonRunner::State::waitingForAction);
+    CHECK_FALSE (rig.ui->auxStripShown());
+    CHECK (rig.outline() == rig.contentArea (*dKey, dKey->getLocalBounds()));
+    dKey->onClick();
     rig.settle();
     CHECK (rig.ui->auxStripShown());
-    CHECK (runner.state() == LessonRunner::State::tourShowing);
+    CHECK (runner.status (0) == LessonRunner::StepStatus::done);
     rig.learn->noteAction ("next");
     // 2. LIVE INPUT: the source dropdown outlined; its choice (after the click) completes it.
     REQUIRE (runner.stepIndex() == 1);
@@ -901,7 +947,7 @@ TEST_CASE ("analog learn: Explore FX Routing - a specific block, its rack, a reo
     rig.learn->noteAction ("close");
 }
 
-TEST_CASE ("analog learn: Quick Start - seven steps, each on its own part of the instrument", "[learn][analog]")
+TEST_CASE ("analog learn: Quick Start - eight steps, each on its own part of the instrument; D shown with its key", "[learn][analog]")
 {
     Rig rig;
     rig.ui->setArpExpanded (false);
@@ -909,25 +955,36 @@ TEST_CASE ("analog learn: Quick Start - seven steps, each on its own part of the
     rig.settle();
     REQUIRE (rig.learn->startLesson ("analog.quickstart"));
     auto& runner = rig.runner();
-    const juce::StringArray expected { "header.preset", "cards.AB", "card.C.source", "macros.bank", "arp.opener", "arp.companion", "aux.strip" };
-    for (int s = 0; s < 7; ++s)
+    const juce::StringArray expected { "header.preset", "cards.AB", "card.C.source", "macros.bank", "arp.opener", "arp.companion", "keyboard.auxToggle", "aux.strip" };
+    using UA = osp::plugin::KeyboardUtilityActions::Action;
+    auto* dKey = rig.ui->keyboardActions().button (UA::aux);
+    REQUIRE (dKey != nullptr);
+    for (int s = 0; s < 8; ++s)
     {
         rig.settle();
         INFO ("step " << s);
         REQUIRE (runner.stepIndex() == s);
         CHECK (runner.step()->targetId == expected[s]);
-        CHECK (rig.learn->note()->stepText() == "STEP " + juce::String (s + 1) + " OF 7");
-        if (s == 6)
-        {
-            // D hidden: the note says so and offers Show AUX (it never shows D by itself).
-            CHECK (runner.state() == LessonRunner::State::paused);
-            CHECK (rig.keys().contains ("showme"));
-            rig.learn->noteAction ("showme");
-            rig.settle();
-        }
+        CHECK (rig.learn->note()->stepText() == "STEP " + juce::String (s + 1) + " OF 8");
         REQUIRE (rig.ring().has_value());
         rig.checkNotePlacement();
-        rig.learn->noteAction (s == 6 ? "finish" : "next");
+        if (s == 6)
+        {
+            // "Show AUX D": the D key itself outlined; the step never shows D by itself, the
+            // musician's click on D does - and the next step is the strip it showed.
+            CHECK (runner.step()->title == "Show AUX D");
+            CHECK (rig.learn->note()->bodyText() == juce::String ("Click D beneath ARP and SUB to show AUX D below the oscillator cards. AUX D can play rhythmic loops, noise, Kontakt instruments or audio from another DAW track."));
+            CHECK (runner.state() == LessonRunner::State::waitingForAction);
+            CHECK_FALSE (rig.ui->auxStripShown());
+            CHECK (rig.outline() == rig.contentArea (*dKey, dKey->getLocalBounds()));
+            dKey->onClick();
+            rig.settle();
+            CHECK (rig.ui->auxStripShown());
+            CHECK (runner.status (6) == LessonRunner::StepStatus::done);
+        }
+        if (s == 7)
+            CHECK (rig.outline() == rig.contentArea (*rig.ui->auxStripComponent(), rig.ui->auxStripComponent()->getLocalBounds()));
+        rig.learn->noteAction (s == 7 ? "finish" : "next");
     }
     CHECK (rig.learn->noteKind() == LearnController::NoteKind::complete);
     CHECK (rig.learn->note()->bodyText().contains ("main parts of Analog"));
@@ -950,7 +1007,8 @@ TEST_CASE ("analog learn: Info - regions outline, explain with the rewritten tex
             ids.add (region->targetId());
     INFO ("regions: " << ids.joinIntoString (" "));
     for (const char* id : { "header.preset", "source.card.A", "source.card.B", "source.card.C", "macro.0", "macro.1", "macro.2", "macro.3", "macro.4",
-                            "macro.5", "mod.panel", "keyboard", "arp.control", "advanced", "routing.button" })
+                            "macro.5", "mod.panel", "keyboard", "arp.control", "keyboard.settings", "keyboard.info", "keyboard.auxToggle",
+                            "routing.button" })
         CHECK (ids.contains (id));
     rig.learn->inspect ("macro.0");
     rig.settle();
@@ -1162,8 +1220,8 @@ TEST_CASE ("analog learn: screenshots of every lesson step, the browser, Info (A
             rig.learn->noteAction ("close");
         };
         rig.ui->setArpExpanded (false);
-        rig.ui->setAuxStripShown (true);
-        everyStep ("analog.quickstart", "10-quickstart");
+        // (Show AUX D with the strip hidden, as a first run sees it: the D key outlined)
+        everyStep ("analog.quickstart", "10-quickstart", [&] (int s) { rig.ui->setAuxStripShown (s >= 7); });
         rig.ui->setAuxStripShown (false);
         automate (rig.p, "arp.enabled", 0.0f);
         automate (rig.p, "analog.arp.link", 1.0f);
@@ -1206,8 +1264,8 @@ TEST_CASE ("analog learn: screenshots of every lesson step, the browser, Info (A
         });
         rig.ui->showMacroBank (0);
         rig.p.setMacroBank (0);
-        rig.ui->setAuxStripShown (true);
         everyStep ("analog.aux.live", "50-aux", [&] (int s) {
+            rig.ui->setAuxStripShown (s >= 1);   // (step 1: D hidden, its key outlined)
             if (s >= 2)
                 automate (rig.p, params::auxMode, 3.0f);
             if (s >= 4)
@@ -1218,6 +1276,23 @@ TEST_CASE ("analog learn: screenshots of every lesson step, the browser, Info (A
         rig.ui->setRackExpanded (osp::plugin::rack::Kind::morph, false);
         automate (rig.p, params::auxMode, 1.0f);
         rig.ui->setAuxStripShown (false);
+        // MORPH TO D with D hidden: "Show AUX D" on the D key (recovery shows the strip only).
+        automate (rig.p, params::hybridType, 1.0f);
+        rig.ui->setRackExpanded (osp::plugin::rack::Kind::morph, true);
+        if (rig.learn->startLesson ("analog.morph.basics", 8))
+            shoot ("55-morph-recovery-show-aux-d");
+        rig.learn->noteAction ("close");
+        rig.ui->setRackExpanded (osp::plugin::rack::Kind::morph, false);
+        // Info on the keyboard's keys: INFO green, its explanation; SETTINGS' explanation.
+        rig.learn->setLearnMode (true);
+        rig.ui->refreshNow();
+        rig.learn->inspect ("keyboard.info");
+        shoot ("56-info-key-on");
+        rig.learn->inspect ("keyboard.settings");
+        shoot ("57-info-settings-key");
+        rig.learn->inspect ("keyboard.auxToggle");
+        shoot ("58-info-d-key");
+        rig.learn->setLearnMode (false);
         everyStep ("analog.fx.routing", "60-fx", [&] (int s) { rig.ui->setSourceViewShown (s >= 1 && s <= 4); });
         rig.ui->setSourceViewShown (false);
         // Complete, with an example to keep or restore; Reset Tutorials asks first.
@@ -1248,7 +1323,7 @@ TEST_CASE ("analog learn: screenshots of every lesson step, the browser, Info (A
         // The browser with progress: Quick Start done, the arpeggio under way at its third step.
         rig.learn->resetProgress();
         rig.learn->store().update ([] (andor::learn::ProgressData& d) {
-            d.lessons["analog.quickstart"] = { 3, "complete", "2026-11-15T12:00:00Z", {} };
+            d.lessons["analog.quickstart"] = { 4, "complete", "2026-11-15T12:00:00Z", {} };
             d.lessons["analog.arp.basics"] = { 2, "in-progress", {}, "pattern" };
         });
         rig.learn->openBrowser();
@@ -1256,4 +1331,98 @@ TEST_CASE ("analog learn: screenshots of every lesson step, the browser, Info (A
         rig.learn->closeBrowser();
         shoot ("99-off-after");
     }
+}
+
+TEST_CASE ("analog learn: the INFO key turns Info on and off (green while on); pointing explains, clicks still reach the controls", "[learn][analog][utility-keys]")
+{
+    Rig rig;
+    using UA = osp::plugin::KeyboardUtilityActions::Action;
+    auto& keys = rig.ui->keyboardActions();
+    auto* info = keys.button (UA::info);
+    REQUIRE (info != nullptr);
+    const auto before = allValues (rig.p);
+    CHECK_FALSE (rig.learn->learnMode());
+    CHECK_FALSE (keys.isActive (UA::info));
+    info->onClick();
+    rig.settle();
+    CHECK (rig.learn->learnMode());
+    CHECK (keys.isActive (UA::info));
+    CHECK (info->getTooltip() == "Hide Info");
+    // The regions outline and explain, but never take a click: the control under one keeps
+    // its normal function.
+    REQUIRE_FALSE (rig.learn->regions().empty());
+    for (auto* region : rig.learn->regions())
+    {
+        bool self = true, children = true;
+        region->getInterceptsMouseClicks (self, children);
+        CHECK_FALSE (self);
+    }
+    // The keys themselves are explained (Info on any of the three).
+    for (const char* id : { "keyboard.auxToggle", "keyboard.settings", "keyboard.info" })
+    {
+        rig.learn->inspect (id);
+        rig.settle();
+        INFO (id);
+        REQUIRE (rig.learn->note() != nullptr);
+        CHECK (rig.learn->note()->metaText() == "INFO");
+    }
+    rig.learn->inspect ("keyboard.info");
+    rig.settle();
+    CHECK (rig.learn->note()->titleText() == "Info");
+    CHECK (rig.learn->note()->bodyText() == "Turn Info on to read explanations of controls as you point to them. Turn it off to return to the normal view.");
+    rig.learn->inspect ("keyboard.settings");
+    rig.settle();
+    CHECK (rig.learn->note()->titleText() == "Advanced Settings");
+    CHECK (rig.learn->note()->bodyText() == "Open the instrument's detailed settings, including voice and tuning options. The available controls depend on the instrument.");
+    info->onClick();
+    rig.settle();
+    CHECK_FALSE (rig.learn->learnMode());
+    CHECK_FALSE (keys.isActive (UA::info));
+    CHECK (info->getTooltip() == "Show Info");
+    CHECK (allValues (rig.p) == before);
+}
+
+TEST_CASE ("analog: screenshots of the keyboard's D / SETTINGS / INFO keys and the compact popovers (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-keys]")
+{
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (juce::String::fromUTF8 (dir));
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Rig rig (1448);
+    using UA = osp::plugin::KeyboardUtilityActions::Action;
+    auto& keys = rig.ui->keyboardActions();
+    auto write = [&] (const juce::Image& image, const juce::String& name) {
+        const auto file = out.getChildFile ("keys-" + name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    auto shoot = [&] (const juce::String& name) {
+        rig.settle();
+        const auto image = rig.ui->createComponentSnapshot (rig.ui->getLocalBounds(), true, 2.0f);
+        write (image, name);
+        // The keyboard's lower right, close up (ARP / SUB and the keys beneath them).
+        const auto around = rig.ui->getLocalArea (&keys, keys.getLocalBounds()).expanded (60, 110).translated (0, -70)
+                                .getIntersection (rig.ui->getLocalBounds());
+        write (rig.ui->createComponentSnapshot (around, true, 3.0f), name + "-closeup");
+    };
+    rig.ui->setArpExpanded (false);
+    rig.ui->setAuxStripShown (false);
+    shoot ("01-three-keys-aux-hidden");
+    keys.button (UA::aux)->onClick();
+    shoot ("02-d-active-aux-shown");
+    keys.button (UA::aux)->onClick();
+    keys.button (UA::settings)->onClick();
+    shoot ("03-settings-open");
+    keys.button (UA::settings)->onClick();
+    keys.button (UA::info)->onClick();
+    shoot ("04-info-on");
+    keys.button (UA::info)->onClick();
+    rig.ui->openPopup (andor::shell::ShellEditor::pitchWheelPopup);
+    shoot ("05-pitch-bend-popover");
+    rig.ui->closePopup();
+    rig.ui->openPopup (andor::shell::ShellEditor::modWheelPopup);
+    shoot ("06-mod-wheel-popover");
+    rig.ui->closePopup();
 }

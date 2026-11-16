@@ -1,5 +1,32 @@
 # ANDOR ANALOG — status
 
+> **16 Nov 2026, keyboard keys D / SETTINGS / INFO (`feature/aux-live-input`;
+> docs/KEYBOARD_UTILITY_ACTIONS.md, docs/screenshots/keys):**
+> - The large Advanced key beneath ARP and SUB is now three small ceramic keys, shared with
+>   OSP (`KeyboardUtilityActions`):
+>   - **D** shows or hides AUX D. It changes only the view: the sound and every parameter are
+>     identical (tested).
+>   - **SETTINGS** opens and closes Advanced, which is anchored to the key.
+>   - **INFO** turns Info on and off; it is green while on. Pointing explains a control, and
+>     clicks keep working.
+> - Show / Hide AUX, Advanced settings and Toggle Info are gone from the menus. Learn is now
+>   Tutorials… and Reset Tutorials….
+> - Learn changes:
+>   - Quick Start (revision 4, eight steps): "Show AUX D" outlines the D key and completes on
+>     the musician's own click. The next step outlines the strip.
+>   - Use external audio (revision 3) starts the same way.
+>   - When D is hidden and silent, the MORPH and LIVE INPUT recovery says "Show AUX D" on the D
+>     key. Its fix shows the strip only; then the real problem is outlined.
+>   - The keys have Info texts.
+> - MOD WHEEL, PITCH BEND and ADVANCED use the compact SUB / MOVEMENT popover proportions.
+> - Verified (Linux):
+>   - Analog plugin tests: 4 / 4 shards pass (241 cases; the 4 skips are the usual
+>     host-only ones), including the Learn and utility-key cases.
+>   - analog_dsp_tests: 321 cases pass.
+>   - Visual regression: OSP's, the example product's and Analog's are 0 pixels outside the
+>     masks. The key row is a new approved product mask, `keyboard-actions`.
+>   - DAW, AU / VST3 and Mac standalone checks are UNVERIFIED (OWNER TEST).
+
 > **15 Nov 2026, PITCH / MOD wheel popovers and VIBRATO (`feature/aux-live-input`;
 > docs/WHEELS_VIBRATO.md):**
 > - The captions under the wheels open their settings (PITCH BEND: RANGE; MOD WHEEL:

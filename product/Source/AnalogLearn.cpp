@@ -78,14 +78,30 @@ namespace
         };
     }
 
+    /** AUX D hidden: the D key beneath ARP and SUB shows it (and only shows it: D's power,
+        sound and routing stay as they are; what is wrong with them is the next requirement's).
+        `whenSilent`: needed only while D also has something to fix (a lesson that merely
+        listens to a ready D never asks for the strip). */
+    Requirement auxShown (bool whenSilent = false)
+    {
+        auto holds = Condition::state ("analog.aux.shown");
+        if (whenSilent)
+            holds = Condition::any ({ holds, Condition::all ({ Condition::equals (params::auxEnabled, 1.0f), Condition::state ("analog.d.heard"),
+                                                                Condition::state ("analog.d.levelUp"), Condition::state ("analog.d.playable") }) });
+        return need ("aux.shown", std::move (holds), "Show AUX D",
+                     "Click D below ARP and SUB to show the AUX controls. You can then check which sound D is using.", "keyboard.auxToggle",
+                     "Show AUX D", false);
+    }
+
     std::vector<Requirement> auxReady()
     {
+        // In order: the strip first (D), then what actually keeps D silent, each on its own control.
         return {
-            need ("d.on", Condition::equals (params::auxEnabled, 1.0f), "AUX D is off", "Switch AUX D on with its power key to hear it.", "aux.power", "Show AUX"),
+            auxShown (true),
+            need ("d.on", Condition::equals (params::auxEnabled, 1.0f), "AUX D is off", "Switch AUX D on with its power key to hear it.", "aux.power"),
             need ("d.heard", Condition::state ("analog.d.heard"), "AUX D is muted",
-                  "AUX D is muted, or a card is soloed. Click M on AUX D (or the other card's S) to hear it.", "aux.mute", "Show AUX"),
-            need ("d.level", Condition::state ("analog.d.levelUp"), "AUX D is silent", "AUX D's LEVEL is all the way down. Turn it up to hear D.", "aux.level",
-                  "Show AUX"),
+                  "AUX D is muted, or a card is soloed. Click M on AUX D (or the other card's S) to hear it.", "aux.mute"),
+            need ("d.level", Condition::state ("analog.d.levelUp"), "AUX D is silent", "AUX D's LEVEL is all the way down. Turn it up to hear D.", "aux.level"),
             need ("d.playable", Condition::state ("analog.d.playable"), "A sound is needed",
                   "AUX D has nothing to play: no RHYTHM loop, no Kontakt instrument loaded, or no audio arriving at LIVE INPUT. Choose NOISE, load a source, or load the example sound.",
                   "aux.mode", "Choose Source"),
@@ -122,14 +138,20 @@ namespace
         l.title = "Quick Start";
         l.description = "The main parts of ANDOR Analog";
         l.group = "Quick Start";
-        l.revision = 3;   // (3: Learn 2.0 - seven steps, exact targets)
+        l.revision = 4;   // (4: AUX D shown with the keyboard's D key, then the strip itself)
         l.minutes = 2;
         l.completionText = u8 ("You\xe2\x80\x99ve seen the main parts of Analog. Choose another lesson to try a feature in more detail.");
-        auto aux = explain ("aux", "aux.strip", "AUX D",
-                            "AUX D is an optional fourth sound source. It can play rhythmic loops, noise, Kontakt instruments or audio sent from your DAW.");
+        // The D key beneath ARP and SUB: the musician's own click shows AUX D (already showing:
+        // said so, Continue). Then the strip it showed.
+        auto aux = task ("aux", "keyboard.auxToggle", "Show AUX D",
+                         "Click D beneath ARP and SUB to show AUX D below the oscillator cards. AUX D can play rhythmic loops, noise, Kontakt instruments or audio from another DAW track.",
+                         Completion::action ({ "aux.visibility.toggled" }, Condition::state ("analog.aux.shown"))
+                             .withAlreadyDone (Condition::state ("analog.aux.shown"), "AUX D is already visible."),
+                         "AUX D is showing below the oscillator cards.");
         aux.revealOnEnter = false;   // (showing D changes the window: only its key does)
-        aux.revealLabel = "Show AUX";
-        aux.unavailableBody = "AUX D is hidden. Show AUX shows it below the oscillator cards.";
+        auto strip = explain ("strip", "aux.strip", "AUX D",
+                              "Choose D's sound from the source dropdown in its display. Its power key, M and LEVEL work like the other cards'. Click D again to hide the strip; D keeps its sound.");
+        strip.requirements = { auxShown() };
         l.steps = {
             explain ("sounds", "header.preset", "Select a sound",
                      "Click the preset name to browse sounds. Use the arrows on either side to move through them. SAVE stores your changes as a user preset."),
@@ -144,6 +166,7 @@ namespace
             explain ("sub", "arp.companion", "Sub-oscillator",
                      "SUB adds lower notes beneath the main sound. Open SUB beside the keyboard to adjust its pitch and level."),
             aux,
+            strip,
         };
         return l;
     }
@@ -347,11 +370,10 @@ namespace
         l.description = "Route another DAW track through AUX D";
         l.group = "AUX D";
         l.capability = "analog.aux";
-        l.revision = 2;   // (2: Learn 2.0 - LIVE INPUT verified on real incoming audio)
+        l.revision = 3;   // (3: AUX D shown with the keyboard's D key)
         l.minutes = 3;
         l.completionText = "Your DAW track is now part of Analog through AUX D. You can mix it with the oscillators, filter it, process it with effects or use it as a MORPH destination.";
-        auto shown = need ("aux.shown", Condition::state ("analog.aux.shown"), "Show AUX D", "AUX D is hidden. Show AUX shows it below the oscillator cards.",
-                           "aux.strip", "Show AUX", false);
+        const auto shown = auxShown();
         auto inputOn = need ("input.available", Condition::state ("analog.d.input.available"), "No incoming audio",
                              "Analog isn't receiving audio through its sidechain input. Check the routing in your DAW and play the source track.");
         inputOn.offerExample = false;
@@ -359,12 +381,14 @@ namespace
                             "The sidechain is connected, but no audio is arriving. Play the source track in your DAW; the AUX display moves when it arrives.",
                             "aux.display", "", false);
         auto liveSelected = need ("live.selected", Condition::equals (params::auxMode, 3.0f), "Choose LIVE INPUT",
-                                  "Choose LIVE INPUT from AUX D's source dropdown first.", "aux.mode", "Show AUX", false);
-        auto show = explain ("show", "aux.strip", "Show AUX D",
-                             "AUX D is the fourth sound source below the oscillator cards. If it is hidden, choose Show AUX from the main menu.");
+                                  "Choose LIVE INPUT from AUX D's source dropdown first.", "aux.mode", "", false);
+        // The D key beneath ARP and SUB (the musician's own click); already showing: Continue.
+        auto show = task ("show", "keyboard.auxToggle", "Show AUX D",
+                          "Click D beneath the ARP/SUB controls to show AUX D. The strip will appear below OSC 1, OSC 2 and OSC C.",
+                          Completion::action ({ "aux.visibility.toggled" }, Condition::state ("analog.aux.shown"))
+                              .withAlreadyDone (Condition::state ("analog.aux.shown"), "AUX D is already visible."),
+                          "AUX D is showing.");
         show.revealOnEnter = false;
-        show.revealLabel = "Show AUX";
-        show.requirements = { shown };
         auto live = task ("live", "aux.mode", "Select LIVE INPUT",
                           "Use the source dropdown on AUX D and choose LIVE INPUT. This mode receives audio from another track through your DAW's sidechain routing.",
                           Completion::action ({ "aux.mode.touched" }, Condition::equals (params::auxMode, 3.0f))
@@ -498,8 +522,11 @@ namespace
             h ("aux.strip", "AUX D \xe2\x80\x94 Additional source",
                "AUX D adds a fourth sound source. Select RHYTHM, NOISE, KONTAKT or LIVE INPUT. Its LEVEL knob controls the source volume, and RACK opens the detailed controls.",
                "analog.aux.live"),
-            h ("advanced", "Advanced settings",
-               "Advanced contains instrument-wide settings such as voice count, tuning, pitch-bend range, glide and supported MIDI expression options."),
+            h ("keyboard.settings", "Advanced Settings",
+               "Open the instrument's detailed settings, including voice and tuning options. The available controls depend on the instrument."),
+            h ("keyboard.info", "Info", "Turn Info on to read explanations of controls as you point to them. Turn it off to return to the normal view."),
+            h ("keyboard.auxToggle", "AUX D",
+               "Show or hide AUX D below the oscillator cards. Hiding it only hides the controls: D keeps its sound, power and settings.", "analog.aux.live"),
             h ("routing.button", "FX Routing",
                "FX Routing shows how the sound sources connect to the effects. Open it to inspect or change the order and signal flow of the processors.",
                "analog.fx.routing"),
