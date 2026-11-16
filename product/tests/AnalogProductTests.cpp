@@ -3926,7 +3926,7 @@ TEST_CASE ("analog: MOVEMENT's key expands its rack under the macros, as a view:
     ui.refreshNow();
     // The cards keep nothing under their knobs (their modifiers in the well): the instrument
     // is shorter by their trim.
-    CHECK (ui.instrumentHeight() == Approx (1086.0f - osp::plugin::EngineCard::footTrim));
+    CHECK (ui.instrumentHeight() == Approx (osp::plugin::design::height - osp::plugin::EngineCard::footTrim));
 
     // MOVEMENT, ECHO and SPACE open racks (from their names: no key on the row).
     REQUIRE (ui.hasRack (Kind::movement));

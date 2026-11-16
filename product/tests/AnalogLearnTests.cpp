@@ -1426,3 +1426,27 @@ TEST_CASE ("analog: screenshots of the keyboard's D / SETTINGS / INFO keys and t
     shoot ("06-mod-wheel-popover");
     rig.ui->closePopup();
 }
+
+TEST_CASE ("analog: screenshots of the bottom edge at the natural size, 869 / 1448 / 1810 wide (ANALOG_SCREENSHOT_DIR, ANALOG_SCREENSHOT_TAG)", "[.][screenshots][screenshots-bottom]")
+{
+    const auto* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const auto* tagEnv = std::getenv ("ANALOG_SCREENSHOT_TAG");
+    const juce::String tag = tagEnv != nullptr ? juce::String (tagEnv) : juce::String ("now");
+    const juce::File out (juce::String::fromUTF8 (dir));
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    Rig rig (1448);
+    rig.ui->setArpExpanded (false);
+    rig.ui->setAuxStripShown (false);
+    for (const int width : { 1448, 869, 1810 })
+    {
+        rig.resize (width);
+        rig.settle();
+        const auto image = rig.ui->createComponentSnapshot (rig.ui->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile ("analog-bottom-" + tag + "-" + juce::String (width) + "x" + juce::String (rig.ui->getHeight()) + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    }
+}

@@ -1,5 +1,24 @@
 # ANDOR ANALOG — status
 
+> **16 Nov 2026, compact bottom edge (OSP and Analog, shared; docs/BOTTOM_EDGE.md,
+> docs/screenshots/bottom):**
+> - Both editors end 36 reference px sooner. The housing's foot is 22 px under the keys, about
+>   20 px under the PITCH / MOD captions; surround and shadow are as before.
+> - Analog is 1448 × 986 (was 1022); OSP is 1448 × 1050 (was 1086).
+> - Nothing above the keys' foot moved or was scaled.
+> - The "Ready" footer is gone. Load failures, open / save results and sound warnings appear
+>   once in the overlay's existing brief notice.
+> - Anchored popovers are now also kept above the instrument's foot (`placePopover`). The SHAPER
+>   DNA panel would otherwise have run past the shorter window.
+> - Verified (Linux):
+>   - Analog plugin tests: 4 / 4 shards (241 cases, the usual host-only skips).
+>   - OSP plugin tests: 4 / 4 shards (171 cases).
+>   - Both bottom-edge tests pass: geometry, no footer label, failures and messages shown as
+>     notices.
+>   - Visual regressions: OSP's reference, the example product's and Analog's are all 0 px
+>     outside the masks.
+>   - DAW / AU / VST3 window sizing and the Mac standalone are UNVERIFIED (OWNER TEST).
+
 > **16 Nov 2026, keyboard keys D / SETTINGS / INFO (`feature/aux-live-input`;
 > docs/KEYBOARD_UTILITY_ACTIONS.md, docs/screenshots/keys):**
 > - The large Advanced key beneath ARP and SUB is now three small ceramic keys, shared with
