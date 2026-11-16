@@ -9,6 +9,11 @@ on:
         description: "Also build and test on Windows"
         type: boolean
         default: false
+      macos_runner:
+        description: "macOS runner (the build is universal on either; Intel when Apple-silicon runners are short)"
+        type: choice
+        options: [macos-15, macos-15-intel]
+        default: macos-15
 
 jobs:
   engine:
@@ -30,8 +35,10 @@ jobs:
         run: ./build/analog-render --benchmark --voices 16 --seconds 5
 
   plugin-macos:
-    # The plugin as it ships (universal), its tests, ANDOR OSP's suite, and auval.
-    runs-on: macos-15
+    # The plugin as it ships (universal), its tests, ANDOR OSP's suite, and auval. On a manual
+    # run the runner can be the Intel image (GitHub's Apple-silicon pool is sometimes too short
+    # to acquire one: "The job was not acquired by Runner of type hosted").
+    runs-on: ${{ inputs.macos_runner || 'macos-15' }}
     steps:
       - uses: actions/checkout@v4
         with:
