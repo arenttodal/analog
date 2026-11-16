@@ -443,11 +443,11 @@ TEST_CASE ("analog learn: Make an arpeggio - nine steps, each control outlined e
     CHECK (juce::exactlyEqual (valueOf (p, "arp.pattern"), globalPattern));
     CHECK (rig.keys().contains ("finish"));
     rig.learn->noteAction ("finish");
-    CHECK (rig.learn->noteKind() == LearnController::NoteKind::complete);
-    CHECK (rig.learn->note()->bodyText().contains ("OSC 1 is sustaining the chord"));
-    CHECK (rig.keys().contains ("browse"));   // (no example was loaded: Tutorials / Close)
+    // (no example was loaded, nothing to choose: the lesson ends in the tutorials)
+    CHECK (rig.learn->noteKind() == LearnController::NoteKind::none);
+    REQUIRE (rig.learn->browser() != nullptr);
     CHECK (rig.learn->store().read().lessons.at ("analog.arp.basics").status == "complete");
-    rig.learn->noteAction ("close");
+    rig.learn->closeBrowser();
     CHECK (rig.learnChildren() == 0);
 }
 
@@ -548,11 +548,15 @@ TEST_CASE ("analog learn: Understand MORPH - prepared sound, ARP off, MORPH TO's
     // Complete: the lesson played on its example - Keep it, or bring back the sound from before.
     CHECK (rig.learn->noteKind() == LearnController::NoteKind::complete);
     CHECK (rig.keys() == juce::StringArray ({ "restore", "keep" }));
+    CHECK (rig.learn->browser() == nullptr);   // (the choice first)
     rig.learn->noteAction ("restore");
     INFO (differences (mine, allValues (p)));
     CHECK (sameValues (allValues (p), mine));   // the musician's sound again
     CHECK_FALSE (p.canRestoreLearnSound());
     CHECK (rig.learn->store().read().lessons.at ("analog.morph.basics").status == "complete");
+    // Then the tutorials.
+    REQUIRE (rig.learn->browser() != nullptr);
+    rig.learn->closeBrowser();
 }
 
 TEST_CASE ("analog learn: MORPH preparation matrix - every unsuitable state says what is missing and offers a next action", "[learn][analog][morph]")
@@ -760,7 +764,8 @@ TEST_CASE ("analog learn: Create a macro - OSC 1 LEVEL's menu, Macro 1 verified,
     REQUIRE (rig.ring().has_value());
     rig.learn->noteAction ("finish");
     CHECK (rig.learn->store().read().lessons.at ("analog.usermacros.basics").status == "complete");
-    rig.learn->noteAction ("close");
+    CHECK (rig.learn->browser() != nullptr);   // (it ends in the tutorials)
+    rig.learn->closeBrowser();
     p.setMacroBank (0);
 }
 
@@ -868,7 +873,8 @@ TEST_CASE ("analog learn: Use external audio - LIVE INPUT verified on real incom
     CHECK (runner.status (6) == LessonRunner::StepStatus::done);
     rig.learn->noteAction ("finish");
     CHECK (rig.learn->store().read().lessons.at ("analog.aux.live").status == "complete");
-    rig.learn->noteAction ("close");
+    CHECK (rig.learn->browser() != nullptr);   // (it ends in the tutorials)
+    rig.learn->closeBrowser();
 }
 
 TEST_CASE ("analog learn: Explore FX Routing - a specific block, its rack, a reorder, back to the cards", "[learn][analog][fx]")
@@ -944,10 +950,11 @@ TEST_CASE ("analog learn: Explore FX Routing - a specific block, its rack, a reo
     CHECK (runner.status (5) == LessonRunner::StepStatus::done);
     rig.learn->noteAction ("finish");
     CHECK (rig.learn->store().read().lessons.at ("analog.fx.routing").status == "complete");
-    rig.learn->noteAction ("close");
+    CHECK (rig.learn->browser() != nullptr);   // (it ends in the tutorials)
+    rig.learn->closeBrowser();
 }
 
-TEST_CASE ("analog learn: Quick Start - eight steps, each on its own part of the instrument; D shown with its key", "[learn][analog]")
+TEST_CASE ("analog learn: Quick Start - nine steps, each on its own part of the instrument; D shown with its key; it ends on INFO, then the tutorials", "[learn][analog]")
 {
     Rig rig;
     rig.ui->setArpExpanded (false);
@@ -955,17 +962,17 @@ TEST_CASE ("analog learn: Quick Start - eight steps, each on its own part of the
     rig.settle();
     REQUIRE (rig.learn->startLesson ("analog.quickstart"));
     auto& runner = rig.runner();
-    const juce::StringArray expected { "header.preset", "cards.AB", "card.C.source", "macros.bank", "arp.opener", "arp.companion", "keyboard.auxToggle", "aux.strip" };
+    const juce::StringArray expected { "header.preset", "cards.AB", "card.C.source", "macros.bank", "arp.opener", "arp.companion", "keyboard.auxToggle", "aux.strip", "keyboard.info" };
     using UA = osp::plugin::KeyboardUtilityActions::Action;
     auto* dKey = rig.ui->keyboardActions().button (UA::aux);
     REQUIRE (dKey != nullptr);
-    for (int s = 0; s < 8; ++s)
+    for (int s = 0; s < 9; ++s)
     {
         rig.settle();
         INFO ("step " << s);
         REQUIRE (runner.stepIndex() == s);
         CHECK (runner.step()->targetId == expected[s]);
-        CHECK (rig.learn->note()->stepText() == "STEP " + juce::String (s + 1) + " OF 8");
+        CHECK (rig.learn->note()->stepText() == "STEP " + juce::String (s + 1) + " OF 9");
         REQUIRE (rig.ring().has_value());
         rig.checkNotePlacement();
         if (s == 6)
@@ -984,10 +991,26 @@ TEST_CASE ("analog learn: Quick Start - eight steps, each on its own part of the
         }
         if (s == 7)
             CHECK (rig.outline() == rig.contentArea (*rig.ui->auxStripComponent(), rig.ui->auxStripComponent()->getLocalBounds()));
-        rig.learn->noteAction (s == 7 ? "finish" : "next");
+        if (s == 8)
+        {
+            // Where Learn is found again: the INFO key outlined (Info itself left off), and the
+            // menu's Learn named.
+            auto* infoKey = rig.ui->keyboardActions().button (UA::info);
+            REQUIRE (infoKey != nullptr);
+            CHECK (runner.step()->title == "Learn any time");
+            CHECK (rig.learn->note()->bodyText().contains ("i in the corner"));
+            CHECK (rig.learn->note()->bodyText().contains ("three-dot menu"));
+            CHECK (rig.outline() == rig.contentArea (*infoKey, infoKey->getLocalBounds()));
+            CHECK_FALSE (rig.learn->learnMode());
+        }
+        rig.learn->noteAction (s == 8 ? "finish" : "next");
     }
-    CHECK (rig.learn->noteKind() == LearnController::NoteKind::complete);
-    CHECK (rig.learn->note()->bodyText().contains ("main parts of Analog"));
+    // Then the tutorials, Quick Start ticked.
+    rig.settle();
+    CHECK (rig.learn->noteKind() == LearnController::NoteKind::none);
+    REQUIRE (rig.learn->browser() != nullptr);
+    CHECK (rig.learn->store().read().lessons.at ("analog.quickstart").status == "complete");
+    rig.learn->closeBrowser();
 }
 
 TEST_CASE ("analog learn: Info - regions outline, explain with the rewritten texts, Esc leaves no trace", "[learn][analog]")
@@ -1323,7 +1346,7 @@ TEST_CASE ("analog learn: screenshots of every lesson step, the browser, Info (A
         // The browser with progress: Quick Start done, the arpeggio under way at its third step.
         rig.learn->resetProgress();
         rig.learn->store().update ([] (andor::learn::ProgressData& d) {
-            d.lessons["analog.quickstart"] = { 4, "complete", "2026-11-15T12:00:00Z", {} };
+            d.lessons["analog.quickstart"] = { 5, "complete", "2026-11-15T12:00:00Z", {} };
             d.lessons["analog.arp.basics"] = { 2, "in-progress", {}, "pattern" };
         });
         rig.learn->openBrowser();
