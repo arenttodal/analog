@@ -138,7 +138,7 @@ namespace
         l.title = "Quick Start";
         l.description = "The main parts of ANDOR Analog";
         l.group = "Quick Start";
-        l.revision = 4;   // (4: AUX D shown with the keyboard's D key, then the strip itself)
+        l.revision = 5;   // (4: AUX D shown with the keyboard's D key, then the strip itself; 5: ends on INFO)
         l.minutes = 2;
         l.completionText = u8 ("You\xe2\x80\x99ve seen the main parts of Analog. Choose another lesson to try a feature in more detail.");
         // The D key beneath ARP and SUB: the musician's own click shows AUX D (already showing:
@@ -167,6 +167,7 @@ namespace
                      "SUB adds lower notes beneath the main sound. Open SUB beside the keyboard to adjust its pitch and level."),
             aux,
             strip,
+            findLearnAgainStep(),   // (the INFO key, and the menu's Learn: every ANDOR instrument's)
         };
         return l;
     }

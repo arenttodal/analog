@@ -1,5 +1,17 @@
 # ANDOR ANALOG — status
 
+> **16 Nov 2026, Learn: every lesson ends in the tutorials; the Quick Start ends on INFO (OSP
+> and Analog, shared `shared/andor-learn`):**
+> - A finished lesson opens the tutorials, with its tick, instead of the "Lesson complete" note.
+>   A lesson that played on its example first asks Keep / Restore, then the tutorials open.
+> - The Quick Start's last step (`andor::learn::findLearnAgainStep()`) points at the INFO key.
+>   Its text:
+>   - the i in the corner always brings back Learn mode;
+>   - every tutorial is under the three-dot menu, in Learn.
+> - `analog.quickstart` is revision 5, nine steps: AUX D, then this step.
+> - OSP pin: `claude/analog-learn-end` (`b522a06`), which is `4489e33` plus that shared change.
+> - Verified (Linux): `andor_analog_tests` (the Learn cases included).
+
 > **16 Nov 2026, compact bottom edge (OSP and Analog, shared; docs/BOTTOM_EDGE.md,
 > docs/screenshots/bottom):**
 > - Both editors end 36 reference px sooner. The housing's foot is 22 px under the keys, about
