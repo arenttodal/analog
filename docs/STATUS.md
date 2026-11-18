@@ -1,5 +1,19 @@
 # ANDOR ANALOG — status
 
+> **18 Nov 2026, rendered macro knob D2 (asset only; OSP PR #26):**
+> - The six macros' sprite packs are the approved D2: the same cap at production height, the
+>   `studio-sculpt` light and an 80 % cast shadow. Looks only: no parameter, state, DSP or layout
+>   change, and ANALOG's colours stay vector.
+> - OSP pin: `claude/analog-pin-d2` (`7fb5dfa`), which is the previous pin `b522a06` plus the
+>   D2 commit only (cherry-picked from OSP's `3354690`). The OSP default line is deliberately not
+>   taken in: it now carries ANALOG's FX, SATELLITE, SUB and USER MACROS as shared code, and that
+>   migration is planned separately (OSP docs/reports/analog-osp-dependency-audit.md).
+> - Verified (Linux, this exact tree): 10 / 10 ctest groups (analog_dsp_tests, plugin,
+>   osp_visual_reference, memo_lab, andor_example_tests and _visual, andor_analog_tests and
+>   _visual, performance-smoke, andor_bootstrap_tool); the visual regression against OSP is
+>   0 px outside the masks in all 18 states.
+> - Still by hand before release: the D2 drag / automation pass on a Retina Mac and in a DAW.
+
 > **16 Nov 2026, Learn: every lesson ends in the tutorials; the Quick Start ends on INFO (OSP
 > and Analog, shared `shared/andor-learn`):**
 > - A finished lesson opens the tutorials, with its tick, instead of the "Lesson complete" note.
