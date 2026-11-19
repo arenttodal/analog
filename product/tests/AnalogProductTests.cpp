@@ -15,10 +15,10 @@
 #include "RackControls.h"
 #include "ParameterRack.h"
 #include "AnalogRacks.h"
-#include "FxPresets.h"
-#include "FxRack.h"
-#include "FxRouting.h"
-#include "FxIdentity.h"
+#include "../Source/FxPresets.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
+#include "../Source/FxRack.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
+#include "../Source/FxRouting.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
+#include "../Source/FxIdentity.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
 #include "fx/Effects.h"
 #include "OspLookAndFeel.h"
 #include "ModulationPanel.h"
@@ -31,7 +31,7 @@
 #include "SubPanel.h"
 #include "UserMacroBank.h"
 #include "UserMacroUI.h"
-#include "SatellitePanel.h"
+#include "../Source/SatellitePanel.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
 #include "RhythmPanel.h"
 #include "ShellProcessor.h"
 
@@ -825,6 +825,30 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             setValue (q, "analog.arp.cardB.rate", 3.0f);
             setValue (q, "analog.arp.cardC.rate", 3.0f);
         };
+    // STRUM (the shared arpeggiator's, OSP's arp.strum.* and the per-card ones) acts on CHORD
+    // steps only: the card's arpeggiator plays CHORD with STRUM on. Its SYNC division is tried
+    // with SYNC on in quarter steps (a spread never runs past its step, so in 32nds every
+    // division is cut to the same length).
+    for (int c = 0; c < 3; ++c)
+    {
+        const juce::String prefix = c == 0 ? juce::String ("arp.strum.") : "analog.arp.card" + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + c)) + ".strum.";
+        for (const char* field : { "on", "direction", "sync", "ms", "division" })
+            setups[prefix + field] = [c, prefix, division = juce::String (field) == "division"] (ShellProcessor& q) {
+                const float rate = division ? 0.0f : 3.0f;   // (1/4 or 1/32)
+                setValue (q, "arp.enabled", 1.0f);
+                setValue (q, "arp.rate", rate);
+                const juce::String card = c == 0 ? juce::String ("arp.") : "analog.arp.card" + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + c)) + ".";
+                if (c > 0)
+                {
+                    setValue (q, "analog.arp.link", 0.0f);
+                    setValue (q, card + "rate", rate);
+                }
+                setValue (q, card + "pattern", static_cast<float> (osp::ArpPattern::chord));
+                setValue (q, prefix + "on", 1.0f);
+                if (division)
+                    setValue (q, prefix + "sync", 1.0f);
+            };
+    }
     // SHAPER DNA's settings act while it plays: MOVEMENT heard, lane A in SHAPER, DNA on (the
     // splits in KEY ZONES; the phrase's 57 / 64 / 69 / 72 / 74 straddle both).
     {
@@ -1089,9 +1113,10 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     }
     renderModWheel = -1;
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
-    // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), and
-    // the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
-    CHECK (checkedBound == bound.size() - 6 + 7 + 10 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 6: "analog.arp.*" and "analog.fx.*" are patterns too)
+    // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), STRUM's
+    // fifteen (five for each of the three arpeggiators), and the modulation's: LFO 2, ENV 1 and
+    // 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
+    CHECK (checkedBound == bound.size() - 6 + 7 + 10 + 15 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 6: "analog.arp.*" and "analog.fx.*" are patterns too)
     CHECK (checkedFx > 300);   // (every routed effect's slot parameters: declared, silent in CLASSIC)
     CHECK (checkedUnbound > 100);
 }
@@ -8675,12 +8700,16 @@ TEST_CASE ("analog: SUB's row in the arpeggiator's housing: its light switches S
     CHECK (juce::roundToInt (p.parameterValue (params::subLowKey)) == juce::roundToInt (p.parameterValue (params::subHighKey)));
     ui.closePopup();
 
-    // The reference rendering (ANDOR OSP's own housing): no second row.
+    // The reference rendering (ANDOR OSP's own housing): since ANDOR OSP has SUB too (shared,
+    // OSP 1e04df6) its housing draws the SUB row as well, with nothing to switch there and no
+    // popover of ANALOG's.
     {
         ShellProcessor reference;
         reference.showReferenceMacros();
         std::unique_ptr<juce::AudioProcessorEditor> plain (reference.createEditorIfNeeded());
-        CHECK (! dynamic_cast<andor::shell::ShellEditor&> (*plain).arpHousing().hasSecondRow());
+        auto& plainUi = dynamic_cast<andor::shell::ShellEditor&> (*plain);
+        CHECK (plainUi.arpHousing().hasSecondRow());
+        CHECK (plainUi.openPopupIndex() == -1);
     }
 }
 

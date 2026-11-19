@@ -1,5 +1,27 @@
 # ANDOR ANALOG — status
 
+> **19 Nov 2026, the tests on OSP's current line (OSP pin `claude/shell-window-once`, `aef5e0d`,
+> OSP's default line plus one shared fix):**
+> - **Why:** `andor_analog_tests` did not compile against OSP's current line. OSP's Shared FX
+>   and SATELLITE work added shared headers with the names of ANALOG's own (`FxPresets.h`,
+>   `FxRack.h`, `FxRouting.h`, `FxIdentity.h`, `SatellitePanel.h`, plus `EqSpectrum.h` and
+>   `FxParameters.h`), and OSP's include path comes first.
+> - **The tests now include ANALOG's own copies** (`../Source/...`). They test the FX ANALOG
+>   ships: ANALOG keeps its own FX and SUB until it adopts the shared ones (OSP STATUS, NEXT).
+> - **Tests brought up to date with shared features:**
+>   - "every control moves the sound" hears STRUM's fifteen parameters (CHORD with STRUM on;
+>     SYNC's division in quarter steps).
+>   - ANDOR OSP's own housing now draws a SUB row (SUB is shared).
+>   - The parameter-schema golden gains the ten card B / C STRUM lines, appended, nothing else.
+> - **A shared bug found and fixed in OSP:** showing the AUX strip asked the host for the same
+>   window height twice, so a host answering the old size first granted it at once. The shell
+>   test "SPACE + ARP + a strip opened together ..." caught it here; ANALOG is the only product
+>   with a strip.
+> - **Not in this pin:** the D2 macro knob (`claude/analog-d2-macros`, OSP `claude/analog-pin-d2`)
+>   stays on its own line.
+> - **Verified (Linux):** `analog_dsp_tests` (321 cases); `andor_analog_tests` (240 passed,
+>   2 skipped).
+
 > **16 Nov 2026, Learn: every lesson ends in the tutorials; the Quick Start ends on INFO (OSP
 > and Analog, shared `shared/andor-learn`):**
 > - A finished lesson opens the tutorials, with its tick, instead of the "Lesson complete" note.

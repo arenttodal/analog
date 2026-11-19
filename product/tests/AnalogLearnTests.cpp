@@ -12,7 +12,7 @@
 #include "Binding.h"
 #include "CeramicSkin.h"
 #include "EffectRack.h"
-#include "FxRouting.h"
+#include "../Source/FxRouting.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
 #include "RackControls.h"
 #include "ShapingPopups.h"
 #include "ShellEditor.h"
