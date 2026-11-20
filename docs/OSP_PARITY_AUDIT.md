@@ -193,9 +193,9 @@ plus the preset dropdown at 200 %), and `docs/screenshots/parity/strum/`: OSP's 
 states and panel beside ANALOG's panel, which opens in the same place and at the same
 proportions.
 
-## Gate 4: Custom ARP Patterns (stacked, not approved in OSP yet)
+## Gate 4: Custom ARP Patterns (stacked; R2 integrated)
 
-**Status: prepared and tested, waiting on OSP.** OSP's Custom Pattern work is on
+**Status: R2 integrated and tested on the stacked line (below). Before R2:** OSP's Custom Pattern work is on
 `claude/custom-arp` (CP2–CP4). It is not on OSP's default line, and **R2 does not exist yet**.
 Per the spec, it is kept off the main integration branch:
 
@@ -222,10 +222,35 @@ Per the spec, it is kept off the main integration branch:
     plays on card B.
 - Full ANALOG suite on this line: 261 cases, all pass (the usual Kontakt-fixture skip).
 
-**When R2 lands:** merge R2 into `claude/analog-parity-r1-custom-arp` (or rebuild it on R2), move
-ANALOG's pin with `tools/update-osp-pin.sh`, re-run `[arp-custom]`, `CustomArpParityTests` and the
-editor screenshots. The editor is the only part R2 is expected to change; the ANALOG-side
-contract (card mapping, state, hints) does not depend on it.
+**R2 (20 Nov 2026, later the same day).** OSP's Custom Pattern UX redesign R2 landed as one
+commit, `6ef3376`, on `claude/macos-release` (OSP's 0.9.0 beta line).
+- It is cherry-picked onto OSP `claude/analog-parity-r1-custom-arp` as `8d3b372`, R2 only. The
+  beta's release infrastructure, MIDI Learn and its POS-line fix are not taken.
+- R2 brings one "Custom Patterns ›" row with a browser, and a grid-first editor with direct
+  manipulation, whole-document undo and a discard question. Its engine, format, state,
+  parameters and factory patterns are unchanged.
+- ANALOG built against it with no source change. Its R2 shell case runs in ANALOG.
+
+**R2 results (ANALOG `claude/osp-parity-r1-custom-arp`, OSP pin `c63339e`, Linux):**
+- **One shared fix, made in OSP** (`c63339e` on the same OSP branch): the editor and the browser
+  titled card B "CARD C". Their card index is the arpeggiator's, as shown, but they mapped it
+  through `shownLayerName`, and ANALOG shows its layers A, C, B. They now use `layerName`. ANDOR
+  OSP shows its layers in order, so it is unchanged: its R2 / CUSTOM / STRUM plugin tests (41
+  cases), its visual reference and the example product's visual test pass.
+- **R2's "Custom Patterns ›" row binds CUSTOM to the interface**, so ANALOG's "every control moves
+  the sound" test now covers `arp.custom` and both cards' CUSTOM (each with a factory pattern on
+  its card); the count went up by those 3.
+- **New test:** the R2 browser names each card as ANALOG shows it (A, B, C) and lists that card's
+  own pattern only (`[arp-custom-r2][parity]`).
+- **Full ANALOG suite:** 263 cases, all pass except 3 skips: the Bukkehorn recordings (not in the
+  repository) and the 2 real-window menu tests, which pass under Xvfb (`[parity]`, run on its own).
+  Visual regression 0 px; the OSP unit, integration, regression, plugin suites, the example product
+  and the rest of ctest pass.
+- **Screenshots** (`[screenshots-parity-custom]`, `docs/screenshots/parity/custom/`): the R2
+  editor on card B, empty and with a take; ANALOG's ARP panel on EDIT B with the "Custom
+  Patterns ›" row and the pattern field; the whole instrument with the ARP open.
+- **Not verified here (OWNER TEST):** the editor and browser in a DAW window (Logic, Live,
+  Reaper), the discard question with the host's own windows, and listening on real material.
 
 ## Visual comparison (baseline vs after)
 

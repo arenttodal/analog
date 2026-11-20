@@ -9,9 +9,9 @@ _20 Nov 2026. The audit, with every area classified, the decisions and the gate 
 |---|---|---|---|
 | ANALOG baseline | `feature/aux-live-input` | `e3a8090` | `b522a06` |
 | **ANALOG integration** | `claude/osp-parity-r1` | `ec261bd` | **`127f430`** (OSP `claude/analog-parity-r1`) |
-| ANALOG + Custom ARP (stacked) | `claude/osp-parity-r1-custom-arp` | `348e68c` | `d1bf2d2` (OSP `claude/analog-parity-r1-custom-arp`) |
+| ANALOG + Custom ARP R2 (stacked) | `claude/osp-parity-r1-custom-arp` | branch head | `c63339e` (OSP `claude/analog-parity-r1-custom-arp`) |
 | OSP integration | `claude/analog-parity-r1` | `127f430` | – (`aef5e0d` + 3 commits: shell presets / menus, test fix, STATUS) |
-| OSP + Custom ARP | `claude/analog-parity-r1-custom-arp` | `d1bf2d2` | – (the above + `claude/custom-arp` `e39b0bb` + CUSTOM hint check) |
+| OSP + Custom ARP R2 | `claude/analog-parity-r1-custom-arp` | `c63339e` | – (the above + `claude/custom-arp` `e39b0bb` + CUSTOM hint check + R2 `6ef3376` cherry-picked as `8d3b372` + the card-letter fix) |
 
 Not touched: ANALOG `main` and `claude/release-candidate` (1.0.0 RC), OSP's default branch,
 `claude/macos-release` (0.9.0-beta.1) and `claude/custom-arp`. No release was published.
@@ -19,6 +19,8 @@ Not touched: ANALOG `main` and `claude/release-candidate` (1.0.0 RC), OSP's defa
 ## Integration changelog
 
 **OSP (shared, every shell product):**
+- Stacked line only: Custom Pattern R2, and its editor / browser naming the card by its own letter
+  (ANALOG showed "CARD C" on card B).
 - SAVE updates only the musician's own preset, never a factory one in place. "Save preset" and
   "Save preset as..." are separate items. The preset list shows "Factory" first, then "Your
   presets". The dead "Save starting state..." item is gone.
@@ -74,7 +76,7 @@ See "Integration results", "Gate 4" and "Visual comparison" in the audit. Summar
 
 | Suite | Main line | Custom ARP line |
 |---|---|---|
-| `andor_analog_tests` | 255 cases pass (1 skip, as before) | 261 pass (1 skip) |
+| `andor_analog_tests` | 255 cases pass (1 skip, as before) | 263 cases with R2 (3 skips: Bukkehorn, 2 real-window tests that pass under Xvfb) |
 | `andor_analog_tests_visual` | 0 px | 0 px |
 | `analog_dsp_tests` | pass | pass |
 | OSP unit, integration, regression, plugin; example product; memo lab; perf smoke; bootstrap | pass | pass |
@@ -93,8 +95,9 @@ See "Integration results", "Gate 4" and "Visual comparison" in the audit. Summar
 
 ## Remaining issues and priorities
 
-1. **Custom ARP R2** (blocked on OSP): when it lands, rebuild the stacked line on it and re-pin.
-   Only then can Custom Patterns reach the integration branch.
+1. **Custom ARP R2: integrated on the stacked line** (audit, Gate 4, "R2 results"). It reaches the
+   main integration branch once the owner approves R2 there (it is on OSP's beta line, not its
+   default). Owner test: the editor and browser in DAW windows.
 2. **FX convergence** (P1, OSP work): upstream V6 MAIN + SEND, RETRO 100 % and the AUX identity
    into OSP's shared FX, then delete ANALOG's copies (audit, section 5).
 3. **SUB vibrato upstream** (P2): OSP's shared SUB lacks the MOD-wheel vibrato ANALOG has.

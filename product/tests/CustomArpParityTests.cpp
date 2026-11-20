@@ -6,6 +6,7 @@
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "CustomPatternBrowser.h"
 #include "CustomPatternEditor.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
@@ -302,6 +303,27 @@ TEST_CASE ("parity custom arp: one pattern library for OSP and ANALOG; a library
     CHECK (played.heldAtEnd == 0);
 }
 
+
+TEST_CASE ("parity custom arp: the R2 browser names each card as ANALOG shows it and lists that card's own pattern", "[analog][arp][arp-custom][arp-custom-r2][parity]")
+{
+    // ANALOG shows its layers A, C, B (card C, the hybrid, is storage layer 1); the browser's card
+    // index is the arpeggiator's, as shown. It once read "CARD C" on card B.
+    using Browser = osp::plugin::CustomPatternBrowser;
+    ShellProcessor p;
+    const auto& pattern = osp::arppattern::factoryPatterns().front();
+    p.setCustomArpDocument (1, &pattern);
+    for (int card = 0; card < 3; ++card)
+    {
+        INFO ("card " << card);
+        Browser browser (p, card, [] (bool) {});
+        const auto letter = juce::String::charToString (static_cast<juce::juce_wchar> ('A' + card));
+        CHECK (browser.find (Browser::Kind::heading, "ON CARD " + letter) >= 0);
+        if (card == 1)
+            CHECK (browser.find (Browser::Kind::current, juce::String (pattern.name)) >= 0);
+        else
+            CHECK (browser.find (Browser::Kind::current) < 0);
+    }
+}
 
 TEST_CASE ("parity custom arp: screenshots of the editor on card B and ANALOG's ARP panel with a custom row (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-parity-custom]")
 {

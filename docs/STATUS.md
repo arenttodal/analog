@@ -1,5 +1,21 @@
 # ANDOR ANALOG — status
 
+> **20 Nov 2026, Custom ARP R2 on the stacked line (branch `claude/osp-parity-r1-custom-arp`, OSP
+> pin `c63339e` on `claude/analog-parity-r1-custom-arp`; docs/OSP_PARITY_AUDIT.md, Gate 4):**
+> - **R2 in ANALOG:** OSP's Custom Pattern redesign (6ef33767), cherry-picked alone; the beta's
+>   release work, MIDI Learn and its POS-line fix are not taken. One "Custom Patterns ›" row with a
+>   browser on every card (A, B, C), the grid-first editor, whole-document undo and the discard
+>   question. Engine, file format, state, parameters (CUSTOM hint 41) and factory patterns are as
+>   before.
+> - **Fixed in OSP (shared):** the editor and browser titled card B "CARD C" (ANALOG shows its
+>   layers A, C, B). ANDOR OSP is unchanged.
+> - **Tests:** the every-control test covers the three CUSTOM keys; a new R2 browser test checks
+>   each card's letter and its own pattern. 263 cases (3 skips: Bukkehorn recordings, the two
+>   real-window menu tests, which pass under Xvfb); visual 0 px; every OSP suite.
+> - **Not verified here (OWNER TEST):** DAW hosts, listening.
+> - **Still not on the main integration line or the 1.0.0 RC:** Custom Patterns reach
+>   `claude/osp-parity-r1` once the owner approves R2 for it.
+
 > **20 Nov 2026, OSP synchronization and feature parity R1 (branch `claude/osp-parity-r1`, OSP
 > pin `claude/analog-parity-r1`; docs/OSP_PARITY_AUDIT.md, docs/OSP_DEPENDENCY_UPDATES.md):**
 > ANDOR ANALOG on OSP's approved line (its default: STRUM, the ceramic menus, USER MACROS, the

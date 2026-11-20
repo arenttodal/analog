@@ -33,6 +33,7 @@
 #include "UserMacroUI.h"
 #include "../Source/SatellitePanel.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
 #include "RhythmPanel.h"
+#include "model/ArpFactoryPatterns.h"
 #include "ShellProcessor.h"
 
 #include "audio/utility/TestSignals.h"
@@ -849,6 +850,23 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
                     setValue (q, prefix + "sync", 1.0f);
             };
     }
+    // CUSTOM (Custom ARP Patterns, shared): it changes what plays once its card has a pattern
+    // (CUSTOM on with no pattern plays the style unchanged), so the card is given one: a factory
+    // pattern, on its own arpeggiator.
+    for (int c = 0; c < 3; ++c)
+    {
+        const juce::String card = c == 0 ? juce::String ("arp.") : "analog.arp.card" + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + c)) + ".";
+        setups[card + "custom"] = [c, card] (ShellProcessor& q) {
+            setValue (q, "arp.enabled", 1.0f);
+            setValue (q, "arp.rate", 3.0f);
+            if (c > 0)
+            {
+                setValue (q, "analog.arp.link", 0.0f);
+                setValue (q, card + "rate", 3.0f);
+            }
+            q.setCustomArpDocument (c, &osp::arppattern::factoryPatterns().front());
+        };
+    }
     // SHAPER DNA's settings act while it plays: MOVEMENT heard, lane A in SHAPER, DNA on (the
     // splits in KEY ZONES; the phrase's 57 / 64 / 69 / 72 / 74 straddle both).
     {
@@ -1114,9 +1132,9 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     renderModWheel = -1;
     // Every listed one (the two wheels are not parameters), the arpeggiator's seven ("arp.*")
     // and the per-card arpeggiator's ten (LINK, the three cards, B's and C's own three), STRUM's
-    // fifteen (five for each of the three arpeggiators), and the modulation's: LFO 2, ENV 1 and
-    // 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
-    CHECK (checkedBound == bound.size() - 6 + 7 + 10 + 15 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 6: "analog.arp.*" and "analog.fx.*" are patterns too)
+    // fifteen (five for each of the three arpeggiators), CUSTOM's three (one per arpeggiator), and
+    // the modulation's: LFO 2, ENV 1 and 2, the 16 routes' five ("mod.*"; LFO 1's are listed).
+    CHECK (checkedBound == bound.size() - 6 + 7 + 10 + 15 + 3 + (8 + 2 * 7 + 5 * osp::mod::maxRoutes));   // (- 6: "analog.arp.*" and "analog.fx.*" are patterns too)
     CHECK (checkedFx > 300);   // (every routed effect's slot parameters: declared, silent in CLASSIC)
     CHECK (checkedUnbound > 100);
 }
