@@ -21,8 +21,13 @@
 > - **Kept as ANALOG's own (not switched):** FX routing / rack / presets, SUB, the SATELLITE panel
 >   and the USER MACRO UI, because OSP's shared copies predate MAIN + SEND, RETRO 100 % and SUB
 >   vibrato. The convergence plan is in the audit, section 5.
-> - **Custom ARP Patterns:** R2 is not in OSP yet; CP3 / CP4 prepared on a stacked branch (see
->   the audit's results).
+> - **Custom ARP Patterns:** R2 is not in OSP yet. CP3 / CP4 are prepared and tested on the stacked
+>   branch `claude/osp-parity-r1-custom-arp` (OSP `claude/analog-parity-r1-custom-arp`): CUSTOM
+>   per card (hint 41), the shell's `[arp-custom]` passing in ANALOG, `CustomArpParityTests`.
+> - **Macro lenses:** ANALOG keeps its own (OSP re-rendered its CORE lenses in a new palette);
+>   its walnut pack carries the originals (`tools/add_macro_lenses.py`).
+> - **Verified (Linux):** `andor_analog_tests` 255 cases (261 on the Custom ARP line), visual 0 px,
+>   every OSP suite; final report: docs/OSP_PARITY_R1_REPORT.md.
 > - **Release metadata:** CI checks the OSP pin is on an OSP branch or tag and writes
 >   BUILD-INFO.txt (ANALOG commit, OSP pin) beside the test build and the installer.
 
