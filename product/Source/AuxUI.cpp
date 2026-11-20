@@ -426,8 +426,9 @@ namespace
         juce::Rectangle<float> keyArea (juce::Rectangle<float> bounds) const override { return bounds.reduced (1.0f); }
     };
 
-    /** D ARP's keys on the strip: the RACK key's ceramic face, pressed in and its word in D's
-        colour while its parameter holds `value` (ARP: on; A B C: the lane followed). A click
+    /** D ARP's keys on the strip: the RACK key's ceramic face, lit as the arpeggiator's own
+        keys (OCTAVES, EDIT) - the warm accent face, its word in the accent - while its
+        parameter holds `value` (ARP: on; A B C: the lane followed). A click
         sets that value (ARP: toggles), one undoable gesture. `quiet`: drawn dimmer (it does
         nothing right now - the arpeggiator off, or LINK for the lanes). */
     class ParamKey final : public juce::Button, public skin::KeyFace
@@ -451,7 +452,8 @@ namespace
             if (! skin::drawnBySurface())
                 draw::button (g, r, 7.0f, lit || down, over, colour::accent);
             g.setFont (type::button (12.5f));
-            g.setColour ((lit ? aux::colour().darker (0.25f) : colour::text).withAlpha ((lit ? 1.0f : 0.62f) * (quiet ? 0.45f : 1.0f)));
+            // (D's purple barely read on the pressed face: lit is the arpeggiator panel's orange.)
+            g.setColour ((lit ? colour::accent.darker (0.35f) : colour::text).withAlpha ((lit ? 1.0f : 0.62f) * (quiet ? 0.45f : 1.0f)));
             g.drawText (text, r, juce::Justification::centred, false);
             if (hasKeyboardFocus (false))
             {
@@ -463,7 +465,7 @@ namespace
         skin::KeyRole keyRole() const override { return skin::KeyRole::eq; }
         skin::KeyState keyState() const override
         {
-            return getToggleState() || isDown() ? skin::KeyState::pressed : isOver() ? skin::KeyState::hover : skin::KeyState::normal;
+            return getToggleState() ? skin::KeyState::active : isDown() ? skin::KeyState::pressed : isOver() ? skin::KeyState::hover : skin::KeyState::normal;
         }
         juce::Rectangle<float> keyArea (juce::Rectangle<float> bounds) const override { return bounds.reduced (1.0f); }
 
@@ -565,7 +567,10 @@ namespace
             setTitle ("D AUX");
             setDescription ("D / AUX: a fourth source (RHYTHM, NOISE or KONTAKT) through the FILTER and the effects");
             setTooltip ("D / AUX: double-click for its rack");
-            power = std::make_unique<rackui::PowerKey> (*h.apvts().getParameter (params::auxEnabled), &h.undo(), aux::colour());
+            // Its glyph lit in the accent, as the arpeggiator's keys (D's purple barely read on the
+            // key); the strip rings it in the accent while on (paint) - on and off at a glance.
+            power = std::make_unique<rackui::PowerKey> (*h.apvts().getParameter (params::auxEnabled), &h.undo(), design::colour::accent);
+            power->onChange = [this] (bool) { repaint(); };
             power->setTooltip ("D's power: off, D plays nothing at all (its bus is idle)");
             power->setTitle ("D power");
             binding::tag (*power, params::auxEnabled);
@@ -774,6 +779,14 @@ namespace
             const auto bounds = getLocalBounds().toFloat();
             draw::raised (g, bounds, layout::cardRadius, colour::cardTop, colour::cardBottom);
             skin::drawKeys (g, *this);   // (M / S and RACK: the ceramic keys, as on the cards)
+            if (poweredOf (host))
+            {
+                // D on: a fine accent ring round the power key, no glow (the owner: a halo was
+                // too much; the key draws its own bezel within its bounds).
+                const auto k = power->getBounds().toFloat();
+                g.setColour (colour::accent.withAlpha (0.75f));
+                g.drawEllipse (k.expanded (0.6f), 1.1f);
+            }
             {
                 const auto b = badge.toFloat();
                 juce::Path shape;
@@ -792,7 +805,7 @@ namespace
                 g.setColour (colour::text.withAlpha (0.92f));
                 g.setFont (fonts::make (15.0f, fonts::Weight::medium, 0.06f));
                 g.drawText ("AUX", n.removeFromTop (24.0f), juce::Justification::bottomLeft, false);
-                g.setColour (colour::textSecondary);
+                g.setColour (poweredOf (host) ? colour::accent.darker (0.35f) : colour::textSecondary);
                 g.setFont (fonts::label (10.0f));
                 g.drawText (poweredOf (host) ? juce::String ("ON") : juce::String ("OFF"), n, juce::Justification::topLeft, false);
             }

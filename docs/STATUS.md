@@ -1,5 +1,12 @@
 # ANDOR ANALOG — status
 
+> **20 Nov 2026, D's keys show their state (owner report):** with D on, its ARP key and FOLLOW
+> A B C lit as a faint pressed key in D's purple; they now light as the arpeggiator panel's own
+> keys (OCTAVES, EDIT): the warm accent face, the word in the accent. D's power key: its glyph in
+> the accent and a fine accent ring while on (no glow, at the owner's request), "ON" in the
+> accent. New test (`[auxarp][ui]`): the keys' active state follows ARP and FOLLOW in KONTAKT and
+> NOISE; the ring is drawn on and gone off.
+
 > **20 Nov 2026, Custom ARP merged into the main integration line (`claude/osp-parity-r1`, OSP
 > pin `c2a421a` on `claude/analog-parity-r1`; the owner's go-ahead):**
 > - `claude/osp-parity-r1` now carries everything on the Custom ARP line (fast-forward): Custom

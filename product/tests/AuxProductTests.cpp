@@ -303,6 +303,66 @@ TEST_CASE ("AUX strip: its visibility is kept with the session, never with a pre
     CHECK (r.auxStripShown());   // (... nor hides it)
 }
 
+TEST_CASE ("AUX strip: D ARP's ARP and FOLLOW keys light as the arpeggiator's own (the warm accent face), not a faint pressed key", "[analog][aux][ui][auxarp]")
+{
+    // The owner's report: with D on, ARP and FOLLOW A B C barely showed which was on - they
+    // light as OCTAVES and EDIT do in the arpeggiator panel.
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    ui.setAuxStripShown (true);
+    auto& strip = *ui.auxStripComponent();
+    using osp::plugin::skin::KeyFace;
+    using osp::plugin::skin::KeyState;
+    auto stateOf = [&] (const char* name) {
+        auto* face = dynamic_cast<KeyFace*> (AuxStripView::part (strip, name));
+        REQUIRE (face != nullptr);
+        return face->keyState();
+    };
+    set (p, params::auxEnabled, 1.0f);
+    set (p, "arp.enabled", 1.0f);
+    set (p, "analog.arp.link", 0.0f);
+    for (const float mode : { 2.0f, 1.0f })   // (KONTAKT, keyed NOISE)
+    {
+        INFO ("mode " << mode);
+        set (p, params::auxMode, mode);
+        set (p, params::auxArp, 0.0f);
+        set (p, params::auxArpFollow, 1.0f);
+        refreshStrip (ui);
+        CHECK (stateOf ("arp") != KeyState::active);   // (ARP off)
+        CHECK (stateOf ("A") != KeyState::active);
+        CHECK (stateOf ("B") == KeyState::active);     // (the lane followed)
+        CHECK (stateOf ("C") != KeyState::active);
+        set (p, params::auxArp, 1.0f);
+        set (p, params::auxArpFollow, 2.0f);
+        refreshStrip (ui);
+        CHECK (stateOf ("arp") == KeyState::active);
+        CHECK (stateOf ("B") != KeyState::active);
+        CHECK (stateOf ("C") == KeyState::active);
+    }
+
+    // D's power key, the same report: on, an accent ring round it; off, none.
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    refreshStrip (ui);
+    auto* power = AuxStripView::part (strip, "power");
+    REQUIRE (power != nullptr);
+    auto ringPixel = [&] {
+        const auto image = strip.createComponentSnapshot (strip.getLocalBounds(), true, 1.0f);
+        const auto k = power->getBounds();
+        return image.getPixelAt (k.getX() - 1, k.getCentreY());
+    };
+    // (The accent ring over the cream face: clearly warm - the face alone is nearly neutral.)
+    auto near = [] (juce::Colour c) { return c.getRed() - c.getBlue() > 45; };
+    set (p, params::auxEnabled, 1.0f);
+    refreshStrip (ui);
+    CHECK (near (ringPixel()));
+    set (p, params::auxEnabled, 0.0f);
+    refreshStrip (ui);
+    CHECK_FALSE (near (ringPixel()));
+}
+
 TEST_CASE ("AUX strip: the mode's knobs, the C-style mode dropdown, the rack from a double-click and Escape", "[analog][aux][ui]")
 {
     ShellProcessor p;
