@@ -8,10 +8,10 @@ _20 Nov 2026. The audit, with every area classified, the decisions and the gate 
 | | Branch | Commit | OSP pin |
 |---|---|---|---|
 | ANALOG baseline | `feature/aux-live-input` | `e3a8090` | `b522a06` |
-| **ANALOG integration** | `claude/osp-parity-r1` | `ec261bd` | **`127f430`** (OSP `claude/analog-parity-r1`) |
-| ANALOG + Custom ARP R2 (stacked) | `claude/osp-parity-r1-custom-arp` | branch head | `c63339e` (OSP `claude/analog-parity-r1-custom-arp`) |
-| OSP integration | `claude/analog-parity-r1` | `127f430` | – (`aef5e0d` + 3 commits: shell presets / menus, test fix, STATUS) |
-| OSP + Custom ARP R2 | `claude/analog-parity-r1-custom-arp` | `c63339e` | – (the above + `claude/custom-arp` `e39b0bb` + CUSTOM hint check + R2 `6ef3376` cherry-picked as `8d3b372` + the card-letter fix) |
+| **ANALOG integration** (Custom ARP merged) | `claude/osp-parity-r1` | branch head | **`c2a421a`** (OSP `claude/analog-parity-r1`) |
+| ANALOG + Custom ARP R2 (stacked, now merged) | `claude/osp-parity-r1-custom-arp` | the same commit | `c2a421a` |
+| OSP integration | `claude/analog-parity-r1` | `c2a421a` | – (`aef5e0d` + shell presets / menus, test fix, STATUS; then the Custom ARP line below, fast-forward) |
+| OSP + Custom ARP R2 | `claude/analog-parity-r1-custom-arp` | `c2a421a` | – (the above + `claude/custom-arp` `e39b0bb` + CUSTOM hint check + R2 `6ef3376` as `8d3b372` + the card-letter fix + the click fix `9ff2120` as `c2a421a`) |
 
 Not touched: ANALOG `main` and `claude/release-candidate` (1.0.0 RC), OSP's default branch,
 `claude/macos-release` (0.9.0-beta.1) and `claude/custom-arp`. No release was published.
@@ -46,7 +46,7 @@ Not touched: ANALOG `main` and `claude/release-candidate` (1.0.0 RC), OSP's defa
 |---|---|---|
 | `analog.arp.cardB.strum.{on,direction,sync,ms,division}`, `analog.arp.cardC.strum.*` | 10 (the 19 Nov branch had them at v35) | v40 |
 | `arp.strum.*` (card A, the shell's namespace; checked against OSP's schema) | 5 | v40 |
-| Stacked branch only: `analog.arp.cardB.custom`, `analog.arp.cardC.custom`; `arp.custom` (card A) | 2 + 1 | v41 |
+| Custom ARP (stacked, now merged): `analog.arp.cardB.custom`, `analog.arp.cardC.custom`; `arp.custom` (card A) | 2 + 1 | v41 |
 
 No existing parameter changed ID, order, type, range, default or hint. All appended parameters
 are off by default. An older session opens with them off; this is tested fresh and over an
@@ -63,7 +63,7 @@ instance with STRUM on.
 ## Compatibility and migration
 
 - No state-version bump. `<FxRouting schema=2>`, `<UserMacros schema=1>`, C2, sample and Kontakt
-  state are untouched. `<CustomPatterns schema=1>` (stacked branch) is written only when a card
+  state are untouched. `<CustomPatterns schema=1>` (Custom ARP, now on the main line) is written only when a card
   has one, and a state without it clears them, as in OSP.
 - Factory presets: the installer and its manifest are unchanged. SAVE no longer overwrites a
   factory preset in place, but a deliberate Save As into the Factory folder still works, and
@@ -95,9 +95,10 @@ See "Integration results", "Gate 4" and "Visual comparison" in the audit. Summar
 
 ## Remaining issues and priorities
 
-1. **Custom ARP R2: integrated on the stacked line** (audit, Gate 4, "R2 results"). It reaches the
-   main integration branch once the owner approves R2 there (it is on OSP's beta line, not its
-   default). Owner test: the editor and browser in DAW windows.
+1. **Custom ARP R2: merged into the main integration line** (audit, Gate 4), with the click fix
+   (the row opened and closed the browser in one click). Owner test: the clicks, editor and
+   browser in DAW windows on macOS and Windows. OSP's default branch does not have R2 yet (it is on
+   OSP's beta line); the parity line carries it until OSP merges it.
 2. **FX convergence** (P1, OSP work): upstream V6 MAIN + SEND, RETRO 100 % and the AUX identity
    into OSP's shared FX, then delete ANALOG's copies (audit, section 5).
 3. **SUB vibrato upstream** (P2): OSP's shared SUB lacks the MOD-wheel vibrato ANALOG has.

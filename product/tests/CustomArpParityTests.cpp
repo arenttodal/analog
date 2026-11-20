@@ -16,6 +16,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#if ! (JUCE_MAC || JUCE_IOS || JUCE_ANDROID)
+namespace juce::detail
+{
+bool dispatchNextMessageOnSystemQueue (bool returnIfNoPendingMessages);   // (juce_events: Linux / Windows)
+}
+#endif
+
 #include <array>
 #include <functional>
 #include <vector>
@@ -322,6 +329,172 @@ TEST_CASE ("parity custom arp: the R2 browser names each card as ANALOG shows it
             CHECK (browser.find (Browser::Kind::current, juce::String (pattern.name)) >= 0);
         else
             CHECK (browser.find (Browser::Kind::current) < 0);
+    }
+}
+
+namespace
+{
+    /** The ARP panel with clicks as a musician makes them: through the window's native peer where
+        a display is at hand (Xvfb is enough), so JUCE routes every press (the component under it,
+        then the editor's outside-click watcher, as in a host); else routed the same way, step by
+        step (the pressed component's handler, then the watcher). */
+    struct ClickRig
+    {
+        andor::shell::ShellProcessor& p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+        andor::shell::ShellEditor* ui = nullptr;
+        juce::ComponentPeer* peer = nullptr;
+
+        explicit ClickRig (andor::shell::ShellProcessor& q) : p (q)
+        {
+            editor.reset (p.createEditorIfNeeded());
+            ui = dynamic_cast<andor::shell::ShellEditor*> (editor.get());
+            REQUIRE (ui != nullptr);
+            editor->setSize (1448, juce::roundToInt (ui->instrumentHeight()));
+           #if JUCE_LINUX
+            if (juce::SystemStats::getEnvironmentVariable ("DISPLAY", {}).isNotEmpty())
+            {
+                editor->addToDesktop (0);
+                peer = editor->getPeer();
+            }
+           #endif
+            editor->setVisible (true);
+            ui->arpControl().onToggleEditor();
+            editor->setSize (1448, juce::roundToInt (ui->instrumentHeight()));
+            ui->refreshNow();
+        }
+        ~ClickRig() { juce::ModifierKeys::currentModifiers = {}; }
+
+        static void pump()
+        {
+           #if ! (JUCE_MAC || JUCE_IOS || JUCE_ANDROID)
+            for (int i = 0; i < 200 && juce::detail::dispatchNextMessageOnSystemQueue (true); ++i)
+            {
+            }
+           #endif
+        }
+        osp::plugin::ArpInlinePanel& arp() { return ui->arpInlinePanel(); }
+        juce::Component* popup() { return ui->openPopupPanel(); }
+
+        /** The ARP list scrolled (the mouse wheel over it) until the Custom Patterns row shows. */
+        juce::Rectangle<float> customRow()
+        {
+            auto& a = arp();
+            for (int i = 0; i < 40 && a.customRowArea (0).isEmpty(); ++i)
+            {
+                juce::MouseWheelDetails wheel;
+                wheel.deltaY = -0.2f;
+                const auto at = a.patternListArea().getCentre();
+                a.mouseWheelMove (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &a, &a,
+                                                    juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 0, false),
+                                  wheel);
+            }
+            return a.customRowArea (0);
+        }
+
+        /** A left click (press and release) at a point of `c`. */
+        void click (juce::Component& c, juce::Point<float> local)
+        {
+            const auto at = editor->getLocalPoint (&c, local);
+            const auto down = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+            if (peer != nullptr)
+            {
+                for (auto mods : { down, juce::ModifierKeys() })
+                {
+                    juce::ModifierKeys::currentModifiers = mods;
+                    peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::mouse, at, mods, juce::MouseInputSource::defaultPressure,
+                                            juce::MouseInputSource::defaultOrientation, juce::Time::currentTimeMillis());
+                    pump();
+                }
+                return;
+            }
+            auto* target = editor->getComponentAt (at.roundToInt());
+            REQUIRE (target != nullptr);
+            auto event = [&] (juce::ModifierKeys mods) {
+                const auto l = target->getLocalPoint (editor.get(), at);
+                return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), l, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, target, target,
+                                         juce::Time::getCurrentTime(), l, juce::Time::getCurrentTime(), 1, false);
+            };
+            juce::Component::SafePointer<juce::Component> pressed (target);
+            target->mouseDown (event (down));
+            ui->pressAnywhere (target);   // (the desktop's listeners hear a press after the component)
+            if (pressed != nullptr)
+                pressed->mouseUp (event ({}));
+            pump();
+        }
+    };
+}
+
+TEST_CASE ("parity custom arp: Custom Patterns open when clicked: the row opens the browser; a pattern, Edit, + New Pattern and the pencil work by click, on every card", "[analog][arp][arp-custom][arp-custom-r2][parity]")
+{
+    using Browser = osp::plugin::CustomPatternBrowser;
+    using Editor = osp::plugin::CustomPatternEditor;
+    andor::shell::ShellProcessor p;
+    setValue (p, "arp.enabled", 1.0f);
+    setValue (p, "analog.arp.link", 0.0f);
+    ClickRig rig (p);
+    for (int card = 0; card < 3; ++card)
+    {
+        INFO ("card " << card << (rig.peer != nullptr ? " (real window)" : " (routed)"));
+        rig.arp().setEditCard (card);
+        rig.arp().refresh();
+        // The row: the browser opens and stays open after the click.
+        const auto row = rig.customRow();
+        REQUIRE_FALSE (row.isEmpty());
+        rig.click (rig.arp(), row.getCentre());
+        auto* browser = dynamic_cast<Browser*> (rig.popup());
+        REQUIRE (browser != nullptr);
+        CHECK (rig.p.customArpDocument (card) == nullptr);   // (opening it changes nothing)
+
+        // + New Pattern: the editor replaces the browser.
+        const int fresh = browser->find (Browser::Kind::newPattern);
+        REQUIRE (fresh >= 0);
+        rig.click (*browser, browser->rowArea (fresh).getCentre().toFloat());
+        REQUIRE (dynamic_cast<Editor*> (rig.popup()) != nullptr);
+        rig.ui->closePopup();
+
+        // A factory pattern chosen by click: on this card, CUSTOM on, the browser closed.
+        rig.click (rig.arp(), rig.customRow().getCentre());
+        browser = dynamic_cast<Browser*> (rig.popup());
+        REQUIRE (browser != nullptr);
+        if (! browser->factoryExpanded())
+        {
+            const int heading = browser->find (Browser::Kind::factoryHeading);
+            REQUIRE (heading >= 0);
+            rig.click (*browser, browser->rowArea (heading).getCentre().toFloat());
+            REQUIRE (rig.popup() == browser);
+        }
+        const auto& factory = osp::arppattern::factoryPatterns()[static_cast<std::size_t> (card)];
+        const int pick = browser->find (Browser::Kind::factory, juce::String (factory.name));
+        REQUIRE (pick >= 0);
+        rig.click (*browser, browser->rowArea (pick).getCentre().toFloat());
+        CHECK (rig.popup() == nullptr);
+        REQUIRE (rig.p.customArpDocument (card) != nullptr);
+        CHECK (juce::String (rig.p.customArpDocument (card)->name) == juce::String (factory.name));
+        for (int other = 0; other < 3; ++other)
+            if (other > card)
+                CHECK (rig.p.customArpDocument (other) == nullptr);
+        rig.arp().refresh();
+
+        // The pencil in the pattern field: the editor, on this card's pattern.
+        const auto pencil = rig.arp().pencilArea();
+        REQUIRE_FALSE (pencil.isEmpty());
+        rig.click (rig.arp(), pencil.getCentre());
+        auto* editor = dynamic_cast<Editor*> (rig.popup());
+        REQUIRE (editor != nullptr);
+        CHECK (juce::String (editor->document().name) == juce::String (factory.name));
+        rig.ui->closePopup();
+
+        // Edit on the card's own row in the browser: the editor again.
+        rig.click (rig.arp(), rig.customRow().getCentre());
+        browser = dynamic_cast<Browser*> (rig.popup());
+        REQUIRE (browser != nullptr);
+        REQUIRE (browser->find (Browser::Kind::current) >= 0);
+        rig.click (*browser, browser->editArea().getCentre().toFloat());
+        editor = dynamic_cast<Editor*> (rig.popup());
+        REQUIRE (editor != nullptr);
+        CHECK (juce::String (editor->document().name) == juce::String (factory.name));
+        rig.ui->closePopup();
     }
 }
 

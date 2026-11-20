@@ -1,5 +1,18 @@
 # ANDOR ANALOG — status
 
+> **20 Nov 2026, Custom ARP merged into the main integration line (`claude/osp-parity-r1`, OSP
+> pin `c2a421a` on `claude/analog-parity-r1`; the owner's go-ahead):**
+> - `claude/osp-parity-r1` now carries everything on the Custom ARP line (fast-forward): Custom
+>   Patterns R2 on cards A, B and C (CUSTOM hint 41, `<CustomPatterns schema=1>`), with STRUM, the
+>   menus and the rest of R1. OSP's `claude/analog-parity-r1` moved the same way.
+> - **Custom Patterns open when clicked:** the "Custom Patterns ›" row opened the browser and
+>   closed it in the same click (the owner saw this on OSP's beta). Fixed in OSP's shared code
+>   (its own fix, 9ff21209, taken). New ANALOG test, by click on every card in a real window
+>   (Xvfb) and through JUCE's routing: the row opens the browser and it stays open; + New Pattern,
+>   a factory pattern, Edit and the pencil each open what they should. It fails without the fix.
+> - The 1.0.0 RC (`main`, `claude/release-candidate`) is untouched.
+> - **Owner test:** the same clicks in Logic, Live and Reaper, on macOS and Windows.
+
 > **20 Nov 2026, Custom ARP R2 on the stacked line (branch `claude/osp-parity-r1-custom-arp`, OSP
 > pin `c63339e` on `claude/analog-parity-r1-custom-arp`; docs/OSP_PARITY_AUDIT.md, Gate 4):**
 > - **R2 in ANALOG:** OSP's Custom Pattern redesign (6ef33767), cherry-picked alone; the beta's
@@ -13,8 +26,7 @@
 >   each card's letter and its own pattern. 263 cases (3 skips: Bukkehorn recordings, the two
 >   real-window menu tests, which pass under Xvfb); visual 0 px; every OSP suite.
 > - **Not verified here (OWNER TEST):** DAW hosts, listening.
-> - **Still not on the main integration line or the 1.0.0 RC:** Custom Patterns reach
->   `claude/osp-parity-r1` once the owner approves R2 for it.
+> - **Merged into `claude/osp-parity-r1` later the same day** (entry above); not on the 1.0.0 RC.
 
 > **20 Nov 2026, OSP synchronization and feature parity R1 (branch `claude/osp-parity-r1`, OSP
 > pin `claude/analog-parity-r1`; docs/OSP_PARITY_AUDIT.md, docs/OSP_DEPENDENCY_UPDATES.md):**

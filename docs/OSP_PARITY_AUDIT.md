@@ -193,7 +193,7 @@ plus the preset dropdown at 200 %), and `docs/screenshots/parity/strum/`: OSP's 
 states and panel beside ANALOG's panel, which opens in the same place and at the same
 proportions.
 
-## Gate 4: Custom ARP Patterns (stacked; R2 integrated)
+## Gate 4: Custom ARP Patterns (R2; merged into the main integration line)
 
 **Status: R2 integrated and tested on the stacked line (below). Before R2:** OSP's Custom Pattern work is on
 `claude/custom-arp` (CP2–CP4). It is not on OSP's default line, and **R2 does not exist yet**.
@@ -251,6 +251,22 @@ commit, `6ef3376`, on `claude/macos-release` (OSP's 0.9.0 beta line).
   Patterns ›" row and the pattern field; the whole instrument with the ARP open.
 - **Not verified here (OWNER TEST):** the editor and browser in a DAW window (Logic, Live,
   Reaper), the discard question with the host's own windows, and listening on real material.
+
+**Merged into the main integration line (20 Nov 2026, the owner's go-ahead).** ANALOG
+`claude/osp-parity-r1` fast-forwarded to the Custom ARP line; OSP `claude/analog-parity-r1` to
+its Custom ARP line (pin `c2a421a`). Before merging, one more shared fix:
+- **A click on "Custom Patterns ›" showed nothing** (the owner saw it on OSP's beta). The row
+  opened the browser inside the press; the editor's outside-click watcher, told of a press after
+  the pressed component, saw it on the list (the browser's anchor is an invisible child of it that
+  takes no clicks) and closed the browser at once. Every R2 test had opened the browser by calling
+  `openCustomBrowser()`, never by a click. OSP fixed it on its beta line (9ff21209: the row opens
+  the browser just after the press); it is cherry-picked here.
+- **New ANALOG test** (`CustomArpParityTests`, "Custom Patterns open when clicked"): on cards A, B
+  and C, by click in a real window under Xvfb (presses on the window's peer, so JUCE routes them
+  and the watcher hears them as in a host) and through JUCE's routing without one: the row opens
+  the browser and it stays open; + New Pattern opens the editor; a factory pattern goes on that
+  card only, CUSTOM on, the browser closed; the pencil and Edit open the editor on that pattern.
+  It fails without the fix in both modes. OSP has the same test.
 
 ## Visual comparison (baseline vs after)
 
