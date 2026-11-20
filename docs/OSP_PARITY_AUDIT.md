@@ -189,7 +189,9 @@ Each step is its own OSP PR plus ANALOG pin PR (see `docs/OSP_DEPENDENCY_UPDATES
 the window-manager atoms JUCE looks up, on a connection kept open, so the server never resets
 them. Before this, any real-window test after the first crashed with `BadAtom`, OSP's own
 `[menu-visual]` test included. Screenshots: `docs/screenshots/parity/menus/` (100 and 150 %,
-plus the preset dropdown at 200 %).
+plus the preset dropdown at 200 %), and `docs/screenshots/parity/strum/`: OSP's STRUM key
+states and panel beside ANALOG's panel, which opens in the same place and at the same
+proportions.
 
 ## Gate 4: Custom ARP Patterns (stacked, not approved in OSP yet)
 
