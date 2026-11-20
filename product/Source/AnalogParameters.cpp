@@ -1017,7 +1017,7 @@ void addRhythmTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
 
 void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
 {
-    // State version 23 (D / AUX, docs/aux): off in a new instrument and every session from
+    // State version 23 (D / AUX, docs/aux-d): off in a new instrument and every session from
     // before. Append-only: IDs, ranges and choice orders frozen once shipped.
     const Patch::Aux d;
     auto v37 = [] (const juce::String& name) { return juce::ParameterID { name, 37 }; };

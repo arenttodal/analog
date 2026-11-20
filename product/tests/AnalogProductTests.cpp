@@ -1029,7 +1029,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
     for (const auto* id : { &params::subWave, &params::subOctave, &params::subGrit, &params::subLevel, &params::subLowKey, &params::subHighKey,
                             &params::subResponse, &params::subTaperStart, &params::subTaperSlope })
         setups[*id] = [] (ShellProcessor& q) { setValue (q, params::subEnabled, 1.0f); };
-    // D / AUX (docs/aux) acts while it is on: its switches and level on D NOISE (your keys open
+    // D / AUX (docs/aux-d) acts while it is on: its switches and level on D NOISE (your keys open
     // its gate); RHYTHM's settings on a test tick loop (100 BPM against the 120 BPM clock), its
     // envelope's settings with MOD AMOUNT up (the cards' FILTER moved); NOISE's in NOISE.
     // MORPH TO (Addendum 05) acts with MORPH on and D sounding (D NOISE, always on): C vs D.
@@ -10745,6 +10745,36 @@ TEST_CASE ("RHYTHMIC MORPH G7: the display's playhead and C RHYTHM meter are the
     renderShell (rig.p, 0.3, { { 0, 60, 100 } }, false);
     paintDisplay();
     CHECK (panel->display().playheadX() != first);   // (it moves with the audio)
+}
+
+TEST_CASE ("RHYTHMIC MORPH: card C's own display shows RHYTHM's playhead too, moving with the loop (not only the panel's)", "[analog][rhythm][ui]")
+{
+    // The owner's report: with RHYTHM on, a key played moved the RHYTHM panel's playhead but
+    // not the one on card C itself (the loop player plays the recording, not C's voices).
+    RhythmRig rig;
+    auto& engine = dynamic_cast<AnalogEngine&> (rig.p.productEngine());
+    const auto* heads = engine.grainSnapshot (1);   // (card C's recording: ORGANIC's read heads)
+    REQUIRE (heads != nullptr);
+    auto where = [&] {
+        REQUIRE (heads->playheads.load() >= 1);
+        return heads->playheadPosition[0].load();
+    };
+    setValue (rig.p, params::rhythmEnabled, 1.0f);
+    for (const float audio : { 0.0f, 2.0f })   // (AUDIO, BOTH)
+    {
+        INFO ("audio " << audio);
+        setValue (rig.p, params::rhythmAudio, audio);
+        renderShell (rig.p, 0.5, { { 0, 60, 100 } }, false);
+        const float first = where();
+        CHECK (first >= 0.0f);
+        CHECK (first <= 1.0f);
+        renderShell (rig.p, 0.3, { { 0, 60, 100 } }, false);
+        CHECK (where() != first);   // (it moves with the audio)
+    }
+    setValue (rig.p, params::rhythmEnabled, 0.0f);
+    renderShell (rig.p, 0.1, {}, false);
+    renderShell (rig.p, 0.1, {}, false);
+    CHECK (heads->playheads.load() == 0);   // (RHYTHM off, nothing held: no head)
 }
 
 TEST_CASE ("RHYTHMIC MORPH screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-rhythm]")

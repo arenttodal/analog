@@ -108,8 +108,8 @@ Branch: `feature/aux-d` in both repositories. Baseline: analog `19a6a45`, OSP `4
 | Suites: ANALOG DSP 293 test cases; ANALOG product 181 (2 skipped: the Bukkehorn recordings are not in the repository); OSP plugin 162; example product 10; visual regressions (OSP, example, ANALOG with D hidden) | PASS |
 
 **Evidence:**
-- `docs/aux/addendum03/`: the strip in every mode, the rack, drop hover, MUTED, NOT SOLOED, soloed, off; 869 / 1448 / 1810 px; `compare-strip-before-after.png`; `compare-noise-alignment.png`.
-- `docs/demos/aux/aux03-*.wav`: PITCH −12 / 0 / +12, OCT −1 / +1, RATE 2× with PITCH +5, PITCH automated.
+- `docs/aux-d/addendum03/`: the strip in every mode, the rack, drop hover, MUTED, NOT SOLOED, soloed, off; 869 / 1448 / 1810 px; `compare-strip-before-after.png`; `compare-noise-alignment.png`.
+- `docs/demos/aux-d/aux03-*.wav`: PITCH −12 / 0 / +12, OCT −1 / +1, RATE 2× with PITCH +5, PITCH automated.
 
 ### NOT VERIFIED (owner tests)
 

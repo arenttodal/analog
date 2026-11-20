@@ -111,10 +111,10 @@ All tests are in `product/tests/AuxArpTests.cpp` (tag `[auxarp]`).
 
 ### Demos and screenshots
 
-The renders are in `docs/demos/aux/`. Run `ANALOG_DEMO_DIR=... andor_analog_tests
+The renders are in `docs/demos/aux-d/`. Run `ANALOG_DEMO_DIR=... andor_analog_tests
 "[auxarp-demo]"` to make them again. All five use the stand-in instrument, at 120 BPM.
 
-The screenshots are in `docs/aux/screenshots/arp/`:
+The screenshots are in `docs/aux-d/screenshots/arp/`:
 
 - the strip following B, in KONTAKT and in NOISE;
 - the default strip (arpeggiator off, LINK on: dimmed);

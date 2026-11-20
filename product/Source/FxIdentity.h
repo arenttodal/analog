@@ -73,7 +73,7 @@ enum class SynthRack
 {
     voiceFilter,
     morph,
-    aux   ///< D / AUX (docs/aux): a source rack, plum enamel
+    aux   ///< D / AUX (docs/aux-d): a source rack, plum enamel
 };
 const FxVisualIdentity& synthIdentity (SynthRack rack) noexcept;
 

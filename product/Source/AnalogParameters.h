@@ -254,7 +254,7 @@ namespace andor::analog::params
     inline const juce::String rhythmRelease = "analog.rhythm.release";
     inline const juce::String rhythmSensitivity = "analog.rhythm.sensitivity";
     inline const juce::String rhythmDepth = "analog.rhythm.depth";
-    // State version 23: D / AUX (docs/aux). Append-only.
+    // State version 23: D / AUX (docs/aux-d). Append-only.
     inline const juce::String auxEnabled = "analog.aux.enabled";
     inline const juce::String auxMode = "analog.aux.mode";
     inline const juce::String auxLevel = "analog.aux.level";
@@ -279,7 +279,7 @@ namespace andor::analog::params
     // hidden and unread (state recall only): D always goes through the FILTER now.
     inline const juce::String auxPitch = "analog.aux.rhythm.pitch";     ///< -12..12 semitones
     inline const juce::String auxOctave = "analog.aux.rhythm.octave";   ///< -2..2 octaves
-    /** D MORPH (docs/aux/MORPH_DECISION.md, Option D): the second, global MORPH stage, A/B/C
+    /** D MORPH (docs/aux-d/MORPH_DECISION.md, Option D): the second, global MORPH stage, A/B/C
         (after the FILTER) x D; 0 %: off (D layered). Its own control, never the MORPH macro. */
     inline const juce::String auxMorph = "analog.aux.morph";
     /** D RHYTHM's GATE: KEYS (a key starts the loop from its first beat; it plays while a key

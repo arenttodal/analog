@@ -82,7 +82,7 @@ Branch: `feature/aux-live-input` in both repositories, stacked on `feature/aux-d
 
 **Evidence:**
 - **Screenshots** (the hidden screenshot test): `aux-13…16` LIVE INPUT disabled / no signal / signal / rack; `aux-17…19` MORPH TO C, D (NOISE), D (LIVE INPUT).
-- **Demos** in `docs/demos/aux/live/` (with `live05-renders.txt`). The external tracks are **synthesized stand-ins**, since no real recordings are in the repositories; each goes through the plugin's sidechain bus:
+- **Demos** in `docs/demos/aux-d/live/` (with `live05-renders.txt`). The external tracks are **synthesized stand-ins**, since no real recordings are in the repositories; each goes through the plugin's sidechain bus:
   1. pad + plucked string, layered;
   2. the plucked string alone under a FILTER sweep;
   3. saw chord → formant voice, MORPH TO D swept 0 → 100 %;

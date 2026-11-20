@@ -12,7 +12,7 @@ namespace andor::analog
 {
 
 /**
-    D / AUX (docs/aux): the compact strip under cards A / B / C (ShellProduct::auxStrip) and its
+    D / AUX (docs/aux-d): the compact strip under cards A / B / C (ShellProduct::auxStrip) and its
     full-width rack (a product rack, rack::Kind::aux). Both are views of D's parameters
     (analog.aux.*) and of the engine's telemetry; neither changes the sound by being shown.
 

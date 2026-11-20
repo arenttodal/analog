@@ -283,7 +283,7 @@ struct Patch
         double depth = 1.0;           ///< 0..1: C RHYTHM's height
     };
     Rhythm rhythm;
-    /** D / AUX (docs/aux): an optional fourth source on its own stereo bus - RHYTHM (a loop on
+    /** D / AUX (docs/aux-d): an optional fourth source on its own stereo bus - RHYTHM (a loop on
         the host's grid), NOISE (played by the keys) or KONTAKT (one hosted instrument) - mixed
         with the voices before the shared chorus, KALEIDOSCOPE and FX route, through its own
         stereo filter that follows the cards' FILTER. Off (the default, every older patch): not
@@ -317,7 +317,7 @@ struct Patch
         /** RHYTHM's transposition (PITCH + 12 x OCT, semitones): its slices re-pitched where
             they stand on the grid, the tempo and the loop's length unchanged. */
         double pitchSemis = 0.0;
-        /** D MORPH (docs/aux/MORPH_DECISION.md, Option D): the second, global MORPH stage, the
+        /** D MORPH (docs/aux-d/MORPH_DECISION.md, Option D): the second, global MORPH stage, the
             whole A/B/C output (after the FILTER) as its carrier and D as its character. 0: off,
             D layered as ever; 0..0.5 the imprint deepening while D's dry level gives way; 0.5
             the hybrid at D's band energies; 1 D alone. */

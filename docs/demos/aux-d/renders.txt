@@ -38,4 +38,4 @@ dmorph-04-sweep.wav   0 -> 100 % over 6 s
 (The hybrid sits at D's band energies: a sparse, percussive D gates the chord - average level
 falls with the morph, peaks hold.)
 
-LIVE INPUT (Addendum 05): docs/demos/aux/live/ and its live05-renders.txt.
+LIVE INPUT (Addendum 05): docs/demos/aux-d/live/ and its live05-renders.txt.

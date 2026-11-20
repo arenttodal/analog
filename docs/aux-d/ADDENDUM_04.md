@@ -78,7 +78,7 @@ This round holds three things:
   - Click to load and drop ownership are unchanged.
 - **One deliberate departure from Addendum 03:** the display used to sit at B's well's exact x and width. Addendum 04 asks for it immediately after LEVEL with no large gap on the left, so its left edge now follows LEVEL; its right edge stays on B's well's right edge.
 
-**Evidence:** `docs/aux/addendum04/`:
+**Evidence:** `docs/aux-d/addendum04/`:
 - `compare-before-after-1448.png` (all three modes);
 - each mode at 869 / 1448 / 1810 px;
 - the rack;

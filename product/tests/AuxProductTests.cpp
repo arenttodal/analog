@@ -1,4 +1,4 @@
-// D / AUX (docs/aux): the product side - the strip under the cards (a view: shown and hidden
+// D / AUX (docs/aux-d): the product side - the strip under the cards (a view: shown and hidden
 // from the main menu, kept with the session and never with a preset, the cards and the sound
 // untouched), its modes, menu and rack, D's recording (loaded on the loader thread, kept in the
 // sample store, missing handled), its MIDI lane and latency, and the screenshots.

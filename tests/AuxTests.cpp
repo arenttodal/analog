@@ -1,4 +1,4 @@
-// D / AUX (docs/aux), gates 1-5 in the synth: its own stereo bus beside the voices, through its
+// D / AUX (docs/aux-d), gates 1-5 in the synth: its own stereo bus beside the voices, through its
 // FILTER (following the cards'), into the shared chorus / KALEIDOSCOPE / FX route.
 
 #include "TestUtil.h"
@@ -512,7 +512,7 @@ TEST_CASE ("AUX Addendum 03: with PITCH up, a host tempo change moves the ticks 
 }
 
 //==============================================================================
-// D MORPH (docs/aux/MORPH_DECISION.md, Option D): the second MORPH stage, A/B/C x D.
+// D MORPH (docs/aux-d/MORPH_DECISION.md, Option D): the second MORPH stage, A/B/C x D.
 
 namespace
 {

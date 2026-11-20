@@ -116,7 +116,7 @@ public:
     double rhythmPlayhead() const noexcept { return synth.rhythmPlayhead(); }
     /** Tests: a prepared loop as if card C's recording had just been analysed (message thread). */
     void setRhythmLoopForTest (std::shared_ptr<const rhythm::PreparedLoop> loop);
-    //== D / AUX (docs/aux) =====================================================================
+    //== D / AUX (docs/aux-d) =====================================================================
     /** D RHYTHM's recording: its state for the strip and rack (message thread). */
     struct AuxRecordingState
     {

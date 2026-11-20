@@ -1,5 +1,21 @@
 # ANDOR ANALOG — status
 
+> **20 Nov 2026, card C's playhead in RHYTHM; Windows checkout; macOS click test (owner reports
+> and the first CI run of the merged line):**
+> - **Card C's playhead follows RHYTHM:** with a drum loop on C and RHYTHM on, a key moved the
+>   RHYTHM panel's playhead but not the one on card C (the loop player plays the recording, not
+>   C's voices, and the card only showed the voices' read heads). `Synth::collectPlayheads` now
+>   adds the loop player's head while RHYTHM plays, at the same place the panel draws it (wrapped
+>   into the loop's bars). New test (`[rhythm][ui]`, AUDIO and BOTH): the card's head is there
+>   and moves; RHYTHM off, none. It fails without the change.
+> - **Windows could not check out the repository:** `aux` is a reserved file name on Windows, so
+>   `docs/aux/` and `docs/demos/aux/` stopped the Windows job at checkout. Renamed to
+>   `docs/aux-d/` and `docs/demos/aux-d/` (every reference updated; no other reserved names).
+> - **macOS:** the two new click tests (ANALOG's and OSP's) could not pump the message loop
+>   there (the browser opens a message after the click): ANALOG's is skipped on macOS, OSP's
+>   returns early as its other message-loop tests do (OSP 31aed041). Linux and Windows run them;
+>   on macOS the clicks are an OWNER TEST in the hosts.
+
 > **20 Nov 2026, D's keys show their state (owner report):** with D on, its ARP key and FOLLOW
 > A B C lit as a faint pressed key in D's purple; they now light as the arpeggiator panel's own
 > keys (OCTAVES, EDIT): the warm accent face, the word in the accent. D's power key: its glyph in
@@ -207,7 +223,7 @@
 >     - the arp / sub lights lost a seam cross at fractional display scales (OSP skin).
 >
 > - D / AUX, gates 0–8 (`feature/aux-d` in both repositories, stacked on the Kontakt experiment;
->   docs/aux/AUX_REPORT.md):
+>   docs/aux-d/AUX_REPORT.md):
 >   - an optional strip under cards A / B / C, shown or hidden from the main menu (a view
 >     setting: kept with the session, never with a preset);
 >   - D's own stereo source: RHYTHM (a host-synced loop), NOISE (white / pink / brown, keyed or
@@ -218,9 +234,9 @@
 >   - `analog.aux.*` (version hint 37), state version 23; D off is bit-identical.
 >
 >   Card C HYBRID is unchanged. MORPH behaves as Option A until the owner decides
->   (docs/aux/MORPH_DECISION.md: OPEN). Real Kontakt and DAWs: UNVERIFIED (OWNER TEST).
+>   (docs/aux-d/MORPH_DECISION.md: OPEN). Real Kontakt and DAWs: UNVERIFIED (OWNER TEST).
 >
->   AUX Refinement Addendum 03 (docs/aux/ADDENDUM_03.md):
+>   AUX Refinement Addendum 03 (docs/aux-d/ADDENDUM_03.md):
 >   - drops on D's strip or rack load D only, never card C (the shell's DropOwner);
 >   - D always goes through the FILTER (ROUTE removed; the old switch is hidden and unread);
 >   - M / S are the cards' own keys;
@@ -230,13 +246,13 @@
 >   - RHYTHM PITCH / OCT re-pitch the slices on the grid, the tempo and the length unchanged.
 >
 >   Then, at the owner's word:
->   - D MORPH, Option D (docs/aux/MORPH_DECISION.md: DECIDED): a second, global MORPH stage,
+>   - D MORPH, Option D (docs/aux-d/MORPH_DECISION.md: DECIDED): a second, global MORPH stage,
 >     A/B/C (after the FILTER) × D. Its own control (`analog.aux.morph`, 0 % = off; the AUX rack,
 >     a modulation destination, USER macros). It acts only while D sounds; the MORPH macro is
 >     unchanged.
 >   - A file dropped on empty space loads nothing.
 >
->   Then (docs/aux/ADDENDUM_04.md):
+>   Then (docs/aux-d/ADDENDUM_04.md):
 >   - D RHYTHM's GATE (`analog.aux.rhythm.gate`, KEYS by default): a key starts the loop from
 >     its first beat, it plays while a key is held and fades with the AMP's release; FREE is
 >     the old always-playing behaviour. RATE now runs the right way (2x = twice as fast), and a
@@ -314,7 +330,7 @@
 >     pixel-identical at a modulated and a hand-set 80 %; OSC 1 WIDTH per voice; two routes
 >     summed and clamped). OPEN: ANDOR OSP's layer destinations (grains, amp ADSR) on cards A
 >     and B; DAW checks UNVERIFIED (OWNER TEST).
->   - D ARP (docs/aux/D_ARP_FOLLOWER.md): in KONTAKT and keyed NOISE, ARP on / off and FOLLOW
+>   - D ARP (docs/aux-d/D_ARP_FOLLOWER.md): in KONTAKT and keyed NOISE, ARP on / off and FOLLOW
 >     A B C on the strip before RACK and in the AUX rack. D plays one arpeggiator lane - LINK on:
 >     the shared pattern; LINK off: the card chosen, even while that card's own arpeggio is off -
 >     the same notes at the same samples as the lane (`[auxarp]`: D's Kontakt and card C's own
@@ -326,7 +342,7 @@
 >     (ProductInfo::arpFollower, Engine::setAuxNotes); ANDOR OSP has no D, so nothing runs
 >     there. Real Kontakt (a spiccato patch) and DAWs: UNVERIFIED (OWNER TEST).
 >
->   Addendum 05 (`feature/aux-live-input`, docs/aux/ADDENDUM_05.md):
+>   Addendum 05 (`feature/aux-live-input`, docs/aux-d/ADDENDUM_05.md):
 >   - D LIVE INPUT: the DAW's sidechain ("AUX D Live Input", a VST3 auxiliary bus, off by
 >     default; the plugin stays an instrument) as D's source - no MIDI needed, through D's LEVEL,
 >     MUTE / SOLO, the FILTER and the shared effects; level history and input state in the strip

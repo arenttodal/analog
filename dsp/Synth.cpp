@@ -584,6 +584,24 @@ int Synth::collectPlayheads (float* where, float* level, int max) const noexcept
         level[n] = std::clamp (v.amp.value(), 0.0f, 1.0f);
         ++n;
     }
+    // RHYTHM: the loop player plays card C's recording (not its voices), so the card shows
+    // where it reads too, as the RHYTHM panel does (the owner saw it move only there). The
+    // whole recording is the card's picture: source seconds over its length; a rhythmic loop
+    // wrapped into its bars, as the panel wraps it.
+    if (rhythmRun && n < max)
+        if (const auto* loop = loopPlayer.loop(); loop != nullptr && ! loop->left.empty() && loop->rate > 0.0)
+            if (double at = loopPlayer.playheadSeconds(); at >= 0.0)
+            {
+                const double length = static_cast<double> (loop->left.size()) / loop->rate;
+                if (loop->rhythmic())
+                {
+                    const double from = loop->loopStart / loop->rate, span = loop->loopFrames / loop->rate;
+                    at = from + std::fmod (std::fmod (at - from, span) + span, span);
+                }
+                where[n] = static_cast<float> (std::clamp (at / length, 0.0, 1.0));
+                level[n] = 1.0f;
+                ++n;
+            }
     return n;
 }
 
@@ -3263,7 +3281,7 @@ void Synth::startOrganicGrains (Voice& v) noexcept
 }
 
 //==============================================================================
-// D / AUX (docs/aux): its own stereo bus beside the voices.
+// D / AUX (docs/aux-d): its own stereo bus beside the voices.
 
 void Synth::setAuxExternal (const float* left, const float* right, int length, int latency) noexcept
 {

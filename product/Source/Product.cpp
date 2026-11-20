@@ -420,7 +420,7 @@ const ProductInfo& productInfo()
             p.rackFaceplates = { { Kind::movement, movement }, { Kind::echo, echo }, { Kind::space, space } };
             p.fullBleedRacks = true;
         }
-        // D / AUX (docs/aux): the optional strip under the cards, shown or hidden from the main
+        // D / AUX (docs/aux-d): the optional strip under the cards, shown or hidden from the main
         // menu (a view setting, hidden by default; the sound never depends on it).
         p.auxStrip = ProductInfo::AuxStrip {};
         p.auxStrip->create = [] (osp::plugin::InstrumentHost& host) { return andor::analog::createAuxStrip (host); };

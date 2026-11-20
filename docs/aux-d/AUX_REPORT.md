@@ -98,11 +98,11 @@ RHYTHM's loop is placed on the host's grid while the transport runs. With no tra
 
 ## Evidence
 
-- **Screenshots:** `docs/aux/screenshots/`, from the hidden test "AUX: screenshots"; ceramic skin.
+- **Screenshots:** `docs/aux-d/screenshots/`, from the hidden test "AUX: screenshots"; ceramic skin.
   - The window at 869 / 1448 / 1810 px wide: hidden; RHYTHM, NOISE and KONTAKT;
   - the rack in each mode;
   - D off.
-- **Renders:** `docs/demos/aux/`, with `renders.txt`:
+- **Renders:** `docs/demos/aux-d/`, with `renders.txt`:
   - the FILTER sweep on D NOISE: +20 dB from closed to open;
   - D RHYTHM through SPACE and ECHO;
   - A/B/C + D together;

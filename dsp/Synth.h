@@ -274,7 +274,7 @@ public:
     void externalKeyEvent (const std::uint8_t* data, int size) noexcept;
     /** Tests: the external bus's filter cutoff now (Hz), 0 while it is not running. */
     float externalCutoffHz() const noexcept { return externalRunning ? externalFilter.cutoffHz : 0.0f; }
-    //== D / AUX (docs/aux) ======================================================================
+    //== D / AUX (docs/aux-d) ======================================================================
     /** D RHYTHM's prepared loop (owned by the caller, alive while set; null: none). */
     void setAuxLoop (const rhythm::PreparedLoop* loop) noexcept { auxLoop.setLoop (loop); }
     /** D KONTAKT's bus for this block (the hosted instrument's output, its reported latency);
@@ -421,7 +421,8 @@ public:
     int collectOrganicGrains (LiveGranulator::GrainDot* out, int max) const noexcept;
     /** ORGANIC's read heads (card B's playheads, as ANDOR OSP's One Shot voices): one per voice
         playing the recording, where it reads (0..1 of the recording shown) and how loud the
-        note is (its amplitude envelope, 0..1). Returns how many. Any thread that renders. */
+        note is (its amplitude envelope, 0..1); in RHYTHM, the loop player's head too (it plays
+        the recording, not the voices). Returns how many. Any thread that renders. */
     int collectPlayheads (float* where, float* level, int max) const noexcept;
     /** A voice's grains now (tests; `card` 0: A, 1: B). */
     int grainCount (int slot, int card = 0) const noexcept
