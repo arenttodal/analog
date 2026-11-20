@@ -11420,8 +11420,14 @@ TEST_CASE ("MACRO DESTINATION: right-click OSC 1 LEVEL - Assign to Macro 1 - BRI
     CHECK (MacroDestRig::itemOf (menu, "Remove All Macro Assignments") == nullptr);   // (one only)
     // A switch: no misleading assignment item.
     CHECK (MacroDestRig::itemOf (rig.ui->controlContextMenu (params::dnaEnabled), "Assign to Macro") == nullptr);
-    // A click elsewhere: back to the quiet arc (the assignment stays, subtly drawn).
+    // A press on the control the macro moves (turning it) keeps its range shown: the control
+    // being worked on (OSP parity R1: the shared UserMacroController's behaviour, 897d1130).
     rig.ui->pressAnywhere (rig.level);
+    rig.ui->refreshNow();
+    CHECK (rig.overlay().macroFocus() == 0);
+    CHECK (rig.overlay().primaryMacro (params::osc1Level) == 0);
+    // A click elsewhere: back to the quiet arc (the assignment stays, subtly drawn).
+    rig.ui->pressAnywhere (rig.ui);
     rig.ui->refreshNow();
     CHECK (rig.overlay().macroFocus() == -1);
     CHECK (rig.overlay().primaryMacro (params::osc1Level) == -1);
@@ -11539,7 +11545,7 @@ TEST_CASE ("MACRO DESTINATION: assignments made the old way show their halos unt
     CHECK (rig.overlay().primaryMacro (params::osc1Level) == 0);
     CHECK (rig.overlay().haloRoute (params::osc1Level) == slot);
     // Chosen elsewhere: the route is the ring (its depth edited by dragging it, as before).
-    rig.ui->pressAnywhere (rig.level);
+    rig.ui->pressAnywhere (rig.ui);
     rig.ui->refreshNow();
     CHECK (rig.overlay().primaryMacro (params::osc1Level) == -1);
     CHECK (rig.overlay().haloRoute (params::osc1Level) == slot);

@@ -145,6 +145,12 @@ private:
     fx::Graph route() const;
     juce::String subtitleOf (fx::InstanceId id) const;
     juce::String signature() const;
+    /** The effect's real state, read now: its ON parameter (a new effect) or its node's bypass (a
+        built-in one). The tiles' own flag is a cache of this, made at layout. */
+    bool liveBypassed (fx::InstanceId id) const;
+    /** Brings every tile's bypass (its light, its dimmed motif, its knobs) to the effect's real
+        state: after a click on the light, automation, undo, a preset or a chain. True: changed. */
+    bool refreshBypass();
     int tileAt (juce::Point<int> p) const;
     int gapAt (juce::Point<int> p) const;
     void paintTile (juce::Graphics&, const Tile&, bool ghost = false) const;

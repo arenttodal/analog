@@ -670,13 +670,13 @@ analog.morph.global.detail v38 float "D Morph Detail" label="%" range=0.0000..10
 analog.morph.global.levelMatch v38 bool "D Morph Level Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.morph.global.output v38 choice "D Morph Output" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Morph Only|Morph Only|Layered [Morph Only|Layered]
 analog.vibrato.sourceSub v39 bool "Vibrato Source Sub" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.arp.cardB.strum.on v35 bool "Arp Card B Strum" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.arp.cardB.strum.direction v35 choice "Arp Card B Strum Direction" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=UP|RANDOM|ALTERNATE [UP|DOWN|RANDOM|ALTERNATE]
-analog.arp.cardB.strum.sync v35 bool "Arp Card B Strum Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.arp.cardB.strum.ms v35 float "Arp Card B Strum Spread" label="ms" range=0.0000..500.0000/0.1000 skew=0.27443 default=20.0000 steps=2147483647 texts=0.0 ms|40 ms|500 ms
-analog.arp.cardB.strum.division v35 choice "Arp Card B Strum Sync Spread" label="" range=0.0000..9.0000/1.0000 skew=1.00000 default=1.0000 steps=10 texts=1/64|1/4|1/8D [1/64|1/32|1/16|1/8|1/4|1/32T|1/16T|1/8T|1/16D|1/8D]
-analog.arp.cardC.strum.on v35 bool "Arp Card C Strum" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.arp.cardC.strum.direction v35 choice "Arp Card C Strum Direction" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=UP|RANDOM|ALTERNATE [UP|DOWN|RANDOM|ALTERNATE]
-analog.arp.cardC.strum.sync v35 bool "Arp Card C Strum Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
-analog.arp.cardC.strum.ms v35 float "Arp Card C Strum Spread" label="ms" range=0.0000..500.0000/0.1000 skew=0.27443 default=20.0000 steps=2147483647 texts=0.0 ms|40 ms|500 ms
-analog.arp.cardC.strum.division v35 choice "Arp Card C Strum Sync Spread" label="" range=0.0000..9.0000/1.0000 skew=1.00000 default=1.0000 steps=10 texts=1/64|1/4|1/8D [1/64|1/32|1/16|1/8|1/4|1/32T|1/16T|1/8T|1/16D|1/8D]
+analog.arp.cardB.strum.on v40 bool "Arp Card B Strum" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.arp.cardB.strum.direction v40 choice "Arp Card B Strum Direction" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=UP|RANDOM|ALTERNATE [UP|DOWN|RANDOM|ALTERNATE]
+analog.arp.cardB.strum.sync v40 bool "Arp Card B Strum Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.arp.cardB.strum.ms v40 float "Arp Card B Strum Spread" label="ms" range=0.0000..500.0000/0.1000 skew=0.27443 default=20.0000 steps=2147483647 texts=0.0 ms|40 ms|500 ms
+analog.arp.cardB.strum.division v40 choice "Arp Card B Strum Sync Spread" label="" range=0.0000..9.0000/1.0000 skew=1.00000 default=1.0000 steps=10 texts=1/64|1/4|1/8D [1/64|1/32|1/16|1/8|1/4|1/32T|1/16T|1/8T|1/16D|1/8D]
+analog.arp.cardC.strum.on v40 bool "Arp Card C Strum" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.arp.cardC.strum.direction v40 choice "Arp Card C Strum Direction" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=UP|RANDOM|ALTERNATE [UP|DOWN|RANDOM|ALTERNATE]
+analog.arp.cardC.strum.sync v40 bool "Arp Card C Strum Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.arp.cardC.strum.ms v40 float "Arp Card C Strum Spread" label="ms" range=0.0000..500.0000/0.1000 skew=0.27443 default=20.0000 steps=2147483647 texts=0.0 ms|40 ms|500 ms
+analog.arp.cardC.strum.division v40 choice "Arp Card C Strum Sync Spread" label="" range=0.0000..9.0000/1.0000 skew=1.00000 default=1.0000 steps=10 texts=1/64|1/4|1/8D [1/64|1/32|1/16|1/8|1/4|1/32T|1/16T|1/8T|1/16D|1/8D]

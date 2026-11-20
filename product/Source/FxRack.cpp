@@ -1,4 +1,5 @@
 #include "FxRack.h"
+#include "MenuIcons.h"
 
 #include <complex>
 #include "FxIdentity.h"
@@ -1598,6 +1599,9 @@ namespace
             addActions (m);
             m.addSeparator();
             m.addItem ("Reset to defaults", [this] { load ({}); presetNames[static_cast<std::size_t> (id.flatIndex())] = {}; repaint(); });
+            // The shared menu icons; deleting one's own preset in the destructive ink.
+            osp::plugin::menuicons::decorate (m, { { "Save as", osp::plugin::menuicons::Kind::saveAs }, { "Delete*", osp::plugin::menuicons::Kind::remove }, { "Show presets folder", osp::plugin::menuicons::Kind::reveal },
+                               { "Reset to defaults", osp::plugin::menuicons::Kind::reset } });
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
         }
 

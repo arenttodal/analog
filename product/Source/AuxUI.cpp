@@ -1,4 +1,5 @@
 #include "AuxUI.h"
+#include "MenuIcons.h"
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
@@ -665,6 +666,8 @@ namespace
                 if (safe != nullptr)
                     aux::reset (safe->host);
             });
+            // The shared menu icons (as every ANDOR menu): the rack's key, Reset.
+            osp::plugin::menuicons::decorate (m, { { "Open AUX Rack", osp::plugin::menuicons::Kind::settings }, { "Close AUX Rack", osp::plugin::menuicons::Kind::settings }, { "Reset", osp::plugin::menuicons::Kind::reset } });
             return m;
         }
 

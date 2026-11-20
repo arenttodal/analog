@@ -1,4 +1,5 @@
 #include "AnalogWellOverlays.h"
+#include "MenuIcons.h"
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
@@ -842,6 +843,7 @@ namespace
             juce::PopupMenu menu;
             menu.addItem (1, juce::String::fromUTF8 ("Replace\xe2\x80\xa6"));
             menu.addItem (2, "Remove");
+            osp::plugin::menuicons::decorate (menu, { { "Replace", osp::plugin::menuicons::Kind::replace }, { "Remove", osp::plugin::menuicons::Kind::remove } });   // (the shared menu icons)
             auto* h = &host;
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (soundKey.get()), [h] (int picked) {
                 if (auto* engine = engineOf (*h))

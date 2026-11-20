@@ -1,5 +1,31 @@
 # ANDOR ANALOG — status
 
+> **20 Nov 2026, OSP synchronization and feature parity R1 (branch `claude/osp-parity-r1`, OSP
+> pin `claude/analog-parity-r1`; docs/OSP_PARITY_AUDIT.md, docs/OSP_DEPENDENCY_UPDATES.md):**
+> ANDOR ANALOG on OSP's approved line (its default: STRUM, the ceramic menus, USER MACROS, the
+> wheels, the shared FX library), plus the shell's preset saving brought up to OSP's.
+> - **Baseline (Gate 0):** `feature/aux-live-input` e3a8090 (OSP b522a06), 242 product cases
+>   green; schema, V6 renders and 141 screenshots kept.
+> - **STRUM:** shared, on every card (A `arp.strum.*`, B / C `analog.arp.cardB|C.strum.*`,
+>   version hint 40: above ANALOG's own 39), off by default and in older sessions. New ANALOG
+>   tests: every direction, FREE and SYNC, A / B / C unlinked and linked, held-note changes,
+>   sustain, transport stop, recall, the key in ANALOG's ARP panel.
+> - **Menus:** the shared ceramic look on every menu (OSP's SharedMenuLook, held by the shell's
+>   editor) and the shared icons on ANALOG's own menus too (sound key, AUX, FX presets, FX
+>   routing gear / group / tile, sound import); destructive actions in rust.
+> - **Presets (shared shell):** SAVE updates only the musician's own preset (a factory preset
+>   asks for a name); Save preset / Save preset as...; the list shows "Factory" first, then
+>   "Your presets"; removing the recording asks once more.
+> - **FX routing:** the pedal light follows the effect's real state (OSP's shared fix, ported to
+>   ANALOG's own routing view, which keeps MAIN + SEND).
+> - **Kept as ANALOG's own (not switched):** FX routing / rack / presets, SUB, the SATELLITE panel
+>   and the USER MACRO UI, because OSP's shared copies predate MAIN + SEND, RETRO 100 % and SUB
+>   vibrato. The convergence plan is in the audit, section 5.
+> - **Custom ARP Patterns:** R2 is not in OSP yet; CP3 / CP4 prepared on a stacked branch (see
+>   the audit's results).
+> - **Release metadata:** CI checks the OSP pin is on an OSP branch or tag and writes
+>   BUILD-INFO.txt (ANALOG commit, OSP pin) beside the test build and the installer.
+
 > **19 Nov 2026, the tests on OSP's current line (OSP pin `claude/shell-window-once`, `aef5e0d`,
 > OSP's default line plus one shared fix):**
 > - **Why:** `andor_analog_tests` did not compile against OSP's current line. OSP's Shared FX

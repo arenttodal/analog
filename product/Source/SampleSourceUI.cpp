@@ -1,4 +1,5 @@
 #include "SampleSourceUI.h"
+#include "MenuIcons.h"
 
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
@@ -265,6 +266,7 @@ void showSoundMenu (InstrumentHost& host, juce::Component& target, int layer)
     menu.addSeparator();
     menu.addItem (-1, juce::String::fromUTF8 ("Import Kontakt patch\xe2\x80\xa6"));
     menu.addItem (-2, "Remove", inUse != nullptr);
+    osp::plugin::menuicons::decorate (menu, { { "Import Kontakt patch", osp::plugin::menuicons::Kind::importIn }, { "Remove", osp::plugin::menuicons::Kind::remove } });   // (sounds stay plain)
     auto shared = std::make_shared<std::vector<std::unique_ptr<juce::XmlElement>>> (std::move (sounds));
     auto* h = &host;
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target), [h, shared, layer] (int picked) {
