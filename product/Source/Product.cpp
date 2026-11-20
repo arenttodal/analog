@@ -346,6 +346,8 @@ const ProductInfo& productInfo()
         // STRUM (shared, OSP's ARP): its 15 parameters are appended after everything ANALOG has,
         // whose own hints reach 39 (VIBRATO's sourceSub), so they take 40.
         p.strumParameterHint = 40;
+        // CUSTOM (shared Custom ARP Patterns): its three parameters after STRUM's.
+        p.customPatternParameterHint = 41;
         // The effects rack: MOVEMENT, ECHO and SPACE each expanded beside its macro (one at a time).
         p.rackModules = { osp::plugin::rack::Kind::movement, osp::plugin::rack::Kind::echo, osp::plugin::rack::Kind::space };
         // FILTER and MORPH: the product's own inline racks (the same rack, the same parts),
