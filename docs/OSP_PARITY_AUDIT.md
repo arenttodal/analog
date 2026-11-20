@@ -190,3 +190,57 @@ the window-manager atoms JUCE looks up, on a connection kept open, so the server
 them. Before this, any real-window test after the first crashed with `BadAtom`, OSP's own
 `[menu-visual]` test included. Screenshots: `docs/screenshots/parity/menus/` (100 and 150 %,
 plus the preset dropdown at 200 %).
+
+## Gate 4: Custom ARP Patterns (stacked, not approved in OSP yet)
+
+**Status: prepared and tested, waiting on OSP.** OSP's Custom Pattern work is on
+`claude/custom-arp` (CP2–CP4). It is not on OSP's default line, and **R2 does not exist yet**.
+Per the spec, it is kept off the main integration branch:
+
+- **ANALOG `claude/osp-parity-r1-custom-arp`** (stacked on `claude/osp-parity-r1`) pins **OSP
+  `claude/analog-parity-r1-custom-arp`**: the parity line with `claude/custom-arp` (e39b0bb)
+  merged in. Only `docs/STATUS.md` conflicted.
+- `ProductInfo::customPatternParameterHint` is 41 (after STRUM's 40).
+- Schema golden: two lines appended (`analog.arp.cardB.custom`, `analog.arp.cardC.custom`, v41).
+  Card A's `arp.custom` is the shell's, checked against OSP's at the product's hint.
+- The shell's `[arp-custom]` test now runs in ANALOG and passes; CP3/CP4 noted that it never had.
+- New `CustomArpParityTests.cpp`, 5 cases, all pass:
+  - three parameters, off by default;
+  - each card's pattern on that card alone (A OSC 1, B OSC 2, C the hybrid), the others
+    playing UP;
+  - LINK: card A's pattern on every card, B's and C's own documents ignored;
+  - unlinked, three patterns at once (with a rest);
+  - while playing: a pattern changed, C2 added, CUSTOM off, C's arpeggiator off and on again,
+    with no note left held;
+  - C2 is part of card C: no voice ever sounds on a fourth card;
+  - a factory sound with patterns on B and C, saved as a user preset and in a session, recalled
+    onto the same cards and playing the same notes; a preset without patterns clears them;
+  - the library is ANDOR's (`~/Documents/ANDOR/Patterns`, shared by every product). A
+    `.andorpattern` file written by the shared codec reads back as the same document and
+    plays on card B.
+- Full ANALOG suite on this line: 261 cases, all pass (the usual Kontakt-fixture skip).
+
+**When R2 lands:** merge R2 into `claude/analog-parity-r1-custom-arp` (or rebuild it on R2), move
+ANALOG's pin with `tools/update-osp-pin.sh`, re-run `[arp-custom]`, `CustomArpParityTests` and the
+editor screenshots. The editor is the only part R2 is expected to change; the ANALOG-side
+contract (card mapping, state, hints) does not depend on it.
+
+## Visual comparison (baseline vs after)
+
+I compared 141 screenshots from ANALOG's existing screenshot tests: keys, SATELLITE, wheels, USER
+macros, routing, the arp / SUB housing, SUB, macro destinations and the FX racks. Each ran on
+the baseline (e3a8090) and after (the Custom ARP line, a superset of the parity line), at
+869 / 1448 / 1810 px wide. Every difference is accounted for:
+
+| Difference | Where | Verdict |
+|---|---|---|
+| The six CORE macro lenses changed colour (OSP re-rendered them in its new palette, c010a8f4), so they no longer matched ANALOG's arcs | every full-window shot | **Regression, fixed in ANALOG:** its walnut pack now carries the original lenses (`tools/add_macro_lenses.py`, pieces copied unchanged from OSP's skin at b522a06). Those shots are again identical to the baseline |
+| STRUM key beside SATELLITE in the ARP title row | SATELLITE and rack shots with ARP open | Intended (STRUM) |
+| MOD WHEEL / PITCH BEND popovers: OSP's compact layout (CONTROL row, smaller segmented keys, accent arcs) | wheels, keys | Intended (shared, d64f9193) |
+| ADVANCED opens clear of the ARP key | keys (SETTINGS open) | Intended (shared `advancedPopoverOrigin (clearOf)`) |
+| The window with AUX D shown is laid out once at its final height | keys (D active) | Intended (shared shell-window fix aef5e0d) |
+| A bypassed FX tile dims its display; the cream veil is gone | routing | Intended (OSP's pedal-light fix, ported to ANALOG's view) |
+| A USER macro's range stays shown while its own target is pressed | macro destinations | Intended (keep-ranges). The screenshot steps that deselect now press elsewhere, so their images match the baseline |
+
+Nothing else moved: cards, knobs, racks, SUB, the keyboard and the housing are pixel-identical
+to the baseline. `andor_analog_tests_visual` (the product's visual regression) is at 0 px.

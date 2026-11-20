@@ -11642,14 +11642,14 @@ TEST_CASE ("MACRO DESTINATION screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screens
         setValue (rig.p, params::userMacroId (0), 60.0f);
         rig.ui->refreshNow();
         save (*rig.editor, around (params::osc1Level), "md-04-focused-macro-at-60");
-        rig.ui->pressAnywhere (rig.level);
+        rig.ui->pressAnywhere (rig.ui);   // (elsewhere: a press on the macro's own target keeps it chosen)
         rig.ui->refreshNow();
         rig.overlay().mouseExit (rig.mouse ({}, {}));   // (the pointer away)
         rig.ui->refreshNow();
         save (*rig.editor, around (params::osc1Level), "md-05-quiet-unfocused");
         // With an LFO 1 route: the route's ring, the macro quietly outside; Macro 1 chosen: the reverse.
         rig.overlay().assign (1, osp::plugin::modui::destinationFor (params::osc1Level, false));
-        rig.ui->pressAnywhere (rig.level);
+        rig.ui->pressAnywhere (rig.ui);
         rig.ui->refreshNow();
         rig.overlay().mouseExit (rig.mouse ({}, {}));   // (the pointer away)
         rig.ui->refreshNow();
@@ -11844,7 +11844,7 @@ TEST_CASE ("MACRO DESTINATION: assigning from a control's menu, or dragging a ra
     CHECK (rig.overlay().macroFocus() == 0);
     CHECK (rig.overlay().macroHandle (params::osc1Level, 0, 1) != juce::Point<float>());
     // A range dragged on the halo: still CORE.
-    rig.ui->pressAnywhere (rig.level);   // (focus dropped first: the drag itself chooses the macro)
+    rig.ui->pressAnywhere (rig.ui);   // (focus dropped first: the drag itself chooses the macro)
     rig.ui->refreshNow();
     rig.dragEnd (params::osc1Level, 0, 1, 0.85f);
     rig.ui->refreshNow();
