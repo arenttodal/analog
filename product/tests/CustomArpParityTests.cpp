@@ -368,7 +368,9 @@ namespace
         static void pump()
         {
            #if ! (JUCE_MAC || JUCE_IOS || JUCE_ANDROID)
-            for (int i = 0; i < 200 && juce::detail::dispatchNextMessageOnSystemQueue (true); ++i)
+            // (Until the queue is empty: on Windows the editor's timers keep posting, and by card
+            // C a backlog of more than 200 kept the browser's own message from being reached.)
+            for (int i = 0; i < 5000 && juce::detail::dispatchNextMessageOnSystemQueue (true); ++i)
             {
             }
            #endif
@@ -545,4 +547,66 @@ TEST_CASE ("parity custom arp: screenshots of the editor on card B and ANALOG's 
     stream.setPosition (0);
     stream.truncate();
     juce::PNGImageFormat().writeImageToStream (ui.createComponentSnapshot (ui.getLocalBounds(), true, 1.0f), stream);
+}
+
+TEST_CASE ("parity custom arp: in a window shorter than the instrument, the Custom Patterns browser opens in view (scrolled to it)", "[analog][arp][arp-custom][arp-custom-r2][parity]")
+{
+    // A short window (a laptop's screen, or a host that keeps its height) scrolls the instrument.
+    // The browser opens under the ARP panel, low in the instrument: it once ran below the window's
+    // edge, half out of reach. Opening it now scrolls it into view (and only opening it).
+    struct ShortHost final : juce::Component
+    {
+        ShortHost (juce::Component& e, int kept) : editor (e), height (kept) { addAndMakeVisible (editor); }
+        ~ShortHost() override { removeChildComponent (&editor); }
+        void childBoundsChanged (juce::Component*) override
+        {
+            if (! answering && editor.getHeight() != height)
+            {
+                const juce::ScopedValueSetter<bool> inside (answering, true);
+                editor.setSize (editor.getWidth(), height);   // (the old size, every time)
+            }
+        }
+        juce::Component& editor;
+        int height;
+        bool answering = false;
+    };
+    andor::shell::ShellProcessor p;
+    setValue (p, "arp.enabled", 1.0f);
+    setValue (p, "analog.arp.link", 0.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    ui.arpControl().onToggleEditor();
+    const int shortHeight = 860;
+    editor->setSize (1448, shortHeight);
+    ShortHost host (*editor, shortHeight);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.instrumentOverflow().settleNow();
+    ui.instrumentOverflow().settleNow();
+    REQUIRE (ui.instrumentOverflow().overflowing());
+    REQUIRE (editor->getHeight() == shortHeight);
+    for (int card = 0; card < 3; ++card)
+    {
+        INFO ("card " << card);
+        ui.closePopup();
+        // Scrolled to the top again, as a musician might leave it.
+        juce::MouseWheelDetails up {};
+        up.deltaY = 1.0f;
+        for (int i = 0; i < 10; ++i)
+            ui.instrumentOverflow().scrollBy (up);
+        REQUIRE (ui.instrumentOverflow().offset() == 0.0f);
+        ui.arpInlinePanel().setEditCard (card);
+        ui.arpInlinePanel().refresh();
+        ui.arpInlinePanel().openCustomBrowser();
+        auto* browser = dynamic_cast<osp::plugin::CustomPatternBrowser*> (ui.openPopupPanel());
+        REQUIRE (browser != nullptr);
+        const auto shown = editor->getLocalArea (browser, browser->getLocalBounds());
+        CHECK (ui.instrumentOverflow().offset() > 0.0f);   // (scrolled to it)
+        CHECK (shown.getY() >= 0);
+        CHECK (shown.getBottom() <= editor->getHeight() + osp::plugin::MiniPanel::shadowMargin);   // (its card in view; the shadow may touch the edge)
+        // + New Pattern, the row a click missed below the window's edge, is the browser's again.
+        const int fresh = browser->find (osp::plugin::CustomPatternBrowser::Kind::newPattern);
+        REQUIRE (fresh >= 0);
+        auto* under = editor->getComponentAt (editor->getLocalPoint (browser, browser->rowArea (fresh).getCentre()));
+        CHECK ((under == browser || browser->isParentOf (under)));
+    }
 }

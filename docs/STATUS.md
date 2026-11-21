@@ -14,13 +14,21 @@
 > - **Windows build (MSVC):** OSP's shell included `"FxRouting.h"` by name and MSVC found ANDOR
 >   ANALOG's own `product/Source/FxRouting.h` first (it looks beside the including files before
 >   the include paths): `RoutingKey` undeclared. OSP 5cc6fbed includes its own by path.
-> - **Windows build stalled:** MSVC cannot compile `tests/SatelliteTests.cpp` (it stalls
->   generating code; every other engine test file compiles in 2 to 10 s, found by compiling them
->   one at a time). The Windows job now builds, tests and uploads the product and its installer
->   first, then compiles the engine's test files one at a time (8 minutes each at most); a file
->   that does not compile is split by TEST_CASE (`tools/ci/compile_each_case.py`) to name the
->   case MSVC stalls on. Open: that case's fix, then the engine suite on Windows. The job stops
->   after 90 minutes rather than six hours.
+> - **Windows build stalled, found and fixed:** MSVC could not compile one test case, "SATELLITE:
+>   switched on and off mid-note" (its nested lambdas, one taking the 9 KB `Patch` by value);
+>   every other case and file compiles in seconds. Found by compiling each engine test file
+>   alone, then that file's cases alone (`tools/ci/compile_each_case.py`, kept in the Windows
+>   job for any file that stalls). The case is now plain helper functions, the same checks
+>   (passes here). The Windows job builds, tests and uploads the product and its installer first,
+>   then the engine's tests; it stops after 90 minutes rather than six hours.
+> - **The Custom Patterns browser in a short window:** a window shorter than the instrument (a
+>   laptop's screen, or a host keeping its height) scrolls it, and the browser, opened under the
+>   ARP panel, ran below the window's edge, half out of reach. Opening a popover now scrolls it
+>   into view once (`frame::revealPopover`, OSP's shared frame: ANDOR ANALOG's shell and ANDOR
+>   OSP's editor alike); the musician's own scrolling is left alone after. New test on every card
+>   in a scrolled window (fails without the change); OSP has the same test for its editor.
+> - **The click test on Windows:** it handles every waiting message after a click (the editor's
+>   timers kept more than 200 queued by card C, and the browser's opening was not reached).
 > - **Two product tests on Windows (test-only):** the GLOBAL MORPH probe kept a 126 KB
 >   `ShellProcessor` on the stack in each of its sections and overran Windows' 1 MB stack (a host
 >   always makes the processor on the heap); the test's processors are now on the heap (it

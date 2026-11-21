@@ -94,6 +94,38 @@ namespace
         }
         return std::atan2 (std::sqrt (r), std::sqrt (l)) / (0.25 * std::numbers::pi) - 1.0;
     }
+
+    /** `seconds` more of `s`, with `patch` set first, added to the end of `out`. */
+    void renderPart (Synth& s, Stereo& out, const Patch& patch, double seconds, std::vector<Event> events)
+    {
+        s.setPatch (patch);
+        const auto r = render (s, seconds, std::move (events));
+        out.left.insert (out.left.end(), r.left.begin(), r.left.end());
+        out.right.insert (out.right.end(), r.right.begin(), r.right.end());
+    }
+
+    /** A held note: 0.3 s still, 0.3 s with card B moved to the right (`move`, else still), then
+        0.4 s still again. (Plain functions, not nested lambdas: MSVC stalled compiling them.) */
+    Stereo onOffMidNote (const Patch& p, bool move)
+    {
+        auto s = makeSynth (p);
+        Stereo out;
+        out.rate = 48000.0;
+        Patch moving = p;
+        moving.satellite[1] = fixedAt (1.0);
+        renderPart (*s, out, p, 0.3, { on (0, 48, 100) });
+        renderPart (*s, out, move ? moving : p, 0.3, {});
+        renderPart (*s, out, p, 0.4, {});
+        return out;
+    }
+
+    /** The right channel's RMS between two times. */
+    double rightRms (const Stereo& x, double from, double to)
+    {
+        Stereo r = x;
+        r.left = r.right;
+        return r.rms (from, to);
+    }
 }
 
 TEST_CASE ("SATELLITE: all off is the original path - settings that are off change nothing, bit for bit", "[satellite][unit]")
@@ -293,32 +325,10 @@ TEST_CASE ("SATELLITE: switched on and off mid-note - no jump; off again is the 
 {
     Patch p = threeCards();
     p.osc2Coarse = 7.0;
-    auto runWith = [&] (bool move) {
-        auto s = makeSynth (p);
-        Stereo out;
-        out.rate = 48000.0;
-        const auto part = [&] (Patch q, double seconds, std::vector<Event> ev) {
-            s->setPatch (q);
-            const auto r = render (*s, seconds, std::move (ev));
-            out.left.insert (out.left.end(), r.left.begin(), r.left.end());
-            out.right.insert (out.right.end(), r.right.begin(), r.right.end());
-        };
-        Patch moving = p;
-        moving.satellite[1] = fixedAt (1.0);
-        part (p, 0.3, { on (0, 48, 100) });
-        part (move ? moving : p, 0.3, {});
-        part (p, 0.4, {});
-        return out;
-    };
-    const auto plain = runWith (false), moved = runWith (true);
+    const auto plain = onOffMidNote (p, false), moved = onOffMidNote (p, true);
     REQUIRE (moved.finite());
     // The move glides in over ~20 ms: the right channel's level against the still render's
     // (a whole cycle of the note per window) rises in small steps, never a jump.
-    auto rightRms = [] (const Stereo& x, double from, double to) {
-        Stereo r = x;
-        r.left = r.right;
-        return r.rms (from, to);
-    };
     const double cycle = 1.0 / hz (48);
     double last = 1.0;
     for (double t = 0.29; t < 0.36; t += 0.002)
