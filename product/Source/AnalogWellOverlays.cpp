@@ -10,6 +10,7 @@
 #include "OspLookAndFeel.h"
 #include "RhythmPanel.h"
 #include "ShapingPopups.h"
+#include "UnisonPanel.h"
 
 #include <array>
 #include <vector>
@@ -483,6 +484,13 @@ namespace
             modelSelector->setTitle ("OSC " + juce::String (slot) + " model");
             binding::tag (*modelSelector, ids.model);
             addAndMakeVisible (*modelSelector);
+            // UNISON's voices chip beside the model (always shown): OSC 1, 2 and card C's OSC 3
+            // (card C's second layer has none).
+            if (slot <= 3)
+            {
+                unisonChip = std::make_unique<UnisonChip> (host, slot - 1, accent);
+                addAndMakeVisible (*unisonChip);
+            }
 
             // Revealed: this model's timbre, five cells along the foot of the well.
             if (model == 1)   // DCO
@@ -539,6 +547,8 @@ namespace
             }
             else
                 modelSelector->setBounds (w - 12 - 92, 6, 92, 22);
+            if (unisonChip != nullptr)
+                unisonChip->setBounds (modelSelector->getX() - 6 - UnisonChip::preferredWidth, 6, UnisonChip::preferredWidth, 22);
             if (layerKeys != nullptr)
                 layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
             const auto b = band().reduced (8, 4);
@@ -655,6 +665,7 @@ namespace
         const int model;
         const juce::Colour accent;
         std::unique_ptr<ValueSelector> modelSelector, typeSelector;
+        std::unique_ptr<UnisonChip> unisonChip;
         std::unique_ptr<LayerKeys> layerKeys;
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;

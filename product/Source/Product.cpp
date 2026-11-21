@@ -411,6 +411,13 @@ const ProductInfo& productInfo()
         p.crossCloseKeys = true;   // (the ARPEGGIATOR closes with the racks' X)
         // MORPH's own on / off beside its name (off on a new instance; a preset or a session keeps its own).
         p.macroSwitches = { { 0, andor::analog::params::morphEnabled, "Enable / bypass Morph." } };
+        // AMP 2: the held-note attack on the AMP tab ("+ AMP 2", then 1 | 2 x).
+        p.heldAttack = andor::shell::ProductInfo::HeldAttack {
+            andor::analog::params::amp2Enabled, andor::analog::params::amp2Attack, [] (osp::plugin::InstrumentHost& host) -> std::uint32_t {
+                auto* shell = dynamic_cast<andor::shell::ShellProcessor*> (&host);
+                auto* engine = shell != nullptr ? dynamic_cast<andor::analog::AnalogEngine*> (&shell->productEngine()) : nullptr;
+                return engine != nullptr ? engine->heldAttackCount() : 0u;
+            } };
         // The MOD WHEEL's VIBRATO: the oscillators, card C pitched, and SUB (ANALOG's own, off by
         // default). Noise, D and live input are never pitched by it.
         p.vibratoSources = { { "OSC 1", osp::plugin::ids::vibratoSourceA },
@@ -470,11 +477,15 @@ const ProductInfo& productInfo()
             namespace ap = andor::analog::params;
             using K = andor::shell::ProductInfo::CardKnob;
             std::array<K, 5> k {};
-            // Every card the same first four (DETUNE, TUNE, OCT, LEVEL), its fifth its own.
+            // An oscillator card (state version 24): its UNISON's DETUNE and BLEND, then TUNE, OCT,
+            // LEVEL (LEVEL in REIMAGINED's slot: REIMAGINED is hidden, kept in the engine). Fine
+            // tuning (cents) is FINE in the card's UNISON panel (its voices chip in the well).
             if (layer == 0)
-                k = { K { ap::osc1Fine, "DETUNE" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" }, K { ap::osc1Level, "LEVEL" }, K {} };
-            else if (layer == 2)   // (Cinematic V6: its own REIMAGINED fifth, as card A's; its VELO in its well)
-                k = { K { ap::osc2Fine, "DETUNE" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" }, K { ap::osc2Level, "LEVEL" }, K {} };
+                k = { K { ap::unisonId (0, "detune"), "DETUNE" }, K { ap::unisonId (0, "blend"), "BLEND" }, K { ap::osc1Coarse, "TUNE" }, K { ap::osc1Octave, "OCT" },
+                      K { ap::osc1Level, "LEVEL" } };
+            else if (layer == 2)   // (its VELO in its well)
+                k = { K { ap::unisonId (1, "detune"), "DETUNE" }, K { ap::unisonId (1, "blend"), "BLEND" }, K { ap::osc2Coarse, "TUNE" }, K { ap::osc2Octave, "OCT" },
+                      K { ap::osc2Level, "LEVEL" } };
             else if (andor::analog::hybridLayerShown (host) == 2)
             {
                 // Card C's second layer (its keys in the well choose it): its own, by its type.
@@ -498,8 +509,8 @@ const ProductInfo& productInfo()
                     none.hidden = true;
                     k = { none, none, none, level, none };   // (EXPERIMENT: the hosted instrument's own controls are in its editor)
                 }
-                else if (type == HybridType::oscillator)
-                    k = { K { ap::osc3Fine, "DETUNE" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, level, K { ap::hybridVelo, "VELO" } };
+                else if (type == HybridType::oscillator)   // (as A and B; FINE and VELO in its UNISON panel)
+                    k = { K { ap::unisonId (2, "detune"), "DETUNE" }, K { ap::unisonId (2, "blend"), "BLEND" }, K { ap::osc3Coarse, "TUNE" }, K { ap::osc3Octave, "OCT" }, level };
                 else if (type == HybridType::noise)
                     k = { K { ap::hybridNoiseTone, "TONE" }, K { ap::hybridNoiseMovement, "MOVEMENT" }, K { ap::hybridNoiseKeys, "KEYS" }, level, K { ap::hybridVelo, "VELO" } };
                 else   // a recording or a patch: its pitch (the notes it is played with), START

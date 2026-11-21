@@ -266,6 +266,7 @@ void Synth::reset() noexcept
     nextSlot = 0;
     keyCount = 0;
     monoGate = false;
+    forgetKeys();
     lastMonoPitch = -1.0;
     bend = 0.0f;
     wheel = 0.0f;
@@ -910,7 +911,12 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
             v.mod.values[0] = static_cast<float> (v.lfo.value);   // (LFO 1: the synth's own, this note's)
         using D = osp::mod::Dest;
         const auto& compiled = modRuntime.compiled;
-        v.ampAttackSeconds = compiled.has (D::ampAttack) ? osp::mod::modulatedSeconds (D::ampAttack, current.ampAttack, offsetOf (v, D::ampAttack)) : -1.0;
+        // AMP 2: a note begun over a held one takes the held-note attack (latched).
+        v.ampHeld = heldAttackFor (note);
+        if (v.ampHeld)
+            heldAttackStarts.fetch_add (1, std::memory_order_relaxed);
+        const double attackBase = v.ampHeld ? current.amp2Attack : current.ampAttack;
+        v.ampAttackSeconds = compiled.has (D::ampAttack) ? osp::mod::modulatedSeconds (D::ampAttack, attackBase, offsetOf (v, D::ampAttack)) : -1.0;
         v.ampDecaySeconds = compiled.has (D::ampDecay) ? osp::mod::modulatedSeconds (D::ampDecay, current.ampDecay, offsetOf (v, D::ampDecay)) : -1.0;
         v.ampReleaseSeconds = -1.0;
     }
@@ -1074,8 +1080,8 @@ void Synth::releaseVoice (Voice& v) noexcept
     {
         v.ampReleaseSeconds = osp::mod::modulatedSeconds (D::ampRelease, current.ampRelease, offsetOf (v, D::ampRelease));
         const auto& p = patchOf (v);
-        v.amp.setTimes (v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack, v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay,
-                        p.ampSustain, v.ampReleaseSeconds);
+        v.amp.setTimes (v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : (v.ampHeld ? p.amp2Attack : p.ampAttack),
+                        v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay, p.ampSustain, v.ampReleaseSeconds);
     }
     v.amp.noteOff();
     v.env.noteOff();
@@ -1103,6 +1109,8 @@ void Synth::noteOn (int channel, int note, float velocity) noexcept
     modRuntime.noteStarted (note, channel);
     if (! playedKeysOnly)
         modRuntime.setInputNote (note, std::clamp (static_cast<int> (std::lround (velocity * 127.0f)), 1, 127));
+    if (! playedKeysOnly)
+        trackKey (note, true);   // (AMP 2: without an arpeggiator the notes are the keys)
     if (monophonic())
     {
         monoNoteOn (channel, note, velocity);
@@ -1142,6 +1150,8 @@ void Synth::noteOn (int channel, int note, float velocity) noexcept
 void Synth::noteOff (int channel, int note) noexcept
 {
     modRuntime.noteEnded (note, channel);
+    if (! playedKeysOnly)
+        trackKey (note, false);
     if (monophonic())
     {
         monoNoteOff (channel, note);
@@ -1294,6 +1304,79 @@ void Synth::monoGoTo (int note, bool retrigger, float velocity, int channel) noe
         startVoice (v, channel, note, velocity, true);
     }
     lastMonoPitch = note;
+}
+
+void Synth::handleSubMidi (const std::uint8_t* data, int size) noexcept
+{
+    subOsc.handleMidi (data, size);
+    // While an arpeggiator plays the synth, AMP 2 follows the keys themselves (never its steps).
+    if (playedKeysOnly && size >= 3)
+    {
+        const int status = data[0] & 0xf0;
+        if (status == 0x90 && data[2] > 0)
+            trackKey (data[1], true);
+        else if (status == 0x80 || status == 0x90)
+            trackKey (data[1], false);
+    }
+}
+
+bool Synth::pedalHolding() const noexcept
+{
+    if (! pedal)
+        return false;
+    for (const auto& v : voices)
+        if (v.active && v.sustained)
+            return true;
+    return false;
+}
+
+void Synth::trackKey (int note, bool down) noexcept
+{
+    if (note < 0 || note > 127)
+        return;
+    const auto k = static_cast<std::size_t> (note);
+    if (down)
+    {
+        // A phrase: from a key pressed when nothing was held (no key, no pedal holding a note)
+        // until all are let go. Its first 30 ms are one gesture (a chord): those keys take AMP 1;
+        // later ones, begun over the held notes, AMP 2.
+        const bool phrase = keysDown > 0 || pedalHolding();
+        if (! phrase)
+            phraseStart = clock;
+        heldKey[k] = phrase && static_cast<double> (clock - phraseStart) > 0.03 * hostRate;   // (clock: this event's host sample)
+        if (keyDown[k] < 255)
+            ++keyDown[k];
+        ++keysDown;
+    }
+    else if (keyDown[k] > 0)
+    {
+        --keyDown[k];
+        --keysDown;
+    }
+}
+
+void Synth::forgetKeys() noexcept
+{
+    keyDown = {};
+    keysDown = 0;
+    heldKey = {};
+}
+
+bool Synth::heldAttackFor (int note) const noexcept
+{
+    if (! current.amp2Enabled)
+        return false;
+    const auto k = static_cast<std::size_t> (std::clamp (note, 0, 127));
+    if (! playedKeysOnly)
+        return heldKey[k];
+    // An arpeggiator's step: the key it comes from (that key, else a held key of the same
+    // pitch class - its octaves - else the last choice made for that key).
+    if (keyDown[k] > 0)
+        return heldKey[k];
+    for (std::size_t i = k % 12; i < 128; i += 12)
+        if (keyDown[i] > 0)
+            return heldKey[i];
+    return heldKey[k];
 }
 
 void Synth::setPitchBend (float value) noexcept
@@ -1753,7 +1836,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
 
     // Envelopes: the slot's tolerance on the times (+-20 % at 100 %).
     const double t = 0.2 * a;
-    const double ampAttack = (v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : p.ampAttack) * (1.0 + t * d.attack);
+    const double ampAttack = (v.ampAttackSeconds >= 0.0 ? v.ampAttackSeconds : (v.ampHeld ? p.amp2Attack : p.ampAttack)) * (1.0 + t * d.attack);
     const double ampDecay = (v.ampDecaySeconds >= 0.0 ? v.ampDecaySeconds : p.ampDecay) * (1.0 + t * d.decay);
     const double ampRelease = (v.ampReleaseSeconds >= 0.0 ? v.ampReleaseSeconds : p.ampRelease) * (1.0 + t * d.release);
     if (p.envLink)   // ENV LINK: one envelope for both, as on a Juno-106: the AMP envelope (the one on screen) shapes the filter too

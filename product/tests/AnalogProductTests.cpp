@@ -31,6 +31,7 @@
 #include "SubPanel.h"
 #include "UserMacroBank.h"
 #include "UserMacroUI.h"
+#include "../Source/UnisonPanel.h"
 #include "../Source/SatellitePanel.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
 #include "RhythmPanel.h"
 #include "model/ArpFactoryPatterns.h"
@@ -897,6 +898,10 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
                     setValue (q, params::unisonId (card, "voices"), 3.0f);   // (choice index 3: four copies)
             };
         }
+    // LEGATO acts in MONO (the phrase's line over its held chord); AMP 2 on notes begun over
+    // held ones (the line's), with an attack far from AMP 1's.
+    setups[params::legato] = [] (ShellProcessor& q) { setValue (q, "voiceMode", 1.0f); };
+    setups[params::amp2Attack] = [] (ShellProcessor& q) { setValue (q, params::amp2Enabled, 1.0f); };
     // SATELLITE acts on its card while it sounds and moves: the card on, travelling (DEPTH up),
     // card C an oscillator (so it sounds), the voices spread (WIDTH has something to narrow);
     // RATE in FREE, its NOTE choice in BOUNCE.
@@ -3290,12 +3295,16 @@ TEST_CASE ("analog: each oscillator's well reveals its model's own controls on h
             }
             setValue (f.p, slot == 1 ? osc1Model : osc2Model, 0.0f);
         }
-        // The cards' own knobs: DETUNE, TUNE, OCT, LEVEL of that oscillator.
-        CHECK (f.card (0).hasControl (osc1Fine));
+        // The cards' own knobs (state version 24): UNISON's DETUNE and BLEND, TUNE, OCT, LEVEL of
+        // that oscillator (FINE in its UNISON panel).
+        CHECK_FALSE (f.card (0).hasControl (osc1Fine));
+        CHECK (f.card (0).hasControl (unisonId (0, "detune")));
+        CHECK (f.card (0).hasControl (unisonId (0, "blend")));
+        CHECK (f.card (2).hasControl (unisonId (1, "detune")));
         CHECK (f.card (0).hasControl (osc1Coarse));
         CHECK (f.card (0).hasControl (osc1Octave));
         CHECK (f.card (0).hasControl (osc1Level));
-        CHECK (f.card (2).hasControl (osc2Fine));
+        CHECK_FALSE (f.card (2).hasControl (osc2Fine));
         CHECK (f.card (2).hasControl (osc2Level));
     }
     // A model's settings outlive another model playing.
@@ -3387,7 +3396,9 @@ TEST_CASE ("analog: card C is a SAMPLE, OSC 3, NOISE or an INSTRUMENT PATCH; onl
             auto& card = ui.engineCard (1);
             REQUIRE (card.isVisible());
             CHECK (card.hasControl ("layerB.level"));
-            CHECK (card.hasControl (osc3Fine) == (type == HybridType::oscillator));
+            CHECK_FALSE (card.hasControl (osc3Fine));   // (state version 24: FINE in OSC 3's UNISON panel)
+            CHECK (card.hasControl (unisonId (2, "detune")) == (type == HybridType::oscillator));
+            CHECK (card.hasControl (unisonId (2, "blend")) == (type == HybridType::oscillator));
             CHECK (card.hasControl (osc3Octave) == (type == HybridType::oscillator));
             auto* o = card.wellOverlayComponent();
             REQUIRE (o != nullptr);
@@ -3398,7 +3409,7 @@ TEST_CASE ("analog: card C is a SAMPLE, OSC 3, NOISE or an INSTRUMENT PATCH; onl
             CHECK (OverlayFixture::shown (*o, hybridNoiseColor) == (type == HybridType::noise));
             CHECK (card.hasControl (hybridNoiseTone) == (type == HybridType::noise));
             CHECK (card.hasControl (hybridNoiseKeys) == (type == HybridType::noise));
-            CHECK (card.hasControl (hybridVelo) == (type == HybridType::noise || type == HybridType::oscillator));
+            CHECK (card.hasControl (hybridVelo) == (type == HybridType::noise));   // (OSC 3's VELO: in its UNISON panel)
             CHECK (card.hasControl (hybridOctave) == (type == HybridType::sample || type == HybridType::instrumentPatch));
             CHECK (OverlayFixture::shown (*o, osc3Model) == (type == HybridType::oscillator));
             CHECK (OverlayFixture::shown (*o, osc3Wave) == (type == HybridType::oscillator));
@@ -5637,7 +5648,7 @@ TEST_CASE ("analog: FILTER and MORPH open inline from their macros' names - ever
         const char* captions;
     };
     const View views[] { { 0, 0, "RESO ENV KEYS DRIVE ATTACK DECAY SUSTAIN RELEASE VELO" },
-                         { 1, 0, "AMP ENV LINK VOICES UNISON DETUNE SPREAD" },
+                         { 1, 0, "AMP ENV LINK VOICES PLAY LEGATO GLIDE SPREAD" },
                          { 1, 1, "AMOUNT CUTOFF PITCH 1 PITCH 2 DELAY RISE WHEEL" },
                          { 1, 2, "ANALOG PHASE BIAS TRIM CHORUS HISS" },
                          { 2, 0, "SYNC RING BLEND FILT ENV OSC 2 PITCH 1 WIDTH 1 FILTER NOISE" } };
@@ -8559,9 +8570,10 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
         walk (root);
         return found;
     };
-    CHECK (hasControlFor (ui.engineCard (2), ampB, true));
+    CHECK_FALSE (hasControlFor (ui.engineCard (2), ampB, true));   // (state version 24: REIMAGINED hidden on both cards - its engine and state kept, above)
     CHECK_FALSE (hasControlFor (ui.engineCard (2), params::osc2Velo, true));   // (not in the knob row: in the well)
-    CHECK (hasControlFor (ui.engineCard (0), "reimagined"));
+    CHECK_FALSE (hasControlFor (ui.engineCard (0), "reimagined"));   // (state version 24: REIMAGINED hidden - LEVEL in its slot - its engine kept)
+    CHECK (hasControlFor (ui.engineCard (0), params::osc1Level));
     for (const float model : { 0.0f, 1.0f, 2.0f })   // CLASSIC, DCO, WIDE
     {
         INFO ("OSC 2 model " << model);
@@ -12191,4 +12203,117 @@ TEST_CASE ("analog: state version 24 - the global UNISON becomes each card's (MO
         CHECK (plain (p, params::legato) == 0.0f);   // (POLY: nothing changes)
         CHECK (plain (p, "voiceMode") == 0.0f);
     }
+}
+
+TEST_CASE ("analog: screenshots of UNISON - the card row, the voices chip and the panel (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][unison]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    shoot ("unison-init");
+    setValue (p, params::unisonId (0, "voices"), 4.0f);   // (five copies)
+    setValue (p, params::unisonId (0, "detune"), 55.0f);
+    setValue (p, params::unisonId (1, "voices"), 6.0f);
+    setValue (p, params::osc1Model, 2.0f);
+    setValue (p, params::hybridType, 1.0f);
+    setValue (p, params::unisonId (2, "voices"), 2.0f);
+    ui.refreshNow();
+    if (auto* o = ui.engineCard (0).wellOverlayComponent())
+        o->setRevealedForTest (true);
+    shoot ("unison-cards");
+    // The chip opens card A's panel.
+    andor::analog::UnisonChip* chip = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* u = dynamic_cast<andor::analog::UnisonChip*> (child); u != nullptr && chip == nullptr)
+                chip = u;
+            find (*child);
+        }
+    };
+    find (ui.engineCard (0));
+    REQUIRE (chip != nullptr);
+    CHECK (chip->voices() == 5);
+    chip->step (1);
+    CHECK (chip->voices() == 6);
+    chip->openPanel();
+    shoot ("unison-panel-a");
+    setValue (p, params::unisonId (0, "mode"), 1.0f);
+    setValue (p, params::unisonId (0, "width"), 40.0f);
+    shoot ("unison-panel-a-super");
+    chip->openPanel();   // (again: closes)
+    // FILTER's rack, VOICE: the voicing (VOICES, PLAY POLY / MONO, LEGATO, GLIDE, SPREAD).
+    setValue (p, "voiceMode", 1.0f);
+    setValue (p, params::legato, 1.0f);
+    ui.toggleRackFromLabel (osp::plugin::rack::Kind::filter);
+    ui.refreshNow();
+    if (auto* filter = dynamic_cast<osp::plugin::rack::ParameterRack*> (ui.effectsRack().module (osp::plugin::rack::Kind::filter)))
+    {
+        filter->showPage (1);
+        filter->showSubPage (0);
+    }
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    shoot ("unison-voicing-rack");
+    osp::plugin::skin::setLook (before);
+}
+
+TEST_CASE ("analog: AMP 2 on the AMP tab - '+ AMP 2', then 1 | 2 x; 2 edits AMP 2's attack; x switches it off", "[analog][amp2][ui]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    auto& panel = ui.modulationPanel();
+    panel.showTab (0);   // AMP
+    ui.refreshNow();
+    auto& amp = panel.ampEnvelope();
+    REQUIRE (amp.hasHeldAttack());
+    CHECK_FALSE (amp.heldAttackOn());
+    CHECK_FALSE (panel.amp2PlusArea().isEmpty());
+    CHECK (panel.amp2ChipArea (2).isEmpty());
+    auto click = [&] (juce::Rectangle<float> r) {
+        const auto at = r.getCentre();
+        const juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), at, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &panel, &panel,
+                                  juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false);
+        panel.tabMouseDown (e);
+    };
+    click (panel.amp2PlusArea());
+    CHECK (p.parameterValue (params::amp2Enabled) >= 0.5f);
+    CHECK (amp.showingSecond());   // (switched on: AMP 2 shown, to set)
+    CHECK_FALSE (panel.amp2ChipArea (1).isEmpty());
+    click (panel.amp2ChipArea (1));
+    CHECK_FALSE (amp.showingSecond());
+    click (panel.amp2ChipArea (2));
+    CHECK (amp.showingSecond());
+    // The engine's count moving starts the flash.
+    CHECK_FALSE (amp.noteHeldAttackCount (0));
+    CHECK (amp.noteHeldAttackCount (1));
+    CHECK (amp.heldAttackFlash() > 0.0f);
+    if (const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR"))
+    {
+        ui.refreshNow();
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        juce::FileOutputStream stream (juce::File (dir).getChildFile ("amp2-tab.png"));
+        stream.setPosition (0);
+        stream.truncate();
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    }
+    click (panel.amp2ChipArea (3));
+    CHECK (p.parameterValue (params::amp2Enabled) < 0.5f);
+    CHECK_FALSE (amp.showingSecond());
 }

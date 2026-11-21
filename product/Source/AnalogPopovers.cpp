@@ -385,8 +385,9 @@ namespace
         p->row ("VOICES");
         p->onPage (1, page);
         p->knob (polyphony, "VOICES");
-        p->toggle (unison, "UNISON", 1.2f, "Every voice on one note, detuned: a thick mono sound");
-        p->knob (unisonDetune, "DETUNE");
+        p->segments ("voiceMode", { "POLY", "MONO" }, 2.0f, "POLY: every note its own voice. MONO: one note at a time, the newest key");
+        p->toggle (legato, "LEGATO", 1.2f, "MONO: a key pressed while another is held slides there without a new attack. Off: every key starts afresh");
+        p->knob ("glide", "GLIDE");
         p->knob (spread, "SPREAD");
         p->row ("LFO 1  (its shape and rate: the modulation panel)");
         p->onPage (1, page);

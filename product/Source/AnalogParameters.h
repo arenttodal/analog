@@ -52,6 +52,9 @@ namespace andor::analog::params
         global UNISON above is retired (unread): its sessions become each card's UNISON, MONO and
         LEGATO (Product.cpp's migration). */
     inline const juce::String legato = "analog.legato";
+    /** State version 24: AMP 2, the held-note attack (ANALOG only): its switch and ATTACK (ms). */
+    inline const juce::String amp2Enabled = "analog.amp2.enabled";
+    inline const juce::String amp2Attack = "analog.amp2.attack";
     inline const juce::String spread = "analog.spread";
     inline const juce::String resonance = "analog.resonance";
     inline const juce::String keyTrack = "analog.keyTrack";

@@ -184,7 +184,7 @@ namespace
             juce::String sig (page() * 16 + sub());
             for (const auto& id : { params::tone, params::resonance, params::filterModel, params::otaCharacter, params::otaSlope, params::otaHpf, params::junoVariant,
                                     params::vcaMode, juce::String ("attack"), juce::String ("decay"), juce::String ("sustainLevel"), juce::String ("release"),
-                                    params::polyphony, params::unison, params::sync, params::ringMix, params::blend, params::polyModEnv, params::polyModOsc2,
+                                    params::polyphony, juce::String ("voiceMode"), params::legato, juce::String ("glide"), params::sync, params::ringMix, params::blend, params::polyModEnv, params::polyModOsc2,
                                     params::polyModToPitch1, params::polyModToWidth1, params::polyModToCutoff, params::noise, params::noiseColor, params::envDepth,
                                     params::motion, params::lfoCutoff, params::lfoPitch1, params::lfoPitch2, params::lfoDelay, params::lfoRise, params::lfoWheel,
                                     params::analogAmount, params::phaseMode, params::driveBias, params::driveTrim, params::filterDrive, params::chorusMode,
@@ -548,7 +548,8 @@ namespace
             g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             auto* voices = host.apvts().getParameter (params::polyphony);
             gtype::header (g, area, gate ? "AMP" + middleDot() + "GATE" : "AMP" + middleDot() + "ENVELOPE",
-                           "VOICES " + (voices != nullptr ? voices->getCurrentValueAsText() : juce::String()) + (plain (host, params::unison) >= 0.5f ? middleDot() + "UNISON" : juce::String()));
+                           plain (host, "voiceMode") >= 0.5f ? "MONO" + (plain (host, params::legato) >= 0.5f ? middleDot() + "LEGATO" : juce::String())
+                                                              : "VOICES " + (voices != nullptr ? voices->getCurrentValueAsText() : juce::String()));
             if (! gate)
                 gtype::foot (g, area, "time on a square-root scale");
         }
@@ -903,11 +904,21 @@ namespace
                         segmentCell (vcaMode, "AMP", { { "ENV", "Envelope", 0.0f }, { "GATE", "Gate", 1.0f } },
                                      "The amplitude: its envelope (AMP), or a gate that opens and closes with the key");
                         switchCell (envLink, "ENV LINK", { on, off }, "One envelope for both, as on a Juno-106: the AMP envelope shapes the filter too");
-                        steppedKnob (polyphony, "VOICES", textOf (host, polyphony));
-                        switchCell (unison, "UNISON", { on, off }, "Every voice on one note, detuned: a thick mono sound");
-                        knob (unisonDetune, "DETUNE", textOf (host, unisonDetune));
+                    {
+                        // VOICING: how many notes at once, MONO (one: last-note priority) and its
+                        // LEGATO, GLIDE. (Thickness is each card's UNISON now, in its well.)
+                        const bool mono = plain (host, "voiceMode") >= 0.5f;
+                        auto& voices = steppedKnob (polyphony, "VOICES", textOf (host, polyphony));
+                        voices.setAlpha (mono ? 0.45f : 1.0f);
+                        segmentCell ("voiceMode", "PLAY", { { "POLY", "Poly", 0.0f }, { "MONO", "Mono", 1.0f } },
+                                     "POLY: every note its own voice (VOICES of them). MONO: one note at a time, the newest key");
+                        auto& legatoCell = switchCell (legato, "LEGATO", { on, off },
+                                                       "MONO: a key pressed while another is held slides there without a new attack. Off: every key starts afresh");
+                        legatoCell.setAlpha (mono ? 1.0f : 0.45f);
+                        knob ("glide", "GLIDE", textOf (host, "glide"));
                         knob (spread, "SPREAD", textOf (host, spread));
                         break;
+                    }
                     case 1:   // MOD: LFO 1's depths and fade-in, WHEEL its last control (its shape and rate: the modulation panel)
                         knob (motion, "AMOUNT", textOf (host, motion));
                         knob (lfoCutoff, "CUTOFF", textOf (host, lfoCutoff));

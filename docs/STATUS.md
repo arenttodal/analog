@@ -1,5 +1,38 @@
 # ANDOR ANALOG — status
 
+> **21 Nov 2026, UNISON per card, MONO + LEGATO, AMP 2 (branch `claude/analog-unison`, state
+> version 24):**
+> - **UNISON inside each voice (Serum-style), cards A, B and C (OSC 3):** VOICES 1-8, DETUNE
+>   (outer copies at detune^2.5 x RANGE), BLEND (our own constant-power law: loudness never
+>   changes), WIDTH (mid/side: the side through twins of the cards' EQ/DAMPEN, the filter, AMP,
+>   SHAPER DNA; equal-power placement, never louder), MODE (LINEAR, SUPER, EXP, INV, RANDOM from
+>   the note's seed). Polyphonic: every note keeps its own copies and attack. One copy is the old
+>   path bit for bit. CPU here: 8 voices x 7 wide copies +10 % of a core. A card in GRANULAR keeps
+>   its copies mono.
+> - **Card row:** DETUNE (unison), BLEND, TUNE, OCT, LEVEL. FINE tuning (cents) and card C's VELO
+>   moved to the card's UNISON panel, opened from the voices chip (`‹ 4 ›`, beside the model in the
+>   well: arrows step VOICES, the number opens it). The panel draws the copies (place = detune,
+>   height = level, tint = side).
+> - **REIMAGINED hidden** (LEVEL took its slot); its engine and state stay. Switched off in Grain
+>   Cloud (was 0.45), Kaleidoscope Pad (0.65), Tape Frame Keys (0.6), Toybox Chime (0.7), Mirage
+>   Bass (0.65), Frozen Glass (0.3).
+> - **MONO + LEGATO** (FILTER rack, VOICE: VOICES, PLAY POLY/MONO, LEGATO, GLIDE, SPREAD). LEGATO
+>   off (new default): every key fades 3 ms and starts its envelopes from zero; on: the old slide.
+>   The global UNISON is retired: version-23 sessions with it become each card's UNISON (same count,
+>   outer detune, even level, WIDTH = STEREO SPREAD) + MONO + LEGATO; MONO sessions get LEGATO on.
+>   Factory sounds (factory version 10): Unison Lead uses card unison in MONO; the eight MONO sounds
+>   play with LEGATO off.
+> - **AMP 2 (ANALOG only):** a held-note attack. A note begun while another key is held (or the
+>   pedal holds a note), more than 30 ms after the phrase's first key, takes AMP 2's ATTACK
+>   (D/S/R from AMP 1; latched per voice). The keys played decide, never the arpeggiator's steps
+>   (an arp step follows the key it comes from). AMP tab: "+ AMP 2", then `1 | 2 ×` chips, AMP 2's
+>   attack as a ghost, the "2" chip flashes as a note takes it. OSP's hook is opt-in
+>   (`ProductInfo::heldAttack`): ANDOR OSP unchanged.
+> - **Goldens (intentional):** legacy, fx-baseline and v6-baseline renders for the 14 changed
+>   factory sounds only; parameter schema (+24 parameters, all v40).
+> - **OWNER TEST:** listen to Unison Lead and the REIMAGINED-off sounds; try LEGATO off on the
+>   MONO leads; AMP 2 with a held drone. DAW checks are owner tests.
+
 > **20 Nov 2026, card C's playhead in RHYTHM; Windows checkout; macOS click test (owner reports
 > and the first CI run of the merged line):**
 > - **Card C's playhead follows RHYTHM:** with a drum loop on C and RHYTHM on, a key moved the

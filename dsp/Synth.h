@@ -141,7 +141,12 @@ public:
     bool sharedOffset (osp::mod::Dest d, double& offset) const noexcept;
     /** While an arpeggiator plays the synth: VEL and NOTE on the shared stages follow the
         keys the musician pressed (setPlayedKey), not the notes it is given. */
-    void setPlayedKeysOnly (bool on) noexcept { playedKeysOnly = on; }
+    void setPlayedKeysOnly (bool on) noexcept
+    {
+        if (on != playedKeysOnly)
+            forgetKeys();   // (AMP 2's keys: from the other stream now)
+        playedKeysOnly = on;
+    }
     void setPlayedKey (int note, int velocity) noexcept { modRuntime.setInputNote (note, velocity); }
     /** The newest sounding voice's modulation (the panel's meters), or null. */
     const osp::mod::VoiceState* newestModulation() const noexcept;
@@ -182,7 +187,11 @@ public:
     void handleMidi (const std::uint8_t* data, int size) noexcept;
     /** Cinematic V6 gate 2: one message of the musician's own input (before the arpeggiator),
         for SUB. It joins the output after the effects (never their input). */
-    void handleSubMidi (const std::uint8_t* data, int size) noexcept { subOsc.handleMidi (data, size); }
+    /** The keys the musician played (SUB's, and while an arpeggiator plays the synth, AMP 2's
+        held-note rule), at their samples. */
+    void handleSubMidi (const std::uint8_t* data, int size) noexcept;
+    /** AMP 2: how many notes have started with its attack (the interface's key flashes). */
+    std::uint32_t heldAttackCount() const noexcept { return heldAttackStarts.load (std::memory_order_relaxed); }
     /** Tests: SUB. */
     const SubOsc& sub() const noexcept { return subOsc; }
 
@@ -566,6 +575,7 @@ private:
         std::array<BlepLine, 3> sideLine {};
         std::array<float, 3> sideOsc {}, sideTilt {};
         bool sideOn = false, sideWas = false;
+        bool ampHeld = false;   ///< AMP 2: this note took the held-note attack (latched for its life)
         float sideIn = 0.0f;   ///< the cards' side as it reaches the filter (this sample)
         VoiceEq sideEqA, sideEqB, sideEqC;
         VoiceDampen sideDampenA, sideDampenB, sideDampenC;
@@ -728,6 +738,11 @@ private:
     /** UNISON: a voice that starts from silence draws its copies' phases and RANDOM's values. */
     void seedUnison (Voice& v) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
+    // AMP 2's held-note rule: the keys played, the phrase they make, each key's choice.
+    void trackKey (int note, bool down) noexcept;
+    void forgetKeys() noexcept;
+    bool heldAttackFor (int note) const noexcept;
+    bool pedalHolding() const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
     void monoNoteOff (int channel, int note) noexcept;
@@ -801,6 +816,11 @@ private:
     bool voiceRoutes = false;   ///< a route reaches something a voice reads
     std::uint64_t patchGeneration = 1;   ///< a new one: the voices' patches are copied from `current` again
     bool playedKeysOnly = false;
+    std::array<std::uint8_t, 128> keyDown {};
+    int keysDown = 0;
+    std::uint64_t phraseStart = 0;   ///< (clock: host samples)
+    std::array<bool, 128> heldKey {};   ///< each key's AMP 2 choice, made when it was pressed
+    std::atomic<std::uint32_t> heldAttackStarts { 0 };
     bool cardRouting = false;
     const ControlModulator* modulator = nullptr;
 

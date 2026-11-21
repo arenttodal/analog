@@ -124,6 +124,7 @@ namespace
         // State version 24: UNISON, six fields a card (unisonNames), A, B, C.
         iUnisonCards, iUnisonCardsLast = iUnisonCards + 3 * unisonFields - 1,
         iLegato,
+        iAmp2Enabled, iAmp2Attack,
         count
     };
 
@@ -276,6 +277,8 @@ namespace
                 for (const char* name : unisonNames)
                     l.add (unisonId (card, name));
             l.add (legato);
+            l.add (amp2Enabled);
+            l.add (amp2Attack);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -351,6 +354,11 @@ const juce::StringArray& engineParameterIds()
             // Addendum 05: MORPH TO D replaces the AUX rack's D MORPH knob (the MORPH macro drives
             // the global stage); its parameter stays for older experimental sessions, unread.
             n.add (auxMorph);
+            // State version 24: the global UNISON is retired for each card's (its sessions are
+            // migrated); its two parameters stay for older sessions, unread (UNISON DETUNE's
+            // modulation destination with them: offered, disabled).
+            n.add (unison);
+            n.add (unisonDetune);
             return n;
         }();
         juce::StringArray l;
@@ -1141,6 +1149,12 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
         // MONO's LEGATO: off by default (every key starts afresh); older MONO sessions are
         // migrated to on (they always slid).
         layout.add (osp::plugin::parameters::make<Bool> (v40 (legato), "Legato", false));
+        // AMP 2: a held-note attack (a note begun over held ones), off by default; its range
+        // reaches the long swells a held drone wants under it.
+        layout.add (osp::plugin::parameters::make<Bool> (v40 (amp2Enabled), "Amp 2", false));
+        juce::NormalisableRange<float> amp2Range (0.0f, 10000.0f, 0.1f);
+        amp2Range.setSkewForCentre (300.0f);
+        layout.add (osp::plugin::parameters::make<Float> (v40 (amp2Attack), "Amp 2 Attack", amp2Range, 1000.0f, Attributes().withLabel ("ms")));
     }
 }
 
@@ -1328,6 +1342,8 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.unison = false;
     p.unisonDetune = 0.01 * v (iUnisonDetune);
     p.legato = on (iLegato);
+    p.amp2Enabled = on (iAmp2Enabled);
+    p.amp2Attack = 0.001 * v (iAmp2Attack);
     p.stereoSpread = 0.01 * v (iSpread);
     p.resonance = 0.01 * v (iResonance);
     p.keyTrack = 0.01 * v (iKeyTrack);
@@ -2010,6 +2026,8 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (base + 5, u.rangeSemitones);
     }
     put (iLegato, p.legato ? 1.0 : 0.0);
+    put (iAmp2Enabled, p.amp2Enabled ? 1.0 : 0.0);
+    put (iAmp2Attack, 1000.0 * p.amp2Attack);
     {
         const auto& r = p.rhythm;
         put (iRhythmEnabled, r.enabled ? 1.0 : 0.0);

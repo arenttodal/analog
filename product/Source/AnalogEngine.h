@@ -196,6 +196,8 @@ public:
 
     /** SATELLITE's live place of card 0..2 (the panel's path display; read only, any thread). */
     Synth::SatelliteView satelliteView (int card) const noexcept { return synth.satelliteView (card); }
+    /** AMP 2: notes begun with its held-note attack so far (the AMP tab's "2" flashes). */
+    std::uint32_t heldAttackCount() const noexcept { return synth.heldAttackCount(); }
     osp::InstrumentEngine::ModView modulationView() const noexcept override;
     bool sourcePicture (int layer, const juce::AudioProcessorValueTreeState& parameters, std::vector<float>& cycle) const override;
 
