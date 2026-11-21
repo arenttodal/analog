@@ -10,6 +10,8 @@
 > - Tests `[cinematic]`: files equal definitions, load through `loadPreset`, sound, no clipping,
 >   velocity response, identical reload, 44.1/48/96 kHz within 2 dB. Hidden `[cinematic-render]`
 >   writes previews (finished + dry) and `levels.txt`. No engine, factory-sound or OSP change.
+> - Owner listening (21 Nov): "sound good", most verified (which ones not stated). Decision: it
+>   stays an import pack, not factory sounds and not in the release candidate.
 
 > **21 Nov 2026, UNISON per card, MONO + LEGATO, AMP 2 (branch `claude/analog-unison`, state
 > version 24):**

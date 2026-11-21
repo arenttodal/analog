@@ -258,6 +258,11 @@ Heartbeat) play their chords take as single notes.
 
 ## Human listening approval needed
 
+**Owner listening, 21 Nov 2026:** "The patches sound good indeed. I have verified most of them."
+Which ones were not yet verified was not specified, so every preset stays on the list below until
+the owner says it is done. **Decision:** the collection stays an import pack (files opened with
+*Open preset…* from this branch). It is not added to the factory set or the release candidate.
+
 Every preset needs the owner's ears before it ships. These are the ones where the numbers say
 least:
 
