@@ -11,6 +11,9 @@
 > - **Windows could not check out the repository:** `aux` is a reserved file name on Windows, so
 >   `docs/aux/` and `docs/demos/aux/` stopped the Windows job at checkout. Renamed to
 >   `docs/aux-d/` and `docs/demos/aux-d/` (every reference updated; no other reserved names).
+> - **Windows build (MSVC):** OSP's shell included `"FxRouting.h"` by name and MSVC found ANDOR
+>   ANALOG's own `product/Source/FxRouting.h` first (it looks beside the including files before
+>   the include paths): `RoutingKey` undeclared. OSP 5cc6fbed includes its own by path.
 > - **macOS:** the two new click tests (ANALOG's and OSP's) could not pump the message loop
 >   there (the browser opens a message after the click): ANALOG's is skipped on macOS, OSP's
 >   returns early as its other message-loop tests do (OSP 31aed041). Linux and Windows run them;
