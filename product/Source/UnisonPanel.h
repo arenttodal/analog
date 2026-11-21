@@ -75,7 +75,7 @@ private:
     The card's voices chip (the well's top right, beside the model): "‹ 4 ›" - the arrows step
     UNISON's VOICES (1..8), the number opens the card's UNISON panel. One voice reads "1" dimmed.
 */
-class UnisonChip final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+class UnisonChip final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     UnisonChip (osp::plugin::InstrumentHost& host, int card, juce::Colour accent);
@@ -92,12 +92,12 @@ public:
     void openPanel();
 
 private:
-    void timerCallback() override;
+    void voicesChanged();
     osp::plugin::InstrumentHost& host;
     int card = 0;
     juce::Colour accent;
-    int shown = -1;
-    bool shownOpen = false;
+    /** Follows VOICES (a preset, the host, the panel): repaints only when it changes - no timer. */
+    std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 
 } // namespace andor::analog

@@ -211,7 +211,9 @@ UnisonChip::UnisonChip (InstrumentHost& h, int c, juce::Colour a) : host (h), ca
 {
     setWantsKeyboardFocus (true);
     setTitle (juce::String ("Unison ") + static_cast<char> ('A' + card) + " voices");
-    startTimerHz (10);
+    if (auto* p = host.apvts().getParameter (params::unisonId (card, "voices")))
+        attachment = std::make_unique<juce::ParameterAttachment> (*p, [this] (float) { voicesChanged(); }, &host.undo());
+    voicesChanged();
 }
 
 UnisonChip::~UnisonChip() = default;
@@ -306,19 +308,12 @@ bool UnisonChip::keyPressed (const juce::KeyPress& key)
     return true;
 }
 
-void UnisonChip::timerCallback()
+void UnisonChip::voicesChanged()
 {
     const int n = voices();
-    auto* owner = findParentComponentOfClass<AnchoredPopoverHost>();
-    const bool open = owner != nullptr && owner->anchoredPopoverOpenFrom (*this);
-    if (n != shown || open != shownOpen)
-    {
-        shown = n;
-        shownOpen = open;
-        setTooltip (juce::String ("UNISON: ") + (n > 1 ? juce::String (n) + " copies of the oscillator in every note" : juce::String ("one voice (off)"))
-                    + juce::String::fromUTF8 (". \xe2\x80\xb9 \xe2\x80\xba step it; the number opens the card's UNISON (DETUNE, BLEND, WIDTH, MODE, RANGE, FINE)"));
-        repaint();
-    }
+    setTooltip (juce::String ("UNISON: ") + (n > 1 ? juce::String (n) + " copies of the oscillator in every note" : juce::String ("one voice (off)"))
+                + juce::String::fromUTF8 (". \xe2\x80\xb9 \xe2\x80\xba step it; the number opens the card's UNISON (DETUNE, BLEND, WIDTH, MODE, RANGE, FINE)"));
+    repaint();
 }
 
 } // namespace andor::analog

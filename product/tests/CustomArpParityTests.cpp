@@ -378,6 +378,26 @@ namespace
         osp::plugin::ArpInlinePanel& arp() { return ui->arpInlinePanel(); }
         juce::Component* popup() { return ui->openPopupPanel(); }
 
+        /** The popup a click opened, once it has (a click opens the browser by a message posted
+            after the press; on Windows the editor's timers can queue ahead of it, so this keeps
+            the loop running - as a host does - for up to two seconds before giving up). */
+        template <class Panel>
+        Panel* awaitPopup()
+        {
+            const auto until = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+            for (;;)
+            {
+                if (auto* found = dynamic_cast<Panel*> (popup()))
+                    return found;
+                if (juce::Time::getMillisecondCounterHiRes() > until)
+                    return nullptr;
+                pump();
+               #if JUCE_MAC || JUCE_IOS || JUCE_ANDROID
+                return nullptr;   // (nothing to pump here)
+               #endif
+            }
+        }
+
         /** The ARP list scrolled (the mouse wheel over it) until the Custom Patterns row shows. */
         juce::Rectangle<float> customRow()
         {
@@ -449,7 +469,7 @@ TEST_CASE ("parity custom arp: Custom Patterns open when clicked: the row opens 
         const auto row = rig.customRow();
         REQUIRE_FALSE (row.isEmpty());
         rig.click (rig.arp(), row.getCentre());
-        auto* browser = dynamic_cast<Browser*> (rig.popup());
+        auto* browser = rig.awaitPopup<Browser>();
         REQUIRE (browser != nullptr);
         CHECK (rig.p.customArpDocument (card) == nullptr);   // (opening it changes nothing)
 
@@ -457,12 +477,12 @@ TEST_CASE ("parity custom arp: Custom Patterns open when clicked: the row opens 
         const int fresh = browser->find (Browser::Kind::newPattern);
         REQUIRE (fresh >= 0);
         rig.click (*browser, browser->rowArea (fresh).getCentre().toFloat());
-        REQUIRE (dynamic_cast<Editor*> (rig.popup()) != nullptr);
+        REQUIRE (rig.awaitPopup<Editor>() != nullptr);
         rig.ui->closePopup();
 
         // A factory pattern chosen by click: on this card, CUSTOM on, the browser closed.
         rig.click (rig.arp(), rig.customRow().getCentre());
-        browser = dynamic_cast<Browser*> (rig.popup());
+        browser = rig.awaitPopup<Browser>();
         REQUIRE (browser != nullptr);
         if (! browser->factoryExpanded())
         {
@@ -487,18 +507,18 @@ TEST_CASE ("parity custom arp: Custom Patterns open when clicked: the row opens 
         const auto pencil = rig.arp().pencilArea();
         REQUIRE_FALSE (pencil.isEmpty());
         rig.click (rig.arp(), pencil.getCentre());
-        auto* editor = dynamic_cast<Editor*> (rig.popup());
+        auto* editor = rig.awaitPopup<Editor>();
         REQUIRE (editor != nullptr);
         CHECK (juce::String (editor->document().name) == juce::String (factory.name));
         rig.ui->closePopup();
 
         // Edit on the card's own row in the browser: the editor again.
         rig.click (rig.arp(), rig.customRow().getCentre());
-        browser = dynamic_cast<Browser*> (rig.popup());
+        browser = rig.awaitPopup<Browser>();
         REQUIRE (browser != nullptr);
         REQUIRE (browser->find (Browser::Kind::current) >= 0);
         rig.click (*browser, browser->editArea().getCentre().toFloat());
-        editor = dynamic_cast<Editor*> (rig.popup());
+        editor = rig.awaitPopup<Editor>();
         REQUIRE (editor != nullptr);
         CHECK (juce::String (editor->document().name) == juce::String (factory.name));
         rig.ui->closePopup();
