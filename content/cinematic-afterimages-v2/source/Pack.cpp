@@ -1,5 +1,7 @@
 #include "Pack.h"
 
+#include <stdexcept>
+
 #include "AnalogMath.h"
 #include "FactoryPatches.h"
 #include "Unison.h"
@@ -363,9 +365,10 @@ namespace design
     void choose (ShellProcessor& p, const juce::String& id, const juce::String& choice)
     {
         auto* c = dynamic_cast<juce::AudioParameterChoice*> (p.apvts().getParameter (id));
-        jassert (c != nullptr && c->choices.contains (choice));
-        if (c != nullptr)
-            c->setValueNotifyingHost (c->convertTo0to1 (static_cast<float> (c->choices.indexOf (choice))));
+        // A misspelt choice must stop the build of the pack, not quietly pick the first entry.
+        if (c == nullptr || ! c->choices.contains (choice))
+            throw std::invalid_argument ((id + " has no choice " + choice).toStdString());
+        c->setValueNotifyingHost (c->convertTo0to1 (static_cast<float> (c->choices.indexOf (choice))));
     }
 
     void set (ShellProcessor& p, const juce::String& id, float plainValue)
