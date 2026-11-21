@@ -134,17 +134,17 @@ namespace
 // The files equal their definitions up to float rounding: a definition's computed values (dB,
 // Hz, curves) can differ in the last digits between platforms' maths libraries, so PARAM values
 // are compared as numbers (relative 1e-5), everything else exactly.
-static bool sameWithinRounding (const juce::XmlElement& a, const juce::XmlElement& b)
+static juce::String differenceWithinRounding (const juce::XmlElement& a, const juce::XmlElement& b)
 {
-    if (a.getTagName() != b.getTagName() || a.getNumAttributes() != b.getNumAttributes()
-        || a.getNumChildElements() != b.getNumChildElements())
-    {
-        UNSCOPED_INFO (a.getTagName() << ": structure differs (" << a.getNumChildElements() << " vs " << b.getNumChildElements() << " children)");
-        return false;
-    }
+    if (a.getTagName() != b.getTagName())
+        return "tag " + a.getTagName() + " vs " + b.getTagName();
+    if (a.getNumAttributes() != b.getNumAttributes())
+        return a.getTagName() + ": " + juce::String (a.getNumAttributes()) + " vs " + juce::String (b.getNumAttributes()) + " attributes";
     for (int i = 0; i < a.getNumAttributes(); ++i)
         if (a.getAttributeValue (i) != b.getStringAttribute (a.getAttributeName (i)))
-            return false;
+            return a.getTagName() + " " + a.getAttributeName (i) + ": file " + a.getAttributeValue (i) + ", definition " + b.getStringAttribute (a.getAttributeName (i));
+    if (a.getNumChildElements() != b.getNumChildElements())
+        return a.getTagName() + ": " + juce::String (a.getNumChildElements()) + " vs " + juce::String (b.getNumChildElements()) + " children";
     for (int i = 0; i < a.getNumChildElements(); ++i)
     {
         const auto* x = a.getChildElement (i);
@@ -152,20 +152,16 @@ static bool sameWithinRounding (const juce::XmlElement& a, const juce::XmlElemen
         if (x->hasTagName ("PARAM") && y->hasTagName ("PARAM"))
         {
             const double u = x->getDoubleAttribute ("value"), v = y->getDoubleAttribute ("value");
-            if (x->getStringAttribute ("id") != y->getStringAttribute ("id")
-                || std::abs (u - v) > 1.0e-6 + 1.0e-5 * std::max (std::abs (u), std::abs (v)))
-            {
-                UNSCOPED_INFO (x->getStringAttribute ("id") << ": file " << u << ", definition " << v);
-                return false;
-            }
+            if (x->getStringAttribute ("id") != y->getStringAttribute ("id"))
+                return "PARAM " + juce::String (i) + ": file " + x->getStringAttribute ("id") + ", definition " + y->getStringAttribute ("id");
+            if (std::abs (u - v) > 1.0e-6 + 1.0e-5 * std::max (std::abs (u), std::abs (v)))
+                return x->getStringAttribute ("id") + ": file " + juce::String (u, 8) + ", definition " + juce::String (v, 8);
         }
         else if (! x->isEquivalentTo (y, false))
-        {
-            UNSCOPED_INFO (x->getTagName() << " differs");
-            return false;
-        }
+            return x->getTagName() + " differs: file " + x->toString (juce::XmlElement::TextFormat().singleLine()).substring (0, 300)
+                   + " | definition " + y->toString (juce::XmlElement::TextFormat().singleLine()).substring (0, 300);
     }
-    return true;
+    return {};
 }
 
 TEST_CASE ("cinematic afterimages: the collection's files are its definitions, ten of them, each named once", "[cinematic]")
@@ -183,7 +179,7 @@ TEST_CASE ("cinematic afterimages: the collection's files are its definitions, t
         const auto wanted = cinematic::presetXml (s);
         const auto stored = juce::parseXML (file);
         REQUIRE (stored != nullptr);
-        CHECK (sameWithinRounding (*stored, *wanted));
+        CHECK (differenceWithinRounding (*stored, *wanted).toStdString() == std::string());   // (a difference names itself)
     }
 }
 
