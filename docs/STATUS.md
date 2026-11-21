@@ -1,5 +1,16 @@
 # ANDOR ANALOG — status
 
+> **21 Nov 2026, CINEMATIC AFTERIMAGES VOL. 1 (sound-design branch `claude/cinematic-afterimages`,
+> not installed, not published; waits for the owner's listening approval):**
+> - Ten original presets after classic film/TV synth timbres (no samples, no score melodies):
+>   Neon Reverie, Signal From Below, Obsidian Horizon, Gravity Cathedral, Sandborne, Polar
+>   Heartbeat, Circuit Cathedral, Machine Heart, Velvet Pines, Midnight Chrome. Files in
+>   `presets/Cinematic Afterimages Vol. 1/`, definitions in `product/tests/CinematicPresets.cpp`,
+>   briefs, levels and limitations in `docs/sound-design/cinematic-afterimages-vol1.md`.
+> - Tests `[cinematic]`: files equal definitions, load through `loadPreset`, sound, no clipping,
+>   velocity response, identical reload, 44.1/48/96 kHz within 2 dB. Hidden `[cinematic-render]`
+>   writes previews (finished + dry) and `levels.txt`. No engine, factory-sound or OSP change.
+
 > **21 Nov 2026, UNISON per card, MONO + LEGATO, AMP 2 (branch `claude/analog-unison`, state
 > version 24):**
 > - **UNISON inside each voice (Serum-style), cards A, B and C (OSC 3):** VOICES 1-8, DETUNE
