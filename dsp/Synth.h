@@ -819,6 +819,8 @@ private:
     std::array<std::uint8_t, 128> keyDown {};
     int keysDown = 0;
     std::uint64_t phraseStart = 0;   ///< (clock: host samples)
+    /** AMP 2: a phrase's first keys within this time (seconds) are one gesture and take AMP 1. */
+    static constexpr double amp2GestureSeconds = 1.0;
     std::array<bool, 128> heldKey {};   ///< each key's AMP 2 choice, made when it was pressed
     std::atomic<std::uint32_t> heldAttackStarts { 0 };
     bool cardRouting = false;

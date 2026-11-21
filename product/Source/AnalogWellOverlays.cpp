@@ -490,6 +490,10 @@ namespace
             {
                 unisonChip = std::make_unique<UnisonChip> (host, slot - 1, accent);
                 addAndMakeVisible (*unisonChip);
+                // The fan over the waveform while UNISON changes (behind every control).
+                unisonFan = std::make_unique<UnisonFan> (host, slot - 1, accent);
+                addAndMakeVisible (*unisonFan);
+                unisonFan->toBack();
             }
 
             // Revealed: this model's timbre, five cells along the foot of the well.
@@ -549,6 +553,8 @@ namespace
                 modelSelector->setBounds (w - 12 - 92, 6, 92, 22);
             if (unisonChip != nullptr)
                 unisonChip->setBounds (modelSelector->getX() - 6 - UnisonChip::preferredWidth, 6, UnisonChip::preferredWidth, 22);
+            if (unisonFan != nullptr)
+                unisonFan->setBounds (getLocalBounds());
             if (layerKeys != nullptr)
                 layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
             const auto b = band().reduced (8, 4);
@@ -581,6 +587,8 @@ namespace
 
         void tick() override
         {
+            if (unisonFan != nullptr)
+                unisonFan->poll();
             // A control the current wave leaves inactive is dimmed in its place.
             auto dim = [] (juce::Component* c, bool inactive) {
                 if (c != nullptr)
@@ -666,6 +674,7 @@ namespace
         const juce::Colour accent;
         std::unique_ptr<ValueSelector> modelSelector, typeSelector;
         std::unique_ptr<UnisonChip> unisonChip;
+        std::unique_ptr<UnisonFan> unisonFan;
         std::unique_ptr<LayerKeys> layerKeys;
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;

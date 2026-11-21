@@ -1338,12 +1338,12 @@ void Synth::trackKey (int note, bool down) noexcept
     if (down)
     {
         // A phrase: from a key pressed when nothing was held (no key, no pedal holding a note)
-        // until all are let go. Its first 30 ms are one gesture (a chord): those keys take AMP 1;
-        // later ones, begun over the held notes, AMP 2.
+        // until all are let go. Its first second is one gesture (a chord, a strum, a slow roll):
+        // those keys take AMP 1; later ones, begun over the held notes, AMP 2.
         const bool phrase = keysDown > 0 || pedalHolding();
         if (! phrase)
             phraseStart = clock;
-        heldKey[k] = phrase && static_cast<double> (clock - phraseStart) > 0.03 * hostRate;   // (clock: this event's host sample)
+        heldKey[k] = phrase && static_cast<double> (clock - phraseStart) > amp2GestureSeconds * hostRate;   // (clock: this event's host sample)
         if (keyDown[k] < 255)
             ++keyDown[k];
         ++keysDown;

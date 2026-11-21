@@ -124,6 +124,153 @@ void UnisonPicture::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+namespace
+{
+    double nowSeconds() { return juce::Time::getMillisecondCounterHiRes() * 0.001; }
+    // RANDOM: an illustration (each note draws its own spread from its seed), as the panel's picture.
+    constexpr std::array<float, unisonmath::maxVoices> fanIllustration { 0.83f, 0.31f, 0.57f, 0.12f, 0.69f, 0.44f, 0.95f, 0.22f };
+}
+
+UnisonFan::UnisonFan (InstrumentHost& h, int c, juce::Colour a) : host (h), card (juce::jlimit (0, 2, c)), accent (a)
+{
+    setInterceptsMouseClicks (false, false);
+    setTitle ("UNISON copies");
+    seen = keyNow();   // (what the card already had: nothing to show yet)
+}
+
+UnisonFan::~UnisonFan()
+{
+    stopTimer();
+}
+
+juce::String UnisonFan::keyNow() const
+{
+    const auto u = settingsOf (host, card);
+    juce::String key;
+    key << u.voices << ":" << juce::String (u.detune, 4) << ":" << juce::String (u.blend, 4) << ":" << juce::String (u.width, 4) << ":"
+        << static_cast<int> (u.spread) << ":" << juce::String (u.rangeSemitones, 4);
+    return key;
+}
+
+void UnisonFan::poll()
+{
+    const auto key = keyNow();
+    if (key == seen)
+        return;
+    seen = key;
+    holdUntil = nowSeconds() + holdSeconds;
+    if (! isTimerRunning())
+        startTimerHz (30);
+    repaint();
+}
+
+void UnisonFan::timerCallback()
+{
+    poll();
+    const double now = nowSeconds();
+    const bool held = now < holdUntil;
+    const float step = static_cast<float> (1.0 / ((held ? fadeInSeconds : fadeOutSeconds) * 30.0));
+    const float before = alpha;
+    alpha = held ? std::min (1.0f, alpha + step) : std::max (0.0f, alpha - step);
+    if (! held)
+        holdUntil = 0.0;
+    if (! juce::approximatelyEqual (before, alpha))
+        repaint();
+    if (! held && alpha <= 0.0f)
+        stopTimer();   // (gone: no frames until the next change)
+}
+
+void UnisonFan::settleForTest()
+{
+    if (holdUntil > 0.0)
+        alpha = 1.0f;
+    else
+    {
+        alpha = 0.0f;
+        stopTimer();
+    }
+    repaint();
+}
+
+juce::String UnisonFan::caption() const
+{
+    const auto u = settingsOf (host, card);
+    if (u.voices <= 1)
+        return "1 VOICE - UNISON OFF";
+    if (u.voices == 2)
+        return "2 VOICES - BLEND NEEDS 3";
+    const auto l = unisonmath::layout (u, fanIllustration);
+    const float centre = l.gain[static_cast<std::size_t> (l.centre)];
+    const float outer = l.gain[0];
+    return "OUTER COPIES " + juce::String (juce::roundToInt (100.0f * outer / std::max (1.0e-6f, centre))) + " % OF CENTRE";
+}
+
+void UnisonFan::paint (juce::Graphics& g)
+{
+    if (alpha <= 0.001f)
+        return;
+    const auto bounds = getLocalBounds().toFloat();
+    // A veil over the waveform so the copies read (the waveform stays faintly behind them).
+    g.setColour (juce::Colour (0xff121516).withAlpha (0.62f * alpha));
+    g.fillRoundedRectangle (bounds, 6.0f);
+
+    const auto u = settingsOf (host, card);
+    const auto l = unisonmath::layout (u, fanIllustration);
+    const auto area = bounds.withTrimmedTop (36.0f).withTrimmedBottom (26.0f).reduced (24.0f, 0.0f);
+    const float cx = area.getCentreX(), cy = area.getCentreY();
+    // Across: DETUNE's knob travel (the outer copies at d of the half width); every copy's own
+    // place from its detune against the outer ones'.
+    const double outer = unisonmath::detuneSemitones (u.detune, u.rangeSemitones);
+    const float spread = 0.85f * static_cast<float> (juce::jlimit (0.0, 1.0, u.detune)) * 0.5f * area.getWidth();
+    const float halfHeight = 0.5f * area.getHeight();
+
+    // The baseline the copies stand on, as wide as their spread.
+    g.setColour (juce::Colours::white.withAlpha (0.14f * alpha));
+    g.drawLine (cx - spread - 14.0f, cy, cx + spread + 14.0f, cy, 1.0f);
+
+    const auto ivory = juce::Colour (0xffece2d0), amber = juce::Colour (0xfff0b26e);
+    auto drawCopy = [&] (int i) {
+        const auto k = static_cast<std::size_t> (i);
+        const bool centre = unisonmath::isCentre (i, l.count) || l.count == 1;
+        const float x = cx + (outer > 1.0e-9 ? static_cast<float> (l.semitones[k] / outer) : 0.0f) * spread;
+        const float level = juce::jlimit (0.0f, 1.0f, l.gain[k]);   // (one oscillator: 1)
+        const float h = std::max (2.0f, level * halfHeight);
+        const float side = 2.0f * l.place[k] - 1.0f;
+        auto ink = centre ? accent : accent.interpolatedWith (side < 0.0f ? ivory : amber, juce::jlimit (0.35f, 1.0f, std::abs (side) + 0.35f));
+        const float opacity = centre ? 1.0f : 0.45f + 0.55f * level;
+        const float w = centre ? 4.0f : 3.0f;
+        g.setColour (ink.withAlpha (opacity * alpha));
+        g.fillRoundedRectangle (juce::Rectangle<float> (w, 2.0f * h).withCentre ({ x, cy }), 1.5f);
+    };
+    // The outer copies first, the centre over them.
+    for (int i = 0; i < l.count; ++i)
+        if (! (unisonmath::isCentre (i, l.count) || l.count == 1))
+            drawCopy (i);
+    for (int i = 0; i < l.count; ++i)
+        if (unisonmath::isCentre (i, l.count) || l.count == 1)
+            drawCopy (i);
+
+    // The outer copies' detune beneath them.
+    g.setFont (fonts::label (10.0f));
+    if (u.voices > 1 && outer > 1.0e-9)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.45f * alpha));
+        const auto cents = juce::String (juce::roundToInt (100.0 * outer)) + " ct";
+        const float labelY = cy + halfHeight + 6.0f;
+        g.drawText (juce::String::fromUTF8 ("\xe2\x88\x92") + cents, juce::Rectangle<float> (60.0f, 14.0f).withCentre ({ cx - spread, labelY }), juce::Justification::centred, false);
+        g.drawText ("+" + cents, juce::Rectangle<float> (60.0f, 14.0f).withCentre ({ cx + spread, labelY }), juce::Justification::centred, false);
+    }
+    // What BLEND did, top left, under the well's own top row.
+    const auto text = caption();
+    const float tw = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), text) + 16.0f;
+    const auto tag = juce::Rectangle<float> (12.0f, 34.0f, tw, 18.0f);
+    g.setColour (juce::Colour (0xff0e1011).withAlpha (0.82f * alpha));
+    g.fillRoundedRectangle (tag, 5.0f);
+    g.setColour (juce::Colour (0xffd6ccbc).withAlpha (alpha));
+    g.drawText (text, tag, juce::Justification::centred, false);
+}
+
+//==============================================================================
 UnisonPanel::UnisonPanel (InstrumentHost& h, int c)
     : MiniPanel ("UNISON", juce::String ("CARD ") + static_cast<char> ('A' + juce::jlimit (0, 2, c)) + juce::String::fromUTF8 (" Â· OSC ") + juce::String (juce::jlimit (0, 2, c) + 1)),
       host (h), cardIndex (juce::jlimit (0, 2, c))

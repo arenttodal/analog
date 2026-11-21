@@ -1116,7 +1116,14 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         }
         if (const auto setup = setups.find (id); setup != setups.end())
             setup->second (p);
-        const auto reference = renderShell (p, 0.6);
+        // AMP 2 acts on a key begun more than a second into a phrase, over held ones: its own
+        // phrase (the chord, then a note at 1.2 s).
+        const bool amp2Probe = id == params::amp2Attack || id == params::amp2Enabled;
+        static const std::vector<Note> amp2Phrase { { 0, 57, 90 }, { 0, 64, 90 }, { 0, 69, 90 }, { 57600, 72, 90 },
+                                                    { 76800, 57, 0 }, { 76800, 64, 0 }, { 76800, 69, 0 }, { 76800, 72, 0 } };
+        const auto& probeNotes = amp2Probe ? amp2Phrase : phrase;
+        const double probeSeconds = amp2Probe ? 1.6 : 0.6;
+        const auto reference = renderShell (p, probeSeconds, probeNotes);
 
         // Another value: the far side of the range from where it is.
         const float now = param->getValue();
@@ -1124,7 +1131,7 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         if (id == params::polyphony)
             other = 0.0f;   // 1 voice (the chord is three notes)
         param->setValueNotifyingHost (other);
-        const auto changed = renderShell (p, 0.6);
+        const auto changed = renderShell (p, probeSeconds, probeNotes);
         if (id.startsWith ("analog.fx."))
         {
             // The routed effects' (V3: declared read so their racks stay live): heard only once
@@ -12205,6 +12212,72 @@ TEST_CASE ("analog: state version 24 - the global UNISON becomes each card's (MO
     }
 }
 
+namespace
+{
+    andor::analog::UnisonFan* unisonFanIn (juce::Component& root)
+    {
+        andor::analog::UnisonFan* fan = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (auto* f = dynamic_cast<andor::analog::UnisonFan*> (child); f != nullptr && fan == nullptr)
+                    fan = f;
+                find (*child);
+            }
+        };
+        find (root);
+        return fan;
+    }
+}
+
+TEST_CASE ("analog: the UNISON fan shows on the card while UNISON changes, from the engine's own layout, and fades", "[analog][unison][ui]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.refreshNow();
+    auto* overlay = ui.engineCard (0).wellOverlayComponent();
+    REQUIRE (overlay != nullptr);
+    auto* fan = unisonFanIn (*overlay);
+    REQUIRE (fan != nullptr);
+    CHECK_FALSE (fan->showing());   // (nothing changed yet)
+    CHECK_FALSE (fan->isMouseOverOrDragging());
+    {
+        bool self = true, children = true;
+        fan->getInterceptsMouseClicks (self, children);
+        CHECK_FALSE (self);   // (presentation only: the card below keeps its clicks)
+    }
+    overlay->tick();
+    CHECK_FALSE (fan->showing());   // (the card's settings as they were: still nothing)
+
+    setValue (p, params::unisonId (0, "detune"), 60.0f);
+    overlay->tick();
+    CHECK (fan->showing());
+    fan->settleForTest();
+    CHECK (fan->opacity() == 1.0f);
+    CHECK (fan->caption() == "1 VOICE - UNISON OFF");
+
+    setValue (p, params::unisonId (0, "voices"), 1.0f);   // (two copies)
+    fan->poll();
+    CHECK (fan->caption() == "2 VOICES - BLEND NEEDS 3");
+    setValue (p, params::unisonId (0, "voices"), 4.0f);   // (five copies)
+    setValue (p, params::unisonId (0, "blend"), 0.0f);
+    fan->poll();
+    CHECK (fan->caption() == "OUTER COPIES 5 % OF CENTRE");   // (sideWeight 0.05)
+    setValue (p, params::unisonId (0, "blend"), 100.0f);
+    fan->poll();
+    CHECK (fan->caption() == "OUTER COPIES 130 % OF CENTRE");   // (sideWeight 1.3)
+
+    // Card B has its own; card A's change never shows it.
+    if (auto* overlayB = ui.engineCard (1).wellOverlayComponent())
+        if (auto* fanB = unisonFanIn (*overlayB))
+        {
+            overlayB->tick();
+            CHECK_FALSE (fanB->showing());
+        }
+}
+
 TEST_CASE ("analog: screenshots of UNISON - the card row, the voices chip and the panel (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][unison]")
 {
     const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
@@ -12257,6 +12330,25 @@ TEST_CASE ("analog: screenshots of UNISON - the card row, the voices chip and th
     setValue (p, params::unisonId (0, "width"), 40.0f);
     shoot ("unison-panel-a-super");
     chip->openPanel();   // (again: closes)
+    // The fan over card A while BLEND turns (5 copies, DETUNE 45 %): BLEND 0, 60 and 100 %.
+    if (auto* o = ui.engineCard (0).wellOverlayComponent())
+    {
+        o->setRevealedForTest (false);
+        setValue (p, params::unisonId (0, "voices"), 4.0f);
+        setValue (p, params::unisonId (0, "detune"), 45.0f);
+        setValue (p, params::unisonId (0, "mode"), 0.0f);
+        setValue (p, params::unisonId (0, "width"), 100.0f);
+        for (const float b : { 0.0f, 60.0f, 100.0f })
+        {
+            setValue (p, params::unisonId (0, "blend"), b);
+            if (auto* fan = unisonFanIn (*o))
+            {
+                fan->poll();
+                fan->settleForTest();
+            }
+            shoot ("unison-fan-blend-" + juce::String (juce::roundToInt (b)));
+        }
+    }
     // FILTER's rack, VOICE: the voicing (VOICES, PLAY POLY / MONO, LEGATO, GLIDE, SPREAD).
     setValue (p, "voiceMode", 1.0f);
     setValue (p, params::legato, 1.0f);

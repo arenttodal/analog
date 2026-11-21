@@ -32,6 +32,46 @@ private:
 };
 
 /**
+    The UNISON fan, over an oscillator card's waveform while its UNISON changes: one line per
+    copy, drawn from the engine's own layout (unisonmath::layout). Across, where its detune puts
+    it (the outer copies' detune in cents beneath them); its height, its level (one oscillator's
+    level reaches the well's half height): BLEND lifts the outer lines and the centre sinks, the
+    sum's loudness the same; its colour, the card's for the centre copy, ivory to the left and
+    amber to the right as WIDTH sends them. It fades in when VOICES, DETUNE, BLEND, WIDTH, MODE
+    or RANGE changes (a hand, a preset, the host) and out about 1.5 s after the last change.
+    Presentation only: never takes the mouse, never in a preset.
+*/
+class UnisonFan final : public juce::Component, private juce::Timer
+{
+public:
+    UnisonFan (osp::plugin::InstrumentHost& host, int card, juce::Colour accent);
+    ~UnisonFan() override;
+    void paint (juce::Graphics&) override;
+    /** Looks for a change of the card's UNISON (the overlay's tick, and its own frames while shown). */
+    void poll();
+
+    /** Tests: shown (fading in, held, or fading out) and how opaque. */
+    bool showing() const noexcept { return alpha > 0.001f || holdUntil > 0.0; }
+    float opacity() const noexcept { return alpha; }
+    /** Tests: as if the fade had finished (fully shown while held, or gone after it). */
+    void settleForTest();
+    /** The caption it shows (tests). */
+    juce::String caption() const;
+
+    static constexpr double holdSeconds = 1.2, fadeInSeconds = 0.10, fadeOutSeconds = 0.35;
+
+private:
+    void timerCallback() override;
+    juce::String keyNow() const;
+    osp::plugin::InstrumentHost& host;
+    int card = 0;
+    juce::Colour accent;
+    juce::String seen;
+    float alpha = 0.0f;
+    double holdUntil = 0.0;
+};
+
+/**
     The oscillator card's settings (opened from its voices chip, in the card's well): UNISON's
     copies (VOICES, DETUNE, BLEND, WIDTH, MODE, RANGE) under their picture, and the card's FINE
     tuning (cents; card C as an oscillator also its VELO). The SATELLITE / SUB popovers' language.

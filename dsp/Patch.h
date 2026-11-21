@@ -356,8 +356,8 @@ struct Patch
         fades the note out over 3 ms and starts its envelopes from zero. */
     bool legato = false;
     /** AMP 2 (state version 24, ANDOR ANALOG): a held-note attack. On, a note started while
-        another key is held (or the pedal holds sounding notes), later than 30 ms after that
-        phrase's first key (a chord is one gesture), takes AMP 2's ATTACK (seconds); its decay,
+        another key is held (or the pedal holds sounding notes), more than 1 s after that
+        phrase's first key (a chord or strum is one gesture), takes AMP 2's ATTACK (seconds); its decay,
         sustain and release stay AMP 1's. The keys played decide, never an arpeggiator's steps;
         a voice keeps its choice for its life. Off: exactly as before. */
     bool amp2Enabled = false;

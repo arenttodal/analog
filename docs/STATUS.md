@@ -1,5 +1,16 @@
 # ANDOR ANALOG — status
 
+> **21 Nov 2026, UNISON fan + AMP 2's one-second gesture (branch `claude/analog-unison`):**
+> - **UNISON fan** on cards A, B and C (OSC 3): while VOICES, DETUNE, BLEND, WIDTH, MODE or RANGE
+>   changes, one line per copy fades in over the waveform, drawn from the engine's own layout:
+>   across, its detune (the outer copies' cents beneath); its height, its level (BLEND lifts the
+>   outer lines while the centre sinks); the centre in the card's colour, left copies ivory, right
+>   amber. A caption says what BLEND did ("OUTER COPIES 50 % OF CENTRE"; "BLEND NEEDS 3" with two
+>   voices). It fades out 1.2 s after the last change. Owner chose it from three mock-ups (no dot
+>   caps). Presentation only.
+> - **AMP 2:** a phrase's first second of keys (a chord, a strum, a slow roll) takes AMP 1; only
+>   keys begun more than 1 s after the phrase's first, over held ones, take AMP 2 (was 30 ms).
+
 > **21 Nov 2026, UNISON per card, MONO + LEGATO, AMP 2 (branch `claude/analog-unison`, state
 > version 24):**
 > - **UNISON inside each voice (Serum-style), cards A, B and C (OSC 3):** VOICES 1-8, DETUNE
@@ -23,7 +34,7 @@
 >   Factory sounds (factory version 10): Unison Lead uses card unison in MONO; the eight MONO sounds
 >   play with LEGATO off.
 > - **AMP 2 (ANALOG only):** a held-note attack. A note begun while another key is held (or the
->   pedal holds a note), more than 30 ms after the phrase's first key, takes AMP 2's ATTACK
+>   pedal holds a note), more than 1 s after the phrase's first key (a chord or slow strum is one gesture), takes AMP 2's ATTACK
 >   (D/S/R from AMP 1; latched per voice). The keys played decide, never the arpeggiator's steps
 >   (an arp step follows the key it comes from). AMP tab: "+ AMP 2", then `1 | 2 ×` chips, AMP 2's
 >   attack as a ghost, the "2" chip flashes as a note takes it. OSP's hook is opt-in
