@@ -190,6 +190,10 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         v.eqA.prepare (internalRate);
         v.eqB.prepare (internalRate);
         v.eqC.prepare (internalRate);
+        v.sideEqA.prepare (internalRate);   // (UNISON's WIDTH: the side's twins)
+        v.sideEqB.prepare (internalRate);
+        v.sideEqC.prepare (internalRate);
+        v.sideHighPass.prepare (internalRate);
         v.morph.prepare (internalRate, oversampling, morphShared.get());
     }
     // The mode engines' "recording" on a live voice: only its length, rate and root are read.
@@ -339,6 +343,7 @@ void Synth::reset() noexcept
         v.filter.reset();
         v.sendFilter.reset();
         v.carFilter.reset();
+        v.sideOn = v.sideWas = false;   // (UNISON's WIDTH: its twins start from rest, when next used)
         v.line1.reset();
         v.line2.reset();
         v.osc2Out = 0.0f;
@@ -797,6 +802,7 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.filter.reset();
         v.sendFilter.reset();
         v.carFilter.reset();
+        v.sideOn = v.sideWas = false;   // (UNISON's WIDTH: its twins start from rest, when next used)
         v.satTwins = 0;   // (SATELLITE's twins start from rest with it, when next used)
         v.dnaGain = 1.0;
         v.dnaClose = 0.0;
@@ -962,6 +968,8 @@ void Synth::startVoice (Voice& v, int channel, int note, float velocity, bool re
         v.morphCountdown = 0;
         v.layerGainsFresh = true;
     }
+    if (! wasActive)
+        seedUnison (v);   // (UNISON: its copies' phases and RANDOM's draws, this note's)
     applyVoiceModulation (v);
     updateVoiceControl (v, current.lfo.scope == osp::mod::Scope::poly ? static_cast<float> (v.lfo.value) : lfoValue,
                         static_cast<float> (std::clamp (current.lfoAmount + (current.wheelToLfo ? wheel : 0.0f) * (1.0 - current.lfoAmount), 0.0, 1.0)));
@@ -1329,6 +1337,7 @@ void Synth::allSoundOff() noexcept
         v.filter.reset();
         v.sendFilter.reset();
         v.carFilter.reset();
+        v.sideOn = v.sideWas = false;   // (UNISON's WIDTH: its twins start from rest, when next used)
         v.line1.reset();
         v.line2.reset();
         v.outGain = 0.0f;
@@ -1567,6 +1576,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.dt3 = std::clamp (math::noteToHz (note3) / internalRate, 1.0e-9, 0.45);
         v.width3 = static_cast<float> (std::clamp (p.osc3Width + 0.04 * a * d.width2 + lfoD * p.lfoWidth3, 0.02, 0.98));
         planSlot (v, 3, p, v.dt3);
+        planUnison (v, 3, p);
         if (p.osc3Model == OscModel::dco)
         {
             const float depthNow = 0.45f * static_cast<float> (std::clamp (p.dco3.pwmDepth, 0.0, 1.0));
@@ -1605,7 +1615,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     }
     v.organicOn = ! v.organic.finished() || zonesOn || generating || v.c2.on;
     v.classicPair = p.osc1Model == OscModel::classic && p.osc2Model == OscModel::classic && v.ringNow == 0.0f && p.noiseColor == NoiseColor::white
-                    && ! v.organicOn;
+                    && ! v.organicOn && ! p.oscUnison[0].on() && ! p.oscUnison[1].on();
     // MORPH: whenever this note sounds both the oscillators and card C (whatever C plays:
     // the recording, OSC 3, NOISE, an instrument patch's zones), it hears them and fuses them.
     v.morphOn = p.morph.perVoiceOn() && v.organicOn && (v.cards & 3) != 0 && (v.cards & 4) != 0;
@@ -1613,6 +1623,8 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     {
         planSlot (v, 1, p, v.dt1);
         planSlot (v, 2, p, v.dt2);
+        planUnison (v, 1, p);
+        planUnison (v, 2, p);
         const float lfoRaw = lfoNow * v.lfoFade;   // (PWM's own depth: LFO AMOUNT does not scale it)
         auto pwm = [&] (const DcoSettings& c, float& lfoOffset, float& envDepth) {
             const float depthNow = 0.45f * static_cast<float> (std::clamp (c.pwmDepth, 0.0, 1.0));
@@ -1671,6 +1683,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
         v.ota.reset();   // (fading in from rest, never from a stale state)
         v.sendOta.reset();
         v.carOta.reset();
+        v.sideOta.reset();
         for (auto& o : v.satOta)
             o.reset();
     }
@@ -1685,6 +1698,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
             v.highPass.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.sendHighPass.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.carHighPass.setMode (variant, std::clamp (p.highPass, 0, 3));
+            v.sideHighPass.setMode (variant, std::clamp (p.highPass, 0, 3));
             for (auto& h : v.satHighPass)
                 h.setMode (variant, std::clamp (p.highPass, 0, 3));
             v.highPassTail = std::max (1, static_cast<int> (VoiceHighPass::rampSeconds * internalRate) + controlPeriod * oversampling);
@@ -1694,6 +1708,7 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
             v.highPass.setMode (variant, flat);
             v.sendHighPass.setMode (variant, flat);
             v.carHighPass.setMode (variant, flat);
+            v.sideHighPass.setMode (variant, flat);
             for (auto& h : v.satHighPass)
                 h.setMode (variant, flat);
         }
@@ -1829,6 +1844,41 @@ void Synth::updateVoiceControl (Voice& v, float lfoNow, float depth) noexcept
     v.dampenA.control (p.dampenA, dampenCurves[0], v.note, internalRate, dampenSmoothing, v.dampenFresh);
     v.dampenB.control (p.dampenB, dampenCurves[1], v.note, internalRate, dampenSmoothing, v.dampenFresh);
     v.dampenC.control (p.dampenC, dampenCurves[2], v.note, internalRate, dampenSmoothing, v.dampenFresh);
+    // UNISON's WIDTH: the side runs while an off-centre copy of a sounding oscillator plays.
+    {
+        const auto wide = [&v] (int slot) { const auto& u = v.uni[static_cast<std::size_t> (slot)]; return u.count > 1 && u.wide; };
+        const bool sideNow = (! v.classicPair && ((wide (0) && v.gain1 > 0.0f) || (wide (1) && v.gain2 > 0.0f)))
+                             || (v.hybridGen == HybridType::oscillator && wide (2) && v.organicGain > 0.0f);
+        if (sideNow && ! v.sideOn)
+        {
+            // (its twins start from rest, the side gliding in with the copies' phases)
+            v.sideFilter.reset();
+            v.sideOta.reset();
+            v.sideHighPass.reset();
+            v.sideEqA.reset();
+            v.sideEqB.reset();
+            v.sideEqC.reset();
+            v.sideDampenA.reset();
+            v.sideDampenB.reset();
+            v.sideDampenC.reset();
+            v.dnaSideS1 = v.dnaSideS2 = 0.0;
+            v.sideLine = {};
+            v.sideTilt = {};
+        }
+        v.sideWas = v.sideOn;
+        v.sideOn = sideNow;
+    }
+    if (v.sideOn)
+    {
+        // UNISON's WIDTH: the side through the cards' EQ and DAMPEN as the mid goes (twins).
+        const bool fresh = ! v.sideWas;
+        v.sideEqA.control (p.eqA, internalSamples);
+        v.sideEqB.control (p.eqB, internalSamples);
+        v.sideEqC.control (p.eqC, internalSamples);
+        v.sideDampenA.control (p.dampenA, dampenCurves[0], v.note, internalRate, dampenSmoothing, fresh);
+        v.sideDampenB.control (p.dampenB, dampenCurves[1], v.note, internalRate, dampenSmoothing, fresh);
+        v.sideDampenC.control (p.dampenC, dampenCurves[2], v.note, internalRate, dampenSmoothing, fresh);
+    }
     v.dampenFresh = false;
     v.splitCards = ! legacyCards && (v.eqA.active() || v.dampenA.active() || v.eqC.active() || v.dampenC.active());
 }
@@ -2252,6 +2302,8 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
     const float width2 = std::clamp (v.width2 + v.pwm2 + v.pwmEnv2 * envValue, 0.02f, 0.98f);
     if (! pair)
         v.osc2Out = 0.0f;
+    else if (v.uni[1].count > 1)
+        v.osc2Out = unisonSample (v, 2, v.dt2, width2, -1.0, wrap2);   // (UNISON: its copies)
     else if (v.plan2.model == OscModel::classic)
     {
         v.phase2 = osc::walk (v.phase2, v.dt2, width2, v.plan2.waves, 1.0, 0.0, v.line2, wrap2);
@@ -2272,7 +2324,9 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
     double wrap1 = -1.0;
     const double syncAt = p.sync && wrap2 >= 0.0 ? wrap2 : -1.0;
     float o1 = 0.0f;
-    if (pair && v.plan1.model == OscModel::classic)
+    if (pair && v.uni[0].count > 1)
+        o1 = unisonSample (v, 1, dt1, width1, syncAt, wrap1);   // (UNISON: its copies, each synced)
+    else if (pair && v.plan1.model == OscModel::classic)
     {
         const auto& w1 = v.plan1.waves;
         if (syncAt >= 0.0)
@@ -2390,6 +2444,33 @@ float Synth::modelPairSample (Voice& v, const Patch& p, float envValue, float& p
         mix += c;
         v.partC = c * filterInputGain;
     }
+    // UNISON's WIDTH: the side, card by card as the mid goes (the ring takes card B's share; card
+    // C's OSC 3 at its level, never while MORPH fuses it), through the cards' EQ / DAMPEN twins.
+    v.sideIn = 0.0f;
+    if (v.sideOn)
+    {
+        auto wideSide = [&v] (int slot) {
+            const auto& u = v.uni[static_cast<std::size_t> (slot)];
+            return u.count > 1 && u.wide ? v.sideOsc[static_cast<std::size_t> (slot)] : 0.0f;
+        };
+        auto twin = [] (float x, VoiceDampen& dampen, VoiceEq& eq) {
+            if (dampen.active())
+                x = dampen.process (x);
+            if (eq.active())
+                x = eq.process (x);
+            return x;
+        };
+        // (A card in GRANULAR hears its grains, which read the mid's recording: its copies
+        // reach the grains summed, the card mono.)
+        const bool grainsA = v.grainMix > 1.0e-4f || v.cloud > 1.0e-4f;
+        const bool grainsB = v.grainMix2 > 1.0e-4f || v.cloud2 > 1.0e-4f;
+        const float sA = pair && ! grainsA ? wideSide (0) * v.gain1 : 0.0f;
+        const float sB = pair && ! grainsB ? wideSide (1) * v.gain2 * (1.0f - v.ringNow) : 0.0f;
+        float side = v.splitCards ? twin (sA, v.sideDampenA, v.sideEqA) + twin (sB, v.sideDampenC, v.sideEqC) : twin (sA + sB, v.sideDampenA, v.sideEqA);
+        if (v.organicOn && v.hybridGen == HybridType::oscillator && ! v.morphOn)
+            side += twin (v.organicGain * wideSide (2), v.sideDampenB, v.sideEqB);
+        v.sideIn = side * filterInputGain;
+    }
     return mix;
 }
 
@@ -2408,6 +2489,8 @@ float Synth::hybridSample (Voice& v, float envValue) noexcept
     {
         double wrap = -1.0;
         const float width = std::clamp (v.width3 + v.pwm3 + v.pwmEnv3 * envValue, 0.02f, 0.98f);
+        if (v.uni[2].count > 1)
+            return unisonSample (v, 3, v.dt3, width, -1.0, wrap);   // (UNISON: its copies)
         if (v.plan3.model == OscModel::classic)
         {
             v.phase3 = osc::walk (v.phase3, v.dt3, width, v.plan3.waves, 1.0, 0.0, v.line3, wrap);
@@ -2425,6 +2508,142 @@ float Synth::hybridSample (Voice& v, float envValue) noexcept
     v.hybridTone += v.hybridToneCoef * (n - v.hybridTone);
     v.hybridMove += 0.0005f * (v.hybridMoveTarget - v.hybridMove);
     return 0.8f * v.hybridTone * v.hybridMove;
+}
+
+float Synth::unisonSample (Voice& v, int slot, double dt, float width, double syncAt, double& wrapAt) noexcept
+{
+    // UNISON: the oscillator's copies, each its own phase (and model state) at its own detune,
+    // scaled by its gain, all corrected on the slot's one BLEP line (corrections are linear,
+    // as SUPER SAW's seven saws share it); the line ends once, then the slot's SHAPE. With
+    // WIDTH, each copy's corrections also go to the slot's side line, weighted by its side.
+    const auto si = static_cast<std::size_t> (slot - 1);
+    auto& u = v.uni[si];
+    auto& phase = slot == 1 ? v.phase1 : (slot == 2 ? v.phase2 : v.phase3);
+    auto& line = slot == 1 ? v.line1 : (slot == 2 ? v.line2 : v.line3);
+    auto& x = slot == 1 ? v.extra1 : (slot == 2 ? v.extra2 : v.extra3);
+    const auto& plan = slot == 1 ? v.plan1 : (slot == 2 ? v.plan2 : v.plan3);
+    const bool classic = plan.model == OscModel::classic;
+    float naiveSum = 0.0f, naiveSide = 0.0f;
+    auto copy = [&] (auto& target, int i) {
+        const auto k = static_cast<std::size_t> (i);
+        const bool own = i == u.centre;
+        const auto store = static_cast<std::size_t> (i < u.centre ? i : i - 1);
+        double& p = own ? phase : u.phase[own ? 0 : store];
+        const double d = std::min (0.45, dt * u.ratio[k]);
+        double copyWrap = -1.0;
+        double& wrap = own ? wrapAt : copyWrap;   // (only the centre copy is sync's master)
+        if (classic)
+        {
+            osc::Waves w = plan.waves;
+            w.gain *= u.gain[k];
+            if (syncAt >= 0.0)
+            {
+                const double atReset = osc::walk (p, d, width, w, 1.0 - syncAt, syncAt, target, wrap);
+                osc::syncReset (atReset, d, width, w, static_cast<float> (syncAt), target);
+                p = osc::walk (0.0, d, width, w, syncAt, 0.0, target, wrap);
+            }
+            else
+                p = osc::walk (p, d, width, w, 1.0, 0.0, target, wrap);
+            return osc::naive (w, p, width);
+        }
+        return osc::accumulateModel (p, target, own ? x : u.extra[store], plan, d, width, syncAt, wrap, u.gain[k]);
+    };
+    if (u.wide)
+    {
+        for (int i = 0; i < u.count; ++i)
+        {
+            osc::DualLine both { line, v.sideLine[si], u.side[static_cast<std::size_t> (i)] };
+            const float value = copy (both, i);
+            naiveSum += value;
+            naiveSide += u.side[static_cast<std::size_t> (i)] * value;
+        }
+    }
+    else
+        for (int i = 0; i < u.count; ++i)
+            naiveSum += copy (line, i);
+    float out = line.end (naiveSum);
+    float side = u.wide ? v.sideLine[si].end (naiveSide) : 0.0f;
+    if (! classic && plan.tilt)
+    {
+        x.tilt += x.tiltCoef * (out - x.tilt);
+        out = x.tilt;
+        if (u.wide)
+        {
+            v.sideTilt[si] += x.tiltCoef * (side - v.sideTilt[si]);
+            side = v.sideTilt[si];
+        }
+    }
+    v.sideOsc[si] = side;
+    return out;
+}
+
+void Synth::planUnison (Voice& v, int slot, const Patch& p) noexcept
+{
+    auto& u = v.uni[static_cast<std::size_t> (slot - 1)];
+    const auto& s = p.oscUnison[static_cast<std::size_t> (slot - 1)];
+    if (! s.on())
+    {
+        u.count = 1;
+        u.wide = false;
+        u.fresh = true;
+        return;
+    }
+    // The copies' extra model state follows the oscillator's plan (SUPER SAW's sides' ratios
+    // and levels: each copy is a whole SUPER SAW).
+    const auto& x = slot == 1 ? v.extra1 : (slot == 2 ? v.extra2 : v.extra3);
+    for (int j = 0; j < std::clamp (s.voices, 1, unisonmath::maxVoices) - 1; ++j)
+    {
+        auto& c = u.extra[static_cast<std::size_t> (j)];
+        c.sideRatio = x.sideRatio;
+        c.sideLevel = x.sideLevel;
+        c.sawNormal = x.sawNormal;
+    }
+    if (! u.fresh && u.planned == s)
+        return;
+    const auto l = unisonmath::layout (s, u.random);
+    // Copies that join while the note plays start at their own seeded phase (never in step).
+    for (int j = std::max (0, u.count - 1); j < l.count - 1; ++j)
+    {
+        osp::Prng rng (osp::Prng::deriveSeed (v.seed, 0x756e6900u + static_cast<std::uint64_t> (slot), static_cast<std::uint64_t> (j)));
+        u.phase[static_cast<std::size_t> (j)] = rng.nextDouble();
+        auto& c = u.extra[static_cast<std::size_t> (j)];
+        c.subSign = 1.0f;
+        for (auto& side : c.sides)
+            side = rng.nextDouble();
+    }
+    u.count = l.count;
+    u.centre = l.centre;
+    u.wide = false;
+    for (int i = 0; i < l.count; ++i)
+    {
+        const auto k = static_cast<std::size_t> (i);
+        u.ratio[k] = std::exp2 (l.semitones[k] / 12.0);
+        u.place[k] = l.place[k];
+        // An equal-power place: left sqrt2 cos(t), right sqrt2 sin(t), t from 0 (left) to pi/2
+        // (right), as mid (the copy's gain) and side (against it) - the centre exactly as
+        // before, a copy hard to one side as loud as in the middle.
+        const double t = static_cast<double> (l.place[k]) * 1.5707963267948966;
+        const double mid = (std::cos (t) + std::sin (t)) * 0.7071067811865476;
+        const double side = (std::sin (t) - std::cos (t)) * 0.7071067811865476;
+        u.gain[k] = static_cast<float> (l.gain[k] * mid);
+        u.side[k] = static_cast<float> (side / mid);
+        u.wide = u.wide || std::abs (u.side[k]) > 1.0e-6f;
+    }
+    u.planned = s;
+    u.fresh = false;
+}
+
+void Synth::seedUnison (Voice& v) noexcept
+{
+    for (int slot = 1; slot <= 3; ++slot)
+    {
+        auto& u = v.uni[static_cast<std::size_t> (slot - 1)];
+        osp::Prng rng (osp::Prng::deriveSeed (v.seed, 0x756e6980u + static_cast<std::uint64_t> (slot)));
+        for (auto& r : u.random)
+            r = static_cast<float> (rng.nextDouble());
+        u.count = 1;   // (every copy starts afresh, at its own seeded phase: planUnison)
+        u.fresh = true;
+    }
 }
 
 float Synth::cardC (Voice& v, float x) noexcept
@@ -2697,6 +2916,7 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             scratchEnv[ks] = env;
             eqTapAt = tapBase + done + k;   // (the cards' EQ spectrum, while asked for)
             scratchSource[ks] = sourceSample (v, env, scratchPolyMod[ks]);
+            scratchSide[ks] = v.sideOn ? v.sideIn : 0.0f;
             if (modes || sendTaps || carrierTaps || satTwinMask != 0)
             {
                 scratchA[ks] = v.lastA;
@@ -2868,6 +3088,29 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                     }
                 }
             }
+            // UNISON's WIDTH: the side through its own twin of the filter (as the mid goes).
+            float sideY = 0.0f;
+            if (v.sideOn)
+            {
+                float sin = scratchSide[ks] * v.driveGain;
+                if (highPassOn)
+                    sin = v.sideHighPass.process (sin);
+                if (v.otaMix <= 0.0f && v.otaTarget <= 0.0f)
+                    sideY = v.sideFilter.process (sin, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                else
+                {
+                    const float gOtaSide = v.otaCutoffOffset != 0.0f ? cutoffG (cutoff + v.otaCutoffOffset) : g;
+                    const auto character = current.otaVoicing == OtaVoicing::jupiter ? OtaCharacter::jupiter : OtaCharacter::juno;
+                    const float ota = v.sideOta.process (sin, gOtaSide, v.resonance01, character, current.otaTwoPole) * v.otaMakeUp;
+                    if (v.otaMix >= 1.0f && v.otaTarget >= 1.0f)
+                        sideY = ota;
+                    else
+                    {
+                        const float ladder = v.sideFilter.process (sin, g, v.k, driveBias, driveBiasOffset) * v.makeUp;
+                        sideY = ladder + v.otaMix * (ota - ladder);
+                    }
+                }
+            }
             v.outGain += 0.004f * (v.outGainTarget - v.outGain);
             float out = y * scratchAmp[ks] * v.outGain;
             const float fadeGain = v.fade > 0 ? static_cast<float> (v.fade) / static_cast<float> (fadeLength) : 1.0f;
@@ -2877,8 +3120,9 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
             // Card C's part is both its layers'.
             float tap = sendTaps ? sendY * scratchAmp[ks] * v.outGain * fadeGain : 0.0f;
             float carTap = carrierTaps ? carY * scratchAmp[ks] * v.outGain * fadeGain : 0.0f;
+            float sOut = v.sideOn ? sideY * scratchAmp[ks] * v.outGain * fadeGain : 0.0f;
             if (dnaRun)
-                applyShaperDna (v, out, sendTaps ? &tap : nullptr, at, carrierTaps ? &carTap : nullptr);   // SHAPER DNA: this note's rhythm (its send and carrier too)
+                applyShaperDna (v, out, sendTaps ? &tap : nullptr, at, carrierTaps ? &carTap : nullptr, v.sideOn ? &sOut : nullptr);   // SHAPER DNA: this note's rhythm (its send, carrier and side too)
             if (satMoving == 0)
             {
                 left[at] += out * v.panL;
@@ -2986,6 +3230,13 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                         tapR[at] += restTap * restR + tr;
                     }
                 }
+            }
+            if (v.sideOn)
+            {
+                // UNISON's WIDTH: the copies apart, left = mid - side and right = mid + side, at
+                // the voice's own place (the sends and taps hear the mid).
+                left[at] -= sOut * v.panL;
+                right[at] += sOut * v.panR;
             }
             if (v.fade > 0 && --v.fade == 0)
             {
@@ -4372,7 +4623,7 @@ void Synth::updateShaperDna (int count) noexcept
     }
 }
 
-void Synth::applyShaperDna (Voice& v, float& out, float* send, int at, float* carrier) noexcept
+void Synth::applyShaperDna (Voice& v, float& out, float* send, int at, float* carrier, float* side) noexcept
 {
     // The SHAPER's own law, on one note: VOL dips its level, FILTER closes a gentle LP12 (its
     // own state: never shared between notes), BOTH does both, the filter fully and the level
@@ -4412,6 +4663,8 @@ void Synth::applyShaperDna (Voice& v, float& out, float* send, int at, float* ca
             lp (*send, v.dnaSendS1, v.dnaSendS2);
         if (carrier != nullptr)
             lp (*carrier, v.dnaCarS1, v.dnaCarS2);
+        if (side != nullptr)
+            lp (*side, v.dnaSideS1, v.dnaSideS2);
     }
     else
     {
@@ -4428,6 +4681,11 @@ void Synth::applyShaperDna (Voice& v, float& out, float* send, int at, float* ca
             v.dnaCarS1 = 0.0;
             v.dnaCarS2 = *carrier;
         }
+        if (side != nullptr)
+        {
+            v.dnaSideS1 = 0.0;
+            v.dnaSideS2 = *side;
+        }
         v.dnaCoefCountdown = 0;
     }
     out *= static_cast<float> (v.dnaGain);
@@ -4435,6 +4693,8 @@ void Synth::applyShaperDna (Voice& v, float& out, float* send, int at, float* ca
         *send *= static_cast<float> (v.dnaGain);
     if (carrier != nullptr)
         *carrier *= static_cast<float> (v.dnaGain);
+    if (side != nullptr)
+        *side *= static_cast<float> (v.dnaGain);
 }
 
 void Synth::renderChunk (float* left, float* right, int numSamples) noexcept

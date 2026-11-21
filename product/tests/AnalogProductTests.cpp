@@ -885,6 +885,18 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             };
         }
     }
+    // UNISON (state version 24) acts on its card's oscillator once there is more than one copy
+    // (four here), card C an oscillator so it has one.
+    for (int card = 0; card < 3; ++card)
+        for (const char* name : params::unisonNames)
+        {
+            const juce::String field (name);
+            setups[params::unisonId (card, name)] = [card, field] (ShellProcessor& q) {
+                setValue (q, params::hybridType, 1.0f);
+                if (field != "voices")
+                    setValue (q, params::unisonId (card, "voices"), 3.0f);   // (choice index 3: four copies)
+            };
+        }
     // SATELLITE acts on its card while it sounds and moves: the card on, travelling (DEPTH up),
     // card C an oscillator (so it sounds), the voices spread (WIDTH has something to narrow);
     // RATE in FREE, its NOTE choice in BOUNCE.
@@ -6240,7 +6252,7 @@ TEST_CASE ("analog: the FX route is saved with the session once CUSTOM; absent, 
         p.getStateInformation (classicSession);
         auto xml = juce::AudioProcessor::getXmlFromBinary (classicSession.getData(), static_cast<int> (classicSession.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 23);   // (23: D / AUX; 22: EXTERNAL (experiment); 21: RHYTHMIC MORPH; 20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
+        CHECK (xml->getIntAttribute ("productVersion") == 24);   // (24: UNISON; 23: D / AUX; 22: EXTERNAL (experiment); 21: RHYTHMIC MORPH; 20: SATELLITE; 19: USER MACROS; 18: SHAPER DNA; 13: RETRO's parameters appended; 14: card B's REIMAGINED; 15: SUB; 16: card C's second layer; 17: the cards' sends)
         CHECK (findElement (*xml, "FxRouting") == nullptr);   // (an untouched route writes nothing)
 
         // A graph this build cannot play is refused; the route stays.
@@ -8507,7 +8519,7 @@ TEST_CASE ("analog: V6 gate 1 - card B has its own REIMAGINED (layerC.reimagined
     }
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 23);
+    CHECK (xml->getIntAttribute ("productVersion") == 24);
     xml->setAttribute ("productVersion", 13);   // as 1.0 wrote it
     juce::MemoryBlock v13;
     juce::AudioProcessor::copyXmlToBinary (*xml, v13);
@@ -9325,7 +9337,7 @@ TEST_CASE ("SHAPER DNA: every setting is a host parameter - saved, recalled, rea
     {
         auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
         REQUIRE (xml != nullptr);
-        CHECK (xml->getIntAttribute ("productVersion") == 23);
+        CHECK (xml->getIntAttribute ("productVersion") == 24);
     }
     ShellProcessor q;
     q.setStateInformation (session.getData(), static_cast<int> (session.getSize()));
@@ -9701,7 +9713,7 @@ TEST_CASE ("USER MACROS G1: six parameters at 0, no assignment, nothing saved, t
     p.getStateInformation (session);
     auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
     REQUIRE (xml != nullptr);
-    CHECK (xml->getIntAttribute ("productVersion") == 23);
+    CHECK (xml->getIntAttribute ("productVersion") == 24);
     std::function<bool (const juce::XmlElement&)> hasChild = [&] (const juce::XmlElement& e) {
         for (auto* c : e.getChildIterator())
             if (c->hasTagName ("UserMacros") || hasChild (*c))

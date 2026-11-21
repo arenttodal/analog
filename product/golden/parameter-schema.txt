@@ -670,6 +670,24 @@ analog.morph.global.detail v38 float "D Morph Detail" label="%" range=0.0000..10
 analog.morph.global.levelMatch v38 bool "D Morph Level Match" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=1.0000 steps=2 texts=Off|On|On
 analog.morph.global.output v38 choice "D Morph Output" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Morph Only|Morph Only|Layered [Morph Only|Layered]
 analog.vibrato.sourceSub v39 bool "Vibrato Source Sub" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
+analog.unison.a.voices v40 choice "Unison A Voices" label="" range=0.0000..7.0000/1.0000 skew=1.00000 default=0.0000 steps=8 texts=1|5|8 [1|2|3|4|5|6|7|8]
+analog.unison.a.detune v40 float "Unison A Detune" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=45.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.a.blend v40 float "Unison A Blend" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=75.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.a.width v40 float "Unison A Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.a.mode v40 choice "Unison A Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=LINEAR|EXP|RANDOM [LINEAR|SUPER|EXP|INV|RANDOM]
+analog.unison.a.range v40 float "Unison A Range" label="st" range=0.1000..12.0000/0.0100 skew=0.50000 default=1.0000 steps=2147483647 texts=0.10 st|3.08 st|12.00 st
+analog.unison.b.voices v40 choice "Unison B Voices" label="" range=0.0000..7.0000/1.0000 skew=1.00000 default=0.0000 steps=8 texts=1|5|8 [1|2|3|4|5|6|7|8]
+analog.unison.b.detune v40 float "Unison B Detune" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=45.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.b.blend v40 float "Unison B Blend" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=75.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.b.width v40 float "Unison B Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.b.mode v40 choice "Unison B Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=LINEAR|EXP|RANDOM [LINEAR|SUPER|EXP|INV|RANDOM]
+analog.unison.b.range v40 float "Unison B Range" label="st" range=0.1000..12.0000/0.0100 skew=0.50000 default=1.0000 steps=2147483647 texts=0.10 st|3.08 st|12.00 st
+analog.unison.c.voices v40 choice "Unison C Voices" label="" range=0.0000..7.0000/1.0000 skew=1.00000 default=0.0000 steps=8 texts=1|5|8 [1|2|3|4|5|6|7|8]
+analog.unison.c.detune v40 float "Unison C Detune" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=45.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.c.blend v40 float "Unison C Blend" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=75.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.c.width v40 float "Unison C Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.unison.c.mode v40 choice "Unison C Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=LINEAR|EXP|RANDOM [LINEAR|SUPER|EXP|INV|RANDOM]
+analog.unison.c.range v40 float "Unison C Range" label="st" range=0.1000..12.0000/0.0100 skew=0.50000 default=1.0000 steps=2147483647 texts=0.10 st|3.08 st|12.00 st
 analog.arp.cardB.strum.on v40 bool "Arp Card B Strum" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.arp.cardB.strum.direction v40 choice "Arp Card B Strum Direction" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=UP|RANDOM|ALTERNATE [UP|DOWN|RANDOM|ALTERNATE]
 analog.arp.cardB.strum.sync v40 bool "Arp Card B Strum Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On

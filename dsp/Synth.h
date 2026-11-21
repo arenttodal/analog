@@ -541,6 +541,38 @@ private:
         BlepLine line3;
         osc::SlotExtra extra3;
         osc::SlotPlan plan3;
+        /** State version 24: each oscillator's UNISON (0 OSC 1, 1 OSC 2, 2 OSC 3). The centre
+            copy is the oscillator's own phase (sync and Poly Mod act on it); the others are
+            kept here, on the same BLEP line. Their detune ratios, gains and places follow the
+            settings at the control rate (recomputed only when they change). count 1: none. */
+        struct UnisonCopies
+        {
+            int count = 1, centre = 0;
+            std::array<double, unisonmath::maxVoices - 1> phase {};
+            std::array<osc::SlotExtra, unisonmath::maxVoices - 1> extra {};
+            std::array<double, unisonmath::maxVoices> ratio {};
+            std::array<float, unisonmath::maxVoices> gain {}, place {};
+            std::array<float, unisonmath::maxVoices> random {};   ///< RANDOM's draws, this note's
+            std::array<float, unisonmath::maxVoices> side {}; ///< each copy's side weight, -1 left .. +1 right
+            bool wide = false;                               ///< a copy is off-centre (WIDTH above 0)
+            UnisonSettings planned {};                       ///< what ratio / gain / place were made from
+            bool fresh = true;                               ///< recompute at the next control update
+        };
+        std::array<UnisonCopies, 3> uni {};
+        /** UNISON's WIDTH as mid / side: the voice's own signal is the mid (folded to mono, the
+            sound at WIDTH 0); the copies' left / right difference is the side, on its own BLEP
+            line per slot, through the cards' EQ and DAMPEN and the voice's filter as twins, then
+            out as left = mid - side, right = mid + side. Run only while a copy is off-centre. */
+        std::array<BlepLine, 3> sideLine {};
+        std::array<float, 3> sideOsc {}, sideTilt {};
+        bool sideOn = false, sideWas = false;
+        float sideIn = 0.0f;   ///< the cards' side as it reaches the filter (this sample)
+        VoiceEq sideEqA, sideEqB, sideEqC;
+        VoiceDampen sideDampenA, sideDampenB, sideDampenC;
+        LadderFilter sideFilter;
+        OtaFilter sideOta;
+        VoiceHighPass sideHighPass;
+        double dnaSideS1 = 0.0, dnaSideS2 = 0.0;
         float width3 = 0.5f, pwm3 = 0.0f, pwmEnv3 = 0.0f;
         osp::Prng hybridNoise { 1 };
         float hybridColour = 0.0f, hybridTone = 0.0f, hybridToneCoef = 1.0f, hybridMove = 1.0f, hybridMoveTarget = 1.0f;
@@ -688,6 +720,13 @@ private:
     /** The hybrid's own sound this sample (OSC 3 or NOISE), at full level (its card's LEVEL and
         the A/B mix apply as to a recording). */
     float hybridSample (Voice& v, float envValue) noexcept;
+    /** UNISON: one sample of oscillator `slot` (1..3) as its copies, all on its BLEP line;
+        `wrapAt` gets the centre copy's wrap (sync's master). */
+    float unisonSample (Voice& v, int slot, double dt, float width, double syncAt, double& wrapAt) noexcept;
+    /** UNISON (control rate): the copies' detune ratios, gains and places from the settings. */
+    void planUnison (Voice& v, int slot, const Patch& p) noexcept;
+    /** UNISON: a voice that starts from silence draws its copies' phases and RANDOM's values. */
+    void seedUnison (Voice& v) noexcept;
     bool anyKeyHeld (const Voice* except) const noexcept;
     void renderChunk (float* left, float* right, int numSamples) noexcept;
     void monoNoteOn (int channel, int note, float velocity) noexcept;
@@ -807,7 +846,7 @@ private:
     // SHAPER DNA (docs/SHAPER_DNA_V1.md): lane A's SHAPER per note. Nothing here runs while it
     // is off and has faded out, so OFF renders exactly as before.
     void updateShaperDna (int count) noexcept;
-    void applyShaperDna (Voice& v, float& out, float* send, int at, float* carrier = nullptr) noexcept;
+    void applyShaperDna (Voice& v, float& out, float* send, int at, float* carrier = nullptr, float* side = nullptr) noexcept;
     // SATELLITE: each card's motion (control rate; the voices interpolate across the chunk).
     struct SatelliteCard
     {
@@ -1023,6 +1062,7 @@ private:
     std::array<float, modeInterval> scratchSource {}, scratchL {}, scratchR {}, scratchEnv {}, scratchPolyMod {};
     std::array<float, modeInterval> scratchA {}, scratchB {}, scratchC {};   ///< the cards' parts while a mode engine runs
     std::array<float, modeInterval> scratchAmp {};
+    std::array<float, modeInterval> scratchSide {};   ///< UNISON's WIDTH: the voice's side, as it reaches the filter
     double sharedDriftCents = 0.0;   ///< MOVEMENT DRIFT's shared part (every voice together)
 
     const osp::InstrumentModel* organicSource = nullptr;

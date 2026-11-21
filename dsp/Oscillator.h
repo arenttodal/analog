@@ -69,7 +69,8 @@ inline float slope (const Waves& w, double p, double dt) noexcept
     peak (turns down) and the pulse's falling edge. Returns the new phase; `wrapAt` gets the
     wrap's time before the sample (or stays as it was if there is none).
 */
-inline double walk (double phase, double dt, float width, const Waves& w, double duration, double endBefore, BlepLine& line,
+template <class Line>
+inline double walk (double phase, double dt, float width, const Waves& w, double duration, double endBefore, Line& line,
                     double& wrapAt) noexcept
 {
     double remaining = duration;
@@ -126,7 +127,8 @@ inline double walk (double phase, double dt, float width, const Waves& w, double
     A hard-sync reset `d` samples before the sample being computed: the slave starts again
     from phase 0, and the jump (and change of slope) it makes is corrected like any edge.
 */
-inline void syncReset (double phaseAtReset, double dt, float width, const Waves& w, float d, BlepLine& line) noexcept
+template <class Line>
+inline void syncReset (double phaseAtReset, double dt, float width, const Waves& w, float d, Line& line) noexcept
 {
     line.step (naive (w, 0.0, width) - naive (w, phaseAtReset, width), d);
     if (w.triangle)
@@ -197,22 +199,52 @@ struct SlotPlan
     bool squareWidth = false;   ///< WIDE SQUARE: the width held at 50 %
 };
 
+/** UNISON's WIDTH: one copy's corrections onto the mid line and, scaled by the copy's side
+    weight, onto the side line (the walkers take either kind of line). */
+struct DualLine
+{
+    BlepLine& mid;
+    BlepLine& side;
+    float sideScale = 0.0f;
+    void step (float h, float d) noexcept
+    {
+        mid.step (h, d);
+        side.step (h * sideScale, d);
+    }
+    void corner (float delta, float d) noexcept
+    {
+        mid.corner (delta, d);
+        side.corner (delta * sideScale, d);
+    }
+};
+
 /**
     One sample of a DCO or WIDE slot (CLASSIC never comes here). `syncAt` >= 0: the master
     wrapped that long before the sample (hard sync). Returns the slot's output (after its BLEP
     line, two samples late like CLASSIC); `wrapAt` gets its own wrap's time (or stays).
 */
 inline float renderModel (double& phase, BlepLine& line, SlotExtra& x, const SlotPlan& plan, double dt, float width, double syncAt,
-                          double& wrapAt) noexcept
+                          double& wrapAt) noexcept;
+
+/**
+    The part of renderModel before the line's end: one oscillator's corrections onto `line`,
+    scaled by `scale` (UNISON: a copy's gain), returning its naive value. Several calls on one
+    line (UNISON's copies, each with its own phase and SlotExtra) sum, as corrections do; the
+    caller ends the line once and applies the slot's SHAPE (renderModel does both for one).
+*/
+template <class Line>
+inline float accumulateModel (double& phase, Line& line, SlotExtra& x, const SlotPlan& plan, double dt, float width, double syncAt,
+                              double& wrapAt, float scale = 1.0f) noexcept
 {
     if (plan.squareWidth)
         width = 0.5f;
     const auto& w = plan.waves;
-    const float sawGain = (plan.superSaw ? x.sawNormal : 1.0f) * w.gain;
+    const float sawGain = (plan.superSaw ? x.sawNormal : 1.0f) * w.gain * scale;
     // The centre (or only) oscillator, with sync as CLASSIC does it.
     double ownWrap = -1.0;
     Waves centre = w;
-    centre.gain = plan.superSaw ? sawGain : w.gain;
+    centre.gain = plan.superSaw ? sawGain : w.gain * scale;
+    const float subLevel = plan.subLevel * scale;
     if (syncAt >= 0.0)
     {
         const double before = phase;
@@ -231,10 +263,10 @@ inline float renderModel (double& phase, BlepLine& line, SlotExtra& x, const Slo
         const double flipAt = syncAt >= 0.0 ? syncAt : ownWrap;
         if (flipAt >= 0.0)
         {
-            line.step (-2.0f * x.subSign * plan.subLevel, static_cast<float> (flipAt));
+            line.step (-2.0f * x.subSign * subLevel, static_cast<float> (flipAt));
             x.subSign = -x.subSign;
         }
-        naiveValue += x.subSign * plan.subLevel;
+        naiveValue += x.subSign * subLevel;
     }
     else if (ownWrap >= 0.0 || syncAt >= 0.0)
         x.subSign = -x.subSign;   // (kept turning while silent: switching the sub on never clicks out of phase)
@@ -273,7 +305,13 @@ inline float renderModel (double& phase, BlepLine& line, SlotExtra& x, const Slo
     }
     if (ownWrap >= 0.0)
         wrapAt = ownWrap;
-    float out = line.end (naiveValue);
+    return naiveValue;
+}
+
+inline float renderModel (double& phase, BlepLine& line, SlotExtra& x, const SlotPlan& plan, double dt, float width, double syncAt,
+                          double& wrapAt) noexcept
+{
+    float out = line.end (accumulateModel (phase, line, x, plan, dt, width, syncAt, wrapAt));
     if (plan.tilt)
     {
         x.tilt += x.tiltCoef * (out - x.tilt);

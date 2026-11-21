@@ -121,6 +121,8 @@ namespace
         // The MOD WHEEL's VIBRATO (ANDOR OSP's shared vibrato.*; SUB ANALOG's own).
         iVibratoEnabled, iVibratoDepth, iVibratoRate, iVibratoDelay, iVibratoRise, iVibratoControl, iVibratoAmount,
         iVibratoSourceA, iVibratoSourceB, iVibratoSourceC, iVibratoSourceSub,
+        // State version 24: UNISON, six fields a card (unisonNames), A, B, C.
+        iUnisonCards, iUnisonCardsLast = iUnisonCards + 3 * unisonFields - 1,
         count
     };
 
@@ -268,6 +270,10 @@ namespace
                                     &osp::plugin::ids::vibratoAmount, &osp::plugin::ids::vibratoSourceA, &osp::plugin::ids::vibratoSourceB,
                                     &osp::plugin::ids::vibratoSourceC, &vibratoSourceSub })
                 l.add (*id);
+            // State version 24: UNISON.
+            for (int card = 0; card < 3; ++card)
+                for (const char* name : unisonNames)
+                    l.add (unisonId (card, name));
             return l;
         }();
         jassert (withCards.size() == count);
@@ -1108,6 +1114,29 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
     // The MOD WHEEL's VIBRATO on SUB (ANALOG's own source beside ANDOR OSP's shared three):
     // off by default. Appended.
     layout.add (osp::plugin::parameters::make<Bool> (juce::ParameterID { vibratoSourceSub, 39 }, "Vibrato Source Sub", false));
+    // State version 24: each card's UNISON - its oscillator as up to eight detuned copies inside
+    // each voice. One voice (off) by default: an older session plays exactly as it did. Appended.
+    {
+        auto v40 = [] (const juce::String& name) { return juce::ParameterID { name, 40 }; };
+        const UnisonSettings u;
+        const juce::StringArray voices { "1", "2", "3", "4", "5", "6", "7", "8" };
+        for (int card = 0; card < 3; ++card)
+        {
+            const juce::String name = juce::String ("Unison ") + static_cast<char> ('A' + card);
+            layout.add (osp::plugin::parameters::make<Choice> (v40 (unisonId (card, "voices")), name + " Voices", voices, u.voices - 1));
+            layout.add (osp::plugin::parameters::make<Float> (v40 (unisonId (card, "detune")), name + " Detune", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                              static_cast<float> (100.0 * u.detune), Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+            layout.add (osp::plugin::parameters::make<Float> (v40 (unisonId (card, "blend")), name + " Blend", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                              static_cast<float> (100.0 * u.blend), Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+            layout.add (osp::plugin::parameters::make<Float> (v40 (unisonId (card, "width")), name + " Width", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+                                                              static_cast<float> (100.0 * u.width), Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
+            layout.add (osp::plugin::parameters::make<Choice> (v40 (unisonId (card, "mode")), name + " Mode", juce::StringArray { "LINEAR", "SUPER", "EXP", "INV", "RANDOM" },
+                                                               static_cast<int> (u.spread)));
+            layout.add (osp::plugin::parameters::make<Float> (v40 (unisonId (card, "range")), name + " Range", juce::NormalisableRange<float> (0.1f, 12.0f, 0.01f, 0.5f),
+                                                              static_cast<float> (u.rangeSemitones),
+                                                              Attributes().withLabel ("st").withStringFromValueFunction ([] (float v, int) { return juce::String (v, 2) + " st"; })));
+        }
+    }
 }
 
 int readerIndexOf (const juce::String& id)
@@ -1515,6 +1544,18 @@ Patch Reader::readWith (const float* raw) const noexcept
         st.offset = v (base + 8) / 100.0;
         st.retrigger = static_cast<osp::satellite::Retrigger> (index (base + 9, 2));
         st = st.sanitised();
+    }
+    for (int card = 0; card < 3; ++card)
+    {
+        // State version 24: UNISON (card A's on OSC 1, B's on OSC 2, C's on OSC 3).
+        const int base = iUnisonCards + card * unisonFields;
+        auto& u = p.oscUnison[static_cast<std::size_t> (card)];
+        u.voices = 1 + index (base + 0, unisonmath::maxVoices);
+        u.detune = v (base + 1) / 100.0;
+        u.blend = v (base + 2) / 100.0;
+        u.width = v (base + 3) / 100.0;
+        u.spread = static_cast<UnisonSpread> (index (base + 4, 5));
+        u.rangeSemitones = v (base + 5);
     }
     p.granular = on (iSourceMode);
     p.grains.position = 0.01 * v (iGrainPosition);
@@ -1948,6 +1989,17 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (base + 7, 360.0 * st.phase);
         put (base + 8, 100.0 * st.offset);
         put (base + 9, static_cast<int> (st.retrigger));
+    }
+    for (int card = 0; card < 3; ++card)
+    {
+        const int base = iUnisonCards + card * unisonFields;
+        const auto& u = p.oscUnison[static_cast<std::size_t> (card)];
+        put (base + 0, std::clamp (u.voices, 1, unisonmath::maxVoices) - 1);
+        put (base + 1, 100.0 * u.detune);
+        put (base + 2, 100.0 * u.blend);
+        put (base + 3, 100.0 * u.width);
+        put (base + 4, static_cast<int> (u.spread));
+        put (base + 5, u.rangeSemitones);
     }
     {
         const auto& r = p.rhythm;

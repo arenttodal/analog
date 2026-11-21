@@ -244,6 +244,12 @@ namespace andor::analog::params
     inline juce::String satelliteId (int card, const char* name) { return juce::String ("analog.satellite.") + static_cast<char> ('a' + card) + "." + name; }
     inline constexpr const char* satelliteNames[] = { "enabled", "mode", "sync", "division", "rate", "depth", "width", "phase", "offset", "retrigger" };
     inline constexpr int satelliteFields = 10;
+    /** State version 24: each card's UNISON (card 0 A: OSC 1, 1 B: OSC 2, 2 C: OSC 3 - card C as an
+        oscillator), "analog.unison.a.voices" ... One voice (off) in a new instrument and every
+        session from before. */
+    inline juce::String unisonId (int card, const char* name) { return juce::String ("analog.unison.") + static_cast<char> ('a' + card) + "." + name; }
+    inline constexpr const char* unisonNames[] = { "voices", "detune", "blend", "width", "mode", "range" };
+    inline constexpr int unisonFields = 6;
     /** State version 21 (RHYTHMIC MORPH): card C's recording as a host-synced loop and C RHYTHM. */
     inline const juce::String rhythmEnabled = "analog.rhythm.enabled";
     inline const juce::String rhythmAudio = "analog.rhythm.audio";
@@ -358,7 +364,7 @@ namespace andor::analog::params
         double keyDnaCardAmount() const noexcept;
 
         // Modulation (real-time safe).
-        static constexpr int maxValues = 512;
+        static constexpr int maxValues = 640;   // (room for the parameters appended to come; 512 until UNISON)
         using Values = std::array<float, maxValues>;
         /** Every raw value now, in the reader's order. */
         void snapshot (Values& raw) const noexcept;

@@ -11,6 +11,7 @@
 #include "fx/FxSettings.h"
 #include "ShaperDna.h"
 #include "SubOsc.h"
+#include "Unison.h"
 
 #include <algorithm>
 #include <array>
@@ -455,6 +456,9 @@ struct Patch
         SEND route, which feeds its SEND chain with them, taken before the voice filter. Card C's
         is both its layers'. Never SUB's (it has none). */
     double sendA = 0.0, sendB = 0.0, sendC = 0.0;
+    /** State version 24: each oscillator's UNISON - 0 OSC 1 (card A), 1 OSC 2 (card B), 2 OSC 3
+        (card C as an oscillator). One copy (the default): the oscillator exactly as before. */
+    std::array<UnisonSettings, 3> oscUnison {};
 };
 
 } // namespace andor::analog
