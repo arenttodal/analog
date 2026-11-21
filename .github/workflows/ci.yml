@@ -198,9 +198,10 @@ jobs:
           cmake -B build-plugin -G "Visual Studio 17 2022" -A x64 -DOSP_BUILD_PLUGIN=ON "-DCMAKE_TOOLCHAIN_FILE=$toolchain" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
       - name: Build
         id: build
-        run: cmake --build build-plugin --config Release --parallel --target ANDOR_Analog_All andor_analog_tests analog_dsp_tests
-      - name: Test (engine, product)
-        run: ctest --test-dir build-plugin -C Release --output-on-failure -R "^(analog_dsp_tests|andor_analog_tests)$"
+        # (The engine's tests are built last, after the installer: see the final step.)
+        run: cmake --build build-plugin --config Release --parallel --target ANDOR_Analog_All andor_analog_tests
+      - name: Test (product)
+        run: ctest --test-dir build-plugin -C Release --output-on-failure -R "^andor_analog_tests$"
       # What the shipped binaries load: only Windows' own DLLs (a clean PC has nothing else).
       - name: Check DLL dependencies
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -251,3 +252,28 @@ jobs:
           name: ANDOR-Analog-Windows-installer
           path: installer/
           if-no-files-found: error
+      # The engine's tests, last. MSVC stalled for hours "Generating Code" for a batch of these
+      # files (with or without optimisation) and MSBuild compiles a batch together, so each file
+      # is compiled alone (MSBuild's SelectedFiles) with its own limit: a file that stalls is named
+      # and the rest still compile; then the suite links and runs.
+      - name: Test (engine; each file compiled alone)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 60
+        run: |
+          msbuild="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | head -1)"
+          proj="$(cygpath -w "$PWD/build-plugin/analog_dsp_tests.vcxproj")"
+          files="$(awk '/add_executable\(analog_dsp_tests/{p=1;next} p{line=$1; done=index($0,")")>0; gsub(/\)/,"",line); if(line!="") print line; if(done) exit}' CMakeLists.txt)"
+          failed=""
+          for f in $files; do
+            start=$(date +%s)
+            if MSYS_NO_PATHCONV=1 timeout 480 "$msbuild" "$proj" /nologo /nr:false /v:minimal /t:ClCompile /p:Configuration=Release /p:Platform=x64 "/p:SelectedFiles=$(cygpath -w "$PWD/$f")" > cl.log 2>&1; then
+              echo "$f: $(( $(date +%s) - start )) s"
+            else
+              echo "$f: DID NOT COMPILE (exit $?) after $(( $(date +%s) - start )) s"; tail -25 cl.log
+              taskkill //F //IM cl.exe > /dev/null 2>&1 || true
+              failed="$failed $f"
+            fi
+          done
+          if [ -n "$failed" ]; then echo "Did not compile:$failed"; exit 1; fi
+          cmake --build build-plugin --config Release --target analog_dsp_tests
+          ctest --test-dir build-plugin -C Release --output-on-failure -R "^analog_dsp_tests$"

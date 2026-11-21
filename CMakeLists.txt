@@ -116,11 +116,6 @@ if(OSP_BUILD_TESTS)
         tools/Wav.cpp)
     target_include_directories(analog_dsp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/tools)
     target_link_libraries(analog_dsp_tests PRIVATE analog_dsp Catch2::Catch2WithMain)
-    if(MSVC)
-        # The tests' own files unoptimised on MSVC (analog_dsp, which they call, stays optimised):
-        # MSVC's optimiser stalled for hours generating code for a batch of these test files.
-        target_compile_options(analog_dsp_tests PRIVATE /Od)
-    endif()
     target_compile_definitions(analog_dsp_tests PRIVATE ANALOG_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
     osp_set_warnings(analog_dsp_tests)
     add_test(NAME analog_dsp_tests COMMAND analog_dsp_tests)
