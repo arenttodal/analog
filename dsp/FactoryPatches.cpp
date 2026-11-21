@@ -268,10 +268,10 @@ namespace
         }
         {
             Patch p = base();
-            p.unison = true;
-            p.polyphony = 8;
-            p.unisonDetune = 0.45;
-            p.stereoSpread = 0.75;
+            // (State version 24: each card's UNISON in place of the retired global one - the
+            // same eight copies, detune and spread, inside one MONO voice.)
+            p.voiceMode = VoiceMode::mono;
+            p.oscUnison[0] = p.oscUnison[1] = unisonmath::fromLegacy (8, 0.45, 0.75);
             p.tone = hz (2400.0);
             p.resonance = 0.2;
             p.envDepthSemitones = 14.0;
@@ -493,7 +493,7 @@ namespace
             p.grains = { 0.45, 0.28, 22.0, 0.0, 0.6 };
             p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
             p.grains2 = p.grains;
-            p.reimagined = 0.45;
+            p.reimagined = 0.0;   // (REIMAGINED hidden, switched off: was 0.45)
             p.lfoAmount = 0.35;
             p.lfo.rateHz = 0.3;
             p.lfoPitch1 = 0.25;
@@ -510,7 +510,7 @@ namespace
             p.envDepthSemitones = 14.0;
             filterEnv (p, 0.4, 1.2, 0.5, 1.4);
             ampEnv (p, 0.35, 1.0, 0.9, 1.6);
-            p.reimagined = 0.65;
+            p.reimagined = 0.0;   // (REIMAGINED hidden, switched off: was 0.65)
             p.reimaginedSettings.kaleidoscope = { 0.6, 0.7 };
             p.motion = 0.35;
             p.stereoSpread = 0.6;
@@ -531,7 +531,7 @@ namespace
             p.grains = { 0.2, 0.18, 18.0, 0.0, 0.15 };
             p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
             p.grains2 = p.grains;
-            p.reimagined = 0.6;
+            p.reimagined = 0.0;   // (REIMAGINED hidden, switched off: was 0.6)
             p.reimaginedSettings.mode = osp::ReimaginedMode::tapeFrame;
             p.reimaginedSettings.tapeFrame = { 0.5, 0.4, osp::TapeFrameLength::classic };
             p.motion = 0.3;
@@ -552,7 +552,7 @@ namespace
             p.envDepthSemitones = 12.0;
             filterEnv (p, 0.002, 0.5, 0.2, 0.4);
             ampEnv (p, 0.002, 1.2, 0.0, 1.0);
-            p.reimagined = 0.7;
+            p.reimagined = 0.0;   // (REIMAGINED hidden, switched off: was 0.7)
             p.reimaginedSettings.mode = osp::ReimaginedMode::toybox;
             p.reimaginedSettings.toybox = { 0.4, 0.6, osp::ToyboxPlay::turn };
             p.levelDb = -2.0;
@@ -570,7 +570,7 @@ namespace
             p.envDepthSemitones = 30.0;
             filterEnv (p, 0.002, 0.35, 0.2, 0.25);
             ampEnv (p, 0.002, 0.9, 0.7, 0.2);
-            p.reimagined = 0.65;
+            p.reimagined = 0.0;   // (REIMAGINED hidden, switched off: was 0.65)
             p.reimaginedSettings.mode = osp::ReimaginedMode::mirage;
             p.reimaginedSettings.mirage = { 0.55, 0.6, osp::MirageTone::dark };
             p.drive = 0.35;
@@ -659,7 +659,7 @@ namespace
             p.grains = { 0.85, 0.4, 12.0, 12.0, 0.3 };
             p.granular2 = true;   // (both oscillator cards, as one GRANULAR before state version 8)
             p.grains2 = p.grains;
-            p.reimagined = 0.3;
+            p.reimagined = 0.0;   // (REIMAGINED hidden, switched off: was 0.3)
             p.levelDb = -4.0;
             room (p, 0.55, SpaceType::hall, 6.0);
             delay (p, 0.2, 7, 0.5);

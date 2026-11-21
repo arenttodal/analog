@@ -351,6 +351,10 @@ struct Patch
     // Performance.
     int polyphony = 8;
     VoiceMode voiceMode = VoiceMode::poly;
+    /** MONO's LEGATO (state version 24): on, a key pressed while another is held slides there
+        without a new attack (as MONO always did before); off (the default), every new key
+        fades the note out over 3 ms and starts its envelopes from zero. */
+    bool legato = false;
     double glideSeconds = 0.0;
     double bendRangeSemitones = 2.0;
     /** The MOD WHEEL's VIBRATO (ANDOR OSP's, shared: osp::vibrato), per voice. Its sources:

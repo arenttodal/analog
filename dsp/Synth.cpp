@@ -1190,8 +1190,9 @@ void Synth::monoNoteOn (int channel, int note, float velocity) noexcept
         --keyCount;
     }
     keys[static_cast<std::size_t> (keyCount++)] = { channel, note, velocity };
-    // Legato: a key pressed while another holds slides there without a new attack.
-    const bool legato = monoGate;
+    // LEGATO: a key pressed while another holds slides there without a new attack. Without it,
+    // every key starts afresh (a 3 ms fade first while a note sounds: monoGoTo).
+    const bool legato = monoGate && current.legato;
     monoGoTo (note, ! legato, velocity, channel);
     monoGate = true;
 }
@@ -1212,9 +1213,9 @@ void Synth::monoNoteOff (int channel, int note) noexcept
         return;
     if (keyCount > 0)
     {
-        // Back to the key still held (legato).
+        // Back to the key still held (with LEGATO a slide; without, it starts afresh too).
         const auto& k = keys[static_cast<std::size_t> (keyCount - 1)];
-        monoGoTo (k.note, false, k.velocity, k.channel);
+        monoGoTo (k.note, ! current.legato, k.velocity, k.channel);
         return;
     }
     if (pedal)
@@ -1231,6 +1232,12 @@ void Synth::monoNoteOff (int channel, int note) noexcept
     {
         auto& v = voices[static_cast<std::size_t> (i)];
         v.held = false;
+        if (v.pending)
+        {
+            // (a new note waiting on its 3 ms fade: never started - the voice releases)
+            v.pending = false;
+            v.fade = 0;
+        }
         releaseVoice (v);
     }
 }
@@ -1247,6 +1254,30 @@ void Synth::monoGoTo (int note, bool retrigger, float velocity, int channel) noe
         v.pan = static_cast<float> (current.panPercent / 100.0 + current.stereoSpread * spreadPosition * (current.unison ? 1.0 : 0.0));
         v.panNow = v.pan;
         equalPower (v.pan, v.panL, v.panR);
+        if (v.pending)
+        {
+            // (still fading for an earlier key: the newest waits instead)
+            v.pendingChannel = channel;
+            v.pendingNote = note;
+            v.pendingVelocity = velocity;
+            v.pendingDnaProfile = dnaAssigning;
+            continue;
+        }
+        if (v.active && retrigger && ! current.legato && v.amp.value() > 1.0e-4f)
+        {
+            // Without LEGATO a sounding note fades out over 3 ms, then the new one starts its
+            // envelopes from zero (as a stolen voice does).
+            v.pending = true;
+            v.pendingChannel = channel;
+            v.pendingNote = note;
+            v.pendingVelocity = velocity;
+            v.pendingRetrigger = true;
+            v.pendingDnaProfile = dnaAssigning;
+            v.held = false;
+            v.sustained = false;
+            v.fade = std::max (1, static_cast<int> (stealFadeSeconds * internalRate));
+            continue;
+        }
         if (! v.active || ! glide)
             v.pitch = glide ? lastMonoPitch : note;
         if (v.active && ! retrigger)
@@ -3247,6 +3278,8 @@ void Synth::renderVoice (Voice& v, float* left, float* right, int count) noexcep
                 v.active = false;
                 v.stoppedAt = stillRunning;
                 dnaAssigning = v.pendingDnaProfile;   // (the profile its note-on was given)
+                if (monophonic() && ! (current.glideSeconds > 0.0))
+                    v.pitch = v.pendingNote;   // (MONO without LEGATO: the new key at once; with GLIDE, from where it was)
                 startVoice (v, v.pendingChannel, v.pendingNote, v.pendingVelocity, v.pendingRetrigger);
                 used = k + 1;
                 break;

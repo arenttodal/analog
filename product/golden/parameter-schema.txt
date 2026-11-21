@@ -688,6 +688,7 @@ analog.unison.c.blend v40 float "Unison C Blend" label="%" range=0.0000..100.000
 analog.unison.c.width v40 float "Unison C Width" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=100.0000 steps=2147483647 texts=0 %|50 %|100 %
 analog.unison.c.mode v40 choice "Unison C Mode" label="" range=0.0000..4.0000/1.0000 skew=1.00000 default=0.0000 steps=5 texts=LINEAR|EXP|RANDOM [LINEAR|SUPER|EXP|INV|RANDOM]
 analog.unison.c.range v40 float "Unison C Range" label="st" range=0.1000..12.0000/0.0100 skew=0.50000 default=1.0000 steps=2147483647 texts=0.10 st|3.08 st|12.00 st
+analog.legato v40 bool "Legato" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.arp.cardB.strum.on v40 bool "Arp Card B Strum" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.arp.cardB.strum.direction v40 choice "Arp Card B Strum Direction" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=UP|RANDOM|ALTERNATE [UP|DOWN|RANDOM|ALTERNATE]
 analog.arp.cardB.strum.sync v40 bool "Arp Card B Strum Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On

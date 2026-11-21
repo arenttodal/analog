@@ -70,6 +70,7 @@ namespace
         });
         edge ("unison-mono-glide", [] (Patch& p) {
             p.unison = true;
+            p.legato = true;   // (state version 24: the old MONO / UNISON always slid)
             p.glideSeconds = 0.08;
             p.resonance = 0.8;
         });

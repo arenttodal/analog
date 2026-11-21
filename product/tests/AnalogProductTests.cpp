@@ -12131,3 +12131,64 @@ TEST_CASE ("analog: the wheels' popovers screenshots (ANALOG_SCREENSHOT_DIR)", "
     shoot ("wheels-1448-mod-wheel-assigned");
     ui.closePopup();
 }
+
+TEST_CASE ("analog: state version 24 - the global UNISON becomes each card's (MONO, LEGATO); an old MONO session slides", "[analog][migration][unison]")
+{
+    auto plain = [] (ShellProcessor& q, const juce::String& id) {
+        auto* param = q.parameters.getParameter (id);
+        REQUIRE (param != nullptr);
+        return param->convertFrom0to1 (param->getValue());
+    };
+    // A version-23 session: its state as written then.
+    auto asVersion23 = [] (const std::function<void (ShellProcessor&)>& setUp) {
+        juce::MemoryBlock session;
+        {
+            ShellProcessor old;
+            setUp (old);
+            old.getStateInformation (session);
+        }
+        auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), static_cast<int> (session.getSize()));
+        REQUIRE (xml != nullptr);
+        xml->setAttribute ("productVersion", 23);
+        juce::MemoryBlock v23;
+        juce::AudioProcessor::copyXmlToBinary (*xml, v23);
+        return v23;
+    };
+    {
+        const auto v23 = asVersion23 ([] (ShellProcessor& q) {
+            setValue (q, params::unison, 1.0f);
+            setValue (q, params::polyphony, 2.0f);   // (choice index 2: four voices)
+            setValue (q, params::unisonDetune, 45.0f);
+            setValue (q, params::spread, 60.0f);
+        });
+        ShellProcessor p;
+        p.setStateInformation (v23.getData(), static_cast<int> (v23.getSize()));
+        CHECK (plain (p, params::unison) == 0.0f);
+        CHECK (plain (p, "voiceMode") == 1.0f);
+        CHECK (plain (p, params::legato) == 1.0f);
+        for (int card = 0; card < 3; ++card)
+        {
+            INFO ("card " << card);
+            CHECK (plain (p, params::unisonId (card, "voices")) == 3.0f);   // (four copies)
+            const double detune = 0.01 * plain (p, params::unisonId (card, "detune"));
+            CHECK (andor::analog::unisonmath::detuneSemitones (detune, plain (p, params::unisonId (card, "range"))) == Approx (0.25 * 0.45).epsilon (0.01));
+            CHECK (plain (p, params::unisonId (card, "width")) == Approx (60.0f));
+        }
+        CHECK (p.getLatencySamples() >= 0);   // (it plays: the engine reads the migrated state)
+    }
+    {
+        const auto v23 = asVersion23 ([] (ShellProcessor& q) { setValue (q, "voiceMode", 1.0f); });
+        ShellProcessor p;
+        p.setStateInformation (v23.getData(), static_cast<int> (v23.getSize()));
+        CHECK (plain (p, "voiceMode") == 1.0f);
+        CHECK (plain (p, params::legato) == 1.0f);   // (it always slid)
+        CHECK (plain (p, params::unisonId (0, "voices")) == 0.0f);
+    }
+    {
+        const auto v23 = asVersion23 ([] (ShellProcessor&) {});
+        ShellProcessor p;
+        p.setStateInformation (v23.getData(), static_cast<int> (v23.getSize()));
+        CHECK (plain (p, params::legato) == 0.0f);   // (POLY: nothing changes)
+        CHECK (plain (p, "voiceMode") == 0.0f);
+    }
+}

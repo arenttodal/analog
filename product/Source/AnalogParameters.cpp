@@ -123,6 +123,7 @@ namespace
         iVibratoSourceA, iVibratoSourceB, iVibratoSourceC, iVibratoSourceSub,
         // State version 24: UNISON, six fields a card (unisonNames), A, B, C.
         iUnisonCards, iUnisonCardsLast = iUnisonCards + 3 * unisonFields - 1,
+        iLegato,
         count
     };
 
@@ -274,6 +275,7 @@ namespace
             for (int card = 0; card < 3; ++card)
                 for (const char* name : unisonNames)
                     l.add (unisonId (card, name));
+            l.add (legato);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -1136,6 +1138,9 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
                                                               static_cast<float> (u.rangeSemitones),
                                                               Attributes().withLabel ("st").withStringFromValueFunction ([] (float v, int) { return juce::String (v, 2) + " st"; })));
         }
+        // MONO's LEGATO: off by default (every key starts afresh); older MONO sessions are
+        // migrated to on (they always slid).
+        layout.add (osp::plugin::parameters::make<Bool> (v40 (legato), "Legato", false));
     }
 }
 
@@ -1318,8 +1323,11 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.noiseLevel = 0.01 * v (iNoise);
     p.sync = on (iSync);
     p.polyphony = polyphonyFromChoice (index (iPolyphony, polyphonyChoiceCount));
-    p.unison = on (iUnison);
+    // (The global UNISON is retired, unread: each card's UNISON took its place. A session from
+    // before state version 24 is migrated; its parameters stay in the registry for hosts.)
+    p.unison = false;
     p.unisonDetune = 0.01 * v (iUnisonDetune);
+    p.legato = on (iLegato);
     p.stereoSpread = 0.01 * v (iSpread);
     p.resonance = 0.01 * v (iResonance);
     p.keyTrack = 0.01 * v (iKeyTrack);
@@ -2001,6 +2009,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
         put (base + 4, static_cast<int> (u.spread));
         put (base + 5, u.rangeSemitones);
     }
+    put (iLegato, p.legato ? 1.0 : 0.0);
     {
         const auto& r = p.rhythm;
         put (iRhythmEnabled, r.enabled ? 1.0 : 0.0);

@@ -132,6 +132,22 @@ namespace unisonmath
         }
         return l;
     }
+
+    /** The retired global UNISON (state version 23 and before: `voices` whole voices stacked on
+        one note, the outer ones +-25 cents x its DETUNE, spread by STEREO SPREAD, all at one
+        level) as one card's UNISON: the same count, the outer copies at the same detune, every
+        copy at one level, as wide. (Its sessions also become MONO with LEGATO: they slid.) */
+    inline UnisonSettings fromLegacy (int voices, double legacyDetune, double stereoSpread) noexcept
+    {
+        UnisonSettings u;
+        u.voices = std::clamp (voices, 1, maxVoices);
+        u.rangeSemitones = 1.0;
+        u.detune = std::pow (0.25 * std::clamp (legacyDetune, 0.0, 1.0), 0.4);   // (detune^2.5 x 1 st = the old outer detune)
+        u.blend = std::sqrt (0.76);   // (sideWeight 1: the outer copies as loud as the centre)
+        u.width = std::clamp (stereoSpread, 0.0, 1.0);
+        u.spread = UnisonSpread::linear;
+        return u;
+    }
 }
 
 } // namespace andor::analog

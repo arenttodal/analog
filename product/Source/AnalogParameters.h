@@ -48,6 +48,10 @@ namespace andor::analog::params
     inline const juce::String polyphony = "analog.polyphony";
     inline const juce::String unison = "analog.unison";
     inline const juce::String unisonDetune = "analog.unison.detune";
+    /** State version 24: MONO's LEGATO (off: every key starts afresh; on: a held key slides). The
+        global UNISON above is retired (unread): its sessions become each card's UNISON, MONO and
+        LEGATO (Product.cpp's migration). */
+    inline const juce::String legato = "analog.legato";
     inline const juce::String spread = "analog.spread";
     inline const juce::String resonance = "analog.resonance";
     inline const juce::String keyTrack = "analog.keyTrack";

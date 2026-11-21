@@ -412,3 +412,58 @@ TEST_CASE ("UNISON: CPU of eight voices, off / seven copies mono / seven copies 
         WARN ("UNISON " << c.name << ", 8 voices: " << 100.0 * seconds / 2.0 << " % of one core");
     }
 }
+
+TEST_CASE ("MONO LEGATO: off - every key fades 3 ms and starts its envelope from zero; on - a held key slides", "[unison][voices][unit]")
+{
+    Patch p = measurementPatch();
+    p.voiceMode = VoiceMode::mono;
+    p.ampAttack = 0.5;
+    const std::vector<Event> notes { on (0, 48, 100), on (36000, 55, 100) };   // (the second at 0.75 s, the first held)
+    p.legato = false;
+    const auto fresh = render (*makeSynth (p), 1.2, notes);
+    p.legato = true;
+    const auto slid = render (*makeSynth (p), 1.2, notes);
+    REQUIRE (fresh.finite());
+    // Just after the second key (10-40 ms): LEGATO off has begun its new attack from silence;
+    // LEGATO on carries on at the level the first reached.
+    const double before = slid.rms (0.70, 0.74);
+    INFO ("before " << before << " legato " << slid.rms (0.76, 0.79) << " fresh " << fresh.rms (0.76, 0.79));
+    CHECK (slid.rms (0.76, 0.79) > 0.8 * before);
+    CHECK (fresh.rms (0.76, 0.79) < 0.25 * before);
+    CHECK (fresh.rms (1.1, 1.2) > 0.8 * slid.rms (1.1, 1.2));   // (and it rises again, the new key)
+    // Before the second key the two are the same render.
+    float diff = 0.0f;
+    for (std::size_t i = 0; i < 35000; ++i)
+        diff = std::max (diff, std::abs (fresh.left[i] - slid.left[i]));
+    CHECK (diff == 0.0f);
+}
+
+TEST_CASE ("MONO LEGATO off: a key let go during the 3 ms fade never leaves a note hanging; back to a held key starts afresh", "[unison][voices][unit]")
+{
+    Patch p = measurementPatch();
+    p.voiceMode = VoiceMode::mono;
+    p.ampRelease = 0.05;
+    // The second key let go 1 ms after it was pressed (inside its fade), the first already up.
+    const auto s = render (*makeSynth (p), 1.0, { on (0, 48, 100), on (24000, 55, 100), off (24010, 48), off (24048, 55) });
+    REQUIRE (s.finite());
+    CHECK (s.rms (0.8, 1.0) < 1.0e-5);
+    // Trill: the second key up while the first is held - back to the first with a new attack.
+    p.ampAttack = 0.3;
+    const auto t = render (*makeSynth (p), 1.5, { on (0, 48, 100), on (24000, 55, 100), off (36000, 55) });
+    const double held = t.rms (0.70, 0.74);
+    CHECK (t.rms (0.76, 0.78) < 0.3 * held);   // (the first key again, from silence)
+    CHECK (t.rms (1.3, 1.5) > 0.5 * held);
+}
+
+TEST_CASE ("UNISON: the retired global UNISON maps to each card's with the same count, outer detune and an even level", "[unison][unit]")
+{
+    for (const double old : { 0.0, 0.3, 0.45, 1.0 })
+    {
+        const auto u = unisonmath::fromLegacy (8, old, 0.75);
+        CHECK (u.voices == 8);
+        CHECK (unisonmath::detuneSemitones (u.detune, u.rangeSemitones) == Approx (0.25 * old).margin (1.0e-9));
+        CHECK (unisonmath::sideWeight (u.blend) == Approx (1.0).margin (1.0e-9));
+        CHECK (u.width == Approx (0.75));
+    }
+    CHECK (unisonmath::fromLegacy (16, 0.3, 0.0).voices == 8);   // (eight copies at most)
+}

@@ -34,7 +34,7 @@ namespace
 {
     /** Bumped whenever the factory sounds change: an installed set from another version is
         written again (the musician's own presets are never touched). */
-    constexpr const char* factoryVersion = "analog-factory-9";   // (8: MORPH on, the wheel unlinked; 9: INIT with MORPH off)
+    constexpr const char* factoryVersion = "analog-factory-10";   // (8: MORPH on, the wheel unlinked; 9: INIT with MORPH off; 10: UNISON per card, REIMAGINED off)
 
     /** Version 2 moved settings (ANDOR OSP's DRIVE, MOVEMENT, REIMAGINED, GRANULAR and LFO 1
         joined): a version-1 session or preset is brought up to date so it sounds as it did. */
@@ -155,6 +155,35 @@ namespace
         for (const char* name : { "mode", "kaleidoscope.focus", "kaleidoscope.spread", "tapeFrame.age", "tapeFrame.stability", "tapeFrame.frame",
                                   "toybox.motion", "toybox.digital", "toybox.play", "mirage.clock", "mirage.filter", "mirage.tone" })
             host.setParameterValue (Host::reimaginedModeParameterId (2, name), host.parameterValue (Host::reimaginedModeParameterId (0, name)));
+    }
+
+    /** Version 24: the global UNISON (whole voices stacked on one note, always mono and legato)
+        is retired for each card's UNISON inside every voice, and MONO has LEGATO (off when new).
+        A session or preset from before: its UNISON becomes each card's (the same count, detune
+        and spread), MONO with LEGATO; one in MONO keeps sliding (LEGATO on). */
+    void migrateFromVersion23 (osp::plugin::InstrumentHost& host)
+    {
+        namespace p = andor::analog::params;
+        const bool mono = juce::roundToInt (host.parameterValue ("voiceMode")) == 1;
+        if (host.parameterValue (p::unison) >= 0.5f)
+        {
+            const int voices = andor::analog::polyphonyFromChoice (juce::roundToInt (host.parameterValue (p::polyphony)));
+            const auto u = andor::analog::unisonmath::fromLegacy (voices, 0.01 * host.parameterValue (p::unisonDetune), 0.01 * host.parameterValue (p::spread));
+            for (int card = 0; card < 3; ++card)
+            {
+                host.setParameterValue (p::unisonId (card, "voices"), static_cast<float> (u.voices - 1));
+                host.setParameterValue (p::unisonId (card, "detune"), static_cast<float> (100.0 * u.detune));
+                host.setParameterValue (p::unisonId (card, "blend"), static_cast<float> (100.0 * u.blend));
+                host.setParameterValue (p::unisonId (card, "width"), static_cast<float> (100.0 * u.width));
+                host.setParameterValue (p::unisonId (card, "mode"), static_cast<float> (static_cast<int> (u.spread)));
+                host.setParameterValue (p::unisonId (card, "range"), static_cast<float> (u.rangeSemitones));
+            }
+            host.setParameterValue (p::unison, 0.0f);
+            host.setParameterValue ("voiceMode", 1.0f);
+            host.setParameterValue (p::legato, 1.0f);
+        }
+        else if (mono)
+            host.setParameterValue (p::legato, 1.0f);
     }
 
     void migrateFromVersion7 (osp::plugin::InstrumentHost& host)
@@ -550,7 +579,7 @@ const ProductInfo& productInfo()
         // INPUT never: a loop and live audio are not arpeggiated).
         p.arpFollower = andor::shell::ProductInfo::ArpFollower { andor::analog::params::auxArp, andor::analog::params::auxArpFollow,
                                                                  andor::analog::params::auxEnabled, andor::analog::params::auxMode, { 1, 2 } };
-        p.stateVersion = 24;   // (24: each card's UNISON appended, one voice (off) - nothing to migrate; 23: D / AUX appended, off, and its engine child (its recording, its hosted instrument): absent = none - nothing to migrate; 22: EXPERIMENT - card C's EXTERNAL type appended (indices kept) and its ExternalInstrument engine child: absent = none - nothing to migrate; 21: RHYTHMIC MORPH appended, off; C RHYTHM a 13th route source - nothing to migrate; 20: SATELLITE appended, every card off - nothing to migrate; 19: the USER macros appended, no assignment - nothing to migrate; 18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
+        p.stateVersion = 24;   // (24: each card's UNISON and MONO's LEGATO appended; the global UNISON retired - migrated to each card's UNISON + MONO + LEGATO, a MONO session to LEGATO on; 23: D / AUX appended, off, and its engine child (its recording, its hosted instrument): absent = none - nothing to migrate; 22: EXPERIMENT - card C's EXTERNAL type appended (indices kept) and its ExternalInstrument engine child: absent = none - nothing to migrate; 21: RHYTHMIC MORPH appended, off; C RHYTHM a 13th route source - nothing to migrate; 20: SATELLITE appended, every card off - nothing to migrate; 19: the USER macros appended, no assignment - nothing to migrate; 18: SHAPER DNA appended, OFF - nothing to migrate; 12: the FX route, an engine child: absent = CLASSIC; 13: RETRO's parameters appended - nothing to migrate; 14: card B's own REIMAGINED; 15: SUB appended - nothing to migrate; 16: card C's second layer appended, its source an engine child - nothing to migrate; 17: the cards' sends appended, MAIN + SEND's route schema 2 - nothing to migrate)
         p.migrateState = [] (osp::plugin::InstrumentHost& host, int from) {
             if (from < 2)
                 migrateFromVersion1 (host);
@@ -586,6 +615,8 @@ const ProductInfo& productInfo()
             }
             if (from < 14)
                 migrateFromVersion13 (host);
+            if (from < 24)
+                migrateFromVersion23 (host);
         };
         return p;
     }();
