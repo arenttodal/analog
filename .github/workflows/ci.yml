@@ -272,6 +272,8 @@ jobs:
               echo "$f: DID NOT COMPILE (exit $?) after $(( $(date +%s) - start )) s"; tail -25 cl.log
               taskkill //F //IM cl.exe > /dev/null 2>&1 || true
               failed="$failed $f"
+              echo "  which TEST_CASE in $f MSVC cannot compile (each alone, 4 minutes at most):"
+              python tools/ci/compile_each_case.py "$msbuild" "$proj" "$(cygpath -w "$PWD/$f")"
             fi
           done
           if [ -n "$failed" ]; then echo "Did not compile:$failed"; exit 1; fi

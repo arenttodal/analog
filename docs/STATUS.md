@@ -14,12 +14,19 @@
 > - **Windows build (MSVC):** OSP's shell included `"FxRouting.h"` by name and MSVC found ANDOR
 >   ANALOG's own `product/Source/FxRouting.h` first (it looks beside the including files before
 >   the include paths): `RoutingKey` undeclared. OSP 5cc6fbed includes its own by path.
-> - **Windows build stalled:** MSVC stalls "Generating Code" for a batch of `analog_dsp_tests`
->   files (3.7 hours, then 90 minutes at the new job limit; the same with `/Od`, so not the
->   optimiser). The product, its tests and the installer build first now and are uploaded
->   before the engine's tests; those are compiled one file at a time (MSBuild `SelectedFiles`,
->   8 minutes each at most), so the file MSVC stalls on is named in the log, then linked and
->   run. The Windows job stops after 90 minutes rather than six hours.
+> - **Windows build stalled:** MSVC cannot compile `tests/SatelliteTests.cpp` (it stalls
+>   generating code; every other engine test file compiles in 2 to 10 s, found by compiling them
+>   one at a time). The Windows job now builds, tests and uploads the product and its installer
+>   first, then compiles the engine's test files one at a time (8 minutes each at most); a file
+>   that does not compile is split by TEST_CASE (`tools/ci/compile_each_case.py`) to name the
+>   case MSVC stalls on. Open: that case's fix, then the engine suite on Windows. The job stops
+>   after 90 minutes rather than six hours.
+> - **Two product tests on Windows (test-only):** the GLOBAL MORPH probe kept a 126 KB
+>   `ShellProcessor` on the stack in each of its sections and overran Windows' 1 MB stack (a host
+>   always makes the processor on the heap); the test's processors are now on the heap (it
+>   passes here under a 256 KB stack, where it failed before). The effective-value picture test
+>   differed by 3 anti-aliased pixels of ~400,000 on MSVC (80 % modulated is 80 within 0.01):
+>   it allows 8.
 > - **macOS:** the two new click tests (ANALOG's and OSP's) could not pump the message loop
 >   there (the browser opens a message after the click): ANALOG's is skipped on macOS, OSP's
 >   returns early as its other message-loop tests do (OSP 31aed041). Linux and Windows run them;

@@ -153,7 +153,9 @@ TEST_CASE ("effective values: MOVEMENT SHAPER, lanes A and B - modulated to 80 %
             REQUIRE (hand80.getWidth() > 10);
             INFO ("pixels differing: hand 80 vs hand 20 " << pixelsDiffering (hand80, hand20) << ", hand 80 vs modulated 80 " << pixelsDiffering (hand80, mod80));
             CHECK (pixelsDiffering (hand80, hand20) > 200);
-            CHECK (pixelsDiffering (hand80, mod80) == 0);
+            // (A handful of edge pixels may differ: the modulated 80 is 80 within 0.01, and on MSVC
+            // that moved the anti-aliasing of 3 pixels in a picture of about 400,000; GCC and Clang 0.)
+            CHECK (pixelsDiffering (hand80, mod80) <= 8);
         }
     }
 }

@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <functional>
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace
@@ -104,6 +105,10 @@ namespace
         }
         return x;
     }
+
+    // Each processor is made on the heap (a host does the same): one is about 126 KB, and the
+    // probe's many sections each keep one, which overran Windows' 1 MB stack (MSVC reserves them
+    // all in the test's frame).
 
     /** What a run measured: each tap's highest peak, how many blocks D spent in each state,
         how many the stage ran, how many the old display (activity < 0.05) would call silent, and
@@ -265,14 +270,16 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
     // The synth alone (D off): the reference each D render is compared against.
     Measured synthOnly;
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         stillEffects (p);
         synthOnly = measure (p, {});
     }
 
     SECTION ("RHYTHM, a loaded loop, GATE KEYS (the default): keys held - D plays and reaches the stage")
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, 50.0f);
         const auto m = measure (p, {});
@@ -288,7 +295,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
     }
     SECTION ("RHYTHM, keys held, MORPH 100 %: the loop itself, its silences included - never the synth between the hits")
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, 100.0f);
         const auto m = measure (p, {});
@@ -299,7 +307,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
     }
     SECTION ("RHYTHM, a loaded loop, GATE KEYS, no key: D waits for MIDI (measured silent, said why)")
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, 50.0f);
         Run run;
@@ -314,7 +323,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
     SECTION ("RHYTHM FREE on a stopped host transport: waiting for the transport; playing: heard")
     {
         Transport transport;
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, 50.0f);
         stillEffects (p);
@@ -334,7 +344,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
     }
     SECTION ("RHYTHM at MORPH 0 %: D plays into the stage's place but is not heard; never 'silent'")
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, 0.0f);
         stillEffects (p);
@@ -347,7 +358,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
     SECTION ("NOISE (keyed and FREE), KONTAKT (the test instrument), LIVE INPUT: each reaches the stage")
     {
         {
-            ShellProcessor p;
+            auto pOwned = std::make_unique<ShellProcessor>();
+            auto& p = *pOwned;
             morphToD (p, 1, 50.0f);
             const auto m = measure (p, {});
             keep ("noise keyed, keys held", m);
@@ -355,7 +367,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
             CHECK (m.in (State::silent) == 0);
         }
         {
-            ShellProcessor p;
+            auto pOwned = std::make_unique<ShellProcessor>();
+            auto& p = *pOwned;
             morphToD (p, 1, 50.0f);
             set (p, params::auxNoiseGate, 1.0f);
             Run run;
@@ -367,7 +380,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
         }
         {
             SurrogateOverride env;
-            ShellProcessor p;
+            auto pOwned = std::make_unique<ShellProcessor>();
+            auto& p = *pOwned;
             morphToD (p, 2, 50.0f);
             REQUIRE (engineOf (p).auxInstrument().loadKontakt());
             const auto m = measure (p, {});
@@ -376,7 +390,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
             CHECK (changeDb (synthOnly.out, m.out, 0, static_cast<int> (2.5 * rate), stageLag) > -20.0);
         }
         {
-            ShellProcessor p;
+            auto pOwned = std::make_unique<ShellProcessor>();
+            auto& p = *pOwned;
             morphToD (p, 3, 50.0f);
             Run run;
             run.sidechain = &input;
@@ -385,7 +400,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
             CHECK (m.tap (Tap::source) > 0.1f);
             CHECK (m.tap (Tap::morphIn) > 0.05f);
             CHECK (m.in (State::silent) == 0);
-            ShellProcessor q;
+            auto qOwned = std::make_unique<ShellProcessor>();
+            auto& q = *qOwned;
             morphToD (q, 3, 50.0f);
             const auto none = measure (q, {});
             keep ("live input, nothing on the sidechain", none);
@@ -395,7 +411,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 probe: D's path measured in every source mod
     }
     SECTION ("Power, MUTE, SOLO: said as such")
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, 50.0f);
         set (p, params::auxMute, 1.0f);
@@ -431,7 +448,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1: MORPH TO D's endpoints with real audio in e
         SurrogateOverride env;
         // `position` < 0: MORPH off. `solo`: D soloed (D itself, the reference for 100 %).
         auto renderWith = [&] (bool dOn, float position, bool solo) {
-            ShellProcessor p;
+            auto pOwned = std::make_unique<ShellProcessor>();
+            auto& p = *pOwned;
             stillEffects (p);
             if (mode.mode == 0)
                 engineOf (p).setAuxLoopForTest (loop);
@@ -494,11 +512,13 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 renders: a pad x D RHYTHM (ticking loop, GAT
     run.holdFrom = 0.05;
     run.holdTo = 5.0;
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         write ("gm2-g1-1-synth", measure (p, run).out);
     }
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, 0.0f);
         set (p, params::morphEnabled, 0.0f);
@@ -507,7 +527,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 gate 1 renders: a pad x D RHYTHM (ticking loop, GAT
     }
     for (const float position : { 0.0f, 50.0f, 100.0f })
     {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 0, position);
         // The telemetry, block by block: each tap's peak (dBFS) and D's state.
@@ -673,7 +694,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 listening examples A-F: dry S, dry D, crossfade, IM
         { "F-weave-complex", "a wide chord x the bowed stand-in (two complex sources)", 3, &celloIn, { 36, 48, 55, 59, 64, 71 } },
     };
     auto render = [&] (const Example& e, const std::function<void (ShellProcessor&)>& setup) {
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         set (p, params::auxEnabled, 1.0f);
         set (p, params::auxMode, static_cast<float> (e.mode));
@@ -755,7 +777,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 listening examples A-F: dry S, dry D, crossfade, IM
     for (int method = 0; method < 3; ++method)
     {
         static const char* names[] { "imprint", "fuse", "weave" };
-        ShellProcessor p;
+        auto pOwned = std::make_unique<ShellProcessor>();
+        auto& p = *pOwned;
         engineOf (p).setAuxLoopForTest (loop);
         morphToD (p, 3, 0.0f);
         set (p, params::morphGlobalMethod, static_cast<float> (method));
@@ -797,7 +820,8 @@ TEST_CASE ("GLOBAL MORPH 2.0 CPU and latency: the whole instrument, 1 / 4 / 8 / 
             int latency[2] {};
             for (int toD = 0; toD < 2; ++toD)
             {
-                ShellProcessor p;
+                auto pOwned = std::make_unique<ShellProcessor>();
+                auto& p = *pOwned;
                 set (p, params::auxEnabled, 1.0f);
                 set (p, params::auxMode, 1.0f);
                 set (p, params::auxNoiseGate, 1.0f);
