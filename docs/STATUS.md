@@ -14,6 +14,11 @@
 > - **Windows build (MSVC):** OSP's shell included `"FxRouting.h"` by name and MSVC found ANDOR
 >   ANALOG's own `product/Source/FxRouting.h` first (it looks beside the including files before
 >   the include paths): `RoutingKey` undeclared. OSP 5cc6fbed includes its own by path.
+> - **Windows build stalled:** MSVC's optimiser spent 3.7 hours "Generating Code" for a batch of
+>   `analog_dsp_tests` files (the product and plugin had built). That target's own files are now
+>   compiled unoptimised on MSVC (`/Od`; `analog_dsp`, which they call, stays optimised): the
+>   same suite at `-O0` here runs 203 s against 190 s, all 321 cases passing. The Windows job
+>   now stops after 90 minutes rather than six hours.
 > - **macOS:** the two new click tests (ANALOG's and OSP's) could not pump the message loop
 >   there (the browser opens a message after the click): ANALOG's is skipped on macOS, OSP's
 >   returns early as its other message-loop tests do (OSP 31aed041). Linux and Windows run them;

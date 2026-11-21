@@ -179,6 +179,8 @@ jobs:
     # branches build macOS alone.
     if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.windows)
     runs-on: windows-2022
+    # (A whole job takes about 25 minutes; a stalled compiler fails here, not after six hours.)
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
