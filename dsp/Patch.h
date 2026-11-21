@@ -327,6 +327,12 @@ struct Patch
             never also layered - so 0 % is the synth alone and 100 % D alone. Off: D layered as
             ever (the stage, if up, beside it). */
         bool morphExclusive = false;
+        /** D's EQ (state version 24, appended): ANDOR OSP's layer EQ (the cards' five bands) on
+            D's own stereo bus, after its source and before its FILTER. Off by default: D as before. */
+        osp::eq::Settings eq;
+        /** D's SEND in a MAIN + SEND route (0..1, as the cards' sends): D as it leaves its FILTER, at
+            its level, into SEND's chain. 0 by default; heard only in MAIN + SEND. */
+        double send = 0.0;
     };
     Aux aux;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12

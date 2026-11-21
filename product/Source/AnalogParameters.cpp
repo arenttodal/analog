@@ -125,6 +125,8 @@ namespace
         iUnisonCards, iUnisonCardsLast = iUnisonCards + 3 * unisonFields - 1,
         iLegato,
         iAmp2Enabled, iAmp2Attack,
+        // D's EQ and SEND (state version 24, appended).
+        iAuxEq, iAuxEqLast = iAuxEq + 18, iAuxSend,
         count
     };
 
@@ -279,6 +281,9 @@ namespace
             l.add (legato);
             l.add (amp2Enabled);
             l.add (amp2Attack);
+            for (const auto& name : osp::plugin::InstrumentHost::eqParameterNames())
+                l.add (auxEqId (name));
+            l.add (auxSend);
             return l;
         }();
         jassert (withCards.size() == count);
@@ -1155,6 +1160,11 @@ void addAuxTo (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
         juce::NormalisableRange<float> amp2Range (0.0f, 10000.0f, 0.1f);
         amp2Range.setSkewForCentre (300.0f);
         layout.add (osp::plugin::parameters::make<Float> (v40 (amp2Attack), "Amp 2 Attack", amp2Range, 1000.0f, Attributes().withLabel ("ms")));
+        // D's EQ (the cards' EQ, on D's bus) and its SEND (MAIN + SEND): neutral by default, so
+        // every session from before plays exactly as it did.
+        osp::plugin::InstrumentHost::addEqParameters (layout, 41, [] (const juce::String& name) { return auxEqId (name); }, "AUX EQ ");
+        layout.add (osp::plugin::parameters::make<Float> (juce::ParameterID { auxSend, 41 }, "Send D", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f,
+                                                          Attributes().withLabel ("%").withStringFromValueFunction (percentText)));
     }
 }
 
@@ -1344,6 +1354,8 @@ Patch Reader::readWith (const float* raw) const noexcept
     p.legato = on (iLegato);
     p.amp2Enabled = on (iAmp2Enabled);
     p.amp2Attack = 0.001 * v (iAmp2Attack);
+    p.aux.eq = cardEq (iAuxEq);
+    p.aux.send = 0.01 * v (iAuxSend);
     p.stereoSpread = 0.01 * v (iSpread);
     p.resonance = 0.01 * v (iResonance);
     p.keyTrack = 0.01 * v (iKeyTrack);
@@ -2028,6 +2040,7 @@ std::map<juce::String, float> valuesOf (const Patch& p)
     put (iLegato, p.legato ? 1.0 : 0.0);
     put (iAmp2Enabled, p.amp2Enabled ? 1.0 : 0.0);
     put (iAmp2Attack, 1000.0 * p.amp2Attack);
+    put (iAuxSend, 100.0 * p.aux.send);
     {
         const auto& r = p.rhythm;
         put (iRhythmEnabled, r.enabled ? 1.0 : 0.0);

@@ -942,6 +942,13 @@ private:
     float auxNoiseSample (int channel, float toneCoefficient) noexcept;
     rhythm::LoopPlayer auxLoop;
     std::vector<float> auxL, auxR, auxDryL, auxDryR, auxLevelBuf, auxTransientBuf, auxEnvBuf, auxDelayL, auxDelayR;
+    /** D's EQ (the cards' layer EQ, on D's stereo bus before its FILTER) and D's SEND in a MAIN +
+        SEND route: what D gives SEND this block (host rate, added to the cards' sends once they
+        are down at the host rate), its amount ramped across the block as the cards' are. */
+    osp::eq::Processor auxEq;
+    std::vector<float> auxSendL, auxSendR;
+    float auxSendFrom = 0.0f, auxSendTo = 0.0f;
+    bool auxSendTaps = false;   ///< this block: D adds to SEND
     // GLOBAL MORPH 2.0: MORPH TO D's stage and its buses (host rate).
     GlobalSpectralMorph stage;
     std::vector<float> stageL, stageR, stageKL, stageKR, stageDL, stageDR;

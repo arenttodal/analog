@@ -75,7 +75,8 @@ public:
     juce::Rectangle<int> continuationIn() const noexcept { return contIn; }
     juce::Rectangle<int> chainBounds() const { return chainArea(); }
     juce::Rectangle<int> mixerBounds() const noexcept { return mixerArea; }
-    juce::Slider* levelKnob (int card) const noexcept { return card >= 0 && card < 3 ? levels[static_cast<std::size_t> (card)].get() : nullptr; }
+    /** A source's knob: 0..2 the cards, 3 D (AUX). */
+    juce::Slider* levelKnob (int card) const noexcept { return card >= 0 && card < 4 ? levels[static_cast<std::size_t> (card)].get() : nullptr; }
     /** V5: a tile's mini knobs (tests): their parameter IDs, and the knob for one. */
     juce::StringArray tileKnobParameters (fx::InstanceId id) const;
     juce::Slider* tileKnob (fx::InstanceId id, const juce::String& parameterId) const;
@@ -165,8 +166,8 @@ private:
     std::unique_ptr<Library> library;
     std::unique_ptr<juce::Component> quick;
     std::optional<fx::InstanceId> quickId;
-    std::array<std::unique_ptr<juce::Slider>, 3> levels;
-    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 3> levelAttachments;
+    std::array<std::unique_ptr<juce::Slider>, 4> levels;   ///< A, B, C and D (AUX)
+    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 4> levelAttachments;
     std::vector<std::unique_ptr<TileKnob>> tileKnobs;
 
     juce::Rectangle<int> headerArea, mixerArea, zoneArea, outputBox, wireFrom;

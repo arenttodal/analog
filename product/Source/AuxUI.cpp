@@ -6,6 +6,7 @@
 #include "Binding.h"
 #include "Design.h"
 #include "DropOwner.h"
+#include "EqEditor.h"
 #include "EngineCard.h"
 #include "FxIdentity.h"
 #include "OspLookAndFeel.h"
@@ -394,13 +395,16 @@ namespace
     class RackKey final : public juce::Button, public skin::KeyFace
     {
     public:
-        RackKey() : juce::Button ("RACK")
+        explicit RackKey (juce::String w = "RACK") : juce::Button (w), word (w)
         {
             setWantsKeyboardFocus (true);
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
-            setTitle ("D AUX rack");
-            setTooltip ("D's rack: every setting of its mode (Escape or its X closes it)");
+            setTitle (word == "RACK" ? juce::String ("D AUX rack") : "D " + word);
+            setTooltip (word == "RACK" ? juce::String ("D's rack: every setting of its mode (Escape or its X closes it)") : juce::String());
         }
+        const juce::String word;
+        /** Lit (the word bright) while what it opens is on (EQ: D's EQ switched on). */
+        bool lit = false;
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
             using namespace design;
@@ -409,8 +413,8 @@ namespace
             if (! skin::drawnBySurface())
                 draw::button (g, r, 7.0f, open || down, over, colour::accent);
             g.setFont (type::button (12.5f));
-            g.setColour (colour::text.withAlpha (open ? 0.92f : 0.62f));
-            g.drawText ("RACK", r, juce::Justification::centred, false);
+            g.setColour (lit && ! open ? aux::colour().darker (0.2f) : colour::text.withAlpha (open ? 0.92f : 0.62f));
+            g.drawText (word, r, juce::Justification::centred, false);
             if (hasKeyboardFocus (false))
             {
                 g.setColour (colour::text.withAlpha (0.35f));
@@ -559,6 +563,42 @@ namespace
     };
 
     //==========================================================================
+    /** D's EQ (opened from the strip's EQ key, above the strip): the cards' EQ editor on D's
+        own nineteen parameters (analog.aux.eq.*) - no DAMPEN (D has no keys of its own to dampen),
+        no modulation curve. */
+    class AuxEqPanel final : public osp::plugin::MiniPanel
+    {
+    public:
+        explicit AuxEqPanel (InstrumentHost& h) : MiniPanel ({}, {})
+        {
+            osp::plugin::EqTarget t;
+            t.layer = 3;   // (no card spectrum: D's own is not tapped)
+            t.idOf = [] (const juce::String& name) { return params::auxEqId (name); };
+            t.name = "D";
+            t.accent = aux::colour();
+            t.dampen = false;
+            t.modulation = false;
+            editor = std::make_unique<osp::plugin::EqEditor> (h, std::move (t));
+            editor->onClose = [this] {
+                if (onClose != nullptr)
+                    onClose();
+            };
+            addAndMakeVisible (*editor);
+        }
+        juce::Point<int> cardSize() const override { return { 640, 300 }; }
+        bool compact() const override { return true; }
+        void refreshContent() override { editor->refresh(); }
+        void settleNow() override { editor->refresh(); }
+        osp::plugin::EqEditor& eq() noexcept { return *editor; }
+
+    protected:
+        // The whole card is the editor (its own title row: EQ D, its switch, its X).
+        void layoutContent (juce::Rectangle<int>) override { editor->setBounds (card().reduced (6)); }
+
+    private:
+        std::unique_ptr<osp::plugin::EqEditor> editor;
+    };
+
     class AuxStrip final : public juce::Component, public juce::SettableTooltipClient, public osp::plugin::DropOwner, private juce::Timer
     {
     public:
@@ -603,6 +643,12 @@ namespace
             rackKey = std::make_unique<RackKey>();
             rackKey->onClick = [this] { setAuxRackOpen (*this, ! auxRackOpen (*this)); };
             addAndMakeVisible (*rackKey);
+            // D's EQ (the cards' EQ, on D's bus before its FILTER): opens above the strip.
+            eqKey = std::make_unique<RackKey> ("EQ");
+            eqKey->setTooltip ("D's EQ: the cards' five bands on D, before its FILTER");
+            binding::tag (*eqKey, params::auxEqId ("*"));
+            eqKey->onClick = [this] { openEq(); };
+            addAndMakeVisible (*eqKey);
             menu = std::make_unique<MenuDots>();
             menu->setTooltip ("D's menu: hide the strip, its rack, reset");
             menu->onClick = [this] { showMenu(); };
@@ -642,6 +688,7 @@ namespace
             if (name == "mode") return modeSelector.get();
             if (name == "display") return display.get();
             if (name == "rack") return rackKey.get();
+            if (name == "eq") return eqKey.get();
             if (name == "menu") return menu.get();
             if (name == "LEVEL") return level.get();
             if (name == "arp") return arpKey.get();
@@ -745,13 +792,14 @@ namespace
             // caption, a double cell); NOISE's two keep the same cells, from the left.
             menu->setBounds (cardC.getRight() - 51, h / 2 - 18, 30, 36);
             rackKey->setBounds (menu->getX() - 8 - 60, h / 2 - 16, 60, 33);
+            eqKey->setBounds (rackKey->getX() - 6 - 44, h / 2 - 16, 44, 33);
             // D ARP's two (KONTAKT, NOISE): right of the knobs, just before RACK - a caption over
             // each, as the knobs' captions.
             {
                 // [ARP]  FOLLOW over [A][B][C]: the keys on RACK's centre line, FOLLOW's caption
                 // above its three.
                 constexpr int laneSize = 25, laneGap = 3;
-                int x = rackKey->getX() - 14 - (3 * laneSize + 2 * laneGap);
+                int x = eqKey->getX() - 14 - (3 * laneSize + 2 * laneGap);
                 const int laneTop = h / 2 - 16 + 33 - laneSize;   // (bottoms aligned with RACK's)
                 followCaption = { x, laneTop - 15, 3 * laneSize + 2 * laneGap, 13 };
                 for (auto& key : laneKeys)
@@ -761,7 +809,7 @@ namespace
                 }
                 arpKey->setBounds (followCaption.getX() - 10 - 50, h / 2 - 16, 50, 33);
             }
-            const int knobLeft = wellC.getX(), knobRight = (arpShown() ? arpKey->getX() : rackKey->getX()) - 10;
+            const int knobLeft = wellC.getX(), knobRight = (arpShown() ? arpKey->getX() : eqKey->getX()) - 10;
             auto weight = [] (const juce::String& caption) { return caption.length() > 6 ? 2.0 : 1.0; };
             const double unit = (knobRight - knobLeft) / (arpShown() ? 2.0 : 5.0);   // (RATE PITCH OCT MOD-AMOUNT: 1 + 1 + 1 + 2; NOISE beside ARP: COLOR TONE)
             double x = knobLeft;
@@ -917,8 +965,32 @@ namespace
 
         void showMenu() { createMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menu.get())); }
 
+        /** D's EQ panel above the strip (the key again closes it). */
+        void openEq()
+        {
+            auto* owner = findParentComponentOfClass<osp::plugin::AnchoredPopoverHost>();
+            if (owner == nullptr)
+                return;
+            if (owner->anchoredPopoverOpenFrom (*eqKey))
+                owner->closeAnchoredPopover();
+            else
+                owner->openAnchoredPopover (std::make_unique<AuxEqPanel> (host), *eqKey);
+        }
+
         void timerCallback() override
         {
+            {
+                // The EQ key: pressed while its panel is open, its word lit while D's EQ is on.
+                auto* owner = findParentComponentOfClass<osp::plugin::AnchoredPopoverHost>();
+                const bool open = owner != nullptr && owner->anchoredPopoverOpenFrom (*eqKey);
+                const bool on = host.parameterValue (params::auxEqId ("enabled")) >= 0.5f;
+                if (open != eqKey->getToggleState() || on != eqKey->lit)
+                {
+                    eqKey->setToggleState (open, juce::dontSendNotification);
+                    eqKey->lit = on;
+                    eqKey->repaint();
+                }
+            }
             if (modeOf (host) != builtMode)
                 buildKnobs();   // (only the mode's knobs: every other part stays where it is)
             display->setTooltip (builtMode == 0 ? "Click to load a loop (WAV, AIFF or FLAC), or drop one here: it plays on the host's grid"
@@ -968,7 +1040,7 @@ namespace
         std::unique_ptr<ValueSelector> modeSelector;
         std::unique_ptr<MiniKnob> level;   ///< (permanent: not one of the mode's knobs)
         std::unique_ptr<AuxDisplay> display;
-        std::unique_ptr<RackKey> rackKey;
+        std::unique_ptr<RackKey> rackKey, eqKey;
         std::unique_ptr<MenuDots> menu;
         std::unique_ptr<ParamKey> arpKey;
         std::array<std::unique_ptr<ParamKey>, 3> laneKeys;

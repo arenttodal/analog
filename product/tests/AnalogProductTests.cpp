@@ -32,6 +32,8 @@
 #include "UserMacroBank.h"
 #include "UserMacroUI.h"
 #include "../Source/UnisonPanel.h"
+#include "../Source/AuxUI.h"
+#include "ShapingPopups.h"
 #include "../Source/SatellitePanel.h"   // ANALOG's own (OSP's shared/andor-ui has a header of the same name)
 #include "RhythmPanel.h"
 #include "model/ArpFactoryPatterns.h"
@@ -1085,6 +1087,28 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
             setValue (q, params::auxEnabled, 1.0f);
             setValue (q, params::auxMode, 1.0f);
         };
+    // D's EQ acts on D (NOISE playing), switched on with every band on (a band's switch with the
+    // rest on; the EQ's own switch with the bands on); D's SEND in a MAIN + SEND route with
+    // SPACE's room on SEND.
+    for (const auto& name : osp::plugin::InstrumentHost::eqParameterNames())
+        setups[params::auxEqId (name)] = [name] (ShellProcessor& q) {
+            setValue (q, params::auxEnabled, 1.0f);
+            setValue (q, params::auxMode, 1.0f);
+            setValue (q, params::auxNoiseGate, 1.0f);   // (FREE: sounding whatever the keys)
+            for (const auto& other : osp::plugin::InstrumentHost::eqParameterNames())
+                if (other == "enabled" || other.endsWith (".enabled"))
+                    setValue (q, params::auxEqId (other), 1.0f);
+            for (const char* band : { "lowShelf", "bell", "highShelf" })
+                setValue (q, params::auxEqId (juce::String (band) + ".gain"), 9.0f);
+            juce::ignoreUnused (name);
+        };
+    setups[params::auxSend] = [] (ShellProcessor& q) {
+        dynamic_cast<AnalogEngine&> (q.productEngine()).setFxRoute (andor::analog::fx::mainSendGraph (andor::analog::fx::classicGraph()));
+        setValue (q, params::auxEnabled, 1.0f);
+        setValue (q, params::auxMode, 1.0f);
+        setValue (q, params::auxNoiseGate, 1.0f);
+        setValue (q, "space", 80.0f);
+    };
     // The cards' sends act in a MAIN + SEND route (Cinematic V6 gate 4), card C heard (its
     // second layer) and SPACE's room on SEND.
     for (const auto* id : { &params::sendA, &params::sendB, &params::sendC })
@@ -12408,4 +12432,165 @@ TEST_CASE ("analog: AMP 2 on the AMP tab - '+ AMP 2', then 1 | 2 x; 2 edits AMP 
     click (panel.amp2ChipArea (3));
     CHECK (p.parameterValue (params::amp2Enabled) < 0.5f);
     CHECK_FALSE (amp.showingSecond());
+}
+
+TEST_CASE ("analog: D's EQ shapes D before its FILTER; off, D is untouched", "[analog][aux][eq]")
+{
+    auto noiseD = [] (ShellProcessor& q) {
+        setValue (q, params::auxEnabled, 1.0f);
+        setValue (q, params::auxMode, 1.0f);       // NOISE
+        setValue (q, params::auxNoiseGate, 1.0f);  // FREE
+        setValue (q, params::auxLevel, 0.0f);
+        setValue (q, params::auxFilterFollow, 0.0f);   // (D's FILTER out: the EQ alone)
+    };
+    ShellProcessor a;
+    noiseD (a);
+    const auto plain = renderShell (a, 0.6, {}, false);
+
+    // A band's settings with the EQ off change nothing at all.
+    ShellProcessor b;
+    noiseD (b);
+    setValue (b, params::auxEqId ("hp.enabled"), 1.0f);
+    setValue (b, params::auxEqId ("hp.frequency"), 2000.0f);
+    CHECK (differenceRms (plain, renderShell (b, 0.6, {}, false)) == 0.0);
+
+    // On: a steep 2 kHz high-pass takes most of D's NOISE (its TONE darkens it) away.
+    ShellProcessor c;
+    noiseD (c);
+    setValue (c, params::auxEqId ("enabled"), 1.0f);
+    setValue (c, params::auxEqId ("hp.enabled"), 1.0f);
+    setValue (c, params::auxEqId ("hp.frequency"), 2000.0f);
+    setValue (c, params::auxEqId ("hp.slope"), 1.0f);
+    const auto thin = renderShell (c, 0.6, {}, false);
+    const double before = rmsOf (plain), after = rmsOf (thin);
+    INFO ("D " << 20.0 * std::log10 (before) << " dB, through the 2 kHz high-pass " << 20.0 * std::log10 (after) << " dB");
+    CHECK (before > 1.0e-3);
+    CHECK (after < 0.5 * before);
+}
+
+TEST_CASE ("analog: D's SEND feeds SEND in a MAIN + SEND route and nothing in one path", "[analog][aux][send]")
+{
+    auto setUp = [] (ShellProcessor& q, bool mainSend, float send) {
+        if (mainSend)
+            dynamic_cast<AnalogEngine&> (q.productEngine()).setFxRoute (andor::analog::fx::mainSendGraph (andor::analog::fx::classicGraph()));
+        setValue (q, params::auxEnabled, 1.0f);
+        setValue (q, params::auxMode, 1.0f);
+        setValue (q, params::auxNoiseGate, 1.0f);
+        setValue (q, "space", 80.0f);
+        setValue (q, params::auxSend, send);
+    };
+    // One path (CLASSIC): D already runs through the chain; its SEND is not heard.
+    {
+        ShellProcessor a, b;
+        setUp (a, false, 0.0f);
+        setUp (b, false, 100.0f);
+        CHECK (differenceRms (renderShell (a, 0.6, {}, false), renderShell (b, 0.6, {}, false)) == 0.0);
+    }
+    // MAIN + SEND: D's SEND brings SPACE's room to D (SEND is strictly wet).
+    {
+        ShellProcessor a, b;
+        setUp (a, true, 0.0f);
+        setUp (b, true, 100.0f);
+        const auto dry = renderShell (a, 1.0, {}, false), wet = renderShell (b, 1.0, {}, false);
+        REQUIRE (rmsOf (dry) > 1.0e-3);
+        CHECK (differenceRms (dry, wet) > 1.0e-3);
+    }
+}
+
+TEST_CASE ("analog: the routing view's sources are A, B, C and D - D's LEVEL on MAIN, its SEND on SEND; D's strip opens its EQ", "[analog][aux][routing][ui]")
+{
+    ShellProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    auto* d = view->levelKnob (3);
+    REQUIRE (d != nullptr);
+    CHECK (d->getTitle() == "AUX D level");
+    CHECK (view->mixerBounds().contains (d->getBounds()));
+    CHECK (d->getWidth() >= 36);
+    // Four rows, top to bottom, none overlapping.
+    for (int i = 0; i < 3; ++i)
+        CHECK (view->levelKnob (i)->getBottom() <= view->levelKnob (i + 1)->getY());
+    // The knob is D's LEVEL.
+    d->setValue (d->getMinimum() + 0.3 * (d->getMaximum() - d->getMinimum()), juce::sendNotificationSync);
+    CHECK (std::abs (p.parameterValue (params::auxLevel) - static_cast<float> (d->getValue())) < 0.05f);
+    // MAIN + SEND: on SEND it is D's SEND.
+    REQUIRE (view->useMainSend());
+    view->setTab (1);
+    CHECK (view->levelKnob (3)->getTitle() == "AUX D send");
+    view->levelKnob (3)->setValue (40.0, juce::sendNotificationSync);
+    CHECK (std::abs (p.parameterValue (params::auxSend) - 40.0f) < 0.05f);
+    view->setTab (0);
+    CHECK (view->levelKnob (3)->getTitle() == "AUX D level");
+    ui.setSourceViewShown (false);
+
+    // D's strip: EQ before RACK; it opens D's EQ above the strip, and again closes it.
+    ui.setAuxStripShown (true);
+    ui.refreshNow();
+    auto* strip = ui.auxStripComponent();
+    REQUIRE (strip != nullptr);
+    auto* eq = andor::analog::AuxStripView::part (*strip, "eq");
+    auto* rack = andor::analog::AuxStripView::part (*strip, "rack");
+    REQUIRE (eq != nullptr);
+    REQUIRE (rack != nullptr);
+    CHECK (eq->getRight() <= rack->getX());
+    auto* host = eq->findParentComponentOfClass<osp::plugin::AnchoredPopoverHost>();
+    REQUIRE (host != nullptr);
+    dynamic_cast<juce::Button*> (eq)->onClick();
+    CHECK (host->anchoredPopoverOpenFrom (*eq));
+    dynamic_cast<juce::Button*> (eq)->onClick();
+    CHECK_FALSE (host->anchoredPopoverOpenFrom (*eq));
+}
+
+
+TEST_CASE ("analog: screenshots of D in the routing (MAIN, SEND) and D's EQ (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][aux-routing]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    const auto before = osp::plugin::skin::look();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    setValue (p, params::auxEnabled, 1.0f);
+    setValue (p, params::auxMode, 1.0f);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, 1086);
+    ui.setAuxStripShown (true);
+    auto shoot = [&] (const juce::String& name) {
+        ui.refreshNow();
+        editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+    ui.setSourceViewShown (true);
+    auto* view = dynamic_cast<andor::analog::FxRoutingView*> (ui.sourceViewComponent());
+    REQUIRE (view != nullptr);
+    shoot ("aux-routing-one-path");
+    REQUIRE (view->useMainSend());
+    setValue (p, params::auxSend, 35.0f);
+    shoot ("aux-routing-main");
+    view->setTab (1);
+    shoot ("aux-routing-send");
+    view->setTab (2);
+    shoot ("aux-routing-overview");
+    ui.setSourceViewShown (false);
+    // D's EQ: a low cut and a presence lift, opened above the strip.
+    setValue (p, params::auxEqId ("enabled"), 1.0f);
+    for (const char* band : { "hp", "bell" })
+        setValue (p, params::auxEqId (juce::String (band) + ".enabled"), 1.0f);
+    setValue (p, params::auxEqId ("hp.frequency"), 140.0f);
+    setValue (p, params::auxEqId ("bell.frequency"), 2400.0f);
+    setValue (p, params::auxEqId ("bell.gain"), 5.0f);
+    if (auto* eq = dynamic_cast<juce::Button*> (andor::analog::AuxStripView::part (*ui.auxStripComponent(), "eq")))
+        eq->onClick();
+    shoot ("aux-eq-open");
+    osp::plugin::skin::setLook (before);
 }

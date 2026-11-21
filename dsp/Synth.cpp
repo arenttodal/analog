@@ -226,8 +226,10 @@ void Synth::prepare (double sampleRate, int maximumBlockSize, int oversamplingFa
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
     loopPlayer.prepare (hostRate);
     // D / AUX: its bus (idle until it is powered).
-    for (auto* b : { &auxL, &auxR, &auxDryL, &auxDryR, &auxLevelBuf, &auxTransientBuf, &auxEnvBuf })
+    for (auto* b : { &auxL, &auxR, &auxDryL, &auxDryR, &auxLevelBuf, &auxTransientBuf, &auxEnvBuf, &auxSendL, &auxSendR })
         b->assign (static_cast<std::size_t> (maxBlock), 0.0f);
+    auxEq.prepare (hostRate);
+    auxSendFrom = auxSendTo = 0.0f;
     auxDelayL.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
     auxDelayR.assign (static_cast<std::size_t> (maxExternalLatency), 0.0f);
     // GLOBAL MORPH 2.0: MORPH TO D's stage and the carrier tap.
@@ -3976,6 +3978,10 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
             carDelayDAt = (carDelayDAt + 1) % maxExternalLatency;
         }
     auxLatencyNow = auxModePlaying == Patch::Aux::Mode::kontakt && a.enabled ? auxExternal.latency : 0;
+    // Its EQ (the cards' five bands), before its FILTER. Off: not run, D untouched.
+    auxEq.setTarget (a.eq);
+    if (auxEq.active())
+        auxEq.process (auxL.data(), auxR.data(), n, false);
     // Its FILTER: the cards' (TONE and what moves it, RESONANCE, DRIVE, the model, the high-pass,
     // key tracking, the envelope from the played keys), its stereo bus filter; FOLLOW off
     // crossfades it out (10 ms).
@@ -4015,6 +4021,14 @@ void Synth::mixAux (float* left, float* right, int numSamples) noexcept
         g = g < want ? std::min (want, g + step * std::max (1.0f, want)) : std::max (want, g - step * std::max (1.0f, g));
         const float m = levelMod ? 1.0f - amount * (1.0f - auxEnvBuf[i]) : 1.0f;
         const float l = g * m * auxL[i], r = g * m * auxR[i];
+        if (auxSendTaps)
+        {
+            // SEND hears D as it leaves its FILTER, at its level (MUTE, SOLO, power and all).
+            const float t = static_cast<float> (i + 1) / static_cast<float> (un);
+            const float s = auxSendFrom + t * (auxSendTo - auxSendFrom);
+            auxSendL[i] = s * l;
+            auxSendR[i] = s * r;
+        }
         if (morphing)
         {
             auxL[i] = l;   // (D at its level: the stage's D)
@@ -4830,7 +4844,13 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
     sendTo = { static_cast<float> (current.sendA), static_cast<float> (current.sendB), static_cast<float> (current.sendC) };
     if (! mainSend)
         sendFrom = sendTo = {};
-    sendTaps = mainSend && (sendTo[0] > 0.0f || sendTo[1] > 0.0f || sendTo[2] > 0.0f || sendFrom[0] > 0.0f || sendFrom[1] > 0.0f || sendFrom[2] > 0.0f);
+    // D's SEND likewise (heard while D plays: mixAux writes it, added after the cards' come down).
+    auxSendFrom = auxSendTo;
+    auxSendTo = mainSend && auxRunning ? static_cast<float> (std::clamp (current.aux.send, 0.0, 1.0)) : 0.0f;
+    if (! mainSend)
+        auxSendFrom = 0.0f;
+    auxSendTaps = auxSendFrom > 0.0f || auxSendTo > 0.0f;
+    sendTaps = mainSend && (sendTo[0] > 0.0f || sendTo[1] > 0.0f || sendTo[2] > 0.0f || sendFrom[0] > 0.0f || sendFrom[1] > 0.0f || sendFrom[2] > 0.0f || auxSendTaps);
     if (sendTaps && ! sendWas)
     {
         for (auto* d : { &sendStage1L, &sendStage1R, &sendStage2L, &sendStage2R })
@@ -5040,6 +5060,13 @@ void Synth::renderChunk (float* left, float* right, int numSamples) noexcept
                 sendOutL[static_cast<std::size_t> (i)] = oversampling == 1 ? sL[i] : sendStage2L.process (sL[2 * i], sL[2 * i + 1]);
                 sendOutR[static_cast<std::size_t> (i)] = oversampling == 1 ? sR[i] : sendStage2R.process (sR[2 * i], sR[2 * i + 1]);
             }
+            // D's SEND (already at the host rate).
+            if (auxSendTaps && auxRunning)
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    sendOutL[static_cast<std::size_t> (i)] += auxSendL[static_cast<std::size_t> (i)];
+                    sendOutR[static_cast<std::size_t> (i)] += auxSendR[static_cast<std::size_t> (i)];
+                }
         }
     }
     // SUB joins MAIN before its inserts only once MAIN + SEND is the route playing (never while

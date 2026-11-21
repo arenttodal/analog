@@ -299,6 +299,11 @@ namespace andor::analog::params
         is held, then fades with the AMP's release) or FREE (always playing, on the host's
         grid). Appended; KEYS by default. */
     inline const juce::String auxRhythmGate = "analog.aux.rhythm.gate";
+    /** D's EQ (state version 24, appended; version hint 41): the cards' nineteen EQ parameters
+        (InstrumentHost::eqParameterNames) as `analog.aux.eq.<name>`, every band and the EQ off. */
+    inline juce::String auxEqId (const juce::String& name) { return "analog.aux.eq." + name; }
+    /** D's SEND (state version 24, appended): 0..100 %, heard in a MAIN + SEND route. */
+    inline const juce::String auxSend = "analog.aux.send";
     /** MORPH TO (Addendum 05): which MORPH the MORPH macro drives - C HYBRID (the per-voice
         A + B <-> C morph, as ever; the default) or D AUX (the global stage: A/B/C's bus after the
         FILTER x D, whatever D plays - LIVE INPUT included). One processor at a time; the other's

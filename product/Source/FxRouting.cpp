@@ -6,6 +6,7 @@
 #include "FxRack.h"
 #include "AnalogEngine.h"
 #include "AnalogParameters.h"
+#include "AuxUI.h"
 #include "OspLookAndFeel.h"
 #include "ShellEditor.h"
 #include "ShellProcessor.h"
@@ -29,8 +30,9 @@ namespace
     // The engine mixer's cards (A, B, C: their own colours, as on the cards).
     juce::Colour mixerTileColour (int i)
     {
-        const juce::Colour c[3] { juce::Colour (0xffc77f50), juce::Colour (0xff819aaf), juce::Colour (0xff879f8c) };
-        return c[juce::jlimit (0, 2, i)];
+        // A, B, C and D (AUX's dusty plum).
+        const juce::Colour c[4] { juce::Colour (0xffc77f50), juce::Colour (0xff819aaf), juce::Colour (0xff879f8c), aux::colour() };
+        return c[juce::jlimit (0, 3, i)];
     }
 
     AnalogEngine& engineOf (osp::plugin::InstrumentHost& host) { return dynamic_cast<AnalogEngine&> (dynamic_cast<andor::shell::ShellProcessor&> (host).productEngine()); }
@@ -562,8 +564,8 @@ FxRoutingView::FxRoutingView (osp::plugin::InstrumentHost& h) : host (h), engine
         addAndMakeVisible (*b);
 
     // The engine mixer: each card's own level (the same parameters as the cards' LEVEL).
-    const juce::String levelIds[3] { params::osc1Level, params::osc2Level, "layerB.level" };
-    for (int i = 0; i < 3; ++i)
+    const juce::String levelIds[4] { params::osc1Level, params::osc2Level, "layerB.level", params::auxLevel };
+    for (int i = 0; i < static_cast<int> (levels.size()); ++i)
     {
         auto& s = levels[static_cast<std::size_t> (i)];
         // (V4: a small ceramic level knob, the instrument's own knob, on the same parameter as
@@ -636,17 +638,20 @@ void FxRoutingView::bindMixer()
 {
     // MAIN (and one path): the cards' levels; SEND: their sends.
     const bool sends = currentTab == 1 && engine.fxRoute().mainSend;
-    const juce::String ids[3] { sends ? params::sendA : params::osc1Level, sends ? params::sendB : params::osc2Level, sends ? params::sendC : juce::String ("layerB.level") };
-    for (int i = 0; i < 3; ++i)
+    // (D: AUX's LEVEL on MAIN, its SEND on SEND.)
+    const juce::String ids[4] { sends ? params::sendA : params::osc1Level, sends ? params::sendB : params::osc2Level, sends ? params::sendC : juce::String ("layerB.level"),
+                                sends ? params::auxSend : params::auxLevel };
+    for (int i = 0; i < static_cast<int> (levels.size()); ++i)
     {
         auto& s = levels[static_cast<std::size_t> (i)];
         levelAttachments[static_cast<std::size_t> (i)].reset();
-        s->setTitle (juce::String ("Card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i)) + (sends ? " send" : " level"));
+        s->setTitle ((i == 3 ? juce::String ("AUX D") : juce::String ("Card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i))) + (sends ? " send" : " level"));
         if (auto* p = host.apvts().getParameter (ids[i]))
         {
             levelAttachments[static_cast<std::size_t> (i)] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (host.apvts(), ids[i], *s);
             s->setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
-            s->setTooltip (sends ? juce::String ("How much of card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i))
+            s->setTooltip (i == 3 ? (sends ? juce::String ("How much of D reaches SEND (as it leaves its FILTER, at its level)") : juce::String ("D's level (AUX)"))
+                         : sends ? juce::String ("How much of card ") + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i))
                                        + " reaches SEND (taken before the filter; card C: both its layers)"
                                  : p->getName (64));
         }
@@ -1754,15 +1759,18 @@ void FxRoutingView::paintMixer (juce::Graphics& g) const
     g.setColour (juce::Colour (0xffd9d0c5));
     g.fillRect (juce::Rectangle<int> (mixerArea.getRight(), mixerArea.getY(), 1, mixerArea.getHeight()));
     const float k = mixerScale;
-    const char* names[3] { "OSC 1", "OSC 2", "HYBRID" };
-    const juce::String kinds[3] { textOf (host, params::osc1Model), textOf (host, params::osc2Model), textOf (host, params::hybridType) };
+    const char* names[4] { "OSC 1", "OSC 2", "HYBRID", "AUX" };
+    const bool auxOn = host.parameterValue (params::auxEnabled) >= 0.5f;
+    const juce::String kinds[4] { textOf (host, params::osc1Model), textOf (host, params::osc2Model), textOf (host, params::hybridType),
+                                  auxOn ? aux::modeName (juce::roundToInt (host.parameterValue (params::auxMode))) : juce::String ("OFF") };
     const bool sends = currentTab == 1 && engine.fxRoute().mainSend;
-    const juce::String levelIds[3] { sends ? params::sendA : params::osc1Level, sends ? params::sendB : params::osc2Level,
-                                     sends ? params::sendC : juce::String ("layerB.level") };
-    for (int i = 0; i < 3; ++i)
+    const juce::String levelIds[4] { sends ? params::sendA : params::osc1Level, sends ? params::sendB : params::osc2Level,
+                                     sends ? params::sendC : juce::String ("layerB.level"), sends ? params::auxSend : params::auxLevel };
+    const int rows = static_cast<int> (levels.size());
+    for (int i = 0; i < rows; ++i)
     {
         const auto row = mixerRow (i);
-        if (i < 2)
+        if (i < rows - 1)
         {
             g.setColour (juce::Colour (0xffe7dfd5));
             g.fillRect (row.withTop (row.getBottom() - 1));
@@ -1772,7 +1780,7 @@ void FxRoutingView::paintMixer (juce::Graphics& g) const
         g.fillRoundedRectangle (letter, 5.0f);
         g.setColour (juce::Colours::white);
         g.setFont (font (15.0f * k, fonts::Weight::medium));
-        g.drawText (juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i)), letter, juce::Justification::centred, false);
+        g.drawText (juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i)), letter, juce::Justification::centred, false);   // (D: AUX)
         const auto& knob = levels[static_cast<std::size_t> (i)]->getBounds();
         const int textX = row.getX() + juce::roundToInt (38.0f * k), textW = knob.getX() - 6 - textX;
         g.setColour (juce::Colour (0xff3a3e3a));
@@ -2103,9 +2111,9 @@ void FxRoutingView::paintOverview (juce::Graphics& g) const
     };
     const auto percent = [this] (const juce::String& id) { return juce::String (juce::roundToInt (host.parameterValue (id))) + "%"; };
     const juce::String feed = "A " + percent (params::sendA) + juce::String::fromUTF8 (" \xc2\xb7 B ") + percent (params::sendB)
-                              + juce::String::fromUTF8 (" \xc2\xb7 C ") + percent (params::sendC);
+                              + juce::String::fromUTF8 (" \xc2\xb7 C ") + percent (params::sendC) + juce::String::fromUTF8 (" \xc2\xb7 D ") + percent (params::auxSend);
     area = area.withSizeKeepingCentre (area.getWidth(), 2 * laneH + 16);
-    lane (area.removeFromTop (laneH), "MAIN", full.chain, "A B C");
+    lane (area.removeFromTop (laneH), "MAIN", full.chain, "A B C D");
     area.removeFromTop (16);
     lane (area.removeFromTop (laneH), "SEND", full.send, feed);
 }

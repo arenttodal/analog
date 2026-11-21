@@ -1,5 +1,20 @@
 # ANDOR ANALOG — status
 
+> **21 Nov 2026, D / AUX gets its own EQ and joins the routing (branch `claude/analog-unison`):**
+> - **D's EQ:** the cards' five-band EQ (ANDOR OSP's layer EQ processor) on D's stereo bus,
+>   after its source and before its FILTER. 19 parameters `analog.aux.eq.*` (the cards' names,
+>   ranges and defaults; version hint 41), off by default: every session plays as before. An
+>   **EQ** key on D's strip (before RACK) opens it in a panel under the strip (the cards' EQ
+>   editor via OSP's new `EqTarget`; no DAMPEN, no spectrum yet); its word lights while D's EQ is on.
+> - **D in the routing:** the source column has four rows - A, B, C and **D AUX** (its mode, or
+>   OFF). On one path and on MAIN its knob is D's LEVEL (D already ran through the chain); on
+>   SEND it is D's new **SEND** (`analog.aux.send`, 0-100 %, default 0), which feeds SEND's
+>   ECHO / SPACE with D as it leaves its FILTER, at its level (MUTE, SOLO, power respected),
+>   ramped like the cards' sends. OVERVIEW's SEND feed lists D. Heard only in MAIN + SEND.
+> - Tests: D's EQ off is bit-identical and on shapes D; D's SEND changes nothing on one path and
+>   brings SEND's room in MAIN + SEND; the routing's D knob (LEVEL / SEND) and the strip's EQ
+>   key; every new control in the bindings test. Schema golden +20 parameters (intentional).
+
 > **21 Nov 2026, UNISON fan + AMP 2's one-second gesture (branch `claude/analog-unison`):**
 > - **UNISON fan** on cards A, B and C (OSC 3): while VOICES, DETUNE, BLEND, WIDTH, MODE or RANGE
 >   changes, one line per copy fades in over the waveform, drawn from the engine's own layout:
