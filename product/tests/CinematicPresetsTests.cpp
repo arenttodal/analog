@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 
@@ -130,6 +131,43 @@ namespace
     }
 }
 
+// The files equal their definitions up to float rounding: a definition's computed values (dB,
+// Hz, curves) can differ in the last digits between platforms' maths libraries, so PARAM values
+// are compared as numbers (relative 1e-5), everything else exactly.
+static bool sameWithinRounding (const juce::XmlElement& a, const juce::XmlElement& b)
+{
+    if (a.getTagName() != b.getTagName() || a.getNumAttributes() != b.getNumAttributes()
+        || a.getNumChildElements() != b.getNumChildElements())
+    {
+        UNSCOPED_INFO (a.getTagName() << ": structure differs (" << a.getNumChildElements() << " vs " << b.getNumChildElements() << " children)");
+        return false;
+    }
+    for (int i = 0; i < a.getNumAttributes(); ++i)
+        if (a.getAttributeValue (i) != b.getStringAttribute (a.getAttributeName (i)))
+            return false;
+    for (int i = 0; i < a.getNumChildElements(); ++i)
+    {
+        const auto* x = a.getChildElement (i);
+        const auto* y = b.getChildElement (i);
+        if (x->hasTagName ("PARAM") && y->hasTagName ("PARAM"))
+        {
+            const double u = x->getDoubleAttribute ("value"), v = y->getDoubleAttribute ("value");
+            if (x->getStringAttribute ("id") != y->getStringAttribute ("id")
+                || std::abs (u - v) > 1.0e-6 + 1.0e-5 * std::max (std::abs (u), std::abs (v)))
+            {
+                UNSCOPED_INFO (x->getStringAttribute ("id") << ": file " << u << ", definition " << v);
+                return false;
+            }
+        }
+        else if (! x->isEquivalentTo (y, false))
+        {
+            UNSCOPED_INFO (x->getTagName() << " differs");
+            return false;
+        }
+    }
+    return true;
+}
+
 TEST_CASE ("cinematic afterimages: the collection's files are its definitions, ten of them, each named once", "[cinematic]")
 {
     const auto& list = cinematic::collection();
@@ -145,7 +183,7 @@ TEST_CASE ("cinematic afterimages: the collection's files are its definitions, t
         const auto wanted = cinematic::presetXml (s);
         const auto stored = juce::parseXML (file);
         REQUIRE (stored != nullptr);
-        CHECK (stored->isEquivalentTo (wanted.get(), false));
+        CHECK (sameWithinRounding (*stored, *wanted));
     }
 }
 
