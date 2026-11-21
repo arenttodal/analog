@@ -92,6 +92,13 @@ namespace design
     void chorusMovement (Patch& p, double amount, double rate = 0.45, double width = 0.6, double stereo = 0.7);
     void pulse (Patch& p, double amount, double rate, double shape = 0.3, double stereo = 0.3, bool sync = false, int division = 4);
 
+    /** A card's EQ (eqA: OSC 1 and the noise; eqC: OSC 2): its bell, switched on with the EQ. */
+    void eqBell (osp::eq::Settings& eq, double frequencyHz, double gainDb, double q);
+    /** Its high-pass band, switched on with the EQ. */
+    void eqHighPass (osp::eq::Settings& eq, double frequencyHz);
+    /** AMP 2: a slower attack for notes begun over held ones. */
+    void amp2 (Patch& p, double attackSeconds);
+
     // The shell's own (in Spec::extra).
     void route (ShellProcessor& p, int slot, osp::mod::Source source, osp::mod::Dest dest, float depthPercent);
     void choose (ShellProcessor& p, const juce::String& id, const juce::String& choice);

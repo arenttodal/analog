@@ -327,6 +327,30 @@ namespace design
         p.effects.pulseDivision = division;
     }
 
+    void eqBell (osp::eq::Settings& eq, double frequencyHz, double gainDb, double q)
+    {
+        eq.enabled = true;
+        auto& b = eq.bands[static_cast<std::size_t> (osp::eq::Band::bell)];
+        b.enabled = true;
+        b.frequencyHz = frequencyHz;
+        b.gainDb = gainDb;
+        b.q = q;
+    }
+
+    void eqHighPass (osp::eq::Settings& eq, double frequencyHz)
+    {
+        eq.enabled = true;
+        auto& b = eq.bands[static_cast<std::size_t> (osp::eq::Band::highPass)];
+        b.enabled = true;
+        b.frequencyHz = frequencyHz;
+    }
+
+    void amp2 (Patch& p, double attackSeconds)
+    {
+        p.amp2Enabled = true;
+        p.amp2Attack = attackSeconds;
+    }
+
     void route (ShellProcessor& p, int slot, osp::mod::Source source, osp::mod::Dest dest, float depthPercent)
     {
         using Host = osp::plugin::InstrumentHost;
