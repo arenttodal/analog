@@ -133,7 +133,8 @@ namespace
 
 // The files equal their definitions up to float rounding: a definition's computed values (dB,
 // Hz, curves) can differ in the last digits between platforms' maths libraries, so PARAM values
-// are compared as numbers (relative 1e-5), everything else exactly.
+// are compared as numbers (1e-4 absolute - a value that is 0 here can be 1e-6 on macOS - plus
+// 1e-5 relative, far finer than any control's resolution), everything else exactly.
 static juce::String differenceWithinRounding (const juce::XmlElement& a, const juce::XmlElement& b)
 {
     if (a.getTagName() != b.getTagName())
@@ -154,7 +155,7 @@ static juce::String differenceWithinRounding (const juce::XmlElement& a, const j
             const double u = x->getDoubleAttribute ("value"), v = y->getDoubleAttribute ("value");
             if (x->getStringAttribute ("id") != y->getStringAttribute ("id"))
                 return "PARAM " + juce::String (i) + ": file " + x->getStringAttribute ("id") + ", definition " + y->getStringAttribute ("id");
-            if (std::abs (u - v) > 1.0e-6 + 1.0e-5 * std::max (std::abs (u), std::abs (v)))
+            if (std::abs (u - v) > 1.0e-4 + 1.0e-5 * std::max (std::abs (u), std::abs (v)))
                 return x->getStringAttribute ("id") + ": file " + juce::String (u, 8) + ", definition " + juce::String (v, 8);
         }
         else if (x->getNumChildElements() > 0 || y->getNumChildElements() > 0)
