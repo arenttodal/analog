@@ -599,11 +599,11 @@
     <PARAM id="analog.osc1.level" value="80.0"/>
     <PARAM id="analog.osc1.model" value="0.0"/>
     <PARAM id="analog.osc1.octave" value="0.0"/>
-    <PARAM id="analog.osc1.wave" value="0.0"/>
+    <PARAM id="analog.osc1.wave" value="1.0"/>
     <PARAM id="analog.osc1.wide.shape" value="50.0"/>
     <PARAM id="analog.osc1.wide.spread" value="0.0"/>
     <PARAM id="analog.osc1.wide.wave" value="0.0"/>
-    <PARAM id="analog.osc1.width" value="50.0"/>
+    <PARAM id="analog.osc1.width" value="15.0"/>
     <PARAM id="analog.osc2.coarse" value="0.0"/>
     <PARAM id="analog.osc2.dco.pulse" value="0.0"/>
     <PARAM id="analog.osc2.dco.pwmDepth" value="0.0"/>
@@ -760,17 +760,17 @@
     <PARAM id="dynamics" value="65.0"/>
     <PARAM id="dynamics.curve" value="1.0"/>
     <PARAM id="dynamics.tone" value="35.0"/>
-    <PARAM id="echo" value="0.0"/>
+    <PARAM id="echo" value="25.0"/>
     <PARAM id="echo.age" value="35.0"/>
     <PARAM id="echo.ascend.interval" value="0.0"/>
     <PARAM id="echo.ascend.motion" value="0.0"/>
-    <PARAM id="echo.division" value="5.0"/>
-    <PARAM id="echo.feedback" value="45.0"/>
-    <PARAM id="echo.stereo" value="1.0"/>
+    <PARAM id="echo.division" value="6.0"/>
+    <PARAM id="echo.feedback" value="50.0"/>
+    <PARAM id="echo.stereo" value="2.0"/>
     <PARAM id="echo.sync" value="1.0"/>
     <PARAM id="echo.time" value="375.0000610351562"/>
-    <PARAM id="echo.tone" value="50.0"/>
-    <PARAM id="echo.type" value="0.0"/>
+    <PARAM id="echo.tone" value="45.0"/>
+    <PARAM id="echo.type" value="2.0"/>
     <PARAM id="fineTune" value="0.0"/>
     <PARAM id="gain" value="0.0"/>
     <PARAM id="glide" value="0.0"/>
@@ -809,7 +809,7 @@
     <PARAM id="layerA.granular.tune" value="0.0"/>
     <PARAM id="layerA.granular.window" value="0.0"/>
     <PARAM id="layerA.keyDna.amount" value="100.0"/>
-    <PARAM id="layerA.level" value="2.0"/>
+    <PARAM id="layerA.level" value="1.200000762939453"/>
     <PARAM id="layerA.link" value="0.0"/>
     <PARAM id="layerA.loop" value="1.0"/>
     <PARAM id="layerA.mute" value="0.0"/>
@@ -875,7 +875,7 @@
     <PARAM id="layerB.granular.tune" value="0.0"/>
     <PARAM id="layerB.granular.window" value="0.0"/>
     <PARAM id="layerB.keyDna.amount" value="100.0"/>
-    <PARAM id="layerB.level" value="-46.0"/>
+    <PARAM id="layerB.level" value="-46.79999923706055"/>
     <PARAM id="layerB.link" value="0.0"/>
     <PARAM id="layerB.loop" value="1.0"/>
     <PARAM id="layerB.mute" value="0.0"/>
@@ -1121,7 +1121,7 @@
     <PARAM id="reimaginedLink" value="1.0"/>
     <PARAM id="release" value="250.0"/>
     <PARAM id="seed" value="1.0"/>
-    <PARAM id="space" value="20.0"/>
+    <PARAM id="space" value="18.0"/>
     <PARAM id="space.abyss.freeze" value="0.0"/>
     <PARAM id="space.abyss.gravity" value="0.0"/>
     <PARAM id="space.abyss.resonance" value="0.0"/>
@@ -1132,14 +1132,14 @@
     <PARAM id="space.bloom.time" value="349.9999389648438"/>
     <PARAM id="space.bloom.variant" value="0.0"/>
     <PARAM id="space.damping" value="40.0"/>
-    <PARAM id="space.decay" value="2.999999761581421"/>
+    <PARAM id="space.decay" value="2.499999761581421"/>
     <PARAM id="space.engine" value="0.0"/>
-    <PARAM id="space.highCut" value="5500.0"/>
+    <PARAM id="space.highCut" value="5999.99951171875"/>
     <PARAM id="space.lowCut" value="120.0000457763672"/>
     <PARAM id="space.modulation" value="40.0"/>
     <PARAM id="space.preDelay" value="20.0"/>
     <PARAM id="space.size" value="50.0"/>
-    <PARAM id="space.type" value="1.0"/>
+    <PARAM id="space.type" value="2.0"/>
     <PARAM id="space.vintage.diffusion" value="70.0"/>
     <PARAM id="space.vintage.era" value="0.0"/>
     <PARAM id="space.vintage.variant" value="0.0"/>
