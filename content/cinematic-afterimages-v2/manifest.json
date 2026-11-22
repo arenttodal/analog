@@ -22,7 +22,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.94,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-002",
@@ -41,7 +41,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.73,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-003",
@@ -60,7 +60,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 5.41,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-004",
@@ -79,7 +79,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.64,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-005",
@@ -98,7 +98,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 12.0,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-006",
@@ -117,7 +117,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 11.880000000000001,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-007",
@@ -136,7 +136,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.54,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-008",
@@ -155,7 +155,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.66,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-009",
@@ -174,7 +174,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.53,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-010",
@@ -193,7 +193,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 5.24,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-011",
@@ -212,7 +212,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.46,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-012",
@@ -231,7 +231,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.12,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-013",
@@ -250,7 +250,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -0.3,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-014",
@@ -269,7 +269,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.0,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-015",
@@ -288,7 +288,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.4,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-016",
@@ -307,7 +307,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.25,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-017",
@@ -326,7 +326,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.47,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-018",
@@ -345,7 +345,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.57,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-019",
@@ -364,7 +364,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.31,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-020",
@@ -383,7 +383,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.91,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-021",
@@ -402,7 +402,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -0.54,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-022",
@@ -421,7 +421,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -2.06,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-023",
@@ -440,7 +440,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -2.32,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-024",
@@ -459,7 +459,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.41,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-025",
@@ -478,7 +478,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -3.05,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-026",
@@ -497,7 +497,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.35,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-027",
@@ -516,7 +516,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -4.01,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-028",
@@ -535,7 +535,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.58,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-029",
@@ -554,7 +554,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.5,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-030",
@@ -573,7 +573,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.49,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-031",
@@ -583,7 +583,7 @@
       "description": "A warm, singing lead suspended in an enormous space.",
       "howToPlay": "Play slowly and use the mod wheel; strike harder to open it.",
       "musicalRole": "Emotional solo line",
-      "designerNotes": "Brass-like bloom from velocity, delayed vibrato on the wheel, a nine-second hall kept dark.",
+      "designerNotes": "Brass-like bloom from velocity, delayed vibrato on the wheel, an eight-second hall kept dark.",
       "range": "C3 - C6",
       "lowKey": 48,
       "highKey": 84,
@@ -592,7 +592,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.75,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-032",
@@ -611,7 +611,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 9.220000000000001,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-033",
@@ -630,7 +630,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 10.550000000000001,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-034",
@@ -649,7 +649,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 7.52,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-035",
@@ -668,7 +668,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.52,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-036",
@@ -685,9 +685,9 @@
       "previewPhrase": "lead line",
       "file": "presets/Cinematic Afterimages Vol. 2/Endless Distance/Burning Aurora.andoranalog",
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
-      "loudnessTrimDb": 5.17,
+      "loudnessTrimDb": 6.02,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-037",
@@ -706,7 +706,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.44,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-038",
@@ -725,7 +725,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 8.800000000000001,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-039",
@@ -744,7 +744,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.13,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-040",
@@ -754,7 +754,7 @@
       "description": "A powerful analog brass lead that blooms dramatically into a massive hall.",
       "howToPlay": "Strike harder for a bigger bloom; the wheel adds vibrato.",
       "musicalRole": "Grand arrival theme",
-      "designerNotes": "Three saws (one an octave down) with a big velocity-led filter bloom, unstable vintage drift, a nine-second VINTAGE hall.",
+      "designerNotes": "Three saws (one an octave down) with a big velocity-led filter bloom, unstable vintage drift, an eight-second VINTAGE hall.",
       "range": "C3 - C6",
       "lowKey": 48,
       "highKey": 84,
@@ -763,7 +763,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 7.36,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-041",
@@ -782,7 +782,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.09,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-042",
@@ -801,7 +801,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 8.59,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-043",
@@ -820,7 +820,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 7.59,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-044",
@@ -839,7 +839,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.26,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-045",
@@ -858,7 +858,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 11.630000000000001,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-046",
@@ -877,7 +877,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 7.2,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-047",
@@ -896,7 +896,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 5.76,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-048",
@@ -915,7 +915,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 8.49,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-049",
@@ -934,7 +934,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 8.43,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-050",
@@ -953,7 +953,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 4.91,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-051",
@@ -972,7 +972,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 5.25,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-052",
@@ -991,7 +991,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.01,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-053",
@@ -1010,7 +1010,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -2.75,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-054",
@@ -1029,7 +1029,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.45,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-055",
@@ -1048,7 +1048,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -2.17,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-056",
@@ -1067,7 +1067,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.87,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-057",
@@ -1086,7 +1086,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.97,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-058",
@@ -1105,7 +1105,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.8,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-059",
@@ -1124,7 +1124,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.23,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-060",
@@ -1143,7 +1143,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.47,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-061",
@@ -1162,7 +1162,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.48,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-062",
@@ -1181,7 +1181,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.76,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-063",
@@ -1200,7 +1200,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.25,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-064",
@@ -1219,7 +1219,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 9.91,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-065",
@@ -1238,7 +1238,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.34,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-066",
@@ -1257,7 +1257,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.54,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-067",
@@ -1276,7 +1276,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.67,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-068",
@@ -1295,7 +1295,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -0.58,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-069",
@@ -1314,7 +1314,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.49,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-070",
@@ -1333,7 +1333,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.35,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-071",
@@ -1352,7 +1352,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 4.16,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-072",
@@ -1371,7 +1371,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 7.43,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-073",
@@ -1390,7 +1390,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 8.880000000000001,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-074",
@@ -1409,7 +1409,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 9.65,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-075",
@@ -1428,7 +1428,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 11.619999999999999,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-076",
@@ -1447,7 +1447,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 9.220000000000001,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-077",
@@ -1466,7 +1466,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 7.32,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-078",
@@ -1485,7 +1485,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 10.44,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-079",
@@ -1504,7 +1504,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 5.12,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-080",
@@ -1523,7 +1523,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 9.42,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-081",
@@ -1542,7 +1542,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.04,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-082",
@@ -1559,9 +1559,9 @@
       "previewPhrase": "drone",
       "file": "presets/Cinematic Afterimages Vol. 2/Dark Matter/Frosted Air.andoranalog",
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
-      "loudnessTrimDb": 5.17,
+      "loudnessTrimDb": 7.79,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-083",
@@ -1580,7 +1580,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 4.73,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-084",
@@ -1599,7 +1599,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -4.98,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-085",
@@ -1618,7 +1618,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 2.0,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-086",
@@ -1637,7 +1637,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.45,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-087",
@@ -1656,7 +1656,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 6.27,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-088",
@@ -1666,16 +1666,16 @@
       "description": "A dissonant cluster sinking into an endless space.",
       "howToPlay": "Hold one low note; the cluster is built in.",
       "musicalRole": "Dissonant abyss",
-      "designerNotes": "A saw, a minor second above it, and a tritone on card C, into a sixteen-second ENDLESS ABYSS.",
+      "designerNotes": "A saw, a minor second above it, and a tritone on card C, into an ENDLESS ABYSS that fades over about twenty-five seconds.",
       "range": "E1 - C4",
       "lowKey": 28,
       "highKey": 60,
       "previewPhrase": "drone",
       "file": "presets/Cinematic Afterimages Vol. 2/Dark Matter/Deep Stairwell.andoranalog",
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
-      "loudnessTrimDb": 0.41,
+      "loudnessTrimDb": 3.59,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-089",
@@ -1694,7 +1694,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.08,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-090",
@@ -1713,7 +1713,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.46,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-091",
@@ -1732,7 +1732,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 4.16,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-092",
@@ -1751,7 +1751,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 5.65,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-093",
@@ -1761,7 +1761,7 @@
       "description": "A soft mallet whose notes drip into a long, dark space.",
       "howToPlay": "Play sparse notes and leave room for the tail.",
       "musicalRole": "Reflective mallet",
-      "designerNotes": "A triangle with a quiet sine-like octave, a fast mallet strike, a twelve-second dark ABYSS.",
+      "designerNotes": "A triangle with a quiet sine-like octave, a fast mallet strike, an eight-second dark ABYSS.",
       "range": "C3 - G6",
       "lowKey": 48,
       "highKey": 91,
@@ -1770,7 +1770,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 8.84,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-094",
@@ -1789,7 +1789,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 0.45,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-095",
@@ -1808,7 +1808,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 3.54,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-096",
@@ -1827,7 +1827,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 12.0,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-097",
@@ -1846,7 +1846,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 11.69,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-098",
@@ -1865,7 +1865,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -5.93,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-099",
@@ -1884,7 +1884,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": 1.17,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     },
     {
       "id": "CA2-100",
@@ -1903,7 +1903,7 @@
       "fxRoute": "v1 custom fx drive.1 on fx movement.1 on par send 2 lane 1 { fx echo.1 on } lane 1 { fx space.1 on } | v1 custom",
       "loudnessTrimDb": -1.79,
       "status": "awaiting owner listening",
-      "sourceRevision": "50b525e"
+      "sourceRevision": "8f173e3"
     }
   ]
 }

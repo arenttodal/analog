@@ -809,7 +809,7 @@
     <PARAM id="layerA.granular.tune" value="0.0"/>
     <PARAM id="layerA.granular.window" value="0.0"/>
     <PARAM id="layerA.keyDna.amount" value="100.0"/>
-    <PARAM id="layerA.level" value="5.200000762939453"/>
+    <PARAM id="layerA.level" value="6.0"/>
     <PARAM id="layerA.link" value="0.0"/>
     <PARAM id="layerA.loop" value="1.0"/>
     <PARAM id="layerA.mute" value="0.0"/>
@@ -875,7 +875,7 @@
     <PARAM id="layerB.granular.tune" value="0.0"/>
     <PARAM id="layerB.granular.window" value="0.0"/>
     <PARAM id="layerB.keyDna.amount" value="100.0"/>
-    <PARAM id="layerB.level" value="-42.79999923706055"/>
+    <PARAM id="layerB.level" value="-42.0"/>
     <PARAM id="layerB.link" value="0.0"/>
     <PARAM id="layerB.loop" value="1.0"/>
     <PARAM id="layerB.mute" value="0.0"/>
@@ -1132,7 +1132,7 @@
     <PARAM id="space.bloom.time" value="349.9999389648438"/>
     <PARAM id="space.bloom.variant" value="0.0"/>
     <PARAM id="space.damping" value="40.0"/>
-    <PARAM id="space.decay" value="8.0"/>
+    <PARAM id="space.decay" value="2.999999761581421"/>
     <PARAM id="space.engine" value="1.0"/>
     <PARAM id="space.highCut" value="5999.99951171875"/>
     <PARAM id="space.lowCut" value="99.99999237060547"/>

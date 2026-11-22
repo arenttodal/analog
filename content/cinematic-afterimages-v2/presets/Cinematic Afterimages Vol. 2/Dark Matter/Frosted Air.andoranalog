@@ -76,7 +76,7 @@
     <PARAM id="analog.aux.solo" value="0.0"/>
     <PARAM id="analog.blend" value="50.0"/>
     <PARAM id="analog.drive.bias" value="0.0"/>
-    <PARAM id="analog.drive.trim" value="0.0"/>
+    <PARAM id="analog.drive.trim" value="1.800000190734863"/>
     <PARAM id="analog.envDepth" value="4.0"/>
     <PARAM id="analog.filter.juno.variant" value="1.0"/>
     <PARAM id="analog.filter.model" value="1.0"/>
@@ -809,7 +809,7 @@
     <PARAM id="layerA.granular.tune" value="0.0"/>
     <PARAM id="layerA.granular.window" value="0.0"/>
     <PARAM id="layerA.keyDna.amount" value="100.0"/>
-    <PARAM id="layerA.level" value="5.200000762939453"/>
+    <PARAM id="layerA.level" value="6.0"/>
     <PARAM id="layerA.link" value="0.0"/>
     <PARAM id="layerA.loop" value="1.0"/>
     <PARAM id="layerA.mute" value="0.0"/>
@@ -875,7 +875,7 @@
     <PARAM id="layerB.granular.tune" value="0.0"/>
     <PARAM id="layerB.granular.window" value="0.0"/>
     <PARAM id="layerB.keyDna.amount" value="100.0"/>
-    <PARAM id="layerB.level" value="5.200000762939453"/>
+    <PARAM id="layerB.level" value="6.0"/>
     <PARAM id="layerB.link" value="0.0"/>
     <PARAM id="layerB.loop" value="1.0"/>
     <PARAM id="layerB.mute" value="0.0"/>
@@ -1132,7 +1132,7 @@
     <PARAM id="space.bloom.time" value="349.9999389648438"/>
     <PARAM id="space.bloom.variant" value="0.0"/>
     <PARAM id="space.damping" value="40.0"/>
-    <PARAM id="space.decay" value="8.0"/>
+    <PARAM id="space.decay" value="2.999999761581421"/>
     <PARAM id="space.engine" value="1.0"/>
     <PARAM id="space.highCut" value="7000.00048828125"/>
     <PARAM id="space.lowCut" value="99.99999237060547"/>
