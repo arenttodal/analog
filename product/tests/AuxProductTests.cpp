@@ -170,7 +170,20 @@ TEST_CASE ("AUX strip: shown and hidden from the main menu; the cards stay, what
     CHECK (strip.getHeight() == 76);
     CHECK (identical (before, render (p, 0.5)));   // (a view: nothing sounds different)
 
-    // Its own ... menu: Hide AUX, Open / Close AUX Rack, Reset.
+    // Its X hides it at once (a view change); its menu (a right-click): Hide AUX, Open / Close
+    // AUX Rack, Reset.
+    {
+        auto* x = dynamic_cast<juce::Button*> (AuxStripView::part (*ui.auxStripComponent(), "menu"));
+        REQUIRE (x != nullptr);
+        CHECK (x->getTitle() == "Hide AUX");
+        x->onClick();
+        ui.refreshNow();
+        CHECK_FALSE (p.auxStripShown());
+        CHECK (ui.modulationPanel().getY() == modY);
+        ui.setAuxStripShown (true);
+        ui.refreshNow();
+        CHECK (p.auxStripShown());
+    }
     CHECK (AuxStripView::menuItems (*ui.auxStripComponent()) == juce::StringArray ({ "Hide AUX", "Open AUX Rack", "Reset" }));
     AuxStripView::runMenuItem (*ui.auxStripComponent(), "Hide AUX");
     ui.refreshNow();
@@ -2005,4 +2018,150 @@ TEST_CASE ("layout: screenshots - every inline section at one width; above each 
     editor->setSize (width, juce::roundToInt (static_cast<float> (width) * ui.instrumentHeight() / osp::plugin::design::width));
     const auto after = snap ("10-base-again");
     CHECK (differingAbove (base, after, base.getHeight()) == 0);
+}
+
+//==============================================================================
+// The KONTAKT rack (owner-approved mock-up "Nameplate"): the instrument's nameplate with its keys,
+// LEVEL, MIDI TRANSPOSE, PLAYS (KEYS / ARP A / B / C: D ARP and FOLLOW as one control), and the
+// keys sent to Kontakt on a keyboard in the rack's picture.
+namespace
+{
+    /** Visible here and in every parent (the editor is not on a desktop in the tests). */
+    bool shownIn (juce::Component& c)
+    {
+        // (its own visibility and its parents' up to the rack: a hidden scroll wrapper above the
+        // instrument does not count)
+        for (auto* p = &c; p != nullptr && dynamic_cast<osp::plugin::rack::ParameterRack*> (p) == nullptr; p = p->getParentComponent())
+            if (! p->isVisible())
+                return false;
+        return true;
+    }
+
+    juce::Component* findTitledIn (juce::Component& root, const juce::String& title)
+    {
+        if (root.getTitle() == title && shownIn (root))
+            return &root;
+        for (auto* c : root.getChildren())
+            if (auto* found = findTitledIn (*c, title))
+                return found;
+        return nullptr;
+    }
+
+    juce::Button* findKey (juce::Component& root, const juce::String& text)
+    {
+        if (auto* b = dynamic_cast<juce::Button*> (&root); b != nullptr && b->getButtonText() == text && shownIn (*b))
+            return b;
+        for (auto* c : root.getChildren())
+            if (auto* found = findKey (*c, text))
+                return found;
+        return nullptr;
+    }
+
+    void holdNotes (ShellProcessor& p, std::initializer_list<int> notes)
+    {
+        juce::AudioBuffer<float> buffer (2, block);
+        juce::MidiBuffer midi;
+        for (const int n : notes)
+            midi.addEvent (juce::MidiMessage::noteOn (1, n, static_cast<juce::uint8> (100)), 0);
+        p.processBlock (buffer, midi);
+        juce::MidiBuffer none;
+        for (int i = 0; i < 4; ++i)
+            p.processBlock (buffer, none);
+    }
+}
+
+TEST_CASE ("AUX KONTAKT rack: the nameplate's keys follow Kontakt's state; TRANSPOSE in the rack; PLAYS sets D ARP and FOLLOW together", "[analog][aux][ui][kontakt-rack]")
+{
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    p.prepareToPlay (rate, block);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setAuxStripShown (true);
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 2.0f);
+    ui.setRackExpanded (osp::plugin::rack::Kind::aux, true);
+    refreshStrip (ui);
+    auto& root = *editor;
+    REQUIRE (findTitledIn (root, "D Kontakt") != nullptr);
+    // Empty: one LOAD KONTAKT on the plate; no OPEN / UNLOAD.
+    CHECK (findKey (root, "LOAD KONTAKT") != nullptr);
+    CHECK (findKey (root, "OPEN KONTAKT") == nullptr);
+    CHECK (findKey (root, "UNLOAD") == nullptr);
+    // TRANSPOSE and LEVEL are the rack's knobs.
+    CHECK (osp::plugin::binding::findControl (root, params::auxTranspose) != nullptr);
+    CHECK (osp::plugin::binding::findControl (root, params::auxLevel) != nullptr);
+    // PLAYS: KEYS = D ARP off; ARP B = D ARP on, FOLLOW B; and it shows what the strip set.
+    auto* plays = findTitledIn (root, "PLAYS");
+    REQUIRE (plays != nullptr);
+    const auto at = [plays] (int i) { return juce::Point<float> ((static_cast<float> (i) + 0.5f) * plays->getWidth() / 4.0f, plays->getHeight() * 0.5f); };
+    auto click = [&] (int i) {
+        const auto pos = at (i);
+        plays->mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, plays, plays,
+                                            juce::Time::getCurrentTime(), pos, juce::Time::getCurrentTime(), 1, false));
+    };
+    click (2);
+    CHECK (p.parameterValue (params::auxArp) == 1.0f);
+    CHECK (p.parameterValue (params::auxArpFollow) == 1.0f);
+    click (3);
+    CHECK (p.parameterValue (params::auxArpFollow) == 2.0f);
+    click (0);
+    CHECK (p.parameterValue (params::auxArp) == 0.0f);
+    CHECK (p.parameterValue (params::auxArpFollow) == 2.0f);   // (FOLLOW kept for when ARP returns)
+    // Loaded (the stand-in): OPEN KONTAKT, LOAD... and UNLOAD; UNLOAD empties it again.
+    REQUIRE (engineOf (p).auxInstrument().loadKontaktFrom (juce::File (ANDOR_TEST_INSTRUMENT_VST3)));
+    refreshStrip (ui);
+    CHECK (findKey (root, "OPEN KONTAKT") != nullptr);
+    CHECK (findKey (root, juce::String::fromUTF8 ("LOAD\xe2\x80\xa6")) != nullptr);
+    auto* unload = findKey (root, "UNLOAD");
+    REQUIRE (unload != nullptr);
+    CHECK (findKey (root, "LOAD KONTAKT") == nullptr);
+    // The keys you hold, and the pitches sent after TRANSPOSE, published for the keyboard.
+    set (p, params::auxTranspose, 12.0f);
+    holdNotes (p, { 48, 52, 55 });
+    const auto sent = engineOf (p).auxPitchesSent();
+    CHECK (sent[60]);
+    CHECK (sent[64]);
+    CHECK (sent[67]);
+    CHECK (engineOf (p).auxKeysPlayed()[48]);
+    unload->onClick();
+    refreshStrip (ui);
+    CHECK (engineOf (p).auxInstrument().state() == andor::analog::ExternalInstrument::State::empty);
+    CHECK (findKey (root, "LOAD KONTAKT") != nullptr);
+}
+
+TEST_CASE ("AUX KONTAKT rack screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-kontakt-rack]")
+{
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("ANALOG_SCREENSHOT_DIR", {});
+    REQUIRE (dir.isNotEmpty());
+    const juce::File out (dir);
+    out.createDirectory();
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    p.prepareToPlay (rate, block);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.setAuxStripShown (true);
+    set (p, params::auxEnabled, 1.0f);
+    set (p, params::auxMode, 2.0f);
+    ui.setRackExpanded (osp::plugin::rack::Kind::aux, true);
+    auto shoot = [&] (const juce::String& name) {
+        refreshStrip (ui);
+        juce::Component* rack = findTitledIn (*editor, "D Kontakt");
+        while (rack != nullptr && dynamic_cast<osp::plugin::rack::ParameterRack*> (rack) == nullptr)
+            rack = rack->getParentComponent();
+        const auto area = rack != nullptr ? editor->getLocalArea (rack, rack->getLocalBounds()).expanded (4) : editor->getLocalBounds();
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (editor->createComponentSnapshot (area, true, 2.0f), stream);
+    };
+    shoot ("kontakt-rack-00-empty");
+    REQUIRE (engineOf (p).auxInstrument().loadKontaktFrom (juce::File (ANDOR_TEST_INSTRUMENT_VST3)));
+    set (p, params::auxTranspose, 12.0f);
+    set (p, params::auxArpFollow, 2.0f);
+    holdNotes (p, { 48, 52, 55 });
+    shoot ("kontakt-rack-01-loaded-playing");
 }

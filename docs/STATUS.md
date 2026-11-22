@@ -1,5 +1,23 @@
 # ANDOR ANALOG — status
 
+> **22 Nov 2026, the KONTAKT rack ("Nameplate", owner-approved) and the AUX strip's X (ANALOG only):**
+> - **KONTAKT rack:** the selector row keeps only MODE. A nameplate (a three-knob-wide cell, the
+>   shared opt-in `Slot::threeKnobs`) shows the instrument's name large (from Kontakt's state, else
+>   Kontakt's), Kontakt's name, version and latency small, and OPEN KONTAKT / LOAD... (choose which
+>   Kontakt) / UNLOAD; empty, not found or failed: LOAD KONTAKT (loading: it says so). Then LEVEL
+>   and TRANSPOSE (`analog.aux.transpose`, -12..+12 st, MIDI only), and PLAYS - KEYS / ARP A /
+>   ARP B / ARP C, one control for D ARP and FOLLOW (FOLLOW is kept while KEYS is chosen). The
+>   picture: "<INSTRUMENT> - PLAYING" in its title line and a keyboard (two octaves, three when the
+>   notes need it, following them) with the pitches sent to Kontakt filled and the keys you hold
+>   dotted, "SENT C4 - E4 - G4 - +12 ST" under it.
+> - **AUX strip:** its ... key is now an X that hides AUX at once (D plays on; shown again from the
+>   main menu). A right-click on the strip (or its display) opens the menu: Hide AUX, Open / Close
+>   AUX Rack, Reset. A right-click on the display no longer loads.
+> - Tests: `[aux][ui][kontakt-rack]` (the plate's keys by state, TRANSPOSE and LEVEL in the rack,
+>   PLAYS writing D ARP + FOLLOW, the sent/played pitches), the strip test's X; screenshots
+>   `[screenshots-kontakt-rack]`. OSP pin: the shared slot only.
+> - **Queued next:** Performance Mode R1 (owner spec recorded in `docs/specs/PERFORMANCE_MODE_R1.md`).
+
 > **22 Nov 2026, card C with Kontakt: a nameplate, LOADING, its window by itself (ANALOG only):**
 > - **The well (owner-approved mock-up):** empty - one LOAD KONTAKT key; loading - a spinner,
 >   "LOADING KONTAKT..." and "THE FIRST TIME CAN TAKE A MOMENT"; loaded - the instrument's name

@@ -18,8 +18,9 @@ namespace andor::analog
 
     The strip: D's badge (dusty plum) and AUX, its power, M / S, a graphite well with D's mode
     (the card C type dropdown's look) and a live display, the mode's knobs (RHYTHM: RATE,
-    MOD AMOUNT, LEVEL; NOISE: COLOR, TONE, LEVEL; KONTAKT: LEVEL), ROUTE and its `...` menu
-    (Hide AUX, Open / Close AUX Rack, Reset). A double-click opens or closes the rack. A
+    MOD AMOUNT, LEVEL; NOISE: COLOR, TONE, LEVEL; KONTAKT: LEVEL), RACK and its X (Hide AUX);
+    a right-click on the strip opens its menu (Hide AUX, Open / Close AUX Rack, Reset). A
+    double-click opens or closes the rack. A
     recording dropped on it becomes D RHYTHM's loop.
 */
 namespace aux

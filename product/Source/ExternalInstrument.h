@@ -107,6 +107,10 @@ public:
         Kontakt is if it is not found) and, loaded, opens Kontakt's own window by itself - no
         second OPEN step. `done` runs on the message thread when it has finished. */
     void loadFromInterface (std::function<void()> done = nullptr);
+    /** LOAD... (the KONTAKT rack's nameplate): asks which Kontakt (.vst3) to load - another
+        version, or one the search does not find - then LOADING, loads it (remembered) and opens
+        its window. Cancelled: nothing changes. */
+    void chooseFromInterface (std::function<void()> done = nullptr);
     /** Loads one plugin (its native state applied if given). */
     bool load (const juce::PluginDescription& description, const juce::MemoryBlock* nativeState = nullptr);
     /** UNLOAD: its notes end, it fades out (10 ms) and is retired; the saved identity goes too. */
@@ -151,6 +155,8 @@ public:
     /** The host's prepare: every block at most `maxBlock` samples (larger ones are split). */
     void prepare (double sampleRate, int maxBlock);
     int latencySamples() const noexcept { return latency.load (std::memory_order_relaxed); }
+    /** The rate it was last prepared at (Hz): its latency in seconds is latencySamples() / this. */
+    double sampleRate() const noexcept { return rate; }
 
     //== Audio thread ============================================================================
     /**

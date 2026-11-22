@@ -422,6 +422,27 @@ void ExternalInstrument::loadFromInterface (std::function<void()> done)
     });
 }
 
+void ExternalInstrument::chooseFromInterface (std::function<void()> done)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    if (currentState == State::loading)
+        return;
+    askWhereKontaktIs ([this, done] (const juce::File& chosen) {
+        if (chosen == juce::File())
+        {
+            if (done != nullptr)
+                done();   // (cancelled: as it was)
+            return;
+        }
+        showLoadingThen ([this, chosen, done] {
+            if (loadKontaktFrom (chosen))
+                openEditor();
+            if (done != nullptr)
+                done();
+        });
+    });
+}
+
 bool ExternalInstrument::loadKontakt()
 {
     juce::PluginDescription found;

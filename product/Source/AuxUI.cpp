@@ -90,7 +90,112 @@ namespace
         (its level over its bars, the playhead where the audio thread reads it, D's envelope),
         NOISE's colour (its slope, TONE's corner, the gate's light) or KONTAKT's state and
         level. The engine's own telemetry, never an animation. */
-    void paintAuxPicture (juce::Graphics& g, juce::Rectangle<float> area, InstrumentHost& host, bool compact, float& playheadX)
+    /** D KONTAKT's state in words: its instrument (and PLAYING while it sounds), or why not. */
+    juce::String kontaktStatus (InstrumentHost& host)
+    {
+        const auto* engine = engineOf (host);
+        juce::String text = "KONTAKT NOT LOADED";
+        if (engine != nullptr)
+        {
+            const auto& k = engine->auxInstrument();
+            switch (k.state())
+            {
+                case ExternalInstrument::State::ready:
+                {
+                    const auto names = k.instrumentNames();   // (as far as Kontakt's state names them)
+                    text = (names.isEmpty() ? k.displayName() : names[0]).toUpperCase() + (k.sounding() ? dot() + "PLAYING" : juce::String());
+                    break;
+                }
+                case ExternalInstrument::State::loading: text = juce::String::fromUTF8 ("LOADING KONTAKT\xe2\x80\xa6"); break;
+                case ExternalInstrument::State::missing: text = k.displayName().toUpperCase() + ": NOT FOUND ON THIS COMPUTER"; break;
+                case ExternalInstrument::State::failed: text = "KONTAKT WOULD NOT LOAD"; break;
+                case ExternalInstrument::State::notInstalled:
+                case ExternalInstrument::State::empty: break;
+            }
+        }
+        return text;
+    }
+
+    /** KONTAKT in the rack: the keys D sends Kontakt (after TRANSPOSE: filled) and the keys you
+        play (dots), on a keyboard of two octaves (three when they need it) that follows them. */
+    void paintKontaktKeys (juce::Graphics& g, juce::Rectangle<float> area, InstrumentHost& host, int& base, float alpha)
+    {
+        const auto* engine = engineOf (host);
+        const auto sent = engine != nullptr ? engine->auxPitchesSent() : std::bitset<128>();
+        const auto played = engine != nullptr ? engine->auxKeysPlayed() : std::bitset<128>();
+        int low = 128, high = -1;
+        for (int n = 0; n < 128; ++n)
+            if (sent[static_cast<std::size_t> (n)] || played[static_cast<std::size_t> (n)])
+            {
+                low = std::min (low, n);
+                high = std::max (high, n);
+            }
+        // Its window: C to B, two octaves (three when the notes need it), moved only when a note
+        // falls outside it (so it does not jump about while you play).
+        int octaves = 2;
+        if (high >= 0)
+        {
+            octaves = high - (low / 12) * 12 >= 24 ? 3 : 2;
+            if (low < base || high >= base + 12 * octaves)
+                base = juce::jlimit (0, 128 - 12 * octaves, (low / 12) * 12);
+        }
+        base = juce::jlimit (0, 128 - 12 * octaves, base);
+        // The caption under it: what was sent (and how far it moved).
+        auto caption = area.removeFromBottom (14.0f);
+        area.removeFromBottom (6.0f);
+        const auto ink = aux::onDark();
+        static const bool black[12] = { false, true, false, true, false, false, true, false, true, false, true, false };
+        const int whites = 7 * octaves;
+        const float w = area.getWidth() / static_cast<float> (whites);
+        const auto keys = area;
+        int white = 0;
+        for (int i = 0; i < 12 * octaves; ++i)
+        {
+            if (black[i % 12])
+                continue;
+            const int n = base + i;
+            auto key = juce::Rectangle<float> (keys.getX() + w * static_cast<float> (white), keys.getY(), w, keys.getHeight()).reduced (0.75f, 0.0f);
+            g.setColour ((sent[static_cast<std::size_t> (n)] ? ink : cream.withAlpha (0.92f)).withMultipliedAlpha (alpha));
+            g.fillRoundedRectangle (key, 2.0f);
+            if (played[static_cast<std::size_t> (n)])
+            {
+                g.setColour (juce::Colour (0xffe08a4f).withMultipliedAlpha (alpha));
+                g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ key.getCentreX(), key.getBottom() - 8.0f }));
+            }
+            ++white;
+        }
+        white = 0;
+        for (int i = 0; i < 12 * octaves; ++i)
+        {
+            if (! black[i % 12])
+            {
+                ++white;
+                continue;
+            }
+            const int n = base + i;
+            const auto key = juce::Rectangle<float> (keys.getX() + w * static_cast<float> (white) - w * 0.32f, keys.getY(), w * 0.64f, keys.getHeight() * 0.6f);
+            g.setColour ((sent[static_cast<std::size_t> (n)] ? ink : juce::Colour (0xff2a2629)).withMultipliedAlpha (alpha));
+            g.fillRoundedRectangle (key, 1.5f);
+            if (played[static_cast<std::size_t> (n)])
+            {
+                g.setColour (juce::Colour (0xffe08a4f).withMultipliedAlpha (alpha));
+                g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ key.getCentreX(), key.getBottom() - 6.0f }));
+            }
+        }
+        juce::StringArray names;
+        for (int n = 0; n < 128 && names.size() < 6; ++n)
+            if (sent[static_cast<std::size_t> (n)])
+                names.add (juce::MidiMessage::getMidiNoteName (n, true, true, 4));
+        const int transpose = juce::roundToInt (host.parameterValue (params::auxTranspose));
+        g.setFont (fonts::label (10.0f));
+        g.setColour (cream.withAlpha (0.5f * alpha));
+        juce::String text = names.isEmpty() ? juce::String ("PLAY TO SEE WHAT KONTAKT RECEIVES") : "SENT " + names.joinIntoString (dot());
+        if (transpose != 0)
+            text << dot() << (transpose > 0 ? "+" : "") << transpose << " ST";
+        g.drawText (text, caption, juce::Justification::centredLeft, true);
+    }
+
+    void paintAuxPicture (juce::Graphics& g, juce::Rectangle<float> area, InstrumentHost& host, bool compact, float& playheadX, int* keyboardBase = nullptr)
     {
         playheadX = -1.0f;
         const auto* engine = engineOf (host);
@@ -277,29 +382,19 @@ namespace
         }
         // KONTAKT: its state and name, and its level over time as a bar.
         g.setFont (fonts::label (compact ? 10.0f : 12.0f));
-        juce::String text = "KONTAKT NOT LOADED";   // (once: the readout says nothing more; a click loads it)
-        if (engine != nullptr)
-        {
-            const auto& k = engine->auxInstrument();
-            switch (k.state())
-            {
-                case ExternalInstrument::State::ready:
-                {
-                    const auto names = k.instrumentNames();   // (as far as Kontakt's state names them)
-                    text = (names.isEmpty() ? k.displayName() : names[0]).toUpperCase() + (k.sounding() ? dot() + "PLAYING" : juce::String());
-                    break;
-                }
-                case ExternalInstrument::State::loading: text = juce::String::fromUTF8 ("LOADING KONTAKT\xe2\x80\xa6"); break;
-                case ExternalInstrument::State::missing: text = k.displayName().toUpperCase() + ": NOT FOUND ON THIS COMPUTER"; break;
-                case ExternalInstrument::State::failed: text = "KONTAKT WOULD NOT LOAD"; break;
-                case ExternalInstrument::State::empty: break;
-            }
-        }
+        const juce::String text = kontaktStatus (host);   // (once: the readout says nothing more; a click loads it)
         const bool loaded = engine != nullptr && engine->auxInstrument().state() == ExternalInstrument::State::ready;
         g.setColour (cream.withAlpha (0.7f * alpha));
         if (! loaded)
         {
             g.drawText (text, area, juce::Justification::centred, true);   // (calm: one line, no level bar)
+            return;
+        }
+        if (! compact && keyboardBase != nullptr)
+        {
+            // The rack: the keys it is sent (its name and PLAYING are the picture's title line).
+            area.removeFromTop (4.0f);
+            paintKontaktKeys (g, area, host, *keyboardBase, alpha);
             return;
         }
         g.drawText (text, area.withTrimmedBottom (area.getHeight() * 0.35f), juce::Justification::centred, true);
@@ -489,27 +584,36 @@ namespace
     };
 
     /** The cards' menu dots (three, vertical: the quietest control). */
-    class MenuDots final : public juce::Button
+    /** The strip's X: hides AUX (a view change - D plays on). Its menu (the rack, Reset) is a
+        right-click on the strip. */
+    class HideKey final : public juce::Button
     {
     public:
-        MenuDots() : juce::Button ("D AUX menu")
+        HideKey() : juce::Button ("Hide AUX")
         {
             setWantsKeyboardFocus (true);
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
-            setTitle ("D AUX menu");
+            setTitle ("Hide AUX");
         }
-        void paintButton (juce::Graphics& g, bool over, bool) override
+        void paintButton (juce::Graphics& g, bool over, bool down) override
         {
             const auto r = getLocalBounds().toFloat();
-            if (over)
+            if (over || down)
             {
-                g.setColour (design::colour::text.withAlpha (0.06f));
+                g.setColour (design::colour::text.withAlpha (down ? 0.1f : 0.06f));
                 g.fillRoundedRectangle (r, 6.0f);
             }
-            const float d = 4.2f * r.getHeight() / 36.0f, gap = 8.5f * r.getHeight() / 36.0f;
+            const float half = 5.5f * r.getHeight() / 36.0f;
+            const auto c = r.getCentre();
             g.setColour (design::colour::text.withAlpha (over ? 0.9f : 0.72f));
-            for (int i = -1; i <= 1; ++i)
-                g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (r.getCentre().translated (0.0f, static_cast<float> (i) * gap)));
+            const float stroke = std::max (1.4f, 1.8f * r.getHeight() / 36.0f);
+            g.drawLine (c.x - half, c.y - half, c.x + half, c.y + half, stroke);
+            g.drawLine (c.x - half, c.y + half, c.x + half, c.y - half, stroke);
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (design::colour::text.withAlpha (0.35f));
+                g.drawRoundedRectangle (r.reduced (1.0f), 6.0f, 1.0f);
+            }
         }
     };
 
@@ -556,9 +660,16 @@ namespace
             paintAuxPicture (g, inner, host, true, shownPlayheadX);
             paintDropState (g, b, dropOver, notice != nullptr ? notice() : juce::String(), 9.0f);
         }
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            // A right-click: the strip's menu (never a load).
+            if (e.mods.isPopupMenu())
+                if (auto* strip = getParentComponent())
+                    strip->mouseDown (e.getEventRelativeTo (strip));
+        }
         void mouseUp (const juce::MouseEvent& e) override
         {
-            if (e.mouseWasClicked() && e.getNumberOfClicks() == 1 && getLocalBounds().contains (e.getPosition()))
+            if (! e.mods.isPopupMenu() && e.mouseWasClicked() && e.getNumberOfClicks() == 1 && getLocalBounds().contains (e.getPosition()))
                 clickAuxSurface (host, *this);
         }
         float playheadX() const noexcept { return shownPlayheadX; }
@@ -655,9 +766,12 @@ namespace
             binding::tag (*eqKey, params::auxEqId ("*"));
             eqKey->onClick = [this] { openEq(); };
             addAndMakeVisible (*eqKey);
-            menu = std::make_unique<MenuDots>();
-            menu->setTooltip ("D's menu: hide the strip, its rack, reset");
-            menu->onClick = [this] { showMenu(); };
+            menu = std::make_unique<HideKey>();
+            menu->setTooltip ("Hide AUX (D plays on; show it again from the main menu). Right-click the strip: its rack, Reset");
+            menu->onClick = [this] {
+                if (auto* editor = editorOf (*this))
+                    editor->setAuxStripShown (false);   // (a view change: D plays on)
+            };
             addAndMakeVisible (*menu);
             // D ARP (KONTAKT and keyed NOISE): ARP on / off and FOLLOW A B C, before RACK - the
             // strip's own ceramic keys.
@@ -887,6 +1001,12 @@ namespace
         }
 
         void mouseDoubleClick (const juce::MouseEvent&) override { setAuxRackOpen (*this, ! auxRackOpen (*this)); }
+        /** A right-click on the strip (or on D): its menu - Hide AUX, the rack, Reset. */
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+                createMenu().showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ e.getScreenX(), e.getScreenY(), 1, 1 }));
+        }
 
         // osp::plugin::DropOwner: a file dropped anywhere on the strip is D's (never card C's).
         void dropHover (const juce::StringArray&, bool over) override
@@ -969,7 +1089,6 @@ namespace
             repaint();
         }
 
-        void showMenu() { createMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menu.get())); }
 
         /** D's EQ panel above the strip (the key again closes it). */
         void openEq()
@@ -1047,7 +1166,7 @@ namespace
         std::unique_ptr<MiniKnob> level;   ///< (permanent: not one of the mode's knobs)
         std::unique_ptr<AuxDisplay> display;
         std::unique_ptr<RackKey> rackKey, eqKey;
-        std::unique_ptr<MenuDots> menu;
+        std::unique_ptr<HideKey> menu;   ///< (its X: "menu" to the tests, in the same place)
         std::unique_ptr<ParamKey> arpKey;
         std::array<std::unique_ptr<ParamKey>, 3> laneKeys;
         std::vector<std::unique_ptr<MiniKnob>> knobs;
@@ -1126,6 +1245,7 @@ namespace
         bool dropOver = false;
         juce::String notice;
         int noticeTicks = 0;
+        int keyboardBase = 48;   ///< KONTAKT's keyboard: its lowest C (it follows the notes)
         void mouseUp (const juce::MouseEvent& e) override
         {
             if (e.mouseWasClicked() && getLocalBounds().contains (e.getPosition()))
@@ -1139,12 +1259,14 @@ namespace
             auto top = inner.removeFromTop (16.0f);
             g.setFont (fonts::label (11.0f));
             g.setColour (cream.withAlpha (0.82f));
-            g.drawText (aux::readout (host), top.withTrimmedRight (80.0f), juce::Justification::centredLeft, true);
+            const bool kontaktLoaded = modeOf (host) == 2 && engineOf (host) != nullptr
+                                       && engineOf (host)->auxInstrument().state() == ExternalInstrument::State::ready;
+            g.drawText (kontaktLoaded ? kontaktStatus (host) : aux::readout (host), top.withTrimmedRight (80.0f), juce::Justification::centredLeft, true);
             g.setColour (cream.withAlpha (0.45f));
             g.drawText ("D " + aux::modeName (modeOf (host)), top, juce::Justification::centredRight, false);
             inner.removeFromTop (8.0f);
             float x = -1.0f;
-            paintAuxPicture (g, inner, host, false, x);
+            paintAuxPicture (g, inner, host, false, x, &keyboardBase);
             juce::String shown = noticeTicks > 0 ? notice : juce::String();
             if (shown.isEmpty())
                 if (auto* engine = engineOf (host))
@@ -1154,6 +1276,317 @@ namespace
 
     private:
         InstrumentHost& host;
+    };
+
+    /** The KONTAKT nameplate's keys: OPEN KONTAKT filled (the one you need most), the others
+        outlined on the plate. */
+    class PlateKey final : public juce::Button
+    {
+    public:
+        PlateKey (const juce::String& text, bool filled) : juce::Button (text), primary (filled)
+        {
+            setTitle (text);
+            setWantsKeyboardFocus (true);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        }
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            if (primary)
+            {
+                g.setColour (juce::Colour (0xfff2ece3).withAlpha (down ? 0.85f : (over ? 1.0f : 0.95f)));
+                g.fillRoundedRectangle (r, 4.0f);
+                g.setColour (juce::Colour (0xff3a3236));
+            }
+            else
+            {
+                g.setColour (juce::Colours::white.withAlpha (down ? 0.14f : (over ? 0.08f : 0.0f)));
+                g.fillRoundedRectangle (r, 4.0f);
+                g.setColour (cream.withAlpha (over ? 0.9f : 0.65f));
+                g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+                g.setColour (cream.withAlpha (0.92f));
+            }
+            g.setFont (fonts::make (10.0f, fonts::Weight::medium, 0.1f));
+            g.drawText (getButtonText(), r, juce::Justification::centred, false);
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (aux::onDark());
+                g.drawRoundedRectangle (r.expanded (1.0f), 5.0f, 1.0f);
+            }
+        }
+
+    private:
+        bool primary;
+    };
+
+    /**
+        The KONTAKT rack's nameplate (approved mock-up "Nameplate"): what D's Kontakt is - its
+        instrument's name large (as far as Kontakt's state names it, else Kontakt's), Kontakt's
+        version and latency small - and its keys: OPEN KONTAKT, LOAD... (choose a Kontakt) and
+        UNLOAD. Empty, not found or failed: LOAD KONTAKT. Loading: it says so.
+    */
+    class KontaktPlate final : public juce::Component, private juce::Timer
+    {
+    public:
+        explicit KontaktPlate (InstrumentHost& h) : host (h)
+        {
+            setTitle ("D Kontakt");
+            rebuild();
+            startTimerHz (5);
+        }
+        /** Follows D's Kontakt now (the rack's refresh; its own timer otherwise). */
+        void update() { timerCallback(); }
+
+        void resized() override
+        {
+            auto row = keysRow();
+            if (open != nullptr)
+            {
+                open->setBounds (row.removeFromLeft (juce::roundToInt (row.getWidth() * 0.42f)));
+                row.removeFromLeft (8);
+                const int each = (row.getWidth() - 8) / 2;
+                choose->setBounds (row.removeFromLeft (each));
+                row.removeFromLeft (8);
+                unload->setBounds (row);
+            }
+            else if (load != nullptr)
+            {
+                load->setBounds (row.removeFromLeft (juce::roundToInt (row.getWidth() * 0.5f)));
+                if (unload != nullptr)
+                {
+                    row.removeFromLeft (8);
+                    unload->setBounds (row.removeFromLeft (juce::roundToInt (row.getWidth() * 0.5f)));
+                }
+            }
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (0.5f, 2.5f);
+            g.setColour (juce::Colour (0xff2b2229).withAlpha (0.42f));
+            g.fillRoundedRectangle (r, 6.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.08f));
+            g.drawRoundedRectangle (r, 6.0f, 1.0f);
+            auto* engine = engineOf (host);
+            if (engine == nullptr)
+                return;
+            const auto& k = engine->auxInstrument();
+            auto text = getLocalBounds().toFloat().reduced (14.0f, 9.0f);
+            g.setFont (fonts::label (9.5f));
+            g.setColour (cream.withAlpha (0.62f));
+            g.drawText ("INSTRUMENT", text.removeFromTop (12.0f), juce::Justification::centredLeft, false);
+            text.removeFromTop (3.0f);
+            juce::String name, meta;
+            auto nameColour = juce::Colour (0xfff5efe8);
+            switch (shown)
+            {
+                case ExternalInstrument::State::ready:
+                {
+                    const auto names = k.instrumentNames();
+                    name = names.isEmpty() ? k.displayName() : names[0] + (names.size() > 1 ? "  +" + juce::String (names.size() - 1) : juce::String());
+                    meta = (k.displayName() + dot() + k.version()).trim();
+                    if (k.version().isEmpty())
+                        meta = k.displayName();
+                    if (const double rate = k.sampleRate(); rate > 0.0)
+                        meta << dot() << juce::String (juce::roundToInt (1000.0 * k.latencySamples() / rate)) << " MS LATENCY";
+                    break;
+                }
+                case ExternalInstrument::State::loading: name = juce::String::fromUTF8 ("Loading Kontakt\xe2\x80\xa6"); meta = "THE FIRST TIME CAN TAKE A MOMENT"; break;
+                case ExternalInstrument::State::notInstalled: name = "Kontakt not found"; meta = "LOAD KONTAKT TO CHOOSE WHERE IT IS"; nameColour = juce::Colour (0xffe0a35a); break;
+                case ExternalInstrument::State::missing: name = k.displayName(); meta = "NOT ON THIS COMPUTER"; nameColour = juce::Colour (0xffe0a35a); break;
+                case ExternalInstrument::State::failed: name = "Kontakt would not load"; nameColour = juce::Colour (0xffe07a5a); break;
+                case ExternalInstrument::State::empty: name = "No instrument"; nameColour = cream.withAlpha (0.55f); break;
+            }
+            g.setColour (nameColour);
+            g.setFont (fonts::make (17.0f, fonts::Weight::semibold));
+            g.drawFittedText (name, text.removeFromTop (22.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+            text.removeFromTop (2.0f);
+            g.setColour (cream.withAlpha (0.6f));
+            g.setFont (type::popupLabel (9.5f));
+            g.drawText (meta.toUpperCase(), text.removeFromTop (12.0f), juce::Justification::centredLeft, true);
+        }
+
+    private:
+        juce::Rectangle<int> keysRow() const
+        {
+            return getLocalBounds().reduced (14, 0).withTrimmedTop (getHeight() - 12 - 26).withHeight (26);
+        }
+
+        void rebuild()
+        {
+            auto* engine = engineOf (host);
+            shown = engine != nullptr ? engine->auxInstrument().state() : ExternalInstrument::State::empty;
+            shownNames = engine != nullptr ? engine->auxInstrument().instrumentNames().joinIntoString ("\n") : juce::String();
+            open.reset();
+            choose.reset();
+            unload.reset();
+            load.reset();
+            auto withK = [this] (std::function<void (ExternalInstrument&)> act) {
+                return [this, act] {
+                    if (auto* e = engineOf (host))
+                    {
+                        act (e->auxInstrument());
+                        timerCallback();   // (LOADING at once)
+                    }
+                };
+            };
+            if (shown == ExternalInstrument::State::ready)
+            {
+                open = std::make_unique<PlateKey> ("OPEN KONTAKT", true);
+                open->setTooltip ("Kontakt's own window: choose and set up its instrument there (closing it keeps it playing)");
+                open->onClick = withK ([] (ExternalInstrument& k) { k.openEditor(); });
+                choose = std::make_unique<PlateKey> (juce::String::fromUTF8 ("LOAD\xe2\x80\xa6"), false);
+                choose->setTooltip ("Choose which Kontakt D hosts (another version, or one the search does not find)");
+                choose->onClick = withK ([] (ExternalInstrument& k) { k.chooseFromInterface(); });
+                addAndMakeVisible (*choose);
+                addAndMakeVisible (*open);
+            }
+            else if (shown != ExternalInstrument::State::loading)
+            {
+                load = std::make_unique<PlateKey> ("LOAD KONTAKT", true);
+                load->setTooltip (shown == ExternalInstrument::State::empty ? juce::String ("Host Kontakt (VST3) as D and open its window")
+                                                                            : engine != nullptr ? engine->auxInstrument().message() : juce::String());
+                load->onClick = withK ([] (ExternalInstrument& k) { k.loadFromInterface(); });
+                addAndMakeVisible (*load);
+            }
+            if (shown == ExternalInstrument::State::ready || shown == ExternalInstrument::State::missing)
+            {
+                unload = std::make_unique<PlateKey> ("UNLOAD", false);
+                unload->setTooltip ("Remove Kontakt from D (its notes end)");
+                unload->onClick = withK ([] (ExternalInstrument& k) { k.unload(); });
+                addAndMakeVisible (*unload);
+            }
+            resized();
+            repaint();
+        }
+
+        void timerCallback() override
+        {
+            auto* engine = engineOf (host);
+            if (engine == nullptr)
+                return;
+            const auto& k = engine->auxInstrument();
+            if (k.state() != shown)
+                rebuild();
+            else if (const auto names = k.instrumentNames().joinIntoString ("\n"); names != shownNames)
+            {
+                shownNames = names;
+                repaint();
+            }
+        }
+
+        InstrumentHost& host;
+        ExternalInstrument::State shown = ExternalInstrument::State::empty;
+        juce::String shownNames;
+        std::unique_ptr<PlateKey> open, choose, unload, load;
+    };
+
+    /**
+        PLAYS (the KONTAKT rack): what D's Kontakt plays - your KEYS, or the arpeggio of card A, B
+        or C. One control for D ARP (off / on) and FOLLOW (A / B / C): FOLLOW only ever mattered
+        with D ARP on. The rack's segmented look.
+    */
+    class PlaysSwitch final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+    {
+    public:
+        PlaysSwitch (InstrumentHost& h, juce::Colour accent) : host (h), fill (rackui::palette::activeFill (accent)), text (rackui::palette::activeText (accent))
+        {
+            setTitle ("PLAYS");
+            setWantsKeyboardFocus (true);
+            setMouseClickGrabsKeyboardFocus (false);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            setTooltip ("What D's Kontakt plays: your KEYS, or card A, B or C's arpeggio (even while that card's own is off; the arpeggiator must be on)");
+            shown = current();
+            startTimerHz (10);
+        }
+        /** 0: KEYS; 1..3: ARP A..C. */
+        int current() const
+        {
+            if (host.parameterValue (params::auxArp) < 0.5f)
+                return 0;
+            return 1 + std::clamp (juce::roundToInt (host.parameterValue (params::auxArpFollow)), 0, 2);
+        }
+        void choose (int index)
+        {
+            index = std::clamp (index, 0, 3);
+            if (index == 0)
+                setParameter (host, params::auxArp, 0.0f);
+            else
+            {
+                setParameter (host, params::auxArpFollow, static_cast<float> (index - 1));
+                setParameter (host, params::auxArp, 1.0f);
+            }
+            shown = index;
+            repaint();
+        }
+        void paint (juce::Graphics& g) override
+        {
+            namespace pal = rackui::palette;
+            const auto r = getLocalBounds().toFloat();
+            g.setColour (pal::segmentEdge);
+            g.fillRoundedRectangle (r, 4.0f);
+            g.setColour (pal::segmentFill);
+            g.fillRoundedRectangle (r.reduced (1.0f), 3.0f);
+            {
+                juce::Graphics::ScopedSaveState clip (g);
+                juce::Path inside;
+                inside.addRoundedRectangle (r.reduced (1.0f), 3.0f);
+                g.reduceClipRegion (inside);
+                g.setColour (fill);
+                g.fillRect (segment (shown));
+            }
+            g.setColour (pal::segmentDivider);
+            for (int i = 1; i < 4; ++i)
+                g.fillRect (juce::Rectangle<float> (segment (i).getX() - 0.5f, r.getY() + 1.0f, 1.0f, r.getHeight() - 2.0f));
+            static const char* labels[] = { "KEYS", "ARP A", "ARP B", "ARP C" };
+            for (int i = 0; i < 4; ++i)
+            {
+                g.setFont (fonts::make (10.0f, i == shown ? fonts::Weight::medium : fonts::Weight::regular, 0.0f));
+                g.setColour (i == shown ? text : pal::segmentText);
+                g.drawText (labels[i], segment (i), juce::Justification::centred, false);
+            }
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (pal::focus);
+                g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.5f);
+            }
+        }
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            for (int i = 0; i < 4; ++i)
+                if (segment (i).contains (e.position))
+                    choose (i);
+        }
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            if (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey)
+            {
+                choose (shown + (key == juce::KeyPress::rightKey ? 1 : -1));
+                return true;
+            }
+            return false;
+        }
+        void focusGained (FocusChangeType) override { repaint(); }
+        void focusLost (FocusChangeType) override { repaint(); }
+
+    private:
+        juce::Rectangle<float> segment (int i) const
+        {
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            const float w = r.getWidth() / 4.0f;
+            return { r.getX() + w * static_cast<float> (i), r.getY(), w, r.getHeight() };
+        }
+        void timerCallback() override
+        {
+            if (const int now = current(); now != shown)
+            {
+                shown = now;
+                repaint();
+            }
+        }
+        InstrumentHost& host;
+        juce::Colour fill, text;
+        int shown = 0;
     };
 
     class AuxRack final : public ParameterRack, public osp::plugin::DropOwner
@@ -1184,6 +1617,9 @@ namespace
             ParameterRack::refresh();
             if (auto* g = dynamic_cast<AuxGraph*> (graph()); g != nullptr && g->noticeTicks > 0)
                 --g->noticeTicks;
+            for (auto* child : getChildren())
+                if (auto* plate = dynamic_cast<KontaktPlate*> (child))
+                    plate->update();
         }
 
         explicit AuxRack (InstrumentHost& h) : ParameterRack (h, "AUX", aux::colour(), 0.72f)
@@ -1246,23 +1682,16 @@ namespace
             }
             else
             {
-                selectorComponent (makeKey ("LOAD KONTAKT", [this] {
-                                       if (auto* e = engineOf (host))
-                                           e->auxInstrument().loadFromInterface();
-                                   }),
-                                   "INSTRUMENT", 130);
-                selectorComponent (makeKey ("OPEN", [this] {
-                                       if (auto* e = engineOf (host))
-                                           e->auxInstrument().openEditor();
-                                   }),
-                                   {}, 70);
-                selectorComponent (makeKey ("UNLOAD", [this] {
-                                       if (auto* e = engineOf (host))
-                                           e->auxInstrument().unload();
-                                   }),
-                                   {}, 80);
+                // KONTAKT (approved mock-up "Nameplate"): the instrument, its LEVEL and MIDI
+                // TRANSPOSE, and what it PLAYS (your keys, or a card's arpeggio).
+                customCell (std::make_unique<KontaktPlate> (host), rackui::Slot::threeKnobs);
+                group ({});
                 knob (auxLevel, "LEVEL", textOf (host, auxLevel));
-                arpGroup();
+                steppedKnob (auxTranspose, "TRANSPOSE", textOf (host, auxTranspose));   // (MIDI only: Kontakt's audio is never re-pitched)
+                group ({});
+                auto plays = std::make_unique<PlaysSwitch> (host, synthIdentity (SynthRack::aux).motifInk);
+                binding::markControl (*plays, auxArp);
+                customCell (std::make_unique<rackui::Cell> ("PLAYS", std::move (plays), rackui::Cell::Kind::segments), rackui::Slot::twoKnobs);
             }
             // (Addendum 05: D's MORPH is MORPH TO D in the MORPH rack - the MORPH macro drives it.)
         }
