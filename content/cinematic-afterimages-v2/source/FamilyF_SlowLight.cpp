@@ -234,7 +234,7 @@ void addSlowLight (std::vector<Spec>& l)
                        ampEnv (p, 1.4, 2.0, 0.95, 3.5);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
-                       abyss (p, AbyssVariant::dark, 0.32, 11.0, 40.0, 4000.0);
+                       abyss (p, AbyssVariant::dark, 0.32, 8.0, 40.0, 4000.0);
                        p.analogAmount = 0.35;
                    },
                    nullptr });

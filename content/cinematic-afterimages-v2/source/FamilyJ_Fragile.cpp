@@ -68,7 +68,7 @@ void addFragile (std::vector<Spec>& l)
     l.push_back ({ 93, "After Rain", F,
                    "A soft mallet whose notes drip into a long, dark space.",
                    "Play sparse notes and leave room for the tail.",
-                   "Reflective mallet", "A triangle with a quiet sine-like octave, a fast mallet strike, a twelve-second dark ABYSS.",
+                   "Reflective mallet", "A triangle with a quiet sine-like octave, a fast mallet strike, an eight-second dark ABYSS.",
                    48, 91, Phrase::keys,
                    [] (Patch& p) {
                        p.osc1Level = 0.0;
@@ -84,7 +84,7 @@ void addFragile (std::vector<Spec>& l)
                        p.velocityToFilter = 0.6;
                        p.velocityRangeDb = 18.0;
                        p.polyphony = 16;
-                       abyss (p, AbyssVariant::dark, 0.35, 12.0, 30.0, 4500.0);
+                       abyss (p, AbyssVariant::dark, 0.35, 8.0, 30.0, 4500.0);
                        p.analogAmount = 0.25;
                    },
                    nullptr });
@@ -271,7 +271,7 @@ void addFragile (std::vector<Spec>& l)
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 8;
                        amp2 (p, 1.5);
-                       bloom (p, BloomVariant::wash, 0.4, 10.0);
+                       bloom (p, BloomVariant::wash, 0.4, 8.0);
                        p.analogAmount = 0.3;
                    },
                    nullptr });

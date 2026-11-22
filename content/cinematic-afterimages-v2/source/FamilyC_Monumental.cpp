@@ -123,7 +123,7 @@ void addMonumental (std::vector<Spec>& l)
                        p.lfo.rateHz = 0.4;
                        p.chorusMode = 3;
                        p.polyphony = 8;
-                       abyss (p, AbyssVariant::deep, 0.3, 10.0, 30.0, 4500.0);
+                       abyss (p, AbyssVariant::deep, 0.3, 8.0, 30.0, 4500.0);
                        p.analogAmount = 0.3;
                    },
                    nullptr });
@@ -182,7 +182,7 @@ void addMonumental (std::vector<Spec>& l)
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
                        pulse (p, 0.25, 0.2, 0.5, 0.2);
-                       abyss (p, AbyssVariant::deep, 0.35, 14.0, 40.0, 4000.0);
+                       abyss (p, AbyssVariant::deep, 0.35, 8.0, 40.0, 4000.0);
                        p.analogAmount = 0.35;
                    },
                    nullptr });
@@ -296,7 +296,7 @@ void addMonumental (std::vector<Spec>& l)
                        ampEnv (p, 0.8, 2.0, 1.0, 3.0);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
-                       abyss (p, AbyssVariant::deep, 0.33, 11.0, 30.0, 4000.0);
+                       abyss (p, AbyssVariant::deep, 0.33, 8.0, 30.0, 4000.0);
                        p.analogAmount = 0.4;
                    },
                    nullptr });

@@ -35,7 +35,7 @@
 { 33, 10.55 },   // Ghost Transmission: -29.5 dB (sounding RMS), -15.0 dBFS peak before
 { 34, 7.52 },   // The Last Beacon: -26.5 dB (sounding RMS), -13.4 dBFS peak before
 { 35, 6.52 },   // Halo Drift: -25.5 dB (sounding RMS), -13.8 dBFS peak before
-{ 36, 5.17 },   // Burning Aurora: -24.2 dB (sounding RMS), -11.4 dBFS peak before
+{ 36, 6.02 },   // Burning Aurora: -25.0 dB (sounding RMS), -12.9 dBFS peak before
 { 37, 6.44 },   // Distant Signal: -25.4 dB (sounding RMS), -12.2 dBFS peak before
 { 38, 8.80 },   // Pale Cathedral: -27.8 dB (sounding RMS), -13.4 dBFS peak before
 { 39, 6.13 },   // Blue Ember: -25.1 dB (sounding RMS), -13.7 dBFS peak before
@@ -81,13 +81,13 @@
 { 79, 5.12 },   // Paper Satellites: -25.1 dB (sounding RMS), -12.6 dBFS peak before
 { 80, 9.42 },   // Binary Aurora: -29.4 dB (sounding RMS), -14.5 dBFS peak before
 { 81, 2.04 },   // Signal Grave: -23.0 dB (sounding RMS), -10.7 dBFS peak before
-{ 82, 5.17 },   // Frosted Air: -26.2 dB (sounding RMS), -12.2 dBFS peak before
+{ 82, 7.79 },   // Frosted Air: -28.8 dB (sounding RMS), -14.7 dBFS peak before
 { 83, 4.73 },   // Void Bending: -25.7 dB (sounding RMS), -10.3 dBFS peak before
 { 84, -4.98 },   // Inverted Chapel: -16.0 dB (sounding RMS), -2.9 dBFS peak before
 { 85, 2.00 },   // Blue Static: -23.0 dB (sounding RMS), -13.6 dBFS peak before
 { 86, 3.45 },   // Coal Dust Atmosphere: -24.5 dB (sounding RMS), -12.0 dBFS peak before
 { 87, 6.27 },   // Ring of Ash: -27.3 dB (sounding RMS), -13.0 dBFS peak before
-{ 88, 0.41 },   // Deep Stairwell: -21.4 dB (sounding RMS), -7.0 dBFS peak before
+{ 88, 3.59 },   // Deep Stairwell: -24.6 dB (sounding RMS), -8.8 dBFS peak before
 { 89, -1.08 },   // Forgotten Machine: -19.9 dB (sounding RMS), -8.2 dBFS peak before
 { 90, 3.46 },   // Rusted Sea: -24.5 dB (sounding RMS), -10.6 dBFS peak before
 { 91, 4.16 },   // Glass Raindrops: -25.2 dB (sounding RMS), -9.0 dBFS peak before

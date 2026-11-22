@@ -13,7 +13,7 @@ void addDistance (std::vector<Spec>& l)
     l.push_back ({ 31, "Long Afterlight", F,
                    "A warm, singing lead suspended in an enormous space.",
                    "Play slowly and use the mod wheel; strike harder to open it.",
-                   "Emotional solo line", "Brass-like bloom from velocity, delayed vibrato on the wheel, a nine-second hall kept dark.",
+                   "Emotional solo line", "Brass-like bloom from velocity, delayed vibrato on the wheel, an eight-second hall kept dark.",
                    48, 84, Phrase::lead,
                    [] (Patch& p) {
                        p.osc1Wave = Osc1Wave::saw;
@@ -30,7 +30,7 @@ void addDistance (std::vector<Spec>& l)
                        p.velocityRangeDb = 14.0;
                        mono (p, true, 0.06);
                        vibratoOnWheel (p, 24.0, 5.4, 0.2, 0.5);
-                       room (p, SpaceType::hall, 0.36, 9.0, 60.0, 5200.0, 150.0);
+                       room (p, SpaceType::hall, 0.36, 8.0, 60.0, 5200.0, 150.0);
                        echo (p, EchoType::tape, 0.12, div::eighthDotted, 0.35, 0.4);
                        drift (p, 0.12, 0.5, 0.25, 0.3);
                        p.analogAmount = 0.45;
@@ -88,7 +88,7 @@ void addDistance (std::vector<Spec>& l)
                        p.velocityRangeDb = 12.0;
                        mono (p, true, 0.05);
                        echo (p, EchoType::tape, 0.3, div::quarter, 0.55, 0.35);
-                       abyss (p, AbyssVariant::dark, 0.3, 10.0, 30.0, 4500.0);
+                       abyss (p, AbyssVariant::dark, 0.3, 8.0, 30.0, 4500.0);
                        p.analogAmount = 0.45;
                    },
                    nullptr });
@@ -144,7 +144,7 @@ void addDistance (std::vector<Spec>& l)
                        p.velocityRangeDb = 10.0;
                        mono (p, true, 0.06);
                        vibratoAlways (p, 9.0, 5.0, 0.6, 0.8);
-                       bloom (p, BloomVariant::wash, 0.4, 9.0);
+                       bloom (p, BloomVariant::wash, 0.4, 8.0);
                        p.analogAmount = 0.25;
                    },
                    nullptr });
@@ -173,7 +173,7 @@ void addDistance (std::vector<Spec>& l)
                        mono (p, true, 0.03);
                        drive (p, DriveMode::crunch, 0.25, 0.55, 0.5);
                        echo (p, EchoType::tape, 0.22, div::eighthDotted, 0.45, 0.45, EchoStereo::wide);
-                       abyss (p, AbyssVariant::endless, 0.32, 12.0, 30.0, 6000.0);
+                       abyss (p, AbyssVariant::endless, 0.32, 3.0, 30.0, 6000.0);
                        p.analogAmount = 0.3;
                    },
                    [] (ShellProcessor& s) { route (s, 0, Source::cc1, Dest::cutoff, 35.0f); } });
@@ -197,7 +197,7 @@ void addDistance (std::vector<Spec>& l)
                        ampEnv (p, 0.02, 0.8, 0.9, 1.5);
                        p.velocityRangeDb = 10.0;
                        mono (p, true, 0.04);
-                       room (p, SpaceType::hall, 0.45, 10.0, 160.0, 3000.0, 200.0);
+                       room (p, SpaceType::hall, 0.45, 8.0, 160.0, 3000.0, 200.0);
                        p.analogAmount = 0.3;
                    },
                    nullptr });
@@ -262,7 +262,7 @@ void addDistance (std::vector<Spec>& l)
     l.push_back ({ 40, "Endless Arrival", F,
                    "A powerful analog brass lead that blooms dramatically into a massive hall.",
                    "Strike harder for a bigger bloom; the wheel adds vibrato.",
-                   "Grand arrival theme", "Three saws (one an octave down) with a big velocity-led filter bloom, unstable vintage drift, a nine-second VINTAGE hall.",
+                   "Grand arrival theme", "Three saws (one an octave down) with a big velocity-led filter bloom, unstable vintage drift, an eight-second VINTAGE hall.",
                    48, 84, Phrase::lead,
                    [] (Patch& p) {
                        p.osc1Wave = Osc1Wave::saw;
@@ -281,7 +281,7 @@ void addDistance (std::vector<Spec>& l)
                        mono (p, true, 0.07);
                        vibratoOnWheel (p, 20.0, 5.4, 0.3, 0.5);
                        drift (p, 0.25, 0.5, 0.4, 0.4);
-                       vintage (p, VintageVariant::hall, 0.38, 9.0, 40.0, 6000.0);
+                       vintage (p, VintageVariant::hall, 0.38, 8.0, 40.0, 6000.0);
                        p.analogAmount = 0.6;
                    },
                    nullptr });

@@ -37,7 +37,7 @@ void addDarkMatter (std::vector<Spec>& l)
                        p.lfoCutoff = 6.0;
                        p.polyphony = 4;
                        drift (p, 0.35, 0.4, 0.5, 0.5);
-                       abyss (p, AbyssVariant::dark, 0.38, 12.0, 40.0, 4000.0);
+                       abyss (p, AbyssVariant::dark, 0.38, 8.0, 40.0, 4000.0);
                        p.analogAmount = 0.6;
                    },
                    nullptr });
@@ -67,7 +67,7 @@ void addDarkMatter (std::vector<Spec>& l)
                        ampEnv (p, 2.0, 3.0, 0.95, 5.0);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
-                       abyss (p, AbyssVariant::endless, 0.4, 14.0, 40.0, 7000.0);
+                       abyss (p, AbyssVariant::endless, 0.4, 3.0, 40.0, 7000.0);
                        p.analogAmount = 0.3;
                    },
                    nullptr });
@@ -95,7 +95,7 @@ void addDarkMatter (std::vector<Spec>& l)
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
                        chorusMovement (p, 0.4, 0.3, 0.6, 0.8);
-                       abyss (p, AbyssVariant::inverse, 0.32, 10.0, 30.0, 4500.0);
+                       abyss (p, AbyssVariant::inverse, 0.32, 8.0, 30.0, 4500.0);
                        p.analogAmount = 0.4;
                    },
                    nullptr });
@@ -119,7 +119,7 @@ void addDarkMatter (std::vector<Spec>& l)
                        ampEnv (p, 3.5, 1.0, 1.0, 0.4);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 8;
-                       abyss (p, AbyssVariant::dark, 0.32, 9.0, 30.0, 4000.0);
+                       abyss (p, AbyssVariant::dark, 0.32, 8.0, 30.0, 4000.0);
                        p.analogAmount = 0.35;
                    },
                    nullptr });
@@ -196,7 +196,7 @@ void addDarkMatter (std::vector<Spec>& l)
                        ampEnv (p, 1.0, 2.0, 0.95, 3.5);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
-                       abyss (p, AbyssVariant::deep, 0.3, 10.0, 30.0, 4500.0);
+                       abyss (p, AbyssVariant::deep, 0.3, 8.0, 30.0, 4500.0);
                        p.analogAmount = 0.35;
                    },
                    nullptr });
@@ -204,7 +204,7 @@ void addDarkMatter (std::vector<Spec>& l)
     l.push_back ({ 88, "Deep Stairwell", F,
                    "A dissonant cluster sinking into an endless space.",
                    "Hold one low note; the cluster is built in.",
-                   "Dissonant abyss", "A saw, a minor second above it, and a tritone on card C, into a sixteen-second ENDLESS ABYSS.",
+                   "Dissonant abyss", "A saw, a minor second above it, and a tritone on card C, into an ENDLESS ABYSS that fades over about twenty-five seconds.",
                    28, 60, Phrase::drone,
                    [] (Patch& p) {
                        p.osc1Wave = Osc1Wave::saw;
@@ -221,7 +221,7 @@ void addDarkMatter (std::vector<Spec>& l)
                        ampEnv (p, 1.6, 2.0, 0.95, 4.0);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
-                       abyss (p, AbyssVariant::endless, 0.38, 16.0, 40.0, 4000.0);
+                       abyss (p, AbyssVariant::endless, 0.38, 3.0, 40.0, 4000.0);
                        p.analogAmount = 0.4;
                    },
                    nullptr });
@@ -282,7 +282,7 @@ void addDarkMatter (std::vector<Spec>& l)
                        ampEnv (p, 1.8, 2.0, 0.95, 4.5);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 4;
-                       abyss (p, AbyssVariant::deep, 0.32, 11.0, 30.0, 3500.0);
+                       abyss (p, AbyssVariant::deep, 0.32, 8.0, 30.0, 3500.0);
                        p.analogAmount = 0.4;
                    },
                    nullptr });
