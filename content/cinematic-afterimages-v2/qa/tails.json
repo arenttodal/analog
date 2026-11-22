@@ -1,0 +1,602 @@
+[
+ {
+  "id": "CA2-001",
+  "name": "Deep Current",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-002",
+  "name": "Stone Current",
+  "secondsToSilence": 0.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-003",
+  "name": "Velvet Gravity",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-004",
+  "name": "Blackwater Monolith",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-005",
+  "name": "Ironwood",
+  "secondsToSilence": 0.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-006",
+  "name": "Low Orbit",
+  "secondsToSilence": 0.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-007",
+  "name": "Earthmover",
+  "secondsToSilence": 0.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-008",
+  "name": "Coal Engine",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-009",
+  "name": "Lunar Pressure",
+  "secondsToSilence": 0.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-010",
+  "name": "Deepest Thread",
+  "secondsToSilence": 3.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-011",
+  "name": "Furnace Teeth",
+  "secondsToSilence": 0.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-012",
+  "name": "Rust Circuit",
+  "secondsToSilence": 0.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-013",
+  "name": "Broken Reactor",
+  "secondsToSilence": 0.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-014",
+  "name": "Corrosion Field",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-015",
+  "name": "Blackcoil",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-016",
+  "name": "Voltage Wound",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-017",
+  "name": "Charred Glass",
+  "secondsToSilence": 0.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-018",
+  "name": "Slagline",
+  "secondsToSilence": 0.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-019",
+  "name": "Motor Ghost",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-020",
+  "name": "Gravel Choir",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-021",
+  "name": "Cathedral Below",
+  "secondsToSilence": 7.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-022",
+  "name": "Titan Footfall",
+  "secondsToSilence": 2.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-023",
+  "name": "Gravity Well",
+  "secondsToSilence": 2.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-024",
+  "name": "Cold Continent",
+  "secondsToSilence": 9.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-025",
+  "name": "The Hollow Sun",
+  "secondsToSilence": 2.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-026",
+  "name": "Abyssal Beacon",
+  "secondsToSilence": 11.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-027",
+  "name": "Pressure Vault",
+  "secondsToSilence": 1.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-028",
+  "name": "Black Ice Passage",
+  "secondsToSilence": 3.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-029",
+  "name": "Tectonic Choir",
+  "secondsToSilence": 4.8,
+  "lastSecondDb": -107.3
+ },
+ {
+  "id": "CA2-030",
+  "name": "Heavy Weather",
+  "secondsToSilence": 10.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-031",
+  "name": "Long Afterlight",
+  "secondsToSilence": 6.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-032",
+  "name": "Glass Horizon",
+  "secondsToSilence": 5.0,
+  "lastSecondDb": -100.8
+ },
+ {
+  "id": "CA2-033",
+  "name": "Ghost Transmission",
+  "secondsToSilence": 5.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-034",
+  "name": "The Last Beacon",
+  "secondsToSilence": 6.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-035",
+  "name": "Halo Drift",
+  "secondsToSilence": 7.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-036",
+  "name": "Burning Aurora",
+  "secondsToSilence": 16.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-037",
+  "name": "Distant Signal",
+  "secondsToSilence": 6.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-038",
+  "name": "Pale Cathedral",
+  "secondsToSilence": 6.0,
+  "lastSecondDb": -100.9
+ },
+ {
+  "id": "CA2-039",
+  "name": "Blue Ember",
+  "secondsToSilence": 5.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-040",
+  "name": "Endless Arrival",
+  "secondsToSilence": 8.8,
+  "lastSecondDb": -101.6
+ },
+ {
+  "id": "CA2-041",
+  "name": "Amber Meridian",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-042",
+  "name": "Wounded Voltage",
+  "secondsToSilence": 2.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-043",
+  "name": "Night Swimmer",
+  "secondsToSilence": 2.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-044",
+  "name": "Silk Current",
+  "secondsToSilence": 2.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-045",
+  "name": "Glass Needle",
+  "secondsToSilence": 1.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-046",
+  "name": "Horizon Runner",
+  "secondsToSilence": 0.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-047",
+  "name": "False Sunrise",
+  "secondsToSilence": 2.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-048",
+  "name": "Copper Thread",
+  "secondsToSilence": 1.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-049",
+  "name": "Arc of Breath",
+  "secondsToSilence": 2.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-050",
+  "name": "Soft Defiance",
+  "secondsToSilence": 1.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-051",
+  "name": "Slow Northern Light",
+  "secondsToSilence": 4.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-052",
+  "name": "Weather Memory",
+  "secondsToSilence": 4.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-053",
+  "name": "Submerged Chapel",
+  "secondsToSilence": 7.5,
+  "lastSecondDb": -102.4
+ },
+ {
+  "id": "CA2-054",
+  "name": "Dust Bloom",
+  "secondsToSilence": 4.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-055",
+  "name": "Sleepwalk Circuit",
+  "secondsToSilence": 5.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-056",
+  "name": "The Blue Archive",
+  "secondsToSilence": 2.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-057",
+  "name": "Pale Moss",
+  "secondsToSilence": 4.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-058",
+  "name": "Silent Meridian",
+  "secondsToSilence": 9.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-059",
+  "name": "Glass Fog",
+  "secondsToSilence": 6.5,
+  "lastSecondDb": -101.7
+ },
+ {
+  "id": "CA2-060",
+  "name": "Dawn Without Sun",
+  "secondsToSilence": 6.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-061",
+  "name": "Copper Choir",
+  "secondsToSilence": 3.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-062",
+  "name": "Wooden Horizon",
+  "secondsToSilence": 1.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-063",
+  "name": "Winter Horns",
+  "secondsToSilence": 3.8,
+  "lastSecondDb": -106.3
+ },
+ {
+  "id": "CA2-064",
+  "name": "Signal Brass",
+  "secondsToSilence": 1.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-065",
+  "name": "Amber Strings",
+  "secondsToSilence": 3.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-066",
+  "name": "Low Chamber",
+  "secondsToSilence": 3.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-067",
+  "name": "Fire Procession",
+  "secondsToSilence": 3.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-068",
+  "name": "Hollow Reeds",
+  "secondsToSilence": 1.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-069",
+  "name": "Ashen Fanfare",
+  "secondsToSilence": 4.8,
+  "lastSecondDb": -105.4
+ },
+ {
+  "id": "CA2-070",
+  "name": "Frozen Ensemble",
+  "secondsToSilence": 7.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-071",
+  "name": "Lost Telemetry",
+  "secondsToSilence": 1.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-072",
+  "name": "Hourglass Motor",
+  "secondsToSilence": 1.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-073",
+  "name": "Spindle Light",
+  "secondsToSilence": 4.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-074",
+  "name": "Counting Shadows",
+  "secondsToSilence": 2.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-075",
+  "name": "Circuit Rain",
+  "secondsToSilence": 1.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-076",
+  "name": "Moss Clock",
+  "secondsToSilence": 1.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-077",
+  "name": "Broken Compass",
+  "secondsToSilence": 0.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-078",
+  "name": "Neon Telegraph",
+  "secondsToSilence": 0.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-079",
+  "name": "Paper Satellites",
+  "secondsToSilence": 6.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-080",
+  "name": "Binary Aurora",
+  "secondsToSilence": 1.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-081",
+  "name": "Signal Grave",
+  "secondsToSilence": 8.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-082",
+  "name": "Frosted Air",
+  "secondsToSilence": 22.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-083",
+  "name": "Void Bending",
+  "secondsToSilence": 8.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-084",
+  "name": "Inverted Chapel",
+  "secondsToSilence": 8.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-085",
+  "name": "Blue Static",
+  "secondsToSilence": 5.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-086",
+  "name": "Coal Dust Atmosphere",
+  "secondsToSilence": 5.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-087",
+  "name": "Ring of Ash",
+  "secondsToSilence": 9.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-088",
+  "name": "Deep Stairwell",
+  "secondsToSilence": 26.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-089",
+  "name": "Forgotten Machine",
+  "secondsToSilence": 4.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-090",
+  "name": "Rusted Sea",
+  "secondsToSilence": 9.2,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-091",
+  "name": "Glass Raindrops",
+  "secondsToSilence": 1.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-092",
+  "name": "Hollow Felt",
+  "secondsToSilence": 0.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-093",
+  "name": "After Rain",
+  "secondsToSilence": 6.5,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-094",
+  "name": "Antique Circuit",
+  "secondsToSilence": 1.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-095",
+  "name": "Snowglass",
+  "secondsToSilence": 2.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-096",
+  "name": "Iron Rain",
+  "secondsToSilence": 0.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-097",
+  "name": "Falling Embers",
+  "secondsToSilence": 1.0,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-098",
+  "name": "Black Door",
+  "secondsToSilence": 1.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-099",
+  "name": "Reverse Signal",
+  "secondsToSilence": 2.8,
+  "lastSecondDb": -200.0
+ },
+ {
+  "id": "CA2-100",
+  "name": "Final Exposure",
+  "secondsToSilence": 9.0,
+  "lastSecondDb": -200.0
+ }
+]
