@@ -157,6 +157,13 @@ static juce::String differenceWithinRounding (const juce::XmlElement& a, const j
             if (std::abs (u - v) > 1.0e-6 + 1.0e-5 * std::max (std::abs (u), std::abs (v)))
                 return x->getStringAttribute ("id") + ": file " + juce::String (u, 8) + ", definition " + juce::String (v, 8);
         }
+        else if (x->getNumChildElements() > 0 || y->getNumChildElements() > 0)
+        {
+            // (The state's own element holds the PARAMs: compare inside it the same way.)
+            const auto inner = differenceWithinRounding (*x, *y);
+            if (inner.isNotEmpty())
+                return inner;
+        }
         else if (! x->isEquivalentTo (y, false))
             return x->getTagName() + " differs: file " + x->toString (juce::XmlElement::TextFormat().singleLine()).substring (0, 300)
                    + " | definition " + y->toString (juce::XmlElement::TextFormat().singleLine()).substring (0, 300);
