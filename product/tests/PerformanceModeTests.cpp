@@ -80,6 +80,24 @@ TEST_CASE ("Performance Mode (ANALOG): one key; cards become pictures; the strip
     CHECK (ui.engineCard (0).inPerformance());
     // The picture keeps the dark well's Edit Mode height (the card is shorter instead).
     CHECK (std::abs (ui.engineCard (0).display().getHeight() - editWell) <= 1);
+
+    // The knob row stays (as Edit Mode shows it), under the picture and inside the card.
+    {
+        auto& card = ui.engineCard (0);
+        int knobs = 0;
+        for (int k = 0; k < 5; ++k)
+            if (auto* knob = card.cardKnob (k); knob != nullptr && knob->isVisible())
+            {
+                ++knobs;
+                CHECK (knob->getY() >= card.display().getBottom());
+                CHECK (card.getLocalBounds().contains (knob->getBounds()));
+            }
+        CHECK (knobs >= 3);
+        bool self = true, children = false;
+        card.getInterceptsMouseClicks (self, children);
+        CHECK_FALSE (self);
+        CHECK (children);   // (its knobs still play)
+    }
     CHECK (ui.instrumentHeight() < editHeight);
     CHECK_FALSE (ui.modulationPanel().isVisible());
     CHECK (ui.visibleCardCount() == 2);

@@ -18,6 +18,10 @@
 > - **Owner feedback applied:** the pencil takes FX ROUTING's place in Performance (no gap);
 >   MORPH's lamp hidden while performing. OSP's own editor now has the same Performance Mode
 >   (OSP d07e943d).
+> - **Owner feedback applied (2):** the pictures keep the dark wells' Edit Mode height (the cards
+>   are shorter instead), and the cards keep their knob row (DETUNE BLEND TUNE OCT LEVEL, PAN ...,
+>   exactly as Edit Mode shows them, still playable) under the picture across the card's width;
+>   badge, keys, modifiers and well tools stay hidden (`EngineCard::performanceFoot`).
 > - **Not yet:** QA at 150 % / 200 %, the 8-macro and mixed-USER captures, multi-instance and
 >   playing-while-toggling checks in a DAW (owner).
 
