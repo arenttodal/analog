@@ -10,6 +10,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+
 namespace
 {
     using andor::shell::ShellEditor;
@@ -61,6 +63,7 @@ TEST_CASE ("Performance Mode (ANALOG): one key; cards become pictures; the strip
     ui.refreshNow();
     const auto before = parameterValues (p);
     const float editHeight = ui.instrumentHeight();
+    const int editWell = ui.engineCard (0).display().getHeight();
     auto& key = ui.performanceKey();
     CHECK (key.isVisible());
     CHECK (key.getTitle() == "Enter Performance Mode");
@@ -75,6 +78,9 @@ TEST_CASE ("Performance Mode (ANALOG): one key; cards become pictures; the strip
     CHECK (ui.instrumentHeight() <= editHeight);
     // The cards: pictures only (no badge, keys or knobs); an empty hybrid leaves no column.
     CHECK (ui.engineCard (0).inPerformance());
+    // The picture keeps the dark well's Edit Mode height (the card is shorter instead).
+    CHECK (std::abs (ui.engineCard (0).display().getHeight() - editWell) <= 1);
+    CHECK (ui.instrumentHeight() < editHeight);
     CHECK_FALSE (ui.modulationPanel().isVisible());
     CHECK (ui.visibleCardCount() == 2);
     // The strip: the six core macros, in the panel's order (no USER macro is assigned).
