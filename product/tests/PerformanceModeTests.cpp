@@ -4,6 +4,8 @@
 #include "Design.h"
 #include "PerformanceView.h"
 #include "ShellEditor.h"
+#include "InstrumentFrame.h"
+#include "ShapingPopups.h"
 #include "ShellProcessor.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -140,6 +142,41 @@ TEST_CASE ("Performance Mode (ANALOG): a new editor opens in the view this insta
     }
 }
 
+TEST_CASE ("Performance Mode (ANALOG): two USER macros assigned - the default shows eight, mixed; the flap never covers a name; the strip at 150 % and 200 %", "[analog][performance][ui]")
+{
+    ShellProcessor p;
+    p.prepareToPlay (rate, block);
+    p.setPerformanceView ({});
+    auto* hooks = p.userMacros();
+    REQUIRE (hooks != nullptr);
+    REQUIRE (hooks->assign (p, 0, "drive"));
+    REQUIRE (hooks->assign (p, 2, "space"));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = editorOf (editor);
+    ui.setPerformance (true);
+    for (const float scale : { 1.0f, 1.5f, 2.0f })
+    {
+        editor->setSize (juce::roundToInt (1448.0f * scale), juce::roundToInt (ui.instrumentHeight() * scale));
+        ui.refreshNow();
+        INFO ("scale " << scale);
+        const auto shown = ui.performanceMacrosShown();
+        REQUIRE (shown.size() == 8);
+        CHECK (shown[6] == "user:0");
+        CHECK (shown[7] == "user:2");
+        // (content coordinates: the flap and every name on the same reference grid)
+        const auto flap = ui.performanceFlap().getBounds();
+        for (auto* child : ui.contentForTest().getChildren())
+            if (dynamic_cast<osp::plugin::MacroLabel*> (child) != nullptr && child->isVisible())
+                CHECK_FALSE (child->getBounds().intersects (flap));
+    }
+    // USER 1 cleared: kept in the selection, never a knob.
+    hooks->clear (p, 0);
+    ui.refreshNow();
+    CHECK (ui.performanceMacrosShown().size() == 7);
+    ui.setPerformance (false);
+    p.setPerformanceView ({});
+}
+
 TEST_CASE ("Performance Mode screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-performance]")
 {
     const auto dir = juce::SystemStats::getEnvironmentVariable ("ANALOG_SCREENSHOT_DIR", {});
@@ -166,6 +203,23 @@ TEST_CASE ("Performance Mode screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screensh
     ui.togglePerformancePicker();
     shoot ("performance-02-picker");
     ui.togglePerformancePicker();
+    // Eight: two USER macros assigned (mixed core and USER), at 100 / 150 / 200 %.
+    if (auto* hooks = p.userMacros())
+    {
+        hooks->assign (p, 0, "drive");
+        hooks->assign (p, 2, "space");
+    }
+    ui.refreshNow();
+    shoot ("performance-03-eight-mixed");
+    for (const float scale : { 1.5f, 2.0f })
+    {
+        editor->setSize (juce::roundToInt (1448.0f * scale), juce::roundToInt (ui.instrumentHeight() * scale));
+        ui.refreshNow();
+        const auto file = out.getChildFile ("performance-04-eight-" + juce::String (juce::roundToInt (scale * 100)) + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), stream);
+    }
     ui.setPerformance (false);
     p.setPerformanceView ({});
 }
