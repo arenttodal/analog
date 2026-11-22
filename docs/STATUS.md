@@ -22,6 +22,9 @@
 >   are shorter instead), and the cards keep their knob row (DETUNE BLEND TUNE OCT LEVEL, PAN ...,
 >   exactly as Edit Mode shows them, still playable) under the picture across the card's width;
 >   badge, keys, modifiers and well tools stay hidden (`EngineCard::performanceFoot`).
+> - **Owner feedback applied (3):** ARP and SUB stay switchable while performing: the key by the
+>   keyboard keeps its two lights (a click anywhere on a row switches it), without chevrons;
+>   nothing opens their settings (`ArpControl::setLightsOnly`).
 > - **Not yet:** QA at 150 % / 200 %, the 8-macro and mixed-USER captures, multi-instance and
 >   playing-while-toggling checks in a DAW (owner).
 

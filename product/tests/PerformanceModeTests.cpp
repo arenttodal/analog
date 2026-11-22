@@ -101,6 +101,32 @@ TEST_CASE ("Performance Mode (ANALOG): one key; cards become pictures; the strip
     CHECK (ui.instrumentHeight() < editHeight);
     CHECK_FALSE (ui.modulationPanel().isVisible());
     CHECK (ui.visibleCardCount() == 2);
+    // ARP and SUB: their lights still switch them (a click anywhere on a row); nothing opens.
+    {
+        auto& arp = ui.arpControl();
+        REQUIRE (arp.isVisible());
+        CHECK (arp.isLightsOnly());
+        const bool arpWas = arp.isOn();
+        const bool subWas = arp.isSecondRowOn();
+        const auto upperRow = arp.chevronArea().getCentre().roundToInt();   // (where the chevron was)
+        const auto lowerRow = arp.secondRowArea().getCentre().roundToInt();
+        juce::ModifierKeys none;
+        auto clickAt = [&] (juce::Point<int> at) {
+            const auto pos = at.toFloat();
+            arp.mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, none, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                             &arp, &arp, juce::Time::getCurrentTime(), pos, juce::Time::getCurrentTime(), 1, false));
+        };
+        clickAt (upperRow);
+        CHECK (arp.isOn() != arpWas);
+        clickAt (lowerRow);
+        CHECK (arp.isSecondRowOn() != subWas);
+        CHECK_FALSE (ui.arpInlinePanel().isVisible());   // (the editor never opened)
+        CHECK (ui.instrumentHeight() < editHeight);
+        clickAt (upperRow);
+        clickAt (lowerRow);
+        CHECK (arp.isOn() == arpWas);
+        CHECK (arp.isSecondRowOn() == subWas);
+    }
     // The strip: the six core macros, in the panel's order (no USER macro is assigned).
     CHECK (ui.performanceMacrosShown().size() == 6);
     // The flap sits inside the macro panel's top edge (the panel never grows for it).
@@ -132,6 +158,7 @@ TEST_CASE ("Performance Mode (ANALOG): one key; cards become pictures; the strip
     ui.refreshNow();
     CHECK_FALSE (ui.performanceShown());
     CHECK_FALSE (ui.engineCard (0).inPerformance());
+    CHECK_FALSE (ui.arpControl().isLightsOnly());
     CHECK (ui.modulationPanel().isVisible());
     CHECK (ui.instrumentHeight() == editHeight);
     CHECK (ui.visibleCardCount() == 3);
