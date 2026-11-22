@@ -1,5 +1,23 @@
 # ANDOR ANALOG — status
 
+> **22 Nov 2026, PERFORMANCE MODE R1 in ANDOR ANALOG - first working version (branch
+> `claude/performance-mode`; spec `docs/specs/PERFORMANCE_MODE_R1.md`; shared code in OSP's
+> `claude/performance-mode`):**
+> - The header's gauge key (after FX ROUTING) switches to Performance: the sources' pictures alone
+>   (no badges, roots, keys, knobs or well tools; an empty card C leaves no column), one row of
+>   the chosen macros across the whole macro housing (MORPH's lamp with its name), the keyboard and
+>   wheels; the modulation panel, CORE/USER tabs, arpeggiator, racks, AUX strip and utility keys
+>   hidden but unchanged (the pencil key brings each back as it was). The flap at the housing's
+>   top right opens "Performance Macros" (choose up to eight core and USER macros, order them,
+>   Reset to Default; USER macros not assigned say "Assign in Edit Mode" and never show a knob).
+> - Kept per instance in the session (never in a preset; loading one keeps the view) and as this
+>   computer's preference (Interface.xml). A new editor opens in the view it was left in.
+> - Tests `[analog][performance]`: key, cards, strip, flap inside the housing, picker (choose,
+>   order, never none, reset), Edit restored (height, panels, cards), every parameter and a
+>   rendered phrase identical; screenshots `[screenshots-performance]`.
+> - **Not yet:** OSP's own editor (Gate 7), scales / multi-instance / DAW checks (owner), the
+>   screenshot matrix (1/2/3 sources, 6/8/<6 macros, mixed USER).
+
 > **22 Nov 2026, the KONTAKT rack ("Nameplate", owner-approved) and the AUX strip's X (ANALOG only):**
 > - **KONTAKT rack:** the selector row keeps only MODE. A nameplate (a three-knob-wide cell, the
 >   shared opt-in `Slot::threeKnobs`) shows the instrument's name large (from Kontakt's state, else

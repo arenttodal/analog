@@ -408,6 +408,7 @@ const ProductInfo& productInfo()
         // No header MIX for now (the cards' own levels and the routing view's balance them): the
         // preset bar takes its room, SAVE and ROUTING after it as keys of one size.
         p.headerMix = false;
+        p.performanceMode = true;   // (PERFORMANCE MODE R1: the header's Edit / Performance key)
         p.crossCloseKeys = true;   // (the ARPEGGIATOR closes with the racks' X)
         // MORPH's own on / off beside its name (off on a new instance; a preset or a session keeps its own).
         p.macroSwitches = { { 0, andor::analog::params::morphEnabled, "Enable / bypass Morph." } };
