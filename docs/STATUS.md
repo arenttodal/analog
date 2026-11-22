@@ -15,8 +15,11 @@
 > - Tests `[analog][performance]`: key, cards, strip, flap inside the housing, picker (choose,
 >   order, never none, reset), Edit restored (height, panels, cards), every parameter and a
 >   rendered phrase identical; screenshots `[screenshots-performance]`.
-> - **Not yet:** OSP's own editor (Gate 7), scales / multi-instance / DAW checks (owner), the
->   screenshot matrix (1/2/3 sources, 6/8/<6 macros, mixed USER).
+> - **Owner feedback applied:** the pencil takes FX ROUTING's place in Performance (no gap);
+>   MORPH's lamp hidden while performing. OSP's own editor now has the same Performance Mode
+>   (OSP d07e943d).
+> - **Not yet:** QA at 150 % / 200 %, the 8-macro and mixed-USER captures, multi-instance and
+>   playing-while-toggling checks in a DAW (owner).
 
 > **22 Nov 2026, the KONTAKT rack ("Nameplate", owner-approved) and the AUX strip's X (ANALOG only):**
 > - **KONTAKT rack:** the selector row keeps only MODE. A nameplate (a three-knob-wide cell, the
