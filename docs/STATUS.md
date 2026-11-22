@@ -1,5 +1,28 @@
 # ANDOR ANALOG — status
 
+> **22 Nov 2026, card C with Kontakt: a nameplate, LOADING, its window by itself (ANALOG only):**
+> - **The well (owner-approved mock-up):** empty - one LOAD KONTAKT key; loading - a spinner,
+>   "LOADING KONTAKT..." and "THE FIRST TIME CAN TAKE A MOMENT"; loaded - the instrument's name
+>   large, Kontakt's version small, OPEN KONTAKT and UNLOAD, a quiet MORPH - GLOBAL tag. The
+>   explanatory lines are gone; only a problem is put in words (not found: one short line, the
+>   folders searched in the key's tooltip). The nameplate paints the empty well under itself, so
+>   the silent waveform line and grid no longer run through its text.
+> - **LOADING at once, then its window by itself:** LOAD KONTAKT (card C, and D's KONTAKT) turns
+>   the state `loading` before Kontakt starts (the well paints it first), then loads (asking where
+>   Kontakt is if it is not found) and opens Kontakt's own window - no second OPEN step.
+> - **Faster later loads:** what Kontakt reported when found is remembered beside its location and
+>   used while the file is unchanged, so later loads skip the scan (a VST3 scan starts the plug-in
+>   once just to describe it). A changed file is scanned again; one that no longer loads is
+>   forgotten and scanned.
+> - **Instrument names:** read from Kontakt's saved state (.nki / .nkm file names, 8-bit or UTF-16)
+>   when it loads and when its window closes or goes to the background; two names show as
+>   "+ second", more as "+ N more"; none found: Kontakt's own name. D's readout shows the first.
+>   **OWNER TEST:** whether real Kontakt's state names its instruments this way (if not, the card
+>   shows "Kontakt" and its version), and how long the first and later loads take on Windows/macOS.
+> - Tests: `[external][loading]` (LOADING, then loaded with its window open; pressed twice;
+>   an instance gone before its load), `[external][names]`, the remembered description in
+>   `[external][finder]`; the card's UI test; screenshots `[screenshots-external]` (+ loading).
+
 > **22 Nov 2026, a saved project reopens with its preset's name (ANALOG and OSP, every platform):**
 > the session kept the sound but not which preset was open, so reopening a project showed "Init"
 > (OSP: a starting state's name). The session (never a preset file) now records the open preset's

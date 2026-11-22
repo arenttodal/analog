@@ -283,7 +283,13 @@ namespace
             const auto& k = engine->auxInstrument();
             switch (k.state())
             {
-                case ExternalInstrument::State::ready: text = k.displayName().toUpperCase() + (k.sounding() ? dot() + "PLAYING" : juce::String()); break;
+                case ExternalInstrument::State::ready:
+                {
+                    const auto names = k.instrumentNames();   // (as far as Kontakt's state names them)
+                    text = (names.isEmpty() ? k.displayName() : names[0]).toUpperCase() + (k.sounding() ? dot() + "PLAYING" : juce::String());
+                    break;
+                }
+                case ExternalInstrument::State::loading: text = juce::String::fromUTF8 ("LOADING KONTAKT\xe2\x80\xa6"); break;
                 case ExternalInstrument::State::missing: text = k.displayName().toUpperCase() + ": NOT FOUND ON THIS COMPUTER"; break;
                 case ExternalInstrument::State::failed: text = "KONTAKT WOULD NOT LOAD"; break;
                 case ExternalInstrument::State::empty: break;
@@ -340,7 +346,7 @@ namespace
                 if (k.state() == ExternalInstrument::State::ready)
                     k.openEditor();
                 else
-                    k.loadKontaktOrAsk();
+                    k.loadFromInterface();   // (LOADING, then its window opens by itself)
             }
     }
 
@@ -1242,7 +1248,7 @@ namespace
             {
                 selectorComponent (makeKey ("LOAD KONTAKT", [this] {
                                        if (auto* e = engineOf (host))
-                                           e->auxInstrument().loadKontaktOrAsk();
+                                           e->auxInstrument().loadFromInterface();
                                    }),
                                    "INSTRUMENT", 130);
                 selectorComponent (makeKey ("OPEN", [this] {

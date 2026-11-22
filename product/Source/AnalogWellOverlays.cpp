@@ -237,10 +237,27 @@ namespace
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
             setWantsKeyboardFocus (true);
         }
+        /** The well's main key (LOAD KONTAKT, OPEN KONTAKT): light, so it reads first. */
+        bool primary = false;
+
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
             const auto r = getLocalBounds().toFloat().reduced (1.0f);
             const float radius = std::min (6.0f, 0.24f * r.getHeight());
+            if (primary)
+            {
+                g.setColour (juce::Colour (0xffe9e2d6).withAlpha (over || down ? 1.0f : 0.94f));
+                g.fillRoundedRectangle (r, radius);
+                if (hasKeyboardFocus (false))
+                {
+                    g.setColour (accent);
+                    g.drawRoundedRectangle (r.reduced (0.5f), radius, 1.5f);
+                }
+                g.setColour (juce::Colour (0xff2f2c2a));
+                g.setFont (type::popupLabel (juce::jlimit (10.0f, 12.0f, 0.42f * r.getHeight())));
+                g.drawText (getButtonText(), r.reduced (6.0f, 0.0f), juce::Justification::centred, false);
+                return;
+            }
             g.setColour (cellFill.withAlpha (over || down ? 1.0f : 0.92f));
             g.fillRoundedRectangle (r, radius);
             g.setColour (hasKeyboardFocus (false) || over ? accent : cellEdge);
@@ -261,11 +278,12 @@ namespace
         return host.generatedSource (1, s) && s.placeholder.isNotEmpty();
     }
 
-    /** A transparent area over an empty card C's well: a click browses for a recording. */
     /**
-        EXPERIMENT (docs/experiments/KONTAKT_EXTERNAL_MORPH.md): card C's well when it is EXTERNAL -
-        the hosted instrument's state in words, LOAD KONTAKT / OPEN KONTAKT / UNLOAD, its activity
-        light, and what MORPH does here (GLOBAL, EXPERIMENTAL). Kontakt's own window does the rest.
+        EXPERIMENT (docs/experiments/KONTAKT_EXTERNAL_MORPH.md): card C's well when it is EXTERNAL.
+        Calm, like a nameplate: empty - one LOAD KONTAKT key; loading - a spinner and "LOADING
+        KONTAKT" (its first load can take seconds), then Kontakt's own window opens by itself;
+        loaded - the instrument's name large (as far as Kontakt's state names it, else Kontakt's),
+        Kontakt's version small, OPEN KONTAKT and UNLOAD. Only a problem is put in words.
     */
     class ExternalPanel final : public juce::Component, private juce::Timer
     {
@@ -274,12 +292,12 @@ namespace
         {
             setTitle ("Card C external instrument");
             auto* engine = engineOf (host);
-            const auto state = engine != nullptr ? engine->externalInstrument().state() : ExternalInstrument::State::empty;
-            const bool ready = state == ExternalInstrument::State::ready;
-            if (ready)
+            shownState = engine != nullptr ? engine->externalInstrument().state() : ExternalInstrument::State::empty;
+            if (shownState == ExternalInstrument::State::ready)
             {
                 open = std::make_unique<WellAction> ("OPEN KONTAKT", accent);
-                open->setTooltip ("Kontakt's own window: load and set up the instrument there (closing it keeps it playing)");
+                open->primary = true;
+                open->setTooltip ("Kontakt's own window: choose and set up its instrument there (closing it keeps it playing)");
                 open->onClick = [this] {
                     if (auto* e = engineOf (host))
                         e->externalInstrument().openEditor();
@@ -293,29 +311,44 @@ namespace
                 };
                 addAndMakeVisible (*unload);
             }
-            else
+            else if (shownState != ExternalInstrument::State::loading)
             {
                 load = std::make_unique<WellAction> ("LOAD KONTAKT", accent);
-                load->setTooltip ("Host Kontakt (VST3) as card C: it plays card C's notes, and MORPH blends it with A + B");
+                load->primary = true;
+                load->setTooltip ("Host Kontakt (VST3) as card C and open its window: it plays card C's notes, and MORPH blends it with A + B");
+                if (shownState == ExternalInstrument::State::notInstalled && engine != nullptr)
+                    load->setTooltip (engine->externalInstrument().message());
                 load->onClick = [this] {
                     if (auto* e = engineOf (host))
-                        e->externalInstrument().loadKontaktOrAsk();
+                    {
+                        auto& ext = e->externalInstrument();
+                        ext.loadFromInterface();
+                        if (ext.state() == ExternalInstrument::State::loading)
+                        {
+                            // (LOADING at once, here, before Kontakt holds the thread)
+                            shownState = ext.state();
+                            load->setVisible (false);
+                            startTimerHz (30);
+                            repaint();
+                        }
+                    }
                 };
                 addAndMakeVisible (*load);
             }
-            startTimerHz (10);
+            if (engine != nullptr)
+                shownNames = engine->externalInstrument().instrumentNames().joinIntoString ("\n");
+            startTimerHz (shownState == ExternalInstrument::State::loading ? 30 : 4);
         }
 
         void resized() override
         {
-            auto r = getLocalBounds();
-            auto keys = r.withTrimmedTop (std::max (0, r.getHeight() / 2 - 14)).withHeight (28);
+            const auto plate = layout();
             if (load != nullptr)
-                load->setBounds (keys.withSizeKeepingCentre (std::min (keys.getWidth(), 170), 28));
+                load->setBounds (plate.keys.withSizeKeepingCentre (std::min (plate.keys.getWidth(), 170), plate.keys.getHeight()));
             if (open != nullptr)
             {
-                auto row = keys.withSizeKeepingCentre (std::min (keys.getWidth(), 250), 28);
-                open->setBounds (row.removeFromLeft (150));
+                auto row = plate.keys.withSizeKeepingCentre (std::min (plate.keys.getWidth(), 268), plate.keys.getHeight());
+                open->setBounds (row.removeFromLeft (row.getWidth() * 150 / 268));
                 row.removeFromLeft (8);
                 unload->setBounds (row);
             }
@@ -327,74 +360,138 @@ namespace
             if (engine == nullptr)
                 return;
             const auto& ext = engine->externalInstrument();
-            auto r = getLocalBounds().toFloat();
-            auto top = r.removeFromTop (18.0f);
-            // The state, in words.
-            juce::String line, detail;
-            auto colour = cream.withAlpha (0.85f);
-            switch (ext.state())
+            // The well, empty, under the nameplate: no waveform line or grid through its text (the
+            // same drawing as the card's own well, which this panel covers below the TYPE row).
+            if (auto* parent = getParentComponent())
+                design::draw::well (g, parent->getLocalBounds().toFloat().translated (static_cast<float> (-getX()), static_cast<float> (-getY())).reduced (0.5f), 9.0f,
+                                    design::colour::wellB);
+            const auto plate = layout();
+            const auto centred = juce::Justification::centred;
+            switch (shownState)
             {
                 case ExternalInstrument::State::ready:
-                    line = ext.displayName() + (ext.version().isNotEmpty() ? "  " + ext.version() : juce::String());
-                    detail = juce::String::fromUTF8 (ext.sounding() ? "LOADED \xc2\xb7 SOUNDING" : "LOADED \xc2\xb7 choose and set up its instrument in OPEN KONTAKT");
+                {
+                    const auto names = ext.instrumentNames();
+                    juce::String title = names.isEmpty() ? ext.displayName() : names[0], second;
+                    if (names.size() == 2)
+                        second = "+ " + names[1];
+                    else if (names.size() > 2)
+                        second = "+ " + juce::String (names.size() - 1) + " more";
+                    const auto version = names.isEmpty() ? ext.version() : (ext.displayName() + " " + ext.version()).trim();
+                    g.setColour (juce::Colour (0xfff1ebe2));
+                    g.setFont (fonts::make (plate.k * 22.0f, fonts::Weight::semibold));
+                    g.drawFittedText (title, plate.title.toNearestInt(), centred, 1, 0.75f);
+                    if (second.isNotEmpty())
+                    {
+                        g.setColour (cream.withAlpha (0.78f));
+                        g.setFont (fonts::make (plate.k * 13.0f, fonts::Weight::medium));
+                        g.drawFittedText (second, plate.second.toNearestInt(), centred, 1, 0.8f);
+                    }
+                    g.setColour (cream.withAlpha (0.5f));
+                    g.setFont (type::popupLabel (plate.k * 10.5f));
+                    g.drawText (version.toUpperCase(), plate.version, centred, true);
+                    // MORPH here: GLOBAL (a quiet tag).
+                    g.setColour (accent.withAlpha (0.7f));
+                    g.setFont (type::popupLabel (9.5f));
+                    g.drawText (juce::String::fromUTF8 ("MORPH \xc2\xb7 GLOBAL"), getLocalBounds().toFloat().reduced (14.0f, 8.0f).removeFromBottom (14.0f), juce::Justification::centredLeft, true);
                     break;
+                }
+                case ExternalInstrument::State::loading:
+                {
+                    const float size = plate.k * 30.0f;
+                    const auto ring = juce::Rectangle<float> (size, size).withCentre ({ getWidth() * 0.5f, plate.title.getCentreY() });
+                    g.setColour (cream.withAlpha (0.14f));
+                    g.drawEllipse (ring.reduced (1.5f), 2.5f);
+                    juce::Path arc;
+                    const float turn = static_cast<float> (juce::Time::getMillisecondCounter() % 1000u) / 1000.0f * juce::MathConstants<float>::twoPi;
+                    arc.addCentredArc (ring.getCentreX(), ring.getCentreY(), size * 0.5f - 1.5f, size * 0.5f - 1.5f, 0.0f, turn, turn + 1.6f, true);
+                    g.setColour (accent);
+                    g.strokePath (arc, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                    g.setColour (cream.withAlpha (0.85f));
+                    g.setFont (type::popupLabel (plate.k * 11.5f));
+                    g.drawText (juce::String::fromUTF8 ("LOADING KONTAKT\xe2\x80\xa6"), plate.version.translated (0.0f, plate.k * 6.0f), centred, true);
+                    g.setColour (cream.withAlpha (0.45f));
+                    g.setFont (type::popupLabel (plate.k * 10.0f));
+                    g.drawText ("THE FIRST TIME CAN TAKE A MOMENT", plate.version.translated (0.0f, plate.k * 24.0f), centred, true);
+                    break;
+                }
                 case ExternalInstrument::State::notInstalled:
-                    line = "KONTAKT NOT FOUND";
-                    detail = ext.message();
-                    colour = juce::Colour (0xffe0a35a);
-                    break;
                 case ExternalInstrument::State::missing:
-                    line = "MISSING: " + ext.displayName();
-                    detail = ext.message();
-                    colour = juce::Colour (0xffe0a35a);
-                    break;
                 case ExternalInstrument::State::failed:
-                    line = "ERROR";
-                    detail = ext.message();
-                    colour = juce::Colour (0xffe07a5a);
+                {
+                    // Only a problem in words: what, and (small) why.
+                    const auto title = shownState == ExternalInstrument::State::notInstalled ? juce::String ("KONTAKT NOT FOUND")
+                                       : shownState == ExternalInstrument::State::missing    ? "NOT ON THIS COMPUTER: " + ext.displayName().toUpperCase()
+                                                                                              : juce::String ("KONTAKT WOULD NOT LOAD");
+                    g.setColour (juce::Colour (shownState == ExternalInstrument::State::failed ? 0xffe07a5a : 0xffe0a35a));
+                    g.setFont (type::popupLabel (plate.k * 12.0f));
+                    g.drawFittedText (title, plate.title.toNearestInt(), centred, 1, 0.8f);
+                    g.setColour (cream.withAlpha (0.55f));
+                    g.setFont (fonts::label (plate.k * 10.0f));
+                    // (not found: one short line - the folders searched are in the key's tooltip)
+                    const auto why = shownState == ExternalInstrument::State::notInstalled ? juce::String ("PRESS LOAD KONTAKT TO CHOOSE WHERE IT IS") : ext.message();
+                    g.drawFittedText (why, plate.second.getUnion (plate.version).toNearestInt(), centred, 2, 0.9f);
                     break;
+                }
                 case ExternalInstrument::State::empty:
-                    line = juce::String::fromUTF8 ("EXTERNAL \xc2\xb7 NO INSTRUMENT");
-                    detail = "Card C plays a Kontakt instrument: LOAD KONTAKT, then choose it in Kontakt's window.";
-                    break;
+                    break;   // (just its key)
             }
-            g.setFont (type::popupLabel (12.0f));
-            g.setColour (colour);
-            g.drawText (line, top.withTrimmedLeft (16.0f), juce::Justification::centredLeft, true);
-            // Its activity light.
-            const auto light = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ top.getX() + 4.5f, top.getCentreY() });
-            g.setColour (ext.sounding() ? accent.brighter (0.2f) : cream.withAlpha (0.12f));
-            g.fillEllipse (light);
-            g.setFont (fonts::label (10.0f));
-            g.setColour (cream.withAlpha (0.6f));
-            g.drawFittedText (detail, r.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2, 1.0f);
-            // MORPH here: GLOBAL, EXPERIMENTAL.
-            auto foot = getLocalBounds().toFloat().removeFromBottom (34.0f);
-            g.setFont (type::popupLabel (10.5f));
-            g.setColour (accent.withAlpha (0.95f));
-            g.drawText (juce::String::fromUTF8 ("MORPH \xc2\xb7 GLOBAL \xc2\xb7 EXPERIMENTAL"), foot.removeFromTop (16.0f), juce::Justification::centredLeft, true);
-            g.setFont (fonts::label (10.0f));
-            g.setColour (cream.withAlpha (0.55f));
-            g.drawText ("Global spectral morph between A+B and Kontakt C (its method controls do not apply).", foot, juce::Justification::centredLeft, true);
         }
 
     private:
+        struct Plate
+        {
+            float k = 1.0f;
+            juce::Rectangle<float> title, second, version;
+            juce::Rectangle<int> keys;
+        };
+
+        /** The nameplate's rows, centred on the well (this panel sits under its TYPE row). */
+        Plate layout() const
+        {
+            Plate p;
+            const float blockHeight = 26.0f + 4.0f + 16.0f + 6.0f + 14.0f + 14.0f + 28.0f;
+            p.k = juce::jlimit (0.7f, 1.0f, (static_cast<float> (getHeight()) - 16.0f) / blockHeight);
+            const float centreY = juce::jlimit (blockHeight * p.k * 0.5f, std::max (blockHeight * p.k * 0.5f, getHeight() - blockHeight * p.k * 0.5f),
+                                                getHeight() * 0.5f - 19.0f);
+            auto r = juce::Rectangle<float> (0.0f, centreY - 0.5f * blockHeight * p.k, static_cast<float> (getWidth()), blockHeight * p.k).reduced (22.0f, 0.0f);
+            if (shownState == ExternalInstrument::State::empty)
+            {
+                p.keys = juce::Rectangle<float> (r.getX(), centreY - 14.0f, r.getWidth(), 28.0f).toNearestInt();
+                return p;
+            }
+            p.title = r.removeFromTop (26.0f * p.k);
+            r.removeFromTop (4.0f * p.k);
+            p.second = r.removeFromTop (16.0f * p.k);
+            r.removeFromTop (6.0f * p.k);
+            p.version = r.removeFromTop (14.0f * p.k);
+            r.removeFromTop (14.0f * p.k);
+            p.keys = r.removeFromTop (28.0f).toNearestInt();
+            return p;
+        }
+
         void timerCallback() override
         {
-            if (auto* engine = engineOf (host))
-                if (const bool now = engine->externalInstrument().sounding(); now != shownSounding)
-                {
-                    shownSounding = now;
-                    repaint();
-                }
+            auto* engine = engineOf (host);
+            if (engine == nullptr)
+                return;
+            if (shownState == ExternalInstrument::State::loading)
+                repaint();   // (the spinner)
+            if (const auto names = engine->externalInstrument().instrumentNames().joinIntoString ("\n"); names != shownNames)
+            {
+                shownNames = names;
+                repaint();
+            }
         }
 
         InstrumentHost& host;
         juce::Colour accent;
         std::unique_ptr<WellAction> load, open, unload;
-        bool shownSounding = false;
+        ExternalInstrument::State shownState = ExternalInstrument::State::empty;
+        juce::String shownNames;
     };
 
+    /** A transparent area over an empty card C's well: a click browses for a recording. */
     class BrowseArea final : public juce::Component, public juce::SettableTooltipClient
     {
     public:
@@ -827,7 +924,7 @@ namespace
             if (layerKeys != nullptr)
                 layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
             if (externalPanel != nullptr)
-                externalPanel->setBounds (getLocalBounds().withTrimmedTop (6 + 22 + 10).reduced (14, 8));
+                externalPanel->setBounds (getLocalBounds().withTrimmedTop (6 + 22 + 10));   // (it paints the empty well under itself)
             if (rhythmKey != nullptr)
             {
                 // Under the TYPE dropdown, left of the layer keys (their room kept while hidden).

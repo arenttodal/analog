@@ -15,6 +15,7 @@
 #include <map>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 using andor::analog::ExternalInstrument;
@@ -1027,6 +1028,10 @@ TEST_CASE ("EXTERNAL UI screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][
         save ("external-00-empty");
         engineOf (p).externalInstrument().loadKontakt();   // (not installed here)
         save ("external-01-kontakt-not-found");
+        ExternalInstrument::setLoadDelayForTesting (60000);   // (held at LOADING for the picture)
+        engineOf (p).externalInstrument().loadFromInterface();
+        save ("external-01b-loading");
+        ExternalInstrument::setLoadDelayForTesting (-1);
         {
             SurrogateOverride env;
             engineOf (p).externalInstrument().loadKontakt();
@@ -1178,6 +1183,8 @@ namespace
             folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("andor-kontakt-finder-" + juce::String (juce::Time::currentTimeMillis()));
             ExternalInstrument::setSettingsFolderForTesting (folder);
             ExternalInstrument::setKontaktChooserForTesting ([] { return juce::File(); });
+            ExternalInstrument::setLoadDelayForTesting (-1);              // (LOAD loads at once: no message loop needed)
+            ExternalInstrument::setEditorsOnDesktopForTesting (false);   // (LOAD opens its window: off the desktop here)
         }
         void testRunEnded (const Catch::TestRunStats&) override { folder.deleteRecursively(); }
 
@@ -1269,4 +1276,153 @@ TEST_CASE ("KONTAKT FINDER: choosing the file inside a bundle uses the bundle; a
     CHECK (host.state() == ExternalInstrument::State::failed);
     CHECK (host.message().contains ("Not An Instrument.vst3"));
     root.deleteRecursively();
+}
+
+
+//==============================================================================
+// Card C with Kontakt: LOADING while it starts, its window by itself once loaded, the
+// instruments named from its state, and what it reported remembered (no second scan).
+#if ! (JUCE_MAC || JUCE_IOS || JUCE_ANDROID)
+namespace juce::detail
+{
+bool dispatchNextMessageOnSystemQueue (bool returnIfNoPendingMessages);   // (juce_events: Linux / Windows)
+}
+#endif
+
+TEST_CASE ("KONTAKT LOAD: from the interface it says LOADING at once, then loads and opens its own window by itself", "[external][loading]")
+{
+    SurrogateOverride env;
+    ExternalInstrument host;
+    host.prepare (testRate, testBlock);
+    // At once (the tests' default): loaded, and its window open - no second OPEN step.
+    bool finished = false;
+    host.loadFromInterface ([&] { finished = true; });
+    CHECK (finished);
+    REQUIRE (host.state() == ExternalInstrument::State::ready);
+    CHECK (host.editorOpen());
+    host.unload();
+    CHECK_FALSE (host.editorOpen());
+    // As in the instrument: LOADING first (the well paints it), the load a moment later.
+    ExternalInstrument::setLoadDelayForTesting (20);
+    finished = false;
+    host.loadFromInterface ([&] { finished = true; });
+    CHECK (host.state() == ExternalInstrument::State::loading);
+    CHECK_FALSE (finished);
+    host.loadFromInterface();   // (pressed again while loading: nothing more)
+    CHECK (host.state() == ExternalInstrument::State::loading);
+   #if ! (JUCE_MAC || JUCE_IOS || JUCE_ANDROID)
+    const auto until = juce::Time::getMillisecondCounter() + 10000;
+    while (! finished && juce::Time::getMillisecondCounter() < until)
+    {
+        while (juce::detail::dispatchNextMessageOnSystemQueue (true))
+        {
+        }
+        juce::Thread::sleep (2);
+    }
+    CHECK (finished);
+    CHECK (host.state() == ExternalInstrument::State::ready);
+    CHECK (host.editorOpen());
+   #endif
+    ExternalInstrument::setLoadDelayForTesting (-1);
+    // An instance gone before its load: nothing runs on it (the delayed load checks it is alive).
+    {
+        ExternalInstrument::setLoadDelayForTesting (5);
+        auto gone = std::make_unique<ExternalInstrument>();
+        gone->loadFromInterface();
+        gone.reset();
+        ExternalInstrument::setLoadDelayForTesting (-1);
+       #if ! (JUCE_MAC || JUCE_IOS || JUCE_ANDROID)
+        const auto later = juce::Time::getMillisecondCounter() + 100;
+        while (juce::Time::getMillisecondCounter() < later)
+        {
+            while (juce::detail::dispatchNextMessageOnSystemQueue (true))
+            {
+            }
+            juce::Thread::sleep (2);
+        }
+       #endif
+    }
+}
+
+TEST_CASE ("KONTAKT NAMES: the .nki / .nkm names in a state, 8-bit or UTF-16, each once, without their folders", "[external][names]")
+{
+    auto block = [] (std::initializer_list<juce::MemoryBlock> parts) {
+        juce::MemoryBlock all;
+        for (const auto& p : parts)
+            all.append (p.getData(), p.getSize());
+        return all;
+    };
+    auto text = [] (const char* t) { return juce::MemoryBlock (t, std::strlen (t)); };
+    auto utf16 = [] (const juce::String& t) {
+        juce::MemoryBlock m;
+        for (auto c : t)
+        {
+            const char two[2] = { static_cast<char> (c & 0xff), static_cast<char> ((c >> 8) & 0xff) };
+            m.append (two, 2);
+        }
+        return m;
+    };
+    const char binary[] = { 0, 1, 2, static_cast<char> (0xff), 0 };
+    const auto state = block ({ juce::MemoryBlock (binary, sizeof (binary)), text ("C:\\Libraries\\Giant\\Instruments\\The Giant.nki"), juce::MemoryBlock (binary, sizeof (binary)),
+                                text ("/Users/me/Kontakt/Cinematic Strings.NKI"), juce::MemoryBlock (binary, sizeof (binary)),
+                                text ("The Giant.nki"),                 // (again: once)
+                                text ("x/not.nkix"),                    // (another extension)
+                                text ("/.nki"),                         // (no name)
+                                utf16 ("D:\\Lib\\Felt Piano.nki"), juce::MemoryBlock (binary, sizeof (binary)),
+                                text ("/Multis/Score Setup.nkm") });
+    const auto names = ExternalInstrument::instrumentNamesIn (state.getData(), state.getSize());
+    REQUIRE (names.size() == 4);
+    CHECK (names[0] == "The Giant");
+    CHECK (names[1] == "Cinematic Strings");
+    CHECK (names[2] == "Score Setup");
+    CHECK (names[3] == "Felt Piano");
+    CHECK (ExternalInstrument::instrumentNamesIn (binary, sizeof (binary)).isEmpty());
+    CHECK (ExternalInstrument::instrumentNamesIn (nullptr, 0).isEmpty());
+    // A loaded stand-in that names none: no names (the card shows the plug-in's own name).
+    SurrogateOverride env;
+    ExternalInstrument host;
+    host.prepare (testRate, testBlock);
+    REQUIRE (host.loadKontakt());
+    CHECK (host.instrumentNames().isEmpty());
+    host.unload();
+    CHECK (host.instrumentNames().isEmpty());
+}
+
+TEST_CASE ("KONTAKT FINDER: what it reported is remembered - the next LOAD uses it without scanning; a changed file is scanned again", "[external][finder]")
+{
+    const juce::File surrogate (ANDOR_TEST_INSTRUMENT_VST3);
+    ExternalInstrument host;
+    host.prepare (testRate, testBlock);
+    REQUIRE (host.loadKontaktFrom (surrogate));
+    REQUIRE (ExternalInstrument::rememberedDescriptionFile().existsAsFile());
+    // A remembered description, renamed: used as it is (no scan would ever call it that).
+    juce::PluginDescription d;
+    {
+        const auto xml = juce::XmlDocument::parse (ExternalInstrument::rememberedDescriptionFile());
+        REQUIRE (xml != nullptr);
+        REQUIRE (d.loadFromXml (*xml));
+    }
+    const auto realName = d.name;
+    d.name = "Remembered Kontakt";
+    d.createXml()->writeTo (ExternalInstrument::rememberedDescriptionFile());
+    juce::PluginDescription found;
+    juce::String why;
+    REQUIRE (host.locate (found, why));
+    CHECK (found.name == "Remembered Kontakt");
+    // The file changed since (an update): scanned again.
+    d.lastFileModTime = d.lastFileModTime - juce::RelativeTime::days (3);
+    d.createXml()->writeTo (ExternalInstrument::rememberedDescriptionFile());
+    REQUIRE (host.locate (found, why));
+    CHECK (found.name == realName);
+    // A remembered description that does not load: forgotten, Kontakt scanned and loaded.
+    d.lastFileModTime = surrogate.getLastModificationTime();
+    d.uniqueId = 12345;
+    d.deprecatedUid = 12345;
+    d.name = "Remembered Kontakt";
+    d.createXml()->writeTo (ExternalInstrument::rememberedDescriptionFile());
+    ExternalInstrument other;
+    other.prepare (testRate, testBlock);
+    CHECK (other.loadKontakt());
+    CHECK (other.state() == ExternalInstrument::State::ready);
+    ExternalInstrument::rememberKontakt (juce::File());
 }

@@ -39,6 +39,7 @@ public:
         empty,          ///< nothing chosen
         notInstalled,   ///< LOAD found no Kontakt
         ready,          ///< loaded, processing
+        loading,        ///< LOAD pressed: it is being found and loaded (the first time can take seconds)
         missing,        ///< a saved one that is not on this computer (its state kept)
         failed          ///< it would not load (the message says why)
     };
@@ -76,10 +77,19 @@ public:
         every host), or none. */
     static juce::File rememberedKontakt();
     static void rememberKontakt (const juce::File& vst3);
+    /** Where what Kontakt reported when it was last found is kept (its PluginDescription): the
+        next LOAD uses it instead of scanning Kontakt again, while the file is unchanged. */
+    static juce::File rememberedDescriptionFile();
     /** Tests: where the remembered location is kept (empty: the user's application data). */
     static void setSettingsFolderForTesting (const juce::File& folder);
     /** Tests: answers "where is Kontakt?" instead of a file browser (empty File: cancelled). */
     static void setKontaktChooserForTesting (std::function<juce::File()> answer);
+    /** Tests: how long loadFromInterface shows LOADING before it loads (-1: loads at once,
+        without the message loop). The interface's default leaves the well time to paint it. */
+    static void setLoadDelayForTesting (int milliseconds);
+    /** Tests: whether new instances put the instrument's own window on the desktop (a display
+        with no window manager cannot). */
+    static void setEditorsOnDesktopForTesting (bool onDesktop);
     /** Finds Kontakt (or the ANDOR_EXTERNAL_INSTRUMENT_VST3 override): the remembered location
         first, then the search. False: `why` says why, naming the folders searched. */
     bool locate (juce::PluginDescription& found, juce::String& why);
@@ -92,6 +102,11 @@ public:
         asks where it is (opening in the standard VST3 folder) and the choice is remembered, so
         nobody is asked twice. `done` runs on the message thread when it has finished. */
     void loadKontaktOrAsk (std::function<void()> done = nullptr);
+    /** The interface's LOAD KONTAKT (card C, D): the state turns `loading` at once, so the well
+        says so while Kontakt starts (its first load can take seconds); then it loads (asking where
+        Kontakt is if it is not found) and, loaded, opens Kontakt's own window by itself - no
+        second OPEN step. `done` runs on the message thread when it has finished. */
+    void loadFromInterface (std::function<void()> done = nullptr);
     /** Loads one plugin (its native state applied if given). */
     bool load (const juce::PluginDescription& description, const juce::MemoryBlock* nativeState = nullptr);
     /** UNLOAD: its notes end, it fades out (10 ms) and is retired; the saved identity goes too. */
@@ -113,6 +128,14 @@ public:
     juce::String displayName() const { return description.name.isNotEmpty() ? description.name : savedName; }
     juce::String version() const { return description.version; }
     juce::String message() const { return statusMessage; }
+    /** The instruments (or multi) loaded inside Kontakt, by name, as far as its saved state
+        names them (.nki / .nkm file names); empty when it names none. Read when it loads, when
+        its window closes or goes to the background. */
+    juce::StringArray instrumentNames() const { return instruments; }
+    /** Reads instrumentNames() again from the instrument's state (message thread). */
+    void refreshInstrumentNames();
+    /** The .nki / .nkm names in a plugin state (8-bit or UTF-16 text), each once, in order. */
+    static juce::StringArray instrumentNamesIn (const void* data, std::size_t size);
     /** Recently heard (a peak above -70 dBFS in the last second): the card's activity light. */
     bool sounding() const noexcept { return lastPeak.load (std::memory_order_relaxed) > 3.0e-4f; }
 
@@ -169,6 +192,11 @@ private:
     void runInstance (const Live& live, const juce::MidiBuffer& midi, int from, int n, float* left, float* right, float gain, bool endNotes,
                       const Transport& transport) noexcept;
     void logForwarded (const juce::MidiBuffer& midi, int n) noexcept;
+    /** Shows `loading`, then runs `work` once the well has had time to paint it. */
+    void showLoadingThen (std::function<void()> work);
+    /** Asks where Kontakt is (a file browser; the tests' answer); `answer` gets the choice (or
+        an empty File: cancelled), on the message thread. */
+    void askWhereKontaktIs (std::function<void (const juce::File&)> answer);
 
     juce::AudioPluginFormatManager formats;
     osp::ModelExchange<Live> exchange;
@@ -176,10 +204,11 @@ private:
     juce::PluginDescription description;   ///< the one loaded (message thread)
     std::unique_ptr<juce::XmlElement> savedXml;   ///< a restored one that could not load (kept as saved)
     juce::String savedName, statusMessage;
+    juce::StringArray instruments;
     std::shared_ptr<juce::FileChooser> chooser;
     State currentState = State::empty;
     std::unique_ptr<EditorWindow> editorWindow;
-    bool editorsOnDesktop = true;
+    bool editorsOnDesktop;
     double rate = 48000.0;
     int maxBlock = 512;
     std::atomic<int> latency { 0 };

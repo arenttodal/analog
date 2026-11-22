@@ -37,6 +37,12 @@ public:
         }
     }
     void closeButtonPressed() override { owner.closeEditor(); }   // (the instrument stays loaded)
+    void activeWindowStatusChanged() override
+    {
+        // Back to ANALOG: what is loaded in Kontakt now names card C (an instrument chosen there).
+        if (! isActiveWindow())
+            owner.refreshInstrumentNames();
+    }
     bool keyPressed (const juce::KeyPress& key) override
     {
         if (key == juce::KeyPress::escapeKey)
@@ -66,7 +72,31 @@ juce::Optional<juce::AudioPlayHead::PositionInfo> ExternalInstrument::SnapshotHe
 }
 
 //==============================================================================
-ExternalInstrument::ExternalInstrument()
+namespace
+{
+    bool& editorsOnDesktopDefault()
+    {
+        static bool onDesktop = true;
+        return onDesktop;
+    }
+    int& loadDelayMilliseconds()
+    {
+        static int milliseconds = 120;   // (enough for the well to paint LOADING before Kontakt blocks the thread)
+        return milliseconds;
+    }
+}
+
+void ExternalInstrument::setEditorsOnDesktopForTesting (bool onDesktop)
+{
+    editorsOnDesktopDefault() = onDesktop;
+}
+
+void ExternalInstrument::setLoadDelayForTesting (int milliseconds)
+{
+    loadDelayMilliseconds() = milliseconds;
+}
+
+ExternalInstrument::ExternalInstrument() : editorsOnDesktop (editorsOnDesktopDefault())
 {
     formats.addDefaultFormats();
 }
@@ -159,6 +189,40 @@ namespace
         return folder.getChildFile ("Kontakt location.txt");
     }
 
+    /** What Kontakt reported when it was last found (its PluginDescription), beside its
+        location: the next LOAD loads it straight away instead of scanning it again (a VST3 scan
+        starts the plug-in once just to describe it). */
+    juce::File kontaktDescriptionSetting()
+    {
+        return kontaktSetting().getSiblingFile ("Kontakt description.xml");
+    }
+
+    void rememberDescription (const juce::PluginDescription& d)
+    {
+        const auto setting = kontaktDescriptionSetting();
+        if (setting.getParentDirectory().createDirectory())
+            if (const auto xml = d.createXml())
+                xml->writeTo (setting);
+    }
+
+    void forgetDescription()
+    {
+        kontaktDescriptionSetting().deleteFile();
+    }
+
+   #if JUCE_PLUGINHOST_VST3
+    /** The remembered description of `vst3`, if it still describes it (same file, not changed
+        since: an updated Kontakt is scanned again). */
+    bool rememberedDescription (const juce::File& vst3, juce::PluginDescription& d)
+    {
+        const auto xml = juce::XmlDocument::parse (kontaktDescriptionSetting());
+        if (xml == nullptr || ! d.loadFromXml (*xml) || ! d.isInstrument)
+            return false;
+        return juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (d.fileOrIdentifier) == vst3 && vst3.exists()
+               && ! juce::VST3PluginFormat().pluginNeedsRescanning (d);
+    }
+   #endif
+
     /** The .vst3 a chosen path belongs to: the bundle when the file inside it was chosen. */
     juce::File bundleOf (const juce::File& chosen)
     {
@@ -202,6 +266,11 @@ void ExternalInstrument::rememberKontakt (const juce::File& vst3)
         setting.replaceWithText (vst3.getFullPathName());
 }
 
+juce::File ExternalInstrument::rememberedDescriptionFile()
+{
+    return kontaktDescriptionSetting();
+}
+
 bool ExternalInstrument::locate (juce::PluginDescription& found, juce::String& why)
 {
    #if JUCE_PLUGINHOST_VST3
@@ -213,7 +282,11 @@ bool ExternalInstrument::locate (juce::PluginDescription& found, juce::String& w
     else
     {
         if (const auto remembered = rememberedKontakt(); remembered.exists())
+        {
+            if (rememberedDescription (remembered, found))
+                return true;
             candidates.add (remembered);
+        }
         for (const auto& f : findKontaktIn (folders))
             candidates.addIfNotAlreadyThere (f);
     }
@@ -226,11 +299,15 @@ bool ExternalInstrument::locate (juce::PluginDescription& found, juce::String& w
             {
                 found = *t;
                 if (std::getenv (overrideVariable) == nullptr || *std::getenv (overrideVariable) == 0)
+                {
                     rememberKontakt (file);
+                    rememberDescription (found);
+                }
                 return true;
             }
     }
-    why = candidates.isEmpty() ? "Kontakt (VST3) was not found in " + folders.joinIntoString ("; ") + ". Choose where it is."
+    why = candidates.isEmpty() ? (folders.isEmpty() ? juce::String ("Kontakt (VST3) was not found. Choose where it is.")
+                                                    : "Kontakt (VST3) was not found in " + folders.joinIntoString ("; ") + ". Choose where it is.")
                                : "Kontakt was found but did not report an instrument (" + candidates[0].getFullPathName() + ").";
     return false;
    #else
@@ -254,6 +331,7 @@ bool ExternalInstrument::loadKontaktFrom (const juce::File& chosen)
             if (! load (description))
                 return false;
             rememberKontakt (file);
+            rememberDescription (description);
             return true;
         }
     currentState = State::failed;
@@ -276,22 +354,71 @@ void ExternalInstrument::loadKontaktOrAsk (std::function<void()> done)
             done();
         return;
     }
-    if (const auto& answer = chooserForTesting(); answer != nullptr)
-    {
-        if (const auto result = answer(); result != juce::File())
+    askWhereKontaktIs ([this, done] (const juce::File& result) {
+        if (result != juce::File())
             loadKontaktFrom (result);
         if (done != nullptr)
             done();
+    });
+}
+
+void ExternalInstrument::askWhereKontaktIs (std::function<void (const juce::File&)> answer)
+{
+    if (const auto& testAnswer = chooserForTesting(); testAnswer != nullptr)
+    {
+        answer (testAnswer());
         return;
     }
     const auto folders = searchFolders();
     chooser = std::make_shared<juce::FileChooser> ("Where is Kontakt? Choose its .vst3", folders.isEmpty() ? juce::File() : juce::File (folders[0]), "*.vst3");
     const auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectDirectories;
-    chooser->launchAsync (flags, [this, done] (const juce::FileChooser& fc) {
-        if (const auto result = fc.getResult(); result != juce::File())
-            loadKontaktFrom (result);
+    chooser->launchAsync (flags, [answer = std::move (answer)] (const juce::FileChooser& fc) { answer (fc.getResult()); });
+}
+
+void ExternalInstrument::showLoadingThen (std::function<void()> work)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    currentState = State::loading;
+    statusMessage = "Loading Kontakt";
+    if (loadDelayMilliseconds() < 0)
+    {
+        work();
+        return;
+    }
+    juce::Timer::callAfterDelay (loadDelayMilliseconds(), [weak = juce::WeakReference<ExternalInstrument> (this), work = std::move (work)] {
+        if (weak.get() != nullptr)
+            work();
+    });
+}
+
+void ExternalInstrument::loadFromInterface (std::function<void()> done)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    if (currentState == State::loading)
+        return;   // (already on its way)
+    auto finished = [this, done] {
+        if (currentState == State::ready)
+            openEditor();   // (Kontakt's window at once: choosing its instrument is the next step)
         if (done != nullptr)
             done();
+    };
+    showLoadingThen ([this, finished] {
+        if (loadKontakt() || currentState != State::notInstalled)
+        {
+            finished();
+            return;
+        }
+        askWhereKontaktIs ([this, finished] (const juce::File& chosen) {
+            if (chosen == juce::File())
+            {
+                finished();   // (cancelled: still not found, said in words)
+                return;
+            }
+            showLoadingThen ([this, chosen, finished] {
+                loadKontaktFrom (chosen);
+                finished();
+            });
+        });
     });
 }
 
@@ -299,6 +426,16 @@ bool ExternalInstrument::loadKontakt()
 {
     juce::PluginDescription found;
     juce::String why;
+    if (! locate (found, why))
+    {
+        currentState = State::notInstalled;
+        statusMessage = why;
+        return false;
+    }
+    if (load (found))
+        return true;
+    // A remembered description that no longer loads (Kontakt moved or replaced): scan again.
+    forgetDescription();
     if (! locate (found, why))
     {
         currentState = State::notInstalled;
@@ -335,7 +472,75 @@ bool ExternalInstrument::load (const juce::PluginDescription& d, const juce::Mem
     savedXml.reset();
     currentState = State::ready;
     statusMessage = d.name + (d.version.isNotEmpty() ? " " + d.version : juce::String());
+    refreshInstrumentNames();
     return true;
+}
+
+void ExternalInstrument::refreshInstrumentNames()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    const auto& live = exchange.latestModel();
+    if (currentState != State::ready || live == nullptr || live->instance == nullptr)
+    {
+        instruments.clear();
+        return;
+    }
+    juce::MemoryBlock native;
+    live->instance->getStateInformation (native);
+    instruments = instrumentNamesIn (native.getData(), native.getSize());
+}
+
+juce::StringArray ExternalInstrument::instrumentNamesIn (const void* data, std::size_t size)
+{
+    // Kontakt keeps the instruments it has loaded in its state, by file (".../The Giant.nki"),
+    // as 8-bit or UTF-16 text. Each name: the characters before the extension, back to a path
+    // separator or anything that is not text.
+    juce::StringArray names;
+    const auto* bytes = static_cast<const unsigned char*> (data);
+    if (bytes == nullptr)
+        return names;
+    auto isNameChar = [] (juce::juce_wchar c) {
+        return c >= 32 && c != '/' && c != '\\' && c != ':' && c != '"' && c != '<' && c != '>' && c != '|' && c != '*' && c != '?' && c != 127;
+    };
+    auto lower = [] (unsigned char c) { return static_cast<unsigned char> (c >= 'A' && c <= 'Z' ? c + 32 : c); };
+    for (const int stride : { 1, 2 })   // (8-bit text; UTF-16 little-endian)
+    {
+        const std::size_t extensionBytes = 4 * static_cast<std::size_t> (stride);
+        for (std::size_t i = 0; i + extensionBytes <= size; ++i)
+        {
+            auto at = [&] (std::size_t k) { return bytes[i + k * static_cast<std::size_t> (stride)]; };
+            if (at (0) != '.' || lower (at (1)) != 'n' || lower (at (2)) != 'k' || (lower (at (3)) != 'i' && lower (at (3)) != 'm'))
+                continue;
+            if (stride == 2 && (bytes[i + 1] != 0 || bytes[i + 3] != 0 || bytes[i + 5] != 0 || bytes[i + 7] != 0))
+                continue;
+            // (the extension must end there: ".nki" and not ".nkix")
+            if (const std::size_t after = i + extensionBytes; after + static_cast<std::size_t> (stride) <= size)
+            {
+                const juce::juce_wchar next = stride == 1 ? bytes[after] : static_cast<juce::juce_wchar> (bytes[after] | (bytes[after + 1] << 8));
+                if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9'))
+                    continue;
+            }
+            juce::String name;
+            std::size_t start = i;
+            for (int n = 0; n < 160 && start >= static_cast<std::size_t> (stride); ++n)
+            {
+                const std::size_t k = start - static_cast<std::size_t> (stride);
+                const juce::juce_wchar c = stride == 1 ? bytes[k] : static_cast<juce::juce_wchar> (bytes[k] | (bytes[k + 1] << 8));
+                if (! isNameChar (c) || (stride == 1 && c >= 128))
+                    break;
+                start = k;
+            }
+            if (stride == 1)
+                name = juce::String (reinterpret_cast<const char*> (bytes + start), i - start);
+            else
+                for (std::size_t k = start; k < i; k += 2)
+                    name += juce::String::charToString (static_cast<juce::juce_wchar> (bytes[k] | (bytes[k + 1] << 8)));
+            name = name.trim();
+            if (name.isNotEmpty())
+                names.addIfNotAlreadyThere (name);
+        }
+    }
+    return names;
 }
 
 void ExternalInstrument::unload()
@@ -348,6 +553,7 @@ void ExternalInstrument::unload()
     savedXml.reset();
     savedName.clear();
     statusMessage.clear();
+    instruments.clear();
     currentState = State::empty;
 }
 
@@ -435,7 +641,11 @@ void ExternalInstrument::openEditor()
 void ExternalInstrument::closeEditor()
 {
     // (the window owns the editor: deleting it deletes only the editor, never the instrument)
-    editorWindow.reset();
+    if (editorWindow != nullptr)
+    {
+        editorWindow.reset();
+        refreshInstrumentNames();   // (an instrument chosen in Kontakt's window names card C)
+    }
 }
 
 std::unique_ptr<juce::XmlElement> ExternalInstrument::toXml() const
@@ -495,6 +705,7 @@ void ExternalInstrument::restore (const juce::XmlElement& xml)
     if (exchange.latestModel() != nullptr)
         publish (nullptr);
     description = {};
+    instruments.clear();
     savedXml = std::make_unique<juce::XmlElement> (xml);
     savedName = xml.getStringAttribute ("name", d.name);
     if (! found)
