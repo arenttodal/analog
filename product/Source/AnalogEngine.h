@@ -1,4 +1,6 @@
 #pragma once
+#include <bitset>
+#include <array>
 
 #include <map>
 
@@ -469,6 +471,20 @@ private:
     void failAuxLoad (std::uint64_t generation, const juce::String& why);
     ExternalInstrument auxKontakt;
     juce::MidiBuffer auxMidi;                 ///< D KONTAKT's lane, this block (preallocated)
+    /** D KONTAKT's MIDI TRANSPOSE: the pitch each played key was sent as (-1: not sounding, -2:
+        transposed past 0..127 and not sent), so its note-off and aftertouch follow it however
+        the transpose changes meanwhile. Audio thread only. */
+    std::array<std::int16_t, 128> auxSentPitch {};
+    /** What D KONTAKT is sounding: the keys played and the pitches sent (bit n: note n), for the
+        rack's keyboard. Written by the audio thread, read by the interface. */
+    std::array<std::atomic<std::uint64_t>, 2> auxPlayedBits {}, auxSentBits {};
+
+public:
+    /** The keys D KONTAKT is playing and the pitches they were sent as (the rack's keyboard). */
+    std::bitset<128> auxKeysPlayed() const noexcept;
+    std::bitset<128> auxPitchesSent() const noexcept;
+
+private:
     std::vector<float> auxExtL, auxExtR;      ///< its stereo bus, this block
     std::atomic<float>* auxEnabledValue = nullptr;
     std::atomic<float>* auxModeValue = nullptr;

@@ -142,6 +142,10 @@ TEST_CASE ("AUX strip: shown and hidden from the main menu; the cards stay, what
     CHECK (ui.auxStripComponent() == nullptr);
     const auto cards = ui.engineCard (0).getBounds();
     const auto cardC = ui.engineCard (1).getBounds();
+    // (and inside them: the wells keep their height - the strip never brings back the row under
+    // the knobs the cards dropped, which left an empty band and shorter wells)
+    const auto wellA = ui.cardDisplayBounds (0), wellB = ui.cardDisplayBounds (2), wellC = ui.cardDisplayBounds (1);
+    REQUIRE_FALSE (wellA.isEmpty());
     const int modY = ui.modulationPanel().getY();
     const float height = ui.instrumentHeight();
     const auto before = render (p, 0.5);
@@ -155,6 +159,9 @@ TEST_CASE ("AUX strip: shown and hidden from the main menu; the cards stay, what
     CHECK (shift == Catch::Approx (76.0f + 18.0f));
     CHECK (ui.engineCard (0).getBounds() == cards);   // (the cards keep their places and size)
     CHECK (ui.engineCard (1).getBounds() == cardC);
+    CHECK (ui.cardDisplayBounds (0) == wellA);
+    CHECK (ui.cardDisplayBounds (2) == wellB);
+    CHECK (ui.cardDisplayBounds (1) == wellC);
     CHECK (ui.modulationPanel().getY() == modY + juce::roundToInt (shift));
     CHECK (ui.instrumentHeight() == Catch::Approx (height + shift));
     const auto strip = ui.auxStripComponent()->getBounds();
@@ -170,6 +177,7 @@ TEST_CASE ("AUX strip: shown and hidden from the main menu; the cards stay, what
     CHECK_FALSE (p.auxStripShown());
     CHECK_FALSE (ui.auxStripComponent()->isVisible());
     CHECK (ui.modulationPanel().getY() == modY);   // (every place exactly back)
+    CHECK (ui.cardDisplayBounds (0) == wellA);
     CHECK (ui.instrumentHeight() == Catch::Approx (height));
     CHECK (identical (before, render (p, 0.5)));
 }

@@ -6,6 +6,8 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -1158,4 +1160,113 @@ TEST_CASE ("EXTERNAL G6: cost - 4 / 8 / 16 notes, native against the hosted stan
             WARN (notes << " notes: native (OSC 3) " << a << " %, hosted stand-in " << b << " %, + GLOBAL MORPH 50 % " << c << " % of one core; loading it: +"
                         << (after - before) << " kB resident");
         }
+}
+
+
+//==============================================================================
+// LOAD KONTAKT asks where Kontakt is when it is not found: in the tests nobody answers a file
+// browser, so the question is answered here (cancelled unless a test says otherwise), and the
+// remembered location lives in a scratch folder, never the user's own settings.
+namespace
+{
+    class KontaktFinderSetup final : public Catch::EventListenerBase
+    {
+    public:
+        using Catch::EventListenerBase::EventListenerBase;
+        void testRunStarting (const Catch::TestRunInfo&) override
+        {
+            folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("andor-kontakt-finder-" + juce::String (juce::Time::currentTimeMillis()));
+            ExternalInstrument::setSettingsFolderForTesting (folder);
+            ExternalInstrument::setKontaktChooserForTesting ([] { return juce::File(); });
+        }
+        void testRunEnded (const Catch::TestRunStats&) override { folder.deleteRecursively(); }
+
+    private:
+        juce::File folder;
+    };
+}
+CATCH_REGISTER_LISTENER (KontaktFinderSetup)
+
+namespace
+{
+    /** A fake plug-in folder: `relative` paths, each made a folder (a VST3 bundle is one). */
+    juce::File fakeVst3Root (const juce::StringArray& relative)
+    {
+        const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("andor-fake-vst3-" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+        for (const auto& r : relative)
+            root.getChildFile (r).createDirectory();
+        return root;
+    }
+}
+
+TEST_CASE ("KONTAKT FINDER: Kontakt found at the top, nested by Native Instruments, never inside a bundle; newest first", "[external][finder]")
+{
+    const auto root = fakeVst3Root ({ "Kontakt 7.vst3/Contents/x86_64-win",
+                                      "Native Instruments/Kontakt 8/Kontakt 8.vst3/Contents/x86_64-win",
+                                      "Vendor/Some Synth.vst3/Contents/Resources/Kontakt Fake.vst3",   // (inside a bundle: not a plug-in of its own)
+                                      "Deep/a/b/c/d/Kontakt 9.vst3" });                                 // (past the depth)
+    const auto found = ExternalInstrument::findKontaktIn ({ root.getFullPathName() });
+    REQUIRE (found.size() == 2);
+    CHECK (found[0].getFileName() == "Kontakt 8.vst3");
+    CHECK (found[1].getFileName() == "Kontakt 7.vst3");
+    root.deleteRecursively();
+}
+
+TEST_CASE ("KONTAKT FINDER: nothing there - no candidates, the message names the folders searched", "[external][finder]")
+{
+    const auto root = fakeVst3Root ({ "Other.vst3", "Native Instruments/Massive X.vst3" });
+    CHECK (ExternalInstrument::findKontaktIn ({ root.getFullPathName() }).isEmpty());
+    root.deleteRecursively();
+    ExternalInstrument host;
+    host.prepare (testRate, testBlock);
+    juce::PluginDescription found;
+    juce::String why;
+    if (host.locate (found, why))
+        SKIP ("Kontakt is installed here: " << found.name);
+    CHECK (why.contains ("not found"));
+    for (const auto& folder : ExternalInstrument::searchFolders())
+        CHECK (why.contains (folder));
+}
+
+TEST_CASE ("KONTAKT FINDER: not found - LOAD asks where it is; the choice loads and is remembered, so the next LOAD needs no question", "[external][finder]")
+{
+    ExternalInstrument host;
+    host.prepare (testRate, testBlock);
+    juce::PluginDescription probe;
+    juce::String why;
+    if (host.locate (probe, why))
+        SKIP ("Kontakt is installed here: " << probe.name);
+    const juce::File surrogate (ANDOR_TEST_INSTRUMENT_VST3);
+    int asked = 0;
+    ExternalInstrument::setKontaktChooserForTesting ([&] { ++asked; return surrogate; });
+    bool finished = false;
+    host.loadKontaktOrAsk ([&] { finished = true; });
+    CHECK (finished);
+    CHECK (asked == 1);
+    REQUIRE (host.state() == ExternalInstrument::State::ready);
+    CHECK (ExternalInstrument::rememberedKontakt() == surrogate);
+    // A new instance (another track, the next session): found at once, nobody asked.
+    ExternalInstrument again;
+    again.prepare (testRate, testBlock);
+    again.loadKontaktOrAsk();
+    CHECK (asked == 1);
+    CHECK (again.state() == ExternalInstrument::State::ready);
+    // Cancelling the question loads nothing and changes nothing.
+    ExternalInstrument::rememberKontakt (juce::File());
+    ExternalInstrument::setKontaktChooserForTesting ([] { return juce::File(); });
+    ExternalInstrument none;
+    none.prepare (testRate, testBlock);
+    none.loadKontaktOrAsk();
+    CHECK (none.state() == ExternalInstrument::State::notInstalled);
+}
+
+TEST_CASE ("KONTAKT FINDER: choosing the file inside a bundle uses the bundle; a non-instrument is refused in words", "[external][finder]")
+{
+    ExternalInstrument host;
+    host.prepare (testRate, testBlock);
+    const auto root = fakeVst3Root ({ "Not An Instrument.vst3/Contents/x86_64-win" });
+    CHECK_FALSE (host.loadKontaktFrom (root.getChildFile ("Not An Instrument.vst3/Contents/x86_64-win")));
+    CHECK (host.state() == ExternalInstrument::State::failed);
+    CHECK (host.message().contains ("Not An Instrument.vst3"));
+    root.deleteRecursively();
 }

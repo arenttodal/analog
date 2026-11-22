@@ -333,6 +333,10 @@ struct Patch
         /** D's SEND in a MAIN + SEND route (0..1, as the cards' sends): D as it leaves its FILTER, at
             its level, into SEND's chain. 0 by default; heard only in MAIN + SEND. */
         double send = 0.0;
+        /** D KONTAKT's MIDI TRANSPOSE (semitones, -12..12; appended): the notes sent to its
+            instrument move, never its audio (a library mapped an octave off plays where the keys
+            are). A held note ends where it began, however the transpose changes meanwhile. */
+        int transpose = 0;
     };
     Aux aux;
     double lfoPitch1 = 0.4;         ///< semitones, -12..12

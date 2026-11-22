@@ -79,13 +79,127 @@ ExternalInstrument::~ExternalInstrument()
 juce::StringArray ExternalInstrument::searchFolders()
 {
     juce::StringArray folders;
+    auto add = [&folders] (const juce::File& f) {
+        if (f != juce::File() && f.isDirectory())
+            folders.addIfNotAlreadyThere (f.getFullPathName());
+    };
    #if JUCE_PLUGINHOST_VST3
     juce::VST3PluginFormat vst3;
     const auto locations = vst3.getDefaultLocationsToSearch();
     for (int i = 0; i < locations.getNumPaths(); ++i)
-        folders.add (locations[i].getFullPathName());
+        add (locations[i]);
+   #endif
+    auto fromEnvironment = [] (const char* name) {
+        const auto value = juce::SystemStats::getEnvironmentVariable (name, {});
+        return value.isNotEmpty() ? juce::File (value) : juce::File();
+    };
+   #if JUCE_WINDOWS
+    // The VST3 locations (Steinberg's): Common Files\VST3 under both Program Files, and the
+    // per-user one under Local AppData.
+    for (const char* name : { "CommonProgramFiles", "CommonProgramW6432", "CommonProgramFiles(x86)" })
+        if (const auto common = fromEnvironment (name); common != juce::File())
+            add (common.getChildFile ("VST3"));
+    for (const char* name : { "ProgramFiles", "ProgramW6432", "ProgramFiles(x86)" })
+        if (const auto programs = fromEnvironment (name); programs != juce::File())
+            add (programs.getChildFile ("Common Files").getChildFile ("VST3"));
+    if (const auto local = fromEnvironment ("LOCALAPPDATA"); local != juce::File())
+        add (local.getChildFile ("Programs").getChildFile ("Common").getChildFile ("VST3"));
+   #elif JUCE_MAC
+    add (juce::File ("/Library/Audio/Plug-Ins/VST3"));
+    add (juce::File ("~/Library/Audio/Plug-Ins/VST3"));
+   #else
+    add (juce::File ("~/.vst3"));
+    add (juce::File ("/usr/lib/vst3"));
+    add (juce::File ("/usr/local/lib/vst3"));
    #endif
     return folders;
+}
+
+juce::Array<juce::File> ExternalInstrument::findKontaktIn (const juce::StringArray& roots, int maxDepth)
+{
+    juce::Array<juce::File> found;
+    int visited = 0;
+    constexpr int maxVisited = 20000;   // (a plug-in folder holds hundreds of entries, not this many)
+    std::function<void (const juce::File&, int)> walk = [&] (const juce::File& folder, int depth) {
+        for (const auto& entry : juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories))
+        {
+            if (++visited > maxVisited)
+                return;
+            const auto f = entry.getFile();
+            if (isKontaktFile (f))
+            {
+                if (! found.contains (f))
+                    found.add (f);
+            }
+            else if (entry.isDirectory() && ! f.getFileExtension().equalsIgnoreCase (".vst3") && depth < maxDepth)
+                walk (f, depth + 1);   // (never into a .vst3 bundle: its insides are one plug-in)
+        }
+    };
+    for (const auto& root : roots)
+        if (const juce::File folder (root); folder.isDirectory())
+            walk (folder, 1);
+    // The newest first (Kontakt 8 before 7).
+    std::sort (found.begin(), found.end(), [] (const juce::File& a, const juce::File& b) { return a.getFileName().compareNatural (b.getFileName()) > 0; });
+    return found;
+}
+
+namespace
+{
+    juce::File& settingsFolderOverride()
+    {
+        static juce::File folder;
+        return folder;
+    }
+
+    juce::File kontaktSetting()
+    {
+        const auto folder = settingsFolderOverride() != juce::File()
+                                ? settingsFolderOverride()
+                                : juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("ANDOR Analog");
+        return folder.getChildFile ("Kontakt location.txt");
+    }
+
+    /** The .vst3 a chosen path belongs to: the bundle when the file inside it was chosen. */
+    juce::File bundleOf (const juce::File& chosen)
+    {
+        for (auto f = chosen; f != f.getParentDirectory(); f = f.getParentDirectory())
+            if (f.getFileExtension().equalsIgnoreCase (".vst3") && f.getParentDirectory().getFileName() != "Contents"
+                && ! f.getParentDirectory().getParentDirectory().getFileName().equalsIgnoreCase ("Contents"))
+                return f;
+        return chosen;
+    }
+}
+
+void ExternalInstrument::setSettingsFolderForTesting (const juce::File& folder)
+{
+    settingsFolderOverride() = folder;
+}
+
+namespace
+{
+    std::function<juce::File()>& chooserForTesting()
+    {
+        static std::function<juce::File()> answer;
+        return answer;
+    }
+}
+
+void ExternalInstrument::setKontaktChooserForTesting (std::function<juce::File()> answer)
+{
+    chooserForTesting() = std::move (answer);
+}
+
+juce::File ExternalInstrument::rememberedKontakt()
+{
+    const auto text = kontaktSetting().loadFileAsString().trim();
+    return text.isNotEmpty() && juce::File::isAbsolutePath (text) ? juce::File (text) : juce::File();
+}
+
+void ExternalInstrument::rememberKontakt (const juce::File& vst3)
+{
+    const auto setting = kontaktSetting();
+    if (setting.getParentDirectory().createDirectory())
+        setting.replaceWithText (vst3.getFullPathName());
 }
 
 bool ExternalInstrument::locate (juce::PluginDescription& found, juce::String& why)
@@ -93,25 +207,16 @@ bool ExternalInstrument::locate (juce::PluginDescription& found, juce::String& w
    #if JUCE_PLUGINHOST_VST3
     juce::VST3PluginFormat vst3;
     juce::Array<juce::File> candidates;
+    const auto folders = searchFolders();
     if (const char* path = std::getenv (overrideVariable); path != nullptr && *path != 0)
         candidates.add (juce::File (juce::String::fromUTF8 (path)));   // (tests, the surrogate demo)
     else
-        for (const auto& folder : searchFolders())
-        {
-            // The folder itself and one level down (Native Instruments' own subfolder).
-            for (const auto& entry : juce::RangedDirectoryIterator (juce::File (folder), false, "*", juce::File::findFilesAndDirectories))
-            {
-                const auto f = entry.getFile();
-                if (isKontaktFile (f))
-                    candidates.add (f);
-                else if (f.isDirectory() && ! f.getFileExtension().equalsIgnoreCase (".vst3"))
-                    for (const auto& inner : juce::RangedDirectoryIterator (f, false, "*.vst3", juce::File::findFilesAndDirectories))
-                        if (isKontaktFile (inner.getFile()))
-                            candidates.add (inner.getFile());
-            }
-        }
-    // The newest first (Kontakt 8 before 7).
-    std::sort (candidates.begin(), candidates.end(), [] (const juce::File& a, const juce::File& b) { return a.getFileName().compareNatural (b.getFileName()) > 0; });
+    {
+        if (const auto remembered = rememberedKontakt(); remembered.exists())
+            candidates.add (remembered);
+        for (const auto& f : findKontaktIn (folders))
+            candidates.addIfNotAlreadyThere (f);
+    }
     for (const auto& file : candidates)
     {
         juce::OwnedArray<juce::PluginDescription> types;
@@ -120,10 +225,12 @@ bool ExternalInstrument::locate (juce::PluginDescription& found, juce::String& w
             if (t->isInstrument)
             {
                 found = *t;
+                if (std::getenv (overrideVariable) == nullptr || *std::getenv (overrideVariable) == 0)
+                    rememberKontakt (file);
                 return true;
             }
     }
-    why = candidates.isEmpty() ? "Kontakt (VST3) is not installed in the standard VST3 folders."
+    why = candidates.isEmpty() ? "Kontakt (VST3) was not found in " + folders.joinIntoString ("; ") + ". Choose where it is."
                                : "Kontakt was found but did not report an instrument (" + candidates[0].getFullPathName() + ").";
     return false;
    #else
@@ -131,6 +238,61 @@ bool ExternalInstrument::locate (juce::PluginDescription& found, juce::String& w
     why = "This build cannot host plugins (JUCE_PLUGINHOST_VST3 is off).";
     return false;
    #endif
+}
+
+bool ExternalInstrument::loadKontaktFrom (const juce::File& chosen)
+{
+   #if JUCE_PLUGINHOST_VST3
+    const auto file = bundleOf (chosen);
+    juce::VST3PluginFormat vst3;
+    juce::OwnedArray<juce::PluginDescription> types;
+    vst3.findAllTypesForFile (types, file.getFullPathName());
+    for (const auto* t : types)
+        if (t->isInstrument)
+        {
+            const auto description = *t;
+            if (! load (description))
+                return false;
+            rememberKontakt (file);
+            return true;
+        }
+    currentState = State::failed;
+    statusMessage = file.getFileName() + " is not a VST3 instrument. Choose Kontakt's .vst3.";
+    return false;
+   #else
+    juce::ignoreUnused (chosen);
+    currentState = State::failed;
+    statusMessage = "This build cannot host plugins (JUCE_PLUGINHOST_VST3 is off).";
+    return false;
+   #endif
+}
+
+void ExternalInstrument::loadKontaktOrAsk (std::function<void()> done)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    if (loadKontakt() || currentState != State::notInstalled)
+    {
+        if (done != nullptr)
+            done();
+        return;
+    }
+    if (const auto& answer = chooserForTesting(); answer != nullptr)
+    {
+        if (const auto result = answer(); result != juce::File())
+            loadKontaktFrom (result);
+        if (done != nullptr)
+            done();
+        return;
+    }
+    const auto folders = searchFolders();
+    chooser = std::make_shared<juce::FileChooser> ("Where is Kontakt? Choose its .vst3", folders.isEmpty() ? juce::File() : juce::File (folders[0]), "*.vst3");
+    const auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectDirectories;
+    chooser->launchAsync (flags, [this, done] (const juce::FileChooser& fc) {
+        if (const auto result = fc.getResult(); result != juce::File())
+            loadKontaktFrom (result);
+        if (done != nullptr)
+            done();
+    });
 }
 
 bool ExternalInstrument::loadKontakt()

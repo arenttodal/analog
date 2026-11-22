@@ -299,7 +299,7 @@ namespace
                 load->setTooltip ("Host Kontakt (VST3) as card C: it plays card C's notes, and MORPH blends it with A + B");
                 load->onClick = [this] {
                     if (auto* e = engineOf (host))
-                        e->externalInstrument().loadKontakt();
+                        e->externalInstrument().loadKontaktOrAsk();
                 };
                 addAndMakeVisible (*load);
             }

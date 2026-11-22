@@ -136,11 +136,36 @@ UnisonFan::UnisonFan (InstrumentHost& h, int c, juce::Colour a) : host (h), card
     setInterceptsMouseClicks (false, false);
     setTitle ("UNISON copies");
     seen = keyNow();   // (what the card already had: nothing to show yet)
+    for (const char* name : { "voices", "detune", "blend", "width", "mode", "range" })
+        if (auto* p = host.apvts().getParameter (params::unisonId (card, name)))
+        {
+            p->addListener (this);
+            watched.push_back (p);
+        }
 }
 
 UnisonFan::~UnisonFan()
 {
     stopTimer();
+    for (auto* p : watched)
+        p->removeListener (this);
+}
+
+void UnisonFan::parameterGestureChanged (int, bool starting)
+{
+    // (any thread: only atomics here)
+    if (starting)
+        gestures.fetch_add (1);
+    else
+    {
+        gestures.store (std::max (0, gestures.load() - 1));
+        gestureEnded.store (nowSeconds());
+    }
+}
+
+bool UnisonFan::byHand() const noexcept
+{
+    return gestures.load() > 0 || nowSeconds() - gestureEnded.load() < afterGestureSeconds;
 }
 
 juce::String UnisonFan::keyNow() const
@@ -158,6 +183,8 @@ void UnisonFan::poll()
     if (key == seen)
         return;
     seen = key;
+    if (! byHand())
+        return;   // (a preset, a session, the host: the new settings, quietly)
     holdUntil = nowSeconds() + holdSeconds;
     if (! isTimerRunning())
         startTimerHz (30);

@@ -75,6 +75,10 @@ void AnalogEngine::prepare (double sampleRate, int maximumBlockSize, juce::Audio
     auxExtL.assign (externalL.size(), 0.0f);
     auxExtR.assign (externalL.size(), 0.0f);
     auxMidi.ensureSize (16384);
+    auxSentPitch.fill (-1);
+    for (auto* bits : { &auxPlayedBits, &auxSentBits })
+        for (auto& word : *bits)
+            word.store (0, std::memory_order_relaxed);
     prepared = true;
     updateConvolutionImpulses();
     impulseTimer.engine = this;
@@ -115,7 +119,39 @@ void AnalogEngine::updateConvolutionImpulses()
     router.collectGarbage();
 }
 
+namespace
+{
+    /** One note's bit in a two-word set (the rack's keyboard reads it). */
+    void setNoteBit (std::array<std::atomic<std::uint64_t>, 2>& bits, int note, bool on) noexcept
+    {
+        if (note < 0 || note > 127)
+            return;
+        auto& word = bits[static_cast<std::size_t> (note >> 6)];
+        const auto mask = std::uint64_t (1) << (note & 63);
+        if (on)
+            word.fetch_or (mask, std::memory_order_relaxed);
+        else
+            word.fetch_and (~mask, std::memory_order_relaxed);
+    }
+
+    std::bitset<128> bitsOf (const std::array<std::atomic<std::uint64_t>, 2>& bits) noexcept
+    {
+        std::bitset<128> out;
+        for (int w = 0; w < 2; ++w)
+        {
+            const auto word = bits[static_cast<std::size_t> (w)].load (std::memory_order_relaxed);
+            for (int b = 0; b < 64; ++b)
+                if ((word >> b) & 1u)
+                    out.set (static_cast<std::size_t> (w * 64 + b));
+        }
+        return out;
+    }
+}
+
 AnalogEngine::AnalogEngine (int oversampling) : oversamplingFactor (oversampling) {}
+
+std::bitset<128> AnalogEngine::auxKeysPlayed() const noexcept { return bitsOf (auxPlayedBits); }
+std::bitset<128> AnalogEngine::auxPitchesSent() const noexcept { return bitsOf (auxSentBits); }
 
 AnalogEngine::~AnalogEngine()
 {
@@ -1049,6 +1085,14 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
     if (auxKontaktMode || auxKontakt.state() == ExternalInstrument::State::ready)
     {
         auxMidi.clear();
+        if (! auxKontaktMode && (auxPlayedBits[0].load (std::memory_order_relaxed) | auxPlayedBits[1].load (std::memory_order_relaxed)) != 0)
+        {
+            // (D left KONTAKT: the instrument is told it is inactive; what it was sent is over)
+            auxSentPitch.fill (-1);
+            for (auto* bits : { &auxPlayedBits, &auxSentBits })
+                for (auto& word : *bits)
+                    word.store (0, std::memory_order_relaxed);
+        }
         if (auxKontaktMode)
             for (const auto m : auxKeys)
             {
@@ -1059,6 +1103,41 @@ void AnalogEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
                 if (! channelMessage)
                     continue;
                 std::uint8_t bytes[3] { static_cast<std::uint8_t> (status & 0xf0), m.numBytes > 1 ? m.data[1] : std::uint8_t (0), m.numBytes > 2 ? m.data[2] : std::uint8_t (0) };
+                // MIDI TRANSPOSE: a note-on is sent shifted (and remembered); its note-off and
+                // poly aftertouch go to where it was sent, so a transpose changed mid-note never
+                // leaves one hanging. A pitch shifted past 0..127 is not sent at all.
+                const int kind = bytes[0];
+                const int key = bytes[1] & 0x7f;
+                const bool noteOn = kind == 0x90 && bytes[2] > 0;
+                const bool noteOff = kind == 0x80 || (kind == 0x90 && bytes[2] == 0);
+                if (noteOn)
+                {
+                    const int sent = key + patch.aux.transpose;
+                    auxSentPitch[static_cast<std::size_t> (key)] = static_cast<std::int16_t> (sent >= 0 && sent <= 127 ? sent : -2);
+                    if (sent < 0 || sent > 127)
+                        continue;
+                    bytes[1] = static_cast<std::uint8_t> (sent);
+                    setNoteBit (auxPlayedBits, key, true);
+                    setNoteBit (auxSentBits, sent, true);
+                }
+                else if (noteOff || kind == 0xa0)
+                {
+                    const int sent = auxSentPitch[static_cast<std::size_t> (key)];
+                    if (sent == -2)
+                    {
+                        if (noteOff)
+                            auxSentPitch[static_cast<std::size_t> (key)] = -1;
+                        continue;
+                    }
+                    const int to = sent >= 0 ? sent : juce::jlimit (0, 127, key + patch.aux.transpose);
+                    bytes[1] = static_cast<std::uint8_t> (to);
+                    if (noteOff)
+                    {
+                        auxSentPitch[static_cast<std::size_t> (key)] = -1;
+                        setNoteBit (auxPlayedBits, key, false);
+                        setNoteBit (auxSentBits, to, false);
+                    }
+                }
                 auxMidi.addEvent (bytes, m.numBytes, m.samplePosition);
             }
         ExternalInstrument::Transport transport;

@@ -340,7 +340,7 @@ namespace
                 if (k.state() == ExternalInstrument::State::ready)
                     k.openEditor();
                 else
-                    k.loadKontakt();
+                    k.loadKontaktOrAsk();
             }
     }
 
@@ -1242,7 +1242,7 @@ namespace
             {
                 selectorComponent (makeKey ("LOAD KONTAKT", [this] {
                                        if (auto* e = engineOf (host))
-                                           e->auxInstrument().loadKontakt();
+                                           e->auxInstrument().loadKontaktOrAsk();
                                    }),
                                    "INSTRUMENT", 130);
                 selectorComponent (makeKey ("OPEN", [this] {

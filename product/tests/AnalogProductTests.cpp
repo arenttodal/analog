@@ -1109,6 +1109,20 @@ TEST_CASE ("analog: every control the interface enables moves the sound; every o
         setValue (q, params::auxNoiseGate, 1.0f);
         setValue (q, "space", 80.0f);
     };
+    // D KONTAKT's MIDI TRANSPOSE moves what D's instrument plays: D on in KONTAKT with the stand-in
+    // instrument (tests/surrogate; Kontakt is not installed here) loaded.
+    setups[params::auxTranspose] = [] (ShellProcessor& q) {
+        setValue (q, params::auxEnabled, 1.0f);
+        setValue (q, params::auxMode, 2.0f);
+        auto& d = dynamic_cast<AnalogEngine&> (q.productEngine()).auxInstrument();
+        if (d.state() != andor::analog::ExternalInstrument::State::ready)
+        {
+            juce::OwnedArray<juce::PluginDescription> types;
+            juce::VST3PluginFormat().findAllTypesForFile (types, ANDOR_TEST_INSTRUMENT_VST3);
+            REQUIRE_FALSE (types.isEmpty());
+            REQUIRE (d.load (*types[0]));
+        }
+    };
     // The cards' sends act in a MAIN + SEND route (Cinematic V6 gate 4), card C heard (its
     // second layer) and SPACE's room on SEND.
     for (const auto* id : { &params::sendA, &params::sendB, &params::sendC })
@@ -12254,7 +12268,20 @@ namespace
     }
 }
 
-TEST_CASE ("analog: the UNISON fan shows on the card while UNISON changes, from the engine's own layout, and fades", "[analog][unison][ui]")
+namespace
+{
+    /** A hand on a control: the change inside its gesture (as a knob or the voices chip does). */
+    void turn (ShellProcessor& p, const juce::String& id, float value)
+    {
+        auto* param = p.parameters.getParameter (id);
+        REQUIRE (param != nullptr);
+        param->beginChangeGesture();
+        setValue (p, id, value);
+        param->endChangeGesture();
+    }
+}
+
+TEST_CASE ("analog: the UNISON fan shows on the card while a hand changes UNISON (never for a preset or the host), from the engine's own layout, and fades", "[analog][unison][ui]")
 {
     ShellProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
@@ -12274,22 +12301,41 @@ TEST_CASE ("analog: the UNISON fan shows on the card while UNISON changes, from 
     }
     overlay->tick();
     CHECK_FALSE (fan->showing());   // (the card's settings as they were: still nothing)
+    // The host (automation, no gesture) and a preset: new settings, nothing shown.
+    setValue (p, params::unisonId (0, "detune"), 30.0f);
+    overlay->tick();
+    CHECK_FALSE (fan->showing());
+    {
+        const auto preset = juce::File::createTempFile (andor::shell::productInfo().presetExtension);
+        setValue (p, params::unisonId (0, "voices"), 3.0f);
+        setValue (p, params::unisonId (0, "blend"), 80.0f);
+        REQUIRE (p.savePreset (preset));
+        setValue (p, params::unisonId (0, "voices"), 0.0f);
+        setValue (p, params::unisonId (0, "blend"), 50.0f);
+        overlay->tick();
+        REQUIRE (p.loadPreset (preset));
+        overlay->tick();
+        CHECK_FALSE (fan->showing());
+        preset.deleteFile();
+        setValue (p, params::unisonId (0, "voices"), 0.0f);
+        overlay->tick();
+    }
 
-    setValue (p, params::unisonId (0, "detune"), 60.0f);
+    turn (p, params::unisonId (0, "detune"), 60.0f);
     overlay->tick();
     CHECK (fan->showing());
     fan->settleForTest();
     CHECK (fan->opacity() == 1.0f);
     CHECK (fan->caption() == "1 VOICE - UNISON OFF");
 
-    setValue (p, params::unisonId (0, "voices"), 1.0f);   // (two copies)
+    turn (p, params::unisonId (0, "voices"), 1.0f);   // (two copies)
     fan->poll();
     CHECK (fan->caption() == "2 VOICES - BLEND NEEDS 3");
-    setValue (p, params::unisonId (0, "voices"), 4.0f);   // (five copies)
-    setValue (p, params::unisonId (0, "blend"), 0.0f);
+    turn (p, params::unisonId (0, "voices"), 4.0f);   // (five copies)
+    turn (p, params::unisonId (0, "blend"), 0.0f);
     fan->poll();
     CHECK (fan->caption() == "OUTER COPIES 5 % OF CENTRE");   // (sideWeight 0.05)
-    setValue (p, params::unisonId (0, "blend"), 100.0f);
+    turn (p, params::unisonId (0, "blend"), 100.0f);
     fan->poll();
     CHECK (fan->caption() == "OUTER COPIES 130 % OF CENTRE");   // (sideWeight 1.3)
 
@@ -12364,7 +12410,7 @@ TEST_CASE ("analog: screenshots of UNISON - the card row, the voices chip and th
         setValue (p, params::unisonId (0, "width"), 100.0f);
         for (const float b : { 0.0f, 60.0f, 100.0f })
         {
-            setValue (p, params::unisonId (0, "blend"), b);
+            turn (p, params::unisonId (0, "blend"), b);
             if (auto* fan = unisonFanIn (*o))
             {
                 fan->poll();

@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace andor::analog
@@ -61,12 +62,36 @@ public:
     ~ExternalInstrument();
 
     //== Message thread ==========================================================================
-    /** The folders searched for Kontakt's VST3 (the platform's standard VST3 locations). */
+    /** The folders searched for Kontakt's VST3: the platform's standard VST3 locations (JUCE's)
+        and the others plug-ins are commonly installed to (Windows: both Program Files' Common
+        Files\VST3 and the per-user Programs\Common\VST3; macOS: the system's and the user's
+        Library; Linux: ~/.vst3, /usr/lib/vst3, /usr/local/lib/vst3). Existing folders only. */
     static juce::StringArray searchFolders();
-    /** Finds Kontakt (or the ANDOR_EXTERNAL_INSTRUMENT_VST3 override). False: `why` says why. */
+    /** Every Kontakt*.vst3 under `roots`, up to `maxDepth` folders down (Native Instruments
+        nests it, e.g. VST3\Native Instruments\Kontakt 8\Kontakt 8.vst3), never inside a
+        .vst3 bundle; newest first (Kontakt 8 before 7), each once. Bounded: a huge folder can
+        not stall the search. */
+    static juce::Array<juce::File> findKontaktIn (const juce::StringArray& roots, int maxDepth = 4);
+    /** Where Kontakt was last found or chosen on this computer (shared by the standalone and
+        every host), or none. */
+    static juce::File rememberedKontakt();
+    static void rememberKontakt (const juce::File& vst3);
+    /** Tests: where the remembered location is kept (empty: the user's application data). */
+    static void setSettingsFolderForTesting (const juce::File& folder);
+    /** Tests: answers "where is Kontakt?" instead of a file browser (empty File: cancelled). */
+    static void setKontaktChooserForTesting (std::function<juce::File()> answer);
+    /** Finds Kontakt (or the ANDOR_EXTERNAL_INSTRUMENT_VST3 override): the remembered location
+        first, then the search. False: `why` says why, naming the folders searched. */
     bool locate (juce::PluginDescription& found, juce::String& why);
     /** LOAD KONTAKT: locate and load. */
     bool loadKontakt();
+    /** Loads the Kontakt the musician chose (its .vst3, a bundle folder or the file inside it):
+        it must report an instrument. Remembered when it loads. */
+    bool loadKontaktFrom (const juce::File& vst3);
+    /** LOAD KONTAKT from the interface: locate and load; when it is not found, a file browser
+        asks where it is (opening in the standard VST3 folder) and the choice is remembered, so
+        nobody is asked twice. `done` runs on the message thread when it has finished. */
+    void loadKontaktOrAsk (std::function<void()> done = nullptr);
     /** Loads one plugin (its native state applied if given). */
     bool load (const juce::PluginDescription& description, const juce::MemoryBlock* nativeState = nullptr);
     /** UNLOAD: its notes end, it fades out (10 ms) and is retired; the saved identity goes too. */
@@ -151,6 +176,7 @@ private:
     juce::PluginDescription description;   ///< the one loaded (message thread)
     std::unique_ptr<juce::XmlElement> savedXml;   ///< a restored one that could not load (kept as saved)
     juce::String savedName, statusMessage;
+    std::shared_ptr<juce::FileChooser> chooser;
     State currentState = State::empty;
     std::unique_ptr<EditorWindow> editorWindow;
     bool editorsOnDesktop = true;

@@ -1,5 +1,34 @@
 # ANDOR ANALOG — status
 
+> **22 Nov 2026, Kontakt finder, AUX card height, D MIDI TRANSPOSE (branch `claude/analog-unison`):**
+> - **Finding Kontakt (Windows, macOS, Linux):** the search covers every standard VST3 location
+>   (both Program Files' Common Files\VST3 and the per-user one on Windows; the system's and the
+>   user's Library on macOS) and goes four folders deep (Native Instruments nests Kontakt), never
+>   into a bundle; the newest Kontakt first. Where it was found or chosen is remembered (ANALOG's
+>   settings, shared by the standalone and every host) and tried first. Not found: LOAD KONTAKT
+>   opens a file browser at the VST3 folder ("Where is Kontakt?"); the choice (the bundle or the
+>   file inside it) must be an instrument, loads, and is remembered. The message names the folders
+>   searched. Tests: fake folder layouts (nested, bundles, depth), the question answered and
+>   remembered, a non-instrument refused. **OWNER TEST:** real Kontakt on a Windows PC and a Mac.
+> - **The cards with AUX shown:** showing D's strip made the cards bring back the row under their
+>   knobs they had dropped (an empty band, shorter wells); the cards' row now follows the cards
+>   alone (shared shell fix; nothing changes with AUX hidden). The AUX test checks the wells too.
+> - **D KONTAKT MIDI TRANSPOSE** (`analog.aux.transpose`, -12..+12 st, default 0): the notes sent to
+>   D's Kontakt move, never its audio; each note-off goes where its note-on went (a transpose
+>   changed mid-note leaves nothing hanging); a pitch past 0..127 is not sent. The keys held and
+>   the pitches sent are published for the rack's keyboard. Its control arrives with the KONTAKT
+>   rack redesign (owner chose the mock-up "Nameplate"). Schema golden +1 parameter (intentional).
+> - **SAVE (OSP and ANALOG, shared):** a click saves over the open preset after "Save over
+>   <name>?" (Save / Cancel, "Don't warn me again for this patch", kept per preset file); a
+>   right-click on SAVE is Save As.
+> - **Preset folders:** the preset menu's PRESETS are two submenus, **Factory** and **User**
+>   (everything outside Factory), each showing its folders as submenus (subfolders first, then
+>   the folder's presets) as the musician arranged them on disk - a pack in a folder is one
+>   entry, not 100 loose names. The arrows walk the same order. (Packs later go in the same way.)
+> - **UNISON fan:** shown only when a hand moves VOICES, DETUNE, BLEND, WIDTH, MODE or RANGE (a
+>   change inside a control's gesture, or within 0.4 s of it); opening a preset, a session or the
+>   host's automation shows nothing.
+
 > **21 Nov 2026, D / AUX gets its own EQ and joins the routing (branch `claude/analog-unison`):**
 > - **D's EQ:** the cards' five-band EQ (ANDOR OSP's layer EQ processor) on D's stereo bus,
 >   after its source and before its FILTER. 19 parameters `analog.aux.eq.*` (the cards' names,

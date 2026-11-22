@@ -322,25 +322,30 @@ TEST_CASE ("parity presets: factory presets first, then the musician's; SAVE upd
     {
         INFO (e.file.getFullPathName());
         const bool isFactory = e.file.isAChildOf (factory);
-        CHECK (e.context == (isFactory ? "origin:factory" : "origin:user"));
+        CHECK (e.context.upToFirstOccurrenceOf ("|", false, false) == (isFactory ? "origin:factory" : "origin:user"));
         CHECK_FALSE ((isFactory && seenUser));   // (no factory preset after a musician's)
         seenUser = seenUser || ! isFactory;
     }
     CHECK (withMine.back().file == mine);
 
-    // The quick menu shows them under "Factory" and "Your presets".
+    // The quick menu: PRESETS, then Factory and User as submenus (the folders inside them).
     {
         std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditorIfNeeded());
         auto& ui = dynamic_cast<ShellEditor&> (*e);
         auto& bar = dynamic_cast<osp::plugin::PresetBar&> (ui.presetBarComponent());
-        juce::StringArray headers;
-        for (const auto& i : itemsOf (bar.presetMenu()))
-            if (i.header)
-                headers.add (i.text);
-        CHECK (headers.contains ("Factory"));
-        CHECK (headers.contains ("Your presets"));
-        CHECK (headers.indexOf ("Factory") < headers.indexOf ("Your presets"));
-        CHECK_FALSE (headers.contains ("Presets"));
+        juce::StringArray headers, submenus;
+        const auto menu = bar.presetMenu();
+        for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+        {
+            const auto& item = it.getItem();
+            if (item.isSectionHeader)
+                headers.add (item.text);
+            else if (item.subMenu != nullptr)
+                submenus.add (item.text);
+        }
+        CHECK (headers.contains ("Presets"));
+        CHECK (submenus.indexOf ("Factory") >= 0);
+        CHECK (submenus.indexOf ("Factory") < submenus.indexOf ("User"));
     }
 
     // A factory preset opened: SAVE cannot update it in place (it asks for a name instead).
@@ -540,4 +545,62 @@ TEST_CASE ("parity menus: screenshots of ANALOG's menus in the shared look (ANAL
     rig.ui.refreshNow();
     e.removeFromDesktop();
     osp::plugin::OspLookAndFeel::setTranslucentMenusForTests (false);
+}
+
+
+TEST_CASE ("parity presets: USER shows the musician's folders as submenus (subfolders first, then the folder's presets); the arrows walk the same order", "[analog][presets][parity]")
+{
+    IsolatedDocuments documents;
+    ShellProcessor p;
+    const auto ext = andor::shell::productInfo().presetExtension;
+    const auto root = p.presetFolder();
+    // Loose presets at the top, a pack with its families, and an empty folder (not listed).
+    const auto loose = root.getChildFile ("Loose Lead" + ext);
+    const auto packA = root.getChildFile ("Cinematic Pack/Basses/Deep One" + ext);
+    const auto packB = root.getChildFile ("Cinematic Pack/Pads/Wide One" + ext);
+    const auto packTop = root.getChildFile ("Cinematic Pack/Pack Intro" + ext);
+    root.getChildFile ("Empty Folder").createDirectory();
+    for (const auto& f : { loose, packA, packB, packTop })
+    {
+        f.getParentDirectory().createDirectory();
+        REQUIRE (p.savePreset (f));
+    }
+    // The list (and the arrows): Factory first, then USER - Cinematic Pack (Basses, Pads, then
+    // its own preset), then the loose presets.
+    juce::Array<juce::File> users;
+    for (const auto& e : p.presetList())
+        if (! p.isFactoryPreset (e.file))
+            users.add (e.file);
+    CHECK (users == juce::Array<juce::File> ({ packA, packB, packTop, loose }));
+    // The menu: User > Cinematic Pack > Basses > Deep One.
+    std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<ShellEditor&> (*e);
+    auto& bar = dynamic_cast<osp::plugin::PresetBar&> (ui.presetBarComponent());
+    const auto menu = bar.presetMenu();
+    auto childNamed = [] (const juce::PopupMenu& m, const juce::String& name) -> const juce::PopupMenu* {
+        for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
+            if (it.getItem().text == name && it.getItem().subMenu != nullptr)
+                return it.getItem().subMenu.get();
+        return nullptr;
+    };
+    auto texts = [] (const juce::PopupMenu& m) {
+        juce::StringArray t;
+        for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
+            if (! it.getItem().isSeparator)
+                t.add (it.getItem().text);
+        return t;
+    };
+    const auto* user = childNamed (menu, "User");
+    REQUIRE (user != nullptr);
+    CHECK (texts (*user) == juce::StringArray ({ "Cinematic Pack", "Loose Lead" }));
+    const auto* pack = childNamed (*user, "Cinematic Pack");
+    REQUIRE (pack != nullptr);
+    CHECK (texts (*pack) == juce::StringArray ({ "Basses", "Pads", "Pack Intro" }));
+    const auto* basses = childNamed (*pack, "Basses");
+    REQUIRE (basses != nullptr);
+    CHECK (texts (*basses) == juce::StringArray ({ "Deep One" }));
+    // The arrows from the pack's last preset go to the loose one.
+    REQUIRE (p.loadPreset (packTop));
+    p.stepPresetList (1);
+    CHECK (p.currentPresetFile() == loose);
 }

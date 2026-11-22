@@ -304,6 +304,7 @@ namespace andor::analog::params
     inline juce::String auxEqId (const juce::String& name) { return "analog.aux.eq." + name; }
     /** D's SEND (state version 24, appended): 0..100 %, heard in a MAIN + SEND route. */
     inline const juce::String auxSend = "analog.aux.send";
+    inline const juce::String auxTranspose = "analog.aux.transpose";
     /** MORPH TO (Addendum 05): which MORPH the MORPH macro drives - C HYBRID (the per-voice
         A + B <-> C morph, as ever; the default) or D AUX (the global stage: A/B/C's bus after the
         FILTER x D, whatever D plays - LIVE INPUT included). One processor at a time; the other's

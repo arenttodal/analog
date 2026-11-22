@@ -1,5 +1,8 @@
 #pragma once
 
+#include <atomic>
+#include <vector>
+
 #include "InstrumentHost.h"
 #include "MainSections.h"
 #include "ShapingPopups.h"
@@ -37,11 +40,12 @@ private:
     it (the outer copies' detune in cents beneath them); its height, its level (one oscillator's
     level reaches the well's half height): BLEND lifts the outer lines and the centre sinks, the
     sum's loudness the same; its colour, the card's for the centre copy, ivory to the left and
-    amber to the right as WIDTH sends them. It fades in when VOICES, DETUNE, BLEND, WIDTH, MODE
-    or RANGE changes (a hand, a preset, the host) and out about 1.5 s after the last change.
-    Presentation only: never takes the mouse, never in a preset.
+    amber to the right as WIDTH sends them. It fades in when the musician moves VOICES, DETUNE,
+    BLEND, WIDTH, MODE or RANGE by hand (a change inside one of their gestures, or just after it)
+    and out about 1.5 s after the last change; a preset, a session or the host changing them shows
+    nothing. Presentation only: never takes the mouse, never in a preset.
 */
-class UnisonFan final : public juce::Component, private juce::Timer
+class UnisonFan final : public juce::Component, private juce::Timer, private juce::AudioProcessorParameter::Listener
 {
 public:
     UnisonFan (osp::plugin::InstrumentHost& host, int card, juce::Colour accent);
@@ -59,9 +63,18 @@ public:
     juce::String caption() const;
 
     static constexpr double holdSeconds = 1.2, fadeInSeconds = 0.10, fadeOutSeconds = 0.35;
+    /** A change this soon after a hand let go of a control still counts as theirs (a knob's
+        last value can land just after its gesture ends). */
+    static constexpr double afterGestureSeconds = 0.4;
 
 private:
     void timerCallback() override;
+    void parameterValueChanged (int, float) override {}
+    void parameterGestureChanged (int, bool starting) override;
+    bool byHand() const noexcept;
+    std::vector<juce::AudioProcessorParameter*> watched;
+    std::atomic<int> gestures { 0 };
+    std::atomic<double> gestureEnded { -1.0e9 };
     juce::String keyNow() const;
     osp::plugin::InstrumentHost& host;
     int card = 0;

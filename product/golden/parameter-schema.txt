@@ -711,6 +711,7 @@ analog.aux.eq.lp.enabled v41 bool "AUX EQ lp On" label="" range=0.0000..1.0000/1
 analog.aux.eq.lp.frequency v41 float "AUX EQ lp Frequency" label="Hz" range=500.0000..20000.0000/0.0000 skew=1.00000 default=11999.9990 steps=2147483647 texts=500 Hz|3.16 kHz|20.0 kHz
 analog.aux.eq.lp.slope v41 choice "AUX EQ lp Slope" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=12 dB/oct|12 dB/oct|24 dB/oct [12 dB/oct|24 dB/oct]
 analog.aux.send v41 float "Send D" label="%" range=0.0000..100.0000/0.1000 skew=1.00000 default=0.0000 steps=2147483647 texts=0 %|50 %|100 %
+analog.aux.transpose v42 int "Transpose D" label="st" range=-12.0000..12.0000/1.0000 skew=1.00000 default=0.0000 steps=25 texts=-12 st|0 st|+12 st
 analog.arp.cardB.strum.on v40 bool "Arp Card B Strum" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On
 analog.arp.cardB.strum.direction v40 choice "Arp Card B Strum Direction" label="" range=0.0000..3.0000/1.0000 skew=1.00000 default=0.0000 steps=4 texts=UP|RANDOM|ALTERNATE [UP|DOWN|RANDOM|ALTERNATE]
 analog.arp.cardB.strum.sync v40 bool "Arp Card B Strum Sync" label="" range=0.0000..1.0000/1.0000 skew=1.00000 default=0.0000 steps=2 texts=Off|On|On

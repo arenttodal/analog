@@ -514,3 +514,93 @@ TEST_CASE ("D ARP: the demo renders (ANALOG_DEMO_DIR)", "[.][auxarp-demo]")
     render ("auxarp-04-mix-a-up-with-d-follow-b", [] (ShellProcessor& p) { kontaktD (p, true, 1); });
     render ("auxarp-05-mix-d-off", [] (ShellProcessor& p) { kontaktD (p, false, 1); });
 }
+
+TEST_CASE ("D TRANSPOSE: +12 and -12 move the notes Kontakt gets (velocities and timing untouched); 0 sends them as played", "[analog][aux][auxtranspose]")
+{
+    SurrogateOverride env;
+    auto pitches = [] (const std::vector<Seen>& seen) {
+        std::vector<int> notes;
+        for (const auto& s : noteOns (seen))
+            notes.push_back (s.note);
+        std::sort (notes.begin(), notes.end());
+        return notes;
+    };
+    const auto asPlayed = dFor ([] (ShellProcessor& p) { kontaktD (p, false, 1); });
+    const auto up = dFor ([] (ShellProcessor& p) { kontaktD (p, false, 1); set (p, params::auxTranspose, 12.0f); });
+    const auto down = dFor ([] (ShellProcessor& p) { kontaktD (p, false, 1); set (p, params::auxTranspose, -12.0f); });
+    CHECK (pitches (asPlayed) == std::vector<int> ({ 48, 55, 60 }));
+    CHECK (pitches (up) == std::vector<int> ({ 60, 67, 72 }));
+    CHECK (pitches (down) == std::vector<int> ({ 36, 43, 48 }));
+    REQUIRE (up.size() == asPlayed.size());
+    for (size_t i = 0; i < up.size(); ++i)
+    {
+        CHECK (up[i].sample == asPlayed[i].sample);
+        CHECK (up[i].velocity == asPlayed[i].velocity);
+        CHECK (up[i].note == asPlayed[i].note + 12);   // (the note-offs too)
+    }
+    // With D ARP the arpeggio's notes move the same way.
+    const auto arp = dFor ([] (ShellProcessor& p) { cards (p, true, true, true); kontaktD (p, true, 1); });
+    const auto arpUp = dFor ([] (ShellProcessor& p) { cards (p, true, true, true); kontaktD (p, true, 1); set (p, params::auxTranspose, 7.0f); });
+    REQUIRE (noteOns (arpUp).size() == noteOns (arp).size());
+    for (size_t i = 0; i < noteOns (arp).size(); ++i)
+        CHECK (noteOns (arpUp)[i].note == noteOns (arp)[i].note + 7);
+}
+
+TEST_CASE ("D TRANSPOSE: changed while notes are held - each note ends where it began; nothing hangs; out of range is not sent", "[analog][aux][auxtranspose]")
+{
+    SurrogateOverride env;
+    ShellProcessor p;
+    p.prepareToPlay (rate, block);
+    dry (p);
+    kontaktD (p, false, 1);
+    play (p, 0.1);
+    auto& host = engineOf (p).auxInstrument();
+    const int count = host.forwardedCount();
+    const auto start = host.samplesProcessed();
+    // C3 held at 0; TRANSPOSE to +5 at 0.5 s (C3 still held); E3 pressed at 1 s; both released at 1.5 s.
+    play (p, 2.0, { { 0.0, 48, 100 }, { 1.0, 52, 100 }, { 1.5, 48, 0 }, { 1.5, 52, 0 } }, [&] (int b) {
+        if (b == static_cast<int> (0.5 * rate / block))
+            set (p, params::auxTranspose, 5.0f);
+    });
+    const auto seen = seenSince (host, count, start);
+    REQUIRE (seen.size() == 4);
+    CHECK (seen[0].status == 0x90);
+    CHECK (seen[0].note == 48);   // (before the change)
+    CHECK (seen[1].status == 0x90);
+    CHECK (seen[1].note == 57);   // (after: E3 + 5)
+    std::vector<int> offs;
+    for (const auto& s : seen)
+        if (s.status == 0x80)
+            offs.push_back (s.note);
+    std::sort (offs.begin(), offs.end());
+    CHECK (offs == std::vector<int> ({ 48, 57 }));   // (each where it began)
+    CHECK (hanging (host) == 0);
+    // The rack's keyboard: nothing sounding now.
+    CHECK (engineOf (p).auxKeysPlayed().none());
+    CHECK (engineOf (p).auxPitchesSent().none());
+
+    // A key pushed past 127 is not sent, nor its note-off.
+    set (p, params::auxTranspose, 12.0f);
+    const int before = host.forwardedCount();
+    const auto from = host.samplesProcessed();
+    play (p, 0.5, { { 0.0, 120, 100 }, { 0.2, 120, 0 } });
+    CHECK (seenSince (host, before, from).empty());
+}
+
+TEST_CASE ("D TRANSPOSE: the rack's keyboard sees the keys held and the pitches sent", "[analog][aux][auxtranspose]")
+{
+    SurrogateOverride env;
+    ShellProcessor p;
+    p.prepareToPlay (rate, block);
+    dry (p);
+    kontaktD (p, false, 1);
+    set (p, params::auxTranspose, 12.0f);
+    play (p, 0.3, { { 0.0, 48, 100 }, { 0.0, 52, 100 } });
+    const auto played = engineOf (p).auxKeysPlayed(), sent = engineOf (p).auxPitchesSent();
+    CHECK (played.test (48));
+    CHECK (played.test (52));
+    CHECK (sent.test (60));
+    CHECK (sent.test (64));
+    CHECK (played.count() == 2);
+    CHECK (sent.count() == 2);
+}
