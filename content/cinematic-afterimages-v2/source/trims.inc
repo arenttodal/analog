@@ -98,5 +98,5 @@
 { 96, 12.00 },   // Iron Rain: -36.8 dB (sounding RMS), -13.3 dBFS peak before
 { 97, 11.69 },   // Falling Embers: -32.7 dB (sounding RMS), -17.2 dBFS peak before
 { 98, -5.93 },   // Black Door: -15.1 dB (sounding RMS), -7.9 dBFS peak before
-{ 99, 2.01 },   // Reverse Signal: -23.0 dB (sounding RMS), -10.5 dBFS peak before
+{ 99, 1.17 },   // Reverse Signal: -22.2 dB (sounding RMS), -7.6 dBFS peak before
 { 100, -1.79 },   // Final Exposure: -19.2 dB (sounding RMS), -6.9 dBFS peak before

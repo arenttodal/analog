@@ -229,10 +229,11 @@ void addFragile (std::vector<Spec>& l)
     l.push_back ({ 99, "Reverse Signal", F,
                    "A sound that seems to play backwards, rising out of nothing.",
                    "Hold notes for four seconds or more; release before the next.",
-                   "Reverse swell", "A four-second amplitude rise with the filter opening over four and a half seconds, a quick release.",
+                   "Reverse swell", "A narrow pulse and a saw rising over four seconds as the filter opens; the ASCEND echo climbs out of the swell and keeps rising after the note stops.",
                    36, 76, Phrase::drone,
                    [] (Patch& p) {
-                       p.osc1Wave = Osc1Wave::saw;
+                       p.osc1Wave = Osc1Wave::pulse;
+                       p.osc1Width = 0.15;
                        p.osc1Level = 0.8;
                        p.osc2Wave = Osc2Wave::saw;
                        p.osc2FineCents = 7.0;
@@ -244,7 +245,8 @@ void addFragile (std::vector<Spec>& l)
                        ampEnv (p, 4.0, 1.0, 1.0, 0.25);
                        p.velocityRangeDb = 6.0;
                        p.polyphony = 8;
-                       room (p, SpaceType::hall, 0.2, 3.0, 20.0, 5500.0);
+                       echo (p, EchoType::ascend, 0.25, div::quarter, 0.5, 0.45, EchoStereo::wide);
+                       room (p, SpaceType::plate, 0.18, 2.5, 20.0, 6000.0);
                        p.analogAmount = 0.3;
                    },
                    nullptr });

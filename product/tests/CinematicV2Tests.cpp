@@ -463,3 +463,43 @@ TEST_CASE ("cinematic afterimages vol. 2: render the previews and the QA measure
     }
     out.getChildFile ("qa.json").replaceWithText (juce::JSON::toString (juce::var (qa), false));
 }
+
+TEST_CASE ("cinematic afterimages vol. 2: every tail ends (writes tails.json; CA2_RENDER_DIR)", "[.][ca2-tail]")
+{
+    // The previews stop 3-5 s after the last key, so a 16 s ABYSS is still sounding there. This
+    // plays root and fifth for 2 s, then a minute of silence, and finds when the sound falls under
+    // -80 dBFS for good (0.25 s windows): a long tail passes, a tail that never ends fails.
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("CA2_RENDER_DIR", {});
+    if (dir.isEmpty())
+        SKIP ("set CA2_RENDER_DIR");
+    const auto only = juce::SystemStats::getEnvironmentVariable ("CA2_ONLY", {});
+    juce::Array<juce::var> tails;
+    for (const auto& s : ca2::collection())
+    {
+        if (only.isNotEmpty() && ! juce::StringArray::fromTokens (only, ",", "").contains (juce::String (s.number)))
+            continue;
+        ShellProcessor p;
+        REQUIRE (p.loadPreset (ca2::fileFor (s)));
+        const int r = rootOf (s) + (s.phrase == ca2::Phrase::lead ? 12 : 0);
+        const double rate = 48000.0, release = 2.0, seconds = 62.0;
+        const auto audio = render (p, rate, seconds, { on (0.0, r, 100), on (0.0, r + 7, 90), off (release, r), off (release, r + 7) });
+        const int window = juce::roundToInt (rate * 0.25);
+        double silentFrom = -1.0;
+        for (int start = juce::roundToInt (release * rate); start + window <= audio.getNumSamples(); start += window)
+        {
+            const double level = rmsDb (audio, rate, start / rate, (start + window) / rate);
+            if (level > -80.0)
+                silentFrom = -1.0;
+            else if (silentFrom < 0.0)
+                silentFrom = start / rate - release;
+        }
+        auto* t = new juce::DynamicObject();
+        t->setProperty ("id", juce::String (s.id()));
+        t->setProperty ("name", juce::String (s.name));
+        t->setProperty ("secondsToSilence", silentFrom < 0.0 ? juce::var() : juce::var (juce::roundToInt (silentFrom * 10.0) / 10.0));
+        t->setProperty ("lastSecondDb", juce::roundToInt (rmsDb (audio, rate, seconds - 1.0, seconds) * 10.0) / 10.0);
+        tails.add (juce::var (t));
+        CHECK (silentFrom >= 0.0);
+    }
+    juce::File (dir).getChildFile ("tails.json").replaceWithText (juce::JSON::toString (juce::var (tails), false));
+}
