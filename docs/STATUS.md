@@ -1,5 +1,25 @@
 # ANDOR ANALOG — status
 
+> **22 Nov 2026, CINEMATIC AFTERIMAGES VOL. 2 - 100 presets, awaiting the owner's listening
+> (branch `claude/cinematic-afterimages-v2`, from `claude/analog-unison`):**
+> - **The bank:** CA2-001..100 in ten families (Fundamental Weight, Corrosion, Monumental Low
+>   End, Endless Distance, Human Voltage, Slow Light, Synthetic Orchestra, Musical Machines, Dark
+>   Matter, Fragile Machines), an import pack in `content/cinematic-afterimages-v2/` (README,
+>   `manifest.json`, the presets in "Cinematic Afterimages Vol. 2/<family>/"). Not factory sounds,
+>   not in the RC; Vol. 1, the factory set and user presets are untouched. No new DSP.
+> - **How:** each preset is a C++ definition (`source/Family*.cpp`: sound, description, how to
+>   play, role, range); `[ca2-write]` saves it with `ShellProcessor::savePreset`.
+>   `[ca2-calibrate]` sets one trim per preset from its untrimmed phrase (sounding RMS to the
+>   family's target, peak <= -1 dBFS). Arpeggiator choices are checked by name.
+> - **Checked:** `[ca2]` (every file restores its definition and route exactly; finite, > -40 dB,
+>   peak < -0.3 dBFS); hidden `[ca2-render]` (wet / dry previews, three velocities, chords, long
+>   note, expression; all 100 deterministic, 64 = 256-sample blocks, 44.1 / 48 / 96 kHz within
+>   0.31 dB, peaks <= -1.3 dBFS) and new `[ca2-tail]` (every tail under -80 dBFS within 27 s).
+>   Fixed on the way: three ENDLESS ABYSS tails that did not end (decay 3 s now), descriptions that
+>   promised SPACE decays past the control's 8 s, Reverse Signal made distinct from Inverted Chapel.
+> - **⚠️ OWNER TEST:** listening approval per family (README's table, all pending); not loaded in
+>   a DAW. Previews are delivered as MP3s outside git.
+
 > **21 Nov 2026, D / AUX gets its own EQ and joins the routing (branch `claude/analog-unison`):**
 > - **D's EQ:** the cards' five-band EQ (ANDOR OSP's layer EQ processor) on D's stereo bus,
 >   after its source and before its FILTER. 19 parameters `analog.aux.eq.*` (the cards' names,
