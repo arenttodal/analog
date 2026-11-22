@@ -2129,6 +2129,9 @@ TEST_CASE ("AUX KONTAKT rack: the nameplate's keys follow Kontakt's state; TRANS
     refreshStrip (ui);
     CHECK (engineOf (p).auxInstrument().state() == andor::analog::ExternalInstrument::State::empty);
     CHECK (findKey (root, "LOAD KONTAKT") != nullptr);
+    // (leave no remembered Kontakt for the tests after this one)
+    andor::analog::ExternalInstrument::rememberKontakt (juce::File());
+    andor::analog::ExternalInstrument::rememberedDescriptionFile().deleteFile();
 }
 
 TEST_CASE ("AUX KONTAKT rack screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-kontakt-rack]")
@@ -2164,4 +2167,6 @@ TEST_CASE ("AUX KONTAKT rack screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screensh
     set (p, params::auxArpFollow, 2.0f);
     holdNotes (p, { 48, 52, 55 });
     shoot ("kontakt-rack-01-loaded-playing");
+    andor::analog::ExternalInstrument::rememberKontakt (juce::File());
+    andor::analog::ExternalInstrument::rememberedDescriptionFile().deleteFile();
 }
