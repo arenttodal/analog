@@ -328,7 +328,8 @@ TEST_CASE ("parity presets: factory presets first, then the musician's; SAVE upd
     }
     CHECK (withMine.back().file == mine);
 
-    // The quick menu: PRESETS, then Factory and User as submenus (the folders inside them).
+    // The quick menu: the factory set by CATEGORIES (its folders, right in the menu, as ANDOR OSP
+    // lists them), then the musician's own in one User submenu.
     {
         std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditorIfNeeded());
         auto& ui = dynamic_cast<ShellEditor&> (*e);
@@ -343,9 +344,12 @@ TEST_CASE ("parity presets: factory presets first, then the musician's; SAVE upd
             else if (item.subMenu != nullptr)
                 submenus.add (item.text);
         }
-        CHECK (headers.contains ("Presets"));
-        CHECK (submenus.indexOf ("Factory") >= 0);
-        CHECK (submenus.indexOf ("Factory") < submenus.indexOf ("User"));
+        CHECK (headers.contains ("Categories"));
+        CHECK_FALSE (submenus.contains ("Factory"));
+        for (const char* category : { "Bass", "Keys", "Lead", "Pad" })
+            CHECK (submenus.contains (category));
+        CHECK (submenus.indexOf ("Pad") < submenus.indexOf ("User"));
+        CHECK (submenus[submenus.size() - 1] == "User");
     }
 
     // A factory preset opened: SAVE cannot update it in place (it asks for a name instead).

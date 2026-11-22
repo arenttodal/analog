@@ -21,10 +21,12 @@
 > - **SAVE (OSP and ANALOG, shared):** a click saves over the open preset after "Save over
 >   <name>?" (Save / Cancel, "Don't warn me again for this patch", kept per preset file); a
 >   right-click on SAVE is Save As.
-> - **Preset folders:** the preset menu's PRESETS are two submenus, **Factory** and **User**
->   (everything outside Factory), each showing its folders as submenus (subfolders first, then
->   the folder's presets) as the musician arranged them on disk - a pack in a folder is one
->   entry, not 100 loose names. The arrows walk the same order. (Packs later go in the same way.)
+> - **Preset folders:** the factory set by CATEGORIES right in the menu (its folders: Basic, Bass,
+>   Brass, Keys, Lead, Pad, Sequence, Texture), as ANDOR OSP lists them; the musician's own in one
+>   **User** submenu (everything outside Factory), each of their folders a submenu (subfolders
+>   first, then the folder's presets) as arranged on disk - a pack in a folder is one entry, not
+>   100 loose names. The arrows walk the same order. (Owner's call: factory flat by category,
+>   only User in a submenu.)
 > - **UNISON fan:** shown only when a hand moves VOICES, DETUNE, BLEND, WIDTH, MODE or RANGE (a
 >   change inside a control's gesture, or within 0.4 s of it); opening a preset, a session or the
 >   host's automation shows nothing.
