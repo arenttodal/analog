@@ -1,5 +1,12 @@
 # ANDOR ANALOG — status
 
+> **22 Nov 2026, a saved project reopens with its preset's name (ANALOG and OSP, every platform):**
+> the session kept the sound but not which preset was open, so reopening a project showed "Init"
+> (OSP: a starting state's name). The session (never a preset file) now records the open preset's
+> name and file; reopened, the name is back and SAVE still updates that preset; if the file is not
+> on this computer the name still shows and SAVE asks for a name. Older sessions open as before.
+> Tests: `[shell][presets][session]`, OSP `[plugin][menus][session]`.
+
 > **22 Nov 2026, Kontakt finder, AUX card height, D MIDI TRANSPOSE (branch `claude/analog-unison`):**
 > - **Finding Kontakt (Windows, macOS, Linux):** the search covers every standard VST3 location
 >   (both Program Files' Common Files\VST3 and the per-user one on Windows; the system's and the
