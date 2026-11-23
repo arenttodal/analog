@@ -1426,3 +1426,140 @@ TEST_CASE ("KONTAKT FINDER: what it reported is remembered - the next LOAD uses 
     CHECK (other.state() == ExternalInstrument::State::ready);
     ExternalInstrument::rememberKontakt (juce::File());
 }
+
+//==============================================================================
+// Owner feedback: Kontakt's state does not always name what is loaded (it may be compressed),
+// so the nameplate takes the musician's name; and in Performance Mode card C shows its name and
+// a live waveform of what Kontakt plays (not a blank picture).
+
+TEST_CASE ("KONTAKT NAMES: the musician's name for it - shown instead, saved with the session and restored; another instrument or UNLOAD forgets it", "[external][names]")
+{
+    SurrogateOverride env;
+    ShellProcessor p;
+    p.prepareToPlay (testRate, testBlock);
+    set (p, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
+    auto& host = engineOf (p).externalInstrument();
+    REQUIRE (host.loadKontakt());
+    CHECK (host.instrumentName().isEmpty());
+    host.setInstrumentName ("  The Giant ");
+    CHECK (host.instrumentNames() == juce::StringArray ("The Giant"));
+    const auto saved = sessionXml (p);
+    REQUIRE (saved != nullptr);
+    CHECK (findChild (*saved, "ExternalInstrument")->getStringAttribute ("instrumentName") == "The Giant");
+    ShellProcessor q;
+    restoreXml (q, *saved);
+    q.prepareToPlay (testRate, testBlock);
+    CHECK (engineOf (q).externalInstrument().instrumentNames() == juce::StringArray ("The Giant"));
+    // Empty: Kontakt's own again (nothing saved for it).
+    host.setInstrumentName ({});
+    CHECK (host.instrumentNames().isEmpty());
+    CHECK_FALSE (findChild (*sessionXml (p), "ExternalInstrument")->hasAttribute ("instrumentName"));
+    // Loading again, or UNLOAD: forgotten.
+    host.setInstrumentName ("Strings");
+    REQUIRE (host.loadKontakt());
+    CHECK (host.instrumentName().isEmpty());
+    host.setInstrumentName ("Strings");
+    host.unload();
+    CHECK (host.instrumentName().isEmpty());
+}
+
+TEST_CASE ("KONTAKT PERFORMANCE: card C shows its name and a live waveform of what it plays - no keys; Edit Mode as it was", "[external][performance][ui]")
+{
+    SurrogateOverride env;
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    p.prepareToPlay (testRate, testBlock);
+    p.setPerformanceView ({});
+    set (p, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
+    auto& host = engineOf (p).externalInstrument();
+    REQUIRE (host.loadKontakt());
+    // The live waveform's tap: what it plays reaches it.
+    play (p, 0.4, { { 0.0, 57, 110 } });
+    std::vector<float> scope (static_cast<std::size_t> (ExternalInstrument::scopeSize));
+    host.copyScope (scope.data(), ExternalInstrument::scopeSize);
+    float peak = 0.0f;
+    for (const float v : scope)
+        peak = std::max (peak, std::abs (v));
+    CHECK (peak > 1.0e-3f);
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+    ui.refreshNow();
+    auto& card = ui.engineCard (1);
+    // (headless: no window on screen - visible up to the editor)
+    auto shown = [&] (const juce::Component* c) {
+        for (; c != nullptr && c != editor.get(); c = c->getParentComponent())
+            if (! c->isVisible())
+                return false;
+        return c != nullptr;
+    };
+    auto well = [&card]() -> juce::Component* { return card.wellOverlayComponent(); };
+    REQUIRE (well() != nullptr);
+    auto* panel = findTitled (*well(), "Card C external instrument");
+    REQUIRE (panel != nullptr);
+    REQUIRE (findButton (*well(), "OPEN KONTAKT") != nullptr);
+    CHECK (shown (findButton (*well(), "OPEN KONTAKT")));
+
+    ui.setPerformance (true);
+    ui.refreshNow();
+    REQUIRE (card.inPerformance());
+    REQUIRE (well() != nullptr);
+    panel = findTitled (*well(), "Card C external instrument");
+    REQUIRE (panel != nullptr);
+    CHECK (shown (well()));
+    CHECK (shown (panel));
+    CHECK (well()->getBounds() == card.display().getBounds());   // (over the picture)
+    CHECK (panel->getBounds() == well()->getLocalBounds());       // (the whole well)
+    for (auto* child : well()->getChildren())
+        if (child != panel)
+            CHECK_FALSE (child->isVisible());                     // (no TYPE, layer or rhythm keys)
+    for (const char* key : { "OPEN KONTAKT", "UNLOAD" })
+        if (auto* b = findButton (*well(), key))
+            CHECK_FALSE (shown (b));
+
+    ui.setPerformance (false);
+    ui.refreshNow();
+    REQUIRE (well() != nullptr);
+    REQUIRE (findButton (*well(), "OPEN KONTAKT") != nullptr);
+    CHECK (shown (findButton (*well(), "OPEN KONTAKT")));
+    panel = findTitled (*well(), "Card C external instrument");
+    REQUIRE (panel != nullptr);
+    CHECK (panel->getY() > 0);   // (under the TYPE row again)
+    p.setPerformanceView ({});
+}
+
+TEST_CASE ("KONTAKT PERFORMANCE screenshots (ANALOG_SCREENSHOT_DIR)", "[.][screenshots][screenshots-external-performance]")
+{
+    const char* dir = std::getenv ("ANALOG_SCREENSHOT_DIR");
+    REQUIRE (dir != nullptr);
+    const juce::File out (dir);
+    out.createDirectory();
+    SurrogateOverride env;
+    osp::plugin::skin::setLook (osp::plugin::skin::Look::ceramic);
+    ShellProcessor p;
+    p.prepareToPlay (testRate, testBlock);
+    p.setPerformanceView ({});
+    set (p, params::hybridType, static_cast<float> (andor::analog::HybridType::external));
+    auto& host = engineOf (p).externalInstrument();
+    REQUIRE (host.loadKontakt());
+    host.setInstrumentName ("The Giant");
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorIfNeeded());
+    auto& ui = dynamic_cast<andor::shell::ShellEditor&> (*editor);
+    auto shoot = [&] (const juce::String& name) {
+        editor->setSize (1448, juce::roundToInt (ui.instrumentHeight()));
+        ui.refreshNow();
+        const auto file = out.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f), stream);
+    };
+    play (p, 0.5, { { 0.0, 45, 110 } });   // (a held A2: its waveform in the picture)
+    shoot ("kontakt-00-edit-named");
+    ui.setPerformance (true);
+    shoot ("kontakt-01-performance-playing");
+    play (p, 2.5, { { 0.0, 45, 0 } });     // (released and faded: the quiet line)
+    shoot ("kontakt-02-performance-silent");
+    ui.setPerformance (false);
+    p.setPerformanceView ({});
+}

@@ -285,7 +285,7 @@ namespace
         loaded - the instrument's name large (as far as Kontakt's state names it, else Kontakt's),
         Kontakt's version small, OPEN KONTAKT and UNLOAD. Only a problem is put in words.
     */
-    class ExternalPanel final : public juce::Component, private juce::Timer
+    class ExternalPanel final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
     {
     public:
         ExternalPanel (InstrumentHost& h, juce::Colour accentColour) : host (h), accent (accentColour)
@@ -337,7 +337,30 @@ namespace
             }
             if (engine != nullptr)
                 shownNames = engine->externalInstrument().instrumentNames().joinIntoString ("\n");
+            if (shownState == ExternalInstrument::State::ready)
+                setTooltip ("Double-click the name to give it your own (when Kontakt does not say what is loaded)");
             startTimerHz (shownState == ExternalInstrument::State::loading ? 30 : 4);
+        }
+
+        /** Performance Mode: the name above, the live waveform of what it plays below - no keys. */
+        void setPerformance (bool on)
+        {
+            if (performing == on)
+                return;
+            performing = on;
+            cancelRename();
+            for (auto* key : { load.get(), open.get(), unload.get() })
+                if (key != nullptr)
+                    key->setVisible (! on);
+            setInterceptsMouseClicks (! on, ! on);
+            startTimerHz (on ? 30 : (shownState == ExternalInstrument::State::loading ? 30 : 4));
+            repaint();
+        }
+
+        void mouseDoubleClick (const juce::MouseEvent& e) override
+        {
+            if (! performing && shownState == ExternalInstrument::State::ready && layout().title.expanded (0.0f, 6.0f).contains (e.position))
+                startRename();
         }
 
         void resized() override
@@ -365,6 +388,11 @@ namespace
             if (auto* parent = getParentComponent())
                 design::draw::well (g, parent->getLocalBounds().toFloat().translated (static_cast<float> (-getX()), static_cast<float> (-getY())).reduced (0.5f), 9.0f,
                                     design::colour::wellB);
+            if (performing)
+            {
+                paintPerformance (g, ext);
+                return;
+            }
             const auto plate = layout();
             const auto centred = juce::Justification::centred;
             switch (shownState)
@@ -439,6 +467,135 @@ namespace
         }
 
     private:
+        /** The name to show: the musician's, else what Kontakt says is loaded, else Kontakt. */
+        static juce::String titleOf (const ExternalInstrument& ext)
+        {
+            const auto names = ext.instrumentNames();
+            return names.isEmpty() ? ext.displayName() : names[0];
+        }
+
+        void paintPerformance (juce::Graphics& g, const ExternalInstrument& ext)
+        {
+            const auto r = getLocalBounds().toFloat();
+            const float k = juce::jlimit (0.7f, 1.0f, r.getHeight() / 240.0f);
+            const auto centred = juce::Justification::centred;
+            // The name in the upper part; the waveform below it (never through the text).
+            auto titleBox = juce::Rectangle<float> (r.getX() + 18.0f, r.getY() + r.getHeight() * 0.09f, r.getWidth() - 36.0f, 26.0f * k);
+            auto versionBox = titleBox.translated (0.0f, titleBox.getHeight() + 2.0f).withHeight (14.0f * k);
+            if (shownState != ExternalInstrument::State::ready)
+            {
+                g.setColour (cream.withAlpha (0.45f));
+                g.setFont (type::popupLabel (11.0f * k));
+                const auto words = shownState == ExternalInstrument::State::loading ? juce::String::fromUTF8 ("LOADING KONTAKT\xe2\x80\xa6")
+                                   : shownState == ExternalInstrument::State::empty ? juce::String ("NO INSTRUMENT")
+                                                                                     : juce::String ("KONTAKT NOT LOADED");
+                g.drawText (words, r, centred, true);
+                return;
+            }
+            g.setColour (juce::Colour (0xfff1ebe2));
+            g.setFont (fonts::make (20.0f * k, fonts::Weight::semibold));
+            g.drawFittedText (titleOf (ext), titleBox.toNearestInt(), centred, 1, 0.75f);
+            const auto names = ext.instrumentNames();
+            g.setColour (cream.withAlpha (0.45f));
+            g.setFont (type::popupLabel (10.0f * k));
+            g.drawText ((names.isEmpty() ? ext.version() : (ext.displayName() + " " + ext.version()).trim()).toUpperCase(), versionBox, centred, true);
+
+            const auto wave = juce::Rectangle<float> (r.getX() + 18.0f, versionBox.getBottom() + 14.0f * k, r.getWidth() - 36.0f, 0.0f)
+                                  .withBottom (r.getBottom() - 14.0f);
+            if (wave.getHeight() < 12.0f)
+                return;
+            const float mid = wave.getCentreY();
+            g.setColour (cream.withAlpha (0.07f));
+            g.fillRect (wave.getX(), mid - 0.5f, wave.getWidth(), 1.0f);
+            // The newest sound, from its latest rising zero crossing (a steady picture of a held note).
+            constexpr int shown = 1536;
+            scopeBuffer.resize (static_cast<std::size_t> (ExternalInstrument::scopeSize));
+            ext.copyScope (scopeBuffer.data(), ExternalInstrument::scopeSize);
+            int start = ExternalInstrument::scopeSize - shown;
+            for (int i = ExternalInstrument::scopeSize - shown - 1; i > 0; --i)
+                if (scopeBuffer[static_cast<std::size_t> (i - 1)] < 0.0f && scopeBuffer[static_cast<std::size_t> (i)] >= 0.0f)
+                {
+                    start = i;
+                    break;
+                }
+            float peak = 0.0f;
+            for (int i = 0; i < shown; ++i)
+                peak = std::max (peak, std::abs (scopeBuffer[static_cast<std::size_t> (start + i)]));
+            if (peak < 1.0e-4f)
+            {
+                g.setColour (accent.withAlpha (0.35f));
+                g.fillRect (wave.getX(), mid - 0.75f, wave.getWidth(), 1.5f);
+                return;
+            }
+            const float scale = 0.46f * wave.getHeight() / std::max (peak, 0.08f);
+            juce::Path path;
+            for (int i = 0; i < shown; i += 2)
+            {
+                const float x = wave.getX() + wave.getWidth() * static_cast<float> (i) / static_cast<float> (shown - 1);
+                const float y = juce::jlimit (wave.getY(), wave.getBottom(), mid - scopeBuffer[static_cast<std::size_t> (start + i)] * scale);
+                if (i == 0)
+                    path.startNewSubPath (x, y);
+                else
+                    path.lineTo (x, y);
+            }
+            g.setColour (accent.withAlpha (0.22f));
+            g.strokePath (path, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (accent);
+            g.strokePath (path, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+
+        void startRename()
+        {
+            auto* engine = engineOf (host);
+            if (engine == nullptr)
+                return;
+            nameField = std::make_unique<juce::TextEditor>();
+            nameField->setFont (fonts::make (16.0f, fonts::Weight::semibold));
+            nameField->setJustification (juce::Justification::centred);
+            nameField->setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff23272a));
+            nameField->setColour (juce::TextEditor::textColourId, juce::Colour (0xfff1ebe2));
+            nameField->setColour (juce::TextEditor::outlineColourId, accent.withAlpha (0.6f));
+            nameField->setColour (juce::TextEditor::focusedOutlineColourId, accent);
+            nameField->setTextToShowWhenEmpty ("Name (empty: Kontakt's)", cream.withAlpha (0.4f));
+            nameField->setText (titleOf (engine->externalInstrument()), false);
+            nameField->selectAll();
+            nameField->onReturnKey = [this] { commitRename(); };
+            nameField->onFocusLost = [this] { commitRename(); };
+            nameField->onEscapeKey = [this] { cancelRename(); };
+            addAndMakeVisible (*nameField);
+            nameField->setBounds (layout().title.withSizeKeepingCentre (std::min (layout().title.getWidth(), 260.0f), 28.0f).toNearestInt());
+            nameField->grabKeyboardFocus();
+        }
+
+        void commitRename()
+        {
+            if (nameField == nullptr)
+                return;
+            auto text = nameField->getText().trim();
+            if (auto* engine = engineOf (host))
+            {
+                auto& ext = engine->externalInstrument();
+                // (typing what Kontakt already says, or nothing: Kontakt's name again)
+                if (text == ext.displayName())
+                    text.clear();
+                ext.setInstrumentName (text);
+            }
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<ExternalPanel> (this)] {
+                if (safe != nullptr)
+                    safe->cancelRename();
+            });
+        }
+
+        void cancelRename()
+        {
+            if (nameField == nullptr)
+                return;
+            nameField->onFocusLost = nullptr;
+            nameField.reset();
+            shownNames.clear();   // (shown again at the next tick)
+            repaint();
+        }
+
         struct Plate
         {
             float k = 1.0f;
@@ -475,8 +632,8 @@ namespace
             auto* engine = engineOf (host);
             if (engine == nullptr)
                 return;
-            if (shownState == ExternalInstrument::State::loading)
-                repaint();   // (the spinner)
+            if (shownState == ExternalInstrument::State::loading || performing)
+                repaint();   // (the spinner; the live waveform)
             if (const auto names = engine->externalInstrument().instrumentNames().joinIntoString ("\n"); names != shownNames)
             {
                 shownNames = names;
@@ -489,6 +646,9 @@ namespace
         std::unique_ptr<WellAction> load, open, unload;
         ExternalInstrument::State shownState = ExternalInstrument::State::empty;
         juce::String shownNames;
+        bool performing = false;
+        std::unique_ptr<juce::TextEditor> nameField;
+        std::vector<float> scopeBuffer;
     };
 
     /** A transparent area over an empty card C's well: a click browses for a recording. */
@@ -906,6 +1066,8 @@ namespace
         }
 
         int rulerReserve() const override { return 118 + 24; }
+        /** Kontakt in card C: its name and live waveform while performing (else hidden). */
+        bool performancePicture() const override { return externalPanel != nullptr; }
         /** Its TYPE dropdown stays while card C plays Granular (the grains sit along the foot). */
         bool shownWhileGranular() const override { return true; }
 
@@ -924,7 +1086,8 @@ namespace
             if (layerKeys != nullptr)
                 layerKeys->setBounds (getWidth() - 12 - layerKeys->preferredWidth(), 6 + 22 + 6, layerKeys->preferredWidth(), LayerKeys::keySize);   // (under the TYPE dropdown, right-aligned to it)
             if (externalPanel != nullptr)
-                externalPanel->setBounds (getLocalBounds().withTrimmedTop (6 + 22 + 10));   // (it paints the empty well under itself)
+                externalPanel->setBounds (isPerforming() ? getLocalBounds()   // (the picture: the whole well)
+                                                         : getLocalBounds().withTrimmedTop (6 + 22 + 10));   // (it paints the empty well under itself)
             if (rhythmKey != nullptr)
             {
                 // Under the TYPE dropdown, left of the layer keys (their room kept while hidden).
@@ -952,6 +1115,34 @@ namespace
                     else
                         c->setBounds (cell.withSizeKeepingCentre (std::min (cellWidth, 100), b.getHeight()));
                 }
+        }
+
+    protected:
+        void performanceChanged (bool on) override
+        {
+            if (externalPanel == nullptr)
+                return;
+            // Performing: the type, layer and rhythm keys go (kept as they were); the nameplate
+            // becomes the picture - its name and live waveform over the whole well.
+            if (on)
+            {
+                hiddenWhilePerforming.clear();
+                for (auto* child : getChildren())
+                    if (child != externalPanel.get() && child->isVisible())
+                    {
+                        hiddenWhilePerforming.emplace_back (child);
+                        child->setVisible (false);
+                    }
+            }
+            else
+            {
+                for (auto& child : hiddenWhilePerforming)
+                    if (child != nullptr)
+                        child->setVisible (true);
+                hiddenWhilePerforming.clear();
+            }
+            externalPanel->setPerformance (on);
+            resized();
         }
 
     private:
@@ -1019,6 +1210,7 @@ namespace
         std::unique_ptr<LayerKeys> layerKeys;
         std::unique_ptr<RhythmKey> rhythmKey;
         std::unique_ptr<ExternalPanel> externalPanel;
+        std::vector<juce::Component::SafePointer<juce::Component>> hiddenWhilePerforming;
         std::vector<std::unique_ptr<juce::Component>> owned;
         std::array<juce::Component*, 3> cells {};
     };

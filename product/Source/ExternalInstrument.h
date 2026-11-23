@@ -132,14 +132,23 @@ public:
     juce::String displayName() const { return description.name.isNotEmpty() ? description.name : savedName; }
     juce::String version() const { return description.version; }
     juce::String message() const { return statusMessage; }
-    /** The instruments (or multi) loaded inside Kontakt, by name, as far as its saved state
-        names them (.nki / .nkm file names); empty when it names none. Read when it loads, when
-        its window closes or goes to the background. */
-    juce::StringArray instrumentNames() const { return instruments; }
+    /** The instruments (or multi) loaded inside Kontakt, by name: the name the musician gave it
+        (setInstrumentName) if any; else as far as its saved state names them (.nki / .nkm file
+        names), else the program name Kontakt reports (not its default multi's); empty when
+        none says. Read when it loads, when its window closes or goes to the background. */
+    juce::StringArray instrumentNames() const { return givenName.isNotEmpty() ? juce::StringArray (givenName) : instruments; }
+    /** The musician's name for what is loaded (the nameplate, double-clicked): shown instead of
+        what Kontakt reports, saved with the session and the preset. Empty: Kontakt's again. */
+    void setInstrumentName (const juce::String& name) { givenName = name.trim().substring (0, 80); }
+    juce::String instrumentName() const { return givenName; }
     /** Reads instrumentNames() again from the instrument's state (message thread). */
     void refreshInstrumentNames();
     /** The .nki / .nkm names in a plugin state (8-bit or UTF-16 text), each once, in order. */
     static juce::StringArray instrumentNamesIn (const void* data, std::size_t size);
+    /** Its latest output, mono (Performance Mode's live waveform): the newest `count` samples
+        (at most scopeSize), oldest first, into `dest`. Any thread; never blocks the audio. */
+    static constexpr int scopeSize = 4096;
+    void copyScope (float* dest, int count) const noexcept;
     /** Recently heard (a peak above -70 dBFS in the last second): the card's activity light. */
     bool sounding() const noexcept { return lastPeak.load (std::memory_order_relaxed) > 3.0e-4f; }
 
@@ -211,6 +220,7 @@ private:
     std::unique_ptr<juce::XmlElement> savedXml;   ///< a restored one that could not load (kept as saved)
     juce::String savedName, statusMessage;
     juce::StringArray instruments;
+    juce::String givenName;   ///< the musician's name for it (message thread)
     std::shared_ptr<juce::FileChooser> chooser;
     State currentState = State::empty;
     std::unique_ptr<EditorWindow> editorWindow;
@@ -226,6 +236,8 @@ private:
     bool wasActive = false, sentEndToRetiring = false, sentEndOnInactive = false;
     std::atomic<std::int64_t> clock { 0 };
     std::atomic<float> lastPeak { 0.0f };
+    std::array<std::atomic<float>, scopeSize> scope {};   ///< (written by the audio thread, read by the interface)
+    std::atomic<int> scopeWrite { 0 };
     std::array<Forwarded, forwardedCapacity> forwardLog {};
     std::atomic<int> forwardedTotal { 0 };
     const juce::MidiBuffer noMidi;

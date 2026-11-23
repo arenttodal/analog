@@ -470,6 +470,7 @@ bool ExternalInstrument::load (const juce::PluginDescription& d, const juce::Mem
 {
     JUCE_ASSERT_MESSAGE_THREAD
     closeEditor();
+    givenName.clear();   // (another instrument: Kontakt names it again; a restore gives its saved name after)
     juce::String error;
     auto instance = formats.createPluginInstance (d, rate, maxBlock, error);
     if (instance == nullptr)
@@ -509,6 +510,24 @@ void ExternalInstrument::refreshInstrumentNames()
     juce::MemoryBlock native;
     live->instance->getStateInformation (native);
     instruments = instrumentNamesIn (native.getData(), native.getSize());
+    if (instruments.isEmpty())
+    {
+        // (a state that names no file - Kontakt's is compressed: the program it reports, unless
+        // that is only its default multi's or a numbered slot's)
+        const auto program = live->instance->getProgramName (live->instance->getCurrentProgram()).trim();
+        const bool generic = program.isEmpty() || program.containsIgnoreCase ("default") || program.equalsIgnoreCase (description.name)
+                             || program.startsWithIgnoreCase ("program") || program.containsOnly ("0123456789 -");
+        if (! generic)
+            instruments.add (program);
+    }
+}
+
+void ExternalInstrument::copyScope (float* dest, int count) const noexcept
+{
+    count = std::clamp (count, 0, scopeSize);
+    const int end = scopeWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < count; ++i)
+        dest[i] = scope[static_cast<std::size_t> ((end - count + i + scopeSize) % scopeSize)].load (std::memory_order_relaxed);
 }
 
 juce::StringArray ExternalInstrument::instrumentNamesIn (const void* data, std::size_t size)
@@ -575,6 +594,7 @@ void ExternalInstrument::unload()
     savedName.clear();
     statusMessage.clear();
     instruments.clear();
+    givenName.clear();
     currentState = State::empty;
 }
 
@@ -679,6 +699,8 @@ std::unique_ptr<juce::XmlElement> ExternalInstrument::toXml() const
     auto xml = std::make_unique<juce::XmlElement> ("ExternalInstrument");
     xml->setAttribute ("version", 1);
     xml->setAttribute ("name", description.name);
+    if (givenName.isNotEmpty())
+        xml->setAttribute ("instrumentName", givenName);   // (the musician's name for it)
     xml->addChildElement (description.createXml().release());
     juce::MemoryBlock native;
     live->instance->getStateInformation (native);
@@ -706,6 +728,7 @@ void ExternalInstrument::restore (const juce::XmlElement& xml)
     }
     juce::MemoryBlock native;
     native.fromBase64Encoding (xml.getStringAttribute ("state"));
+    const auto given = xml.getStringAttribute ("instrumentName");
     // Where it was saved; else wherever Kontakt is on this computer (another version's folder).
     auto candidate = d;
     bool found = juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (d.fileOrIdentifier).exists();
@@ -720,7 +743,10 @@ void ExternalInstrument::restore (const juce::XmlElement& xml)
         }
     }
     if (found && load (candidate, &native))
+    {
+        setInstrumentName (given);
         return;
+    }
     // Missing (or it failed): nothing loaded, its identity and state kept, saved back as they were.
     closeEditor();
     if (exchange.latestModel() != nullptr)
@@ -779,8 +805,14 @@ void ExternalInstrument::process (const juce::MidiBuffer& midi, float* left, flo
     }
     wasActive = active;
     float peak = 0.0f;
+    int write = scopeWrite.load (std::memory_order_relaxed);
     for (int i = 0; i < n; ++i)
+    {
         peak = std::max ({ peak, std::abs (left[i]), std::abs (right[i]) });
+        scope[static_cast<std::size_t> (write)].store (0.5f * (left[i] + right[i]), std::memory_order_relaxed);
+        write = (write + 1) % scopeSize;
+    }
+    scopeWrite.store (write, std::memory_order_release);
     const float held = lastPeak.load (std::memory_order_relaxed) * std::exp (-static_cast<float> (n) / static_cast<float> (rate));
     lastPeak.store (std::max (peak, held), std::memory_order_relaxed);
     clock.fetch_add (n, std::memory_order_relaxed);

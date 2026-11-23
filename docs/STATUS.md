@@ -25,6 +25,14 @@
 > - **Owner feedback applied (3):** ARP and SUB stay switchable while performing: the key by the
 >   keyboard keeps its two lights (a click anywhere on a row switches it), without chevrons;
 >   nothing opens their settings (`ArpControl::setLightsOnly`).
+> - **Owner feedback applied (4), card C with Kontakt:** Kontakt 6's saved state does not name the
+>   loaded instrument in readable text, so the nameplate showed "Kontakt". Now: the name the
+>   musician gives it (double-click the name; saved with the session and the preset as
+>   `instrumentName`; forgotten when another instrument loads or on UNLOAD), else the .nki name
+>   in Kontakt's state, else the program name Kontakt reports (never its default multi's or a
+>   numbered slot's - unverified against real Kontakt), else "Kontakt". In Performance Mode card C
+>   shows that name above a live waveform of what Kontakt plays (a lock-free tap of its output,
+>   `ExternalInstrument::copyScope`), never the blank picture; no keys.
 > - **Not yet:** QA at 150 % / 200 %, the 8-macro and mixed-USER captures, multi-instance and
 >   playing-while-toggling checks in a DAW (owner).
 
